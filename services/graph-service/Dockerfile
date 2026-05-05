@@ -2,7 +2,7 @@
 # docker build -f services/graph-service/Dockerfile .
 
 FROM node:22-alpine AS base
-RUN npm install -g pnpm
+RUN npm install -g pnpm@9
 
 # ── Build stage ───────────────────────────────────────────────────────────────
 FROM base AS builder
@@ -21,7 +21,7 @@ RUN pnpm --filter @liner-notes/graph-service build
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM node:22-alpine AS runtime
-RUN npm install -g pnpm
+RUN npm install -g pnpm@9
 
 WORKDIR /app
 

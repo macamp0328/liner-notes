@@ -34,6 +34,7 @@ pnpm lint          # ESLint
 ## Docker
 
 ```bash
-docker build -t liner-notes/graph-service .
+# Build context must be the repo root (Dockerfile uses workspace-level lockfile)
+docker build -f services/graph-service/Dockerfile -t liner-notes/graph-service .
 docker run -p 3000:3000 --env-file .env.local liner-notes/graph-service
 ```

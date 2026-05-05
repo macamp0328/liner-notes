@@ -11,7 +11,7 @@ A personal, open-source, forkable monorepo for exploring a vinyl record collecti
 ## Quick Start
 
 ```bash
-# 1. Clone
+# 1. Clone (replace yourusername with your fork, or macamp0328 for the origin)
 git clone https://github.com/yourusername/liner-notes.git
 cd liner-notes
 
@@ -36,7 +36,7 @@ open http://localhost:3000/api/docs
 - pnpm
 - Docker Desktop
 - A [Discogs personal access token](https://www.discogs.com/settings/developers)
-- A [Neo4j Aura Free](https://console.neo4j.io) instance
+- Neo4j — `docker-compose up` starts a local instance automatically. A [Neo4j Aura Free](https://console.neo4j.io) instance is only needed for production deployment.
 
 ## Fork & Run Your Own Collection
 

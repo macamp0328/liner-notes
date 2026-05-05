@@ -1,5 +1,5 @@
 # Terraform resources — Task 5 (infra sprint)
-# See: liner-notes-spec-v0.5.md Section 10
+# See: Section 10 of the product spec (liner-notes-spec-v0.5.md in repo root)
 
 terraform {
   required_version = ">= 1.5"

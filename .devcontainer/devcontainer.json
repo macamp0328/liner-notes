@@ -12,7 +12,7 @@
     "ghcr.io/devcontainers/features/terraform:1": {},
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
-  "onCreateCommand": "npm install -g pnpm && pnpm install",
+  "onCreateCommand": "npm install -g pnpm@9 && pnpm install",
   "postCreateCommand": "echo 'liner-notes dev container ready'",
   "customizations": {
     "vscode": {

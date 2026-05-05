@@ -1,3 +1,4 @@
+import 'dotenv-flow/config';
 import Fastify from 'fastify';
 
 const server = Fastify({ logger: true });

@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:coverage": "vitest run --coverage",
-    "lint": "eslint src --ext .ts"
+    "lint": "eslint src --ext .ts --max-warnings 0"
   },
   "dependencies": {
     "@fastify/rate-limit": "^9.1.0",
