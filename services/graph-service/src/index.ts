@@ -16,3 +16,10 @@ start().catch((err: unknown) => {
   console.error(err);
   process.exit(1);
 });
+
+const shutdown = (): void => {
+  void server.close().then(() => process.exit(0)).catch(() => process.exit(1));
+};
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);

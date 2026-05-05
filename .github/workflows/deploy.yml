@@ -10,7 +10,10 @@ on:
 #   3. Add Terraform plan/apply with manual approval gate
 jobs:
   deploy:
-    name: Deploy (stub)
+    name: Deploy (stub — not implemented)
+    # Task 5 (infra sprint) will implement the real pipeline.
+    # if: false prevents this job from running and emitting a misleading green status.
+    if: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
