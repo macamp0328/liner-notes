@@ -49,6 +49,7 @@ liner-notes/
 ```
 
 **What lives where:**
+
 - Application code → `services/{service-name}/src/`
 - Shared infra (VPC, ECR, IAM) → `infra/terraform/`
 - Service K8s manifests → `infra/k8s/{service-name}/`
@@ -61,15 +62,15 @@ liner-notes/
 
 ### 4.1 Runtime & Framework
 
-| Decision | Value |
-|---|---|
-| Language | TypeScript — strict mode |
-| Runtime | Node.js v22.x LTS |
-| Package manager | pnpm (workspaces) |
-| HTTP framework | **Fastify** |
-| Test runner | Vitest |
-| Linter | ESLint with TypeScript plugin |
-| Formatter | Prettier |
+| Decision        | Value                         |
+| --------------- | ----------------------------- |
+| Language        | TypeScript — strict mode      |
+| Runtime         | Node.js v22.x LTS             |
+| Package manager | pnpm (workspaces)             |
+| HTTP framework  | **Fastify**                   |
+| Test runner     | Vitest                        |
+| Linter          | ESLint with TypeScript plugin |
+| Formatter       | Prettier                      |
 
 **Why Fastify over Express:** Native TypeScript support, built-in JSON schema validation, `@fastify/swagger` + `@fastify/swagger-ui` for zero-friction OpenAPI docs (hard requirement), and a cleaner plugin architecture.
 
@@ -77,14 +78,15 @@ liner-notes/
 
 **Branch naming:**
 
-| Branch type | Pattern | Created by |
-|---|---|---|
-| Agent tasks | `task/{n}-{short-description}` | Agent |
-| Human features | `feat/{short-description}` | Miles |
-| Fixes | `fix/{short-description}` | Agent or Miles |
-| Docs/config | `chore/{short-description}` | Agent or Miles |
+| Branch type    | Pattern                        | Created by     |
+| -------------- | ------------------------------ | -------------- |
+| Agent tasks    | `task/{n}-{short-description}` | Agent          |
+| Human features | `feat/{short-description}`     | Miles          |
+| Fixes          | `fix/{short-description}`      | Agent or Miles |
+| Docs/config    | `chore/{short-description}`    | Agent or Miles |
 
 **Rules:**
+
 - `main` is protected — no direct commits ever
 - All changes via PR with CI passing
 - Squash merge into `main` — one clean commit per task
@@ -92,6 +94,7 @@ liner-notes/
 - Branches are short-lived — complete task, open PR, done
 
 **Agent git workflow (every task):**
+
 ```bash
 # 1. Start from latest main
 git fetch origin
@@ -107,19 +110,21 @@ gh pr create --title "task/{n}: {description}" --body "..."
 ```
 
 **Parallel work with worktrees:**
+
 ```bash
 git worktree add ../liner-notes-task-2 task/2-discogs-exploration
 git worktree add ../liner-notes-task-3 task/3-neo4j-connection
 ```
+
 Each worktree is a fully independent working directory on its own branch. **Agents own all git operations** — branch creation, commits, opening the PR. Miles only reviews and merges.
 
 ### 4.3 Secrets Management
 
-| File | Committed? | Purpose |
-|---|---|---|
-| `.env.example` | ✅ Yes | Documents all variables, no values |
-| `.env.local` | ❌ No (gitignored) | Local development values |
-| AWS Secrets Manager | N/A | Production secrets at container startup |
+| File                | Committed?         | Purpose                                 |
+| ------------------- | ------------------ | --------------------------------------- |
+| `.env.example`      | ✅ Yes             | Documents all variables, no values      |
+| `.env.local`        | ❌ No (gitignored) | Local development values                |
+| AWS Secrets Manager | N/A                | Production secrets at container startup |
 
 **Never commit real values. CI runs a secrets scan (TruffleHog) on every PR.**
 
@@ -132,6 +137,16 @@ Each worktree is a fully independent working directory on its own branch. **Agen
 - No `any` types unless justified with an inline comment
 - All async functions use `async/await` — no raw Promise chains
 - Explicit return types on all exported functions
+
+**Agent requirement — run before every commit:**
+
+```bash
+pnpm prettier --check .          # formatting must pass
+pnpm --filter graph-service lint # ESLint must pass (zero warnings/errors)
+pnpm --filter graph-service typecheck # TypeScript strict must pass
+```
+
+Formatting and lint errors that slip through to PR review are agent mistakes, not reviewer catches. Run these locally before opening a PR. CI enforces them as hard gates — fix before pushing, not after.
 
 ---
 
@@ -151,16 +166,16 @@ No service talks to Neo4j directly except `graph-service`. `graph-service` is th
 
 All 8 checks must pass before a PR is mergeable:
 
-| Check | Tool | Requirement |
-|---|---|---|
-| Linting | ESLint | Zero warnings or errors |
-| Type checking | TypeScript strict | Zero errors |
-| Unit tests | Vitest | 70% coverage minimum |
-| Integration tests | Fastify inject() | 100% of API routes covered |
-| Docker build | Docker | Image builds successfully |
-| Schema validation | Custom script | Constraints + indexes apply cleanly |
-| Security scan | `pnpm audit` + Dependabot | No critical vulnerabilities |
-| Secrets scan | TruffleHog | No credentials in committed code |
+| Check             | Tool                      | Requirement                         |
+| ----------------- | ------------------------- | ----------------------------------- |
+| Linting           | ESLint                    | Zero warnings or errors             |
+| Type checking     | TypeScript strict         | Zero errors                         |
+| Unit tests        | Vitest                    | 70% coverage minimum                |
+| Integration tests | Fastify inject()          | 100% of API routes covered          |
+| Docker build      | Docker                    | Image builds successfully           |
+| Schema validation | Custom script             | Constraints + indexes apply cleanly |
+| Security scan     | `pnpm audit` + Dependabot | No critical vulnerabilities         |
+| Secrets scan      | TruffleHog                | No credentials in committed code    |
 
 ---
 
@@ -214,6 +229,7 @@ The repo is currently private but will be made public on first stable release. T
 ## Agent Guidance Philosophy
 
 Specs in this codebase are **architectural guides**, not rigid requirements. Agents are expected to:
+
 - Treat schema and API specs as the intended direction
 - Research and self-discover (Discogs API docs, Neo4j best practices, Fastify ecosystem)
 - Propose improvements, flag tradeoffs, explain deviations
