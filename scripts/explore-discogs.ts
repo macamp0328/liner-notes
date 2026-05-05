@@ -1,30 +1,30 @@
-import * as dotenv from "dotenv";
-import { writeFileSync } from "fs";
-import { resolve } from "path";
+import * as dotenv from 'dotenv';
+import { writeFileSync } from 'fs';
+import { resolve } from 'path';
 
-dotenv.config({ path: resolve(process.cwd(), ".env.local") });
+dotenv.config({ path: resolve(process.cwd(), '.env.local') });
 
-const TOKEN = process.env["DISCOGS_TOKEN"];
-const USERNAME = process.env["DISCOGS_USERNAME"];
+const TOKEN = process.env['DISCOGS_TOKEN'];
+const USERNAME = process.env['DISCOGS_USERNAME'];
 const USER_AGENT =
-  process.env["DISCOGS_USER_AGENT"] ??
-  "liner-notes/1.0 +https://github.com/macamp0328/liner-notes";
-const DELAY_MS = parseInt(process.env["DISCOGS_REQUEST_DELAY_MS"] ?? "1000", 10);
+  process.env['DISCOGS_USER_AGENT'] ??
+  'liner-notes/1.0 +https://github.com/yourusername/liner-notes';
+const DELAY_MS = parseInt(process.env['DISCOGS_REQUEST_DELAY_MS'] ?? '1000', 10);
 
 if (!TOKEN) {
-  console.error("❌ DISCOGS_TOKEN is not set in .env.local");
+  console.error('❌ DISCOGS_TOKEN is not set in .env.local');
   process.exit(1);
 }
 if (!USERNAME) {
-  console.error("❌ DISCOGS_USERNAME is not set in .env.local");
+  console.error('❌ DISCOGS_USERNAME is not set in .env.local');
   process.exit(1);
 }
 
-const BASE_URL = "https://api.discogs.com";
+const BASE_URL = 'https://api.discogs.com';
 const HEADERS = {
-  Authorization: `Discogs token ${TOKEN}`,
-  "User-Agent": USER_AGENT,
-  Accept: "application/json",
+  Authorization: `Discogs token=${TOKEN}`,
+  'User-Agent': USER_AGENT,
+  Accept: 'application/json',
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -153,7 +153,7 @@ async function discogsGet<T>(path: string): Promise<T> {
 }
 
 function separator(label: string): void {
-  const line = "─".repeat(60);
+  const line = '─'.repeat(60);
   console.log(`\n${line}`);
   console.log(`  ${label}`);
   console.log(line);
@@ -170,11 +170,10 @@ interface FieldReport {
 }
 
 function describeValue(val: unknown): { type: string; sample: string } {
-  if (val === undefined) return { type: "undefined", sample: "—" };
-  if (val === null) return { type: "null", sample: "null" };
+  if (val === undefined) return { type: 'undefined', sample: '—' };
+  if (val === null) return { type: 'null', sample: 'null' };
   if (Array.isArray(val)) {
-    const sample =
-      val.length > 0 ? JSON.stringify(val[0]).slice(0, 80) : "(empty array)";
+    const sample = val.length > 0 ? JSON.stringify(val[0]).slice(0, 80) : '(empty array)';
     return { type: `array[${val.length}]`, sample };
   }
   const str = JSON.stringify(val);
@@ -184,28 +183,28 @@ function describeValue(val: unknown): { type: string; sample: string } {
 function compareFields(release: DiscogsRelease): FieldReport[] {
   // Fields from spec Section 6.4
   const specFields: Array<{ field: string; notes: string }> = [
-    { field: "title", notes: "" },
-    { field: "year", notes: "" },
-    { field: "country", notes: "" },
-    { field: "genres", notes: "spec: genres[]" },
-    { field: "styles", notes: "spec: styles[]" },
-    { field: "formats", notes: "spec: formats[]" },
-    { field: "artists", notes: "spec: artists[] → name, id, role" },
+    { field: 'title', notes: '' },
+    { field: 'year', notes: '' },
+    { field: 'country', notes: '' },
+    { field: 'genres', notes: 'spec: genres[]' },
+    { field: 'styles', notes: 'spec: styles[]' },
+    { field: 'formats', notes: 'spec: formats[]' },
+    { field: 'artists', notes: 'spec: artists[] → name, id, role' },
     {
-      field: "extraartists",
-      notes: "spec: extraartists[] → producers, engineers, session musicians",
+      field: 'extraartists',
+      notes: 'spec: extraartists[] → producers, engineers, session musicians',
     },
-    { field: "labels", notes: "spec: labels[] → name, id, catno" },
+    { field: 'labels', notes: 'spec: labels[] → name, id, catno' },
     {
-      field: "tracklist",
-      notes: "spec: tracklist[] → position, title, duration, extraartists[]",
+      field: 'tracklist',
+      notes: 'spec: tracklist[] → position, title, duration, extraartists[]',
     },
     {
-      field: "companies",
+      field: 'companies',
       notes: 'spec: companies[] → name, id, entity_type_name ("Recorded At" = studio)',
     },
-    { field: "images", notes: "spec: images[] → uri, type" },
-    { field: "master_id", notes: "" },
+    { field: 'images', notes: 'spec: images[] → uri, type' },
+    { field: 'master_id', notes: '' },
   ];
 
   return specFields.map(({ field, notes }) => {
@@ -217,44 +216,57 @@ function compareFields(release: DiscogsRelease): FieldReport[] {
 }
 
 function printFieldReport(reports: FieldReport[]): void {
-  separator("FIELD-BY-FIELD COMPARISON — Spec Section 6.4 vs Actual API");
+  separator('FIELD-BY-FIELD COMPARISON — Spec Section 6.4 vs Actual API');
   console.log();
 
   const colWidths = { field: 16, present: 10, type: 16, sample: 50 };
 
   const header = [
-    "Field".padEnd(colWidths.field),
-    "Present?".padEnd(colWidths.present),
-    "Type".padEnd(colWidths.type),
-    "Sample value".padEnd(colWidths.sample),
-  ].join(" │ ");
+    'Field'.padEnd(colWidths.field),
+    'Present?'.padEnd(colWidths.present),
+    'Type'.padEnd(colWidths.type),
+    'Sample value'.padEnd(colWidths.sample),
+  ].join(' │ ');
   console.log(header);
-  console.log("─".repeat(header.length));
+  console.log('─'.repeat(header.length));
 
   for (const r of reports) {
     const row = [
       r.field.padEnd(colWidths.field),
-      (r.present ? "✅ yes" : "❌ no").padEnd(colWidths.present),
+      (r.present ? '✅ yes' : '❌ no').padEnd(colWidths.present),
       r.type.padEnd(colWidths.type),
       r.sample.slice(0, colWidths.sample).padEnd(colWidths.sample),
-    ].join(" │ ");
+    ].join(' │ ');
     console.log(row);
     if (r.notes) {
-      console.log(`${"".padEnd(colWidths.field)}   ${" ".repeat(colWidths.present + 3)}note: ${r.notes}`);
+      console.log(
+        `${''.padEnd(colWidths.field)}   ${' '.repeat(colWidths.present + 3)}note: ${r.notes}`,
+      );
     }
   }
 }
 
 function printExtraFields(release: DiscogsRelease): void {
-  separator("EXTRA FIELDS — Present in API but not captured in spec Section 6.4");
+  separator('EXTRA FIELDS — Present in API but not captured in spec Section 6.4');
   const specKeys = new Set([
-    "title", "year", "country", "genres", "styles", "formats",
-    "artists", "extraartists", "labels", "tracklist", "companies", "images", "master_id",
-    "id", // expected top-level id
+    'title',
+    'year',
+    'country',
+    'genres',
+    'styles',
+    'formats',
+    'artists',
+    'extraartists',
+    'labels',
+    'tracklist',
+    'companies',
+    'images',
+    'master_id',
+    'id', // expected top-level id
   ]);
   const extraKeys = Object.keys(release).filter((k) => !specKeys.has(k));
   if (extraKeys.length === 0) {
-    console.log("  (none — all API fields accounted for in spec)");
+    console.log('  (none — all API fields accounted for in spec)');
     return;
   }
   for (const key of extraKeys) {
@@ -264,11 +276,9 @@ function printExtraFields(release: DiscogsRelease): void {
 }
 
 function analyzeTracklist(tracklist: DiscogsTracklistEntry[]): void {
-  separator("TRACKLIST ANALYSIS");
+  separator('TRACKLIST ANALYSIS');
   console.log(`  Total entries: ${tracklist.length}`);
-  const withExtraArtists = tracklist.filter(
-    (t) => t.extraartists && t.extraartists.length > 0,
-  );
+  const withExtraArtists = tracklist.filter((t) => t.extraartists && t.extraartists.length > 0);
   console.log(`  Tracks with extraartists: ${withExtraArtists.length}`);
   if (withExtraArtists.length > 0 && withExtraArtists[0]?.extraartists) {
     console.log(`  Sample track extraartist roles:`);
@@ -278,36 +288,34 @@ function analyzeTracklist(tracklist: DiscogsTracklistEntry[]): void {
   }
   const sample = tracklist[0];
   if (sample) {
-    console.log(`\n  Sample track fields: ${Object.keys(sample).join(", ")}`);
+    console.log(`\n  Sample track fields: ${Object.keys(sample).join(', ')}`);
   }
 }
 
 function analyzeCompanies(companies: DiscogsLabel[]): void {
-  separator("COMPANIES ANALYSIS (studio data probe)");
+  separator('COMPANIES ANALYSIS (studio data probe)');
   console.log(`  Total companies: ${companies.length}`);
   for (const c of companies) {
     console.log(
-      `  • ${c.name} | entity_type_name: "${c.entity_type_name ?? "(missing)"}" | catno: "${c.catno}"`,
+      `  • ${c.name} | entity_type_name: "${c.entity_type_name ?? '(missing)'}" | catno: "${c.catno}"`,
     );
   }
   const studios = companies.filter(
-    (c) => c.entity_type_name === "Recorded At" || c.entity_type_name === "Manufactured By",
+    (c) => c.entity_type_name === 'Recorded At' || c.entity_type_name === 'Mixed At',
   );
-  console.log(
-    `  → ${studios.length} company entries with studio-relevant entity_type_name`,
-  );
+  console.log(`  → ${studios.length} company entries with studio-relevant entity_type_name`);
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  console.log("🎵 liner-notes — Discogs API Exploration");
+  console.log('🎵 liner-notes — Discogs API Exploration');
   console.log(`   User: ${USERNAME}`);
   console.log(`   User-Agent: ${USER_AGENT}`);
   console.log(`   Request delay: ${DELAY_MS}ms\n`);
 
   // Step 1: Fetch collection (first 5 releases)
-  separator("RAW RESPONSE — Collection (page 1, per_page=5)");
+  separator('RAW RESPONSE — Collection (page 1, per_page=5)');
   const collectionPath = `/users/${USERNAME}/collection/folders/0/releases?page=1&per_page=5`;
   const collection = await discogsGet<DiscogsCollectionResponse>(collectionPath);
   console.log(JSON.stringify(collection, null, 2));
@@ -316,7 +324,7 @@ async function main(): Promise<void> {
   console.log(`\n📦 Collection stats: ${items} total releases across ${pages} pages`);
 
   if (collection.releases.length === 0) {
-    console.error("❌ No releases found in collection. Check DISCOGS_USERNAME.");
+    console.error('❌ No releases found in collection. Check DISCOGS_USERNAME.');
     process.exit(1);
   }
 
@@ -342,49 +350,46 @@ async function main(): Promise<void> {
   if (fullRelease.tracklist && fullRelease.tracklist.length > 0) {
     analyzeTracklist(fullRelease.tracklist);
   } else {
-    console.log("\n⚠️  No tracklist data on this release.");
+    console.log('\n⚠️  No tracklist data on this release.');
   }
 
   if (fullRelease.companies) {
     analyzeCompanies(fullRelease.companies);
   } else {
-    console.log("\n⚠️  No companies data on this release.");
+    console.log('\n⚠️  No companies data on this release.');
   }
 
   // Step 5: Save fixture
   const fixturePath = resolve(
     process.cwd(),
-    "services/graph-service/tests/fixtures/sample-release.json",
+    'services/graph-service/tests/fixtures/sample-release.json',
   );
   writeFileSync(fixturePath, JSON.stringify(fullRelease, null, 2));
   console.log(`\n✅ Fixture saved → services/graph-service/tests/fixtures/sample-release.json`);
 
   // Step 6: Summary
-  separator("SUMMARY");
+  separator('SUMMARY');
   const present = fieldReports.filter((r) => r.present).length;
   const absent = fieldReports.filter((r) => !r.present).length;
   console.log(`  Spec fields present in API response: ${present}/${fieldReports.length}`);
   if (absent > 0) {
     console.log(
-      `  ⚠️  Missing: ${fieldReports.filter((r) => !r.present).map((r) => r.field).join(", ")}`,
+      `  ⚠️  Missing: ${fieldReports
+        .filter((r) => !r.present)
+        .map((r) => r.field)
+        .join(', ')}`,
     );
   }
   console.log(`\n  Collection size: ${items} releases`);
-  console.log(`  Sample release: "${fullRelease.title}" (${fullRelease.year ?? "year unknown"})`);
-  console.log(`  Genre(s): ${fullRelease.genres?.join(", ") ?? "none"}`);
-  console.log(`  Style(s): ${fullRelease.styles?.join(", ") ?? "none"}`);
-  console.log(
-    `  Tracklist: ${fullRelease.tracklist?.length ?? 0} entries`,
-  );
-  console.log(
-    `  Companies: ${fullRelease.companies?.length ?? 0} entries`,
-  );
-  console.log(
-    `  Extraartists (top-level): ${fullRelease.extraartists?.length ?? 0} entries`,
-  );
+  console.log(`  Sample release: "${fullRelease.title}" (${fullRelease.year ?? 'year unknown'})`);
+  console.log(`  Genre(s): ${fullRelease.genres?.join(', ') ?? 'none'}`);
+  console.log(`  Style(s): ${fullRelease.styles?.join(', ') ?? 'none'}`);
+  console.log(`  Tracklist: ${fullRelease.tracklist?.length ?? 0} entries`);
+  console.log(`  Companies: ${fullRelease.companies?.length ?? 0} entries`);
+  console.log(`  Extraartists (top-level): ${fullRelease.extraartists?.length ?? 0} entries`);
 }
 
 main().catch((err: unknown) => {
-  console.error("❌ Fatal error:", err);
+  console.error('❌ Fatal error:', err);
   process.exit(1);
 });

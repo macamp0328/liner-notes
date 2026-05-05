@@ -2,8 +2,8 @@
 
 **Date:** 2026-05-05  
 **Script:** `scripts/explore-discogs.ts`  
-**Sample release:** Big Thief — *U.F.O.F.* (Discogs ID: 13570466, 2019)  
-**Collection:** macamp0328 — 196 releases across 40 pages  
+**Sample release:** Big Thief — _U.F.O.F._ (Discogs ID: 13570466, 2019)  
+**Collection:** {DISCOGS_USERNAME} — 196 releases across 40 pages
 
 ---
 
@@ -12,11 +12,13 @@
 `GET /users/{username}/collection/folders/0/releases?page=1&per_page=5`
 
 ### What works as expected
-- Authentication via `Authorization: Discogs token {TOKEN}` header works correctly.
+
+- Authentication via `Authorization: Discogs token={TOKEN}` header works correctly.
 - Pagination object is present: `{ page, pages, per_page, items, urls: { next, last } }`.
 - `basic_information` on each release contains: `id`, `title`, `year`, `genres[]`, `styles[]`, `formats[]`, `labels[]`, `artists[]`, `master_id`, `master_url`, `thumb`, `cover_image`.
 
 ### Surprises / gaps
+
 - **Default sort is by label, alphabetically** (`sort=label&sort_order=asc`). The pagination `next`/`last` URLs embed this. To get releases sorted by date added or title, add `?sort=added&sort_order=desc` to the query. No impact on ingestion correctness, but worth being explicit in the ingestion pipeline.
 - **`basic_information.artists[].role` is always `""` (empty string)** for the primary artist. Role is only meaningful on `extraartists[]`.
 - **`basic_information` omits `country` and `extraartists`** — those only appear in the full `GET /releases/{id}` response. The ingestion pipeline must fetch the full release for every record.
@@ -32,21 +34,21 @@
 
 All 13 spec-expected fields are present in the actual API response.
 
-| Field | Present? | Type | Notes |
-|---|---|---|---|
-| `title` | ✅ | string | As expected |
-| `year` | ✅ | number (integer) | As expected |
-| `country` | ✅ | string | e.g. `"US"` |
-| `genres[]` | ✅ | string array | e.g. `["Rock"]` |
-| `styles[]` | ✅ | string array | e.g. `["Indie Rock", "Folk Rock"]` |
-| `formats[]` | ✅ | object array | See format shape below |
-| `artists[]` | ✅ | object array | See artist shape below |
-| `extraartists[]` | ✅ | object array | Top-level: producer, engineer, designer, etc. |
-| `labels[]` | ✅ | object array | See label shape below |
-| `tracklist[]` | ✅ | object array | See tracklist shape below |
-| `companies[]` | ✅ | object array | See companies analysis below |
-| `images[]` | ✅ | object array | See image shape below |
-| `master_id` | ✅ | number | Present when a master exists; may be `0` for releases with no master |
+| Field            | Present? | Type             | Notes                                                                |
+| ---------------- | -------- | ---------------- | -------------------------------------------------------------------- |
+| `title`          | ✅       | string           | As expected                                                          |
+| `year`           | ✅       | number (integer) | As expected                                                          |
+| `country`        | ✅       | string           | e.g. `"US"`                                                          |
+| `genres[]`       | ✅       | string array     | e.g. `["Rock"]`                                                      |
+| `styles[]`       | ✅       | string array     | e.g. `["Indie Rock", "Folk Rock"]`                                   |
+| `formats[]`      | ✅       | object array     | See format shape below                                               |
+| `artists[]`      | ✅       | object array     | See artist shape below                                               |
+| `extraartists[]` | ✅       | object array     | Top-level: producer, engineer, designer, etc.                        |
+| `labels[]`       | ✅       | object array     | See label shape below                                                |
+| `tracklist[]`    | ✅       | object array     | See tracklist shape below                                            |
+| `companies[]`    | ✅       | object array     | See companies analysis below                                         |
+| `images[]`       | ✅       | object array     | See image shape below                                                |
+| `master_id`      | ✅       | number           | Present when a master exists; may be `0` for releases with no master |
 
 ---
 
@@ -57,13 +59,13 @@ All 13 spec-expected fields are present in the actual API response.
 ```json
 {
   "name": "Big Thief",
-  "anv": "",          // artist name variation — alias used on this release
-  "join": "",         // join string between artists ("&", "vs.", etc.)
-  "role": "",         // empty for primary artists; role string for extra artists
-  "tracks": "",       // which tracks this credit applies to (empty = all)
+  "anv": "", // artist name variation — alias used on this release
+  "join": "", // join string between artists ("&", "vs.", etc.)
+  "role": "", // empty for primary artists; role string for extra artists
+  "tracks": "", // which tracks this credit applies to (empty = all)
   "id": 5009441,
   "resource_url": "https://api.discogs.com/artists/5009441",
-  "thumbnail_url": "..."  // only in full release response, not collection
+  "thumbnail_url": "..." // only in full release response, not collection
 }
 ```
 
@@ -86,8 +88,8 @@ When an artist is credited under a name different from their canonical Discogs n
 {
   "name": "4AD",
   "catno": "4AD0129LP",
-  "entity_type": "1",               // numeric code (not human-readable alone)
-  "entity_type_name": "Label",      // human-readable type
+  "entity_type": "1", // numeric code (not human-readable alone)
+  "entity_type_name": "Label", // human-readable type
   "id": 634,
   "resource_url": "...",
   "thumbnail_url": "..."
@@ -96,16 +98,16 @@ When an artist is credited under a name different from their canonical Discogs n
 
 **`companies[]` — observed `entity_type_name` values:**
 
-| entity_type_name | entity_type | Meaning |
-|---|---|---|
-| `Recorded At` | 23 | Recording studio ← **this is the studio node** |
-| `Mixed At` | 27 | Mixing studio — also a studio |
-| `Mastered At` | 29 | Mastering studio |
-| `Lacquer Cut At` | 30 | Lacquer cutting facility |
-| `Phonographic Copyright (p)` | 13 | Copyright holder |
-| `Copyright (c)` | 14 | Copyright holder |
-| `Manufactured By` | 10 | Pressing plant |
-| `Distributed By` | 7 | Distributor |
+| entity_type_name             | entity_type | Meaning                                        |
+| ---------------------------- | ----------- | ---------------------------------------------- |
+| `Recorded At`                | 23          | Recording studio ← **this is the studio node** |
+| `Mixed At`                   | 27          | Mixing studio — also a studio                  |
+| `Mastered At`                | 29          | Mastering studio                               |
+| `Lacquer Cut At`             | 30          | Lacquer cutting facility                       |
+| `Phonographic Copyright (p)` | 13          | Copyright holder                               |
+| `Copyright (c)`              | 14          | Copyright holder                               |
+| `Manufactured By`            | 10          | Pressing plant                                 |
+| `Distributed By`             | 7           | Distributor                                    |
 
 **Recommendation:** The spec filters by `entity_type_name === "Recorded At"` for Studio nodes. Consider also capturing `"Mixed At"` as it often refers to the same facility or is equally valuable for relationship queries. Filter by `entity_type` numeric codes for reliability rather than string matching.
 
@@ -116,9 +118,9 @@ Studio data is **present** on this release (Bear Creek Studios appears twice —
 ```json
 {
   "name": "Vinyl",
-  "qty": "1",               // NOTE: string, not number
+  "qty": "1", // NOTE: string, not number
   "descriptions": ["LP", "Album"],
-  "text": "Pitman Pressing"  // optional free-text note
+  "text": "Pitman Pressing" // optional free-text note
 }
 ```
 
@@ -137,7 +139,7 @@ Studio data is **present** on this release (Bear Creek Studios appears twice —
 ```
 
 **Critical finding — `duration` is frequently empty:**  
-All 12 tracks on *U.F.O.F.* have `duration: ""`. Duration is community-contributed and inconsistently populated on Discogs. Do not rely on it for ingestion completeness. Store when present; don't error when absent.
+All 12 tracks on _U.F.O.F._ have `duration: ""`. Duration is community-contributed and inconsistently populated on Discogs. Do not rely on it for ingestion completeness. Store when present; don't error when absent.
 
 **`type_` field** (not in spec): Tracklist entries can be `"track"` (actual songs), `"heading"` (side headers like "Side A"), or `"index"` (for indexed-but-non-displayed tracks). Filter by `type_ === "track"` during ingestion to avoid creating Track nodes for structural headers.
 
@@ -147,10 +149,10 @@ All 12 tracks on *U.F.O.F.* have `duration: ""`. Duration is community-contribut
 
 ```json
 {
-  "type": "primary",        // "primary" or "secondary"
-  "uri": "https://...",     // full-size image
-  "resource_url": "...",    // same as uri for images
-  "uri150": "https://...",  // 150px thumbnail
+  "type": "primary", // "primary" or "secondary"
+  "uri": "https://...", // full-size image
+  "resource_url": "...", // same as uri for images
+  "uri150": "https://...", // 150px thumbnail
   "width": 600,
   "height": 595
 }
@@ -162,18 +164,18 @@ All 12 tracks on *U.F.O.F.* have `duration: ""`. Duration is community-contribut
 
 ## 4. Extra Fields Not in Spec — Worth Capturing
 
-| Field | Value | Recommendation |
-|---|---|---|
-| `released` | `"2019-05-03"` (ISO date string) | Store alongside `year` — gives day-precision for sorting. Add as `releaseDate` property on `Release`. |
-| `notes` | Free-text string | Store as `notes` property on `Release` — contains pressing info, variants. |
-| `identifiers[]` | Barcode, matrix/runout | Consider storing barcode as `barcode` on `Release` for deduplication. |
-| `videos[]` | YouTube links per release | Could enrich a future frontend — skip for now |
-| `community.rating` | `{ count, average }` | Interesting for ranking queries — store as `communityRating` and `communityRatingCount` on `Release`. |
-| `thumb` | 150px thumbnail URL | Redundant with `images[].uri150` on the primary image — skip top-level `thumb` |
-| `uri` | Discogs web URL | Store as `discogsUrl` on `Release` — useful for linking back |
-| `master_url` | Discogs API URL for master | Skip — derivable from `master_id` |
-| `blocked_from_sale` / `is_offensive` | boolean flags | Skip |
-| `estimated_weight` | grams | Skip |
+| Field                                | Value                            | Recommendation                                                                                        |
+| ------------------------------------ | -------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `released`                           | `"2019-05-03"` (ISO date string) | Store alongside `year` — gives day-precision for sorting. Add as `releaseDate` property on `Release`. |
+| `notes`                              | Free-text string                 | Store as `notes` property on `Release` — contains pressing info, variants.                            |
+| `identifiers[]`                      | Barcode, matrix/runout           | Consider storing barcode as `barcode` on `Release` for deduplication.                                 |
+| `videos[]`                           | YouTube links per release        | Could enrich a future frontend — skip for now                                                         |
+| `community.rating`                   | `{ count, average }`             | Interesting for ranking queries — store as `communityRating` and `communityRatingCount` on `Release`. |
+| `thumb`                              | 150px thumbnail URL              | Redundant with `images[].uri150` on the primary image — skip top-level `thumb`                        |
+| `uri`                                | Discogs web URL                  | Store as `discogsUrl` on `Release` — useful for linking back                                          |
+| `master_url`                         | Discogs API URL for master       | Skip — derivable from `master_id`                                                                     |
+| `blocked_from_sale` / `is_offensive` | boolean flags                    | Skip                                                                                                  |
+| `estimated_weight`                   | grams                            | Skip                                                                                                  |
 
 ---
 
@@ -205,6 +207,7 @@ In addition to `entity_type_name === "Recorded At"`, also capture `"Mixed At"` f
 ### Musician role parsing
 
 `extraartists[].role` is a comma-delimited multi-value string, not a single value. For the `CREDITED_ON` relationship:
+
 - Store raw `role` string as-is
 - Add a `displayRole` property that splits on `, ` and takes the first token
 - Do not try to normalize all instrument variants at schema time — too much variance
@@ -220,10 +223,12 @@ Store `anv` on the relationship (e.g., `CREDITED_ON`, `RELEASED_BY`) as `credite
 ### `CREDITED_ON` — Track vs Release level
 
 The API provides credits at two levels:
+
 - `release.extraartists[]` — album-wide credits (producer, engineer, designer)
 - `release.tracklist[n].extraartists[]` — track-level credits (who played what on each song)
 
 Recommend two parallel relationship types (or a `scope` property):
+
 - Album-level credits → `Musician -[:CREDITED_ON {scope: "release"}]-> Release`
 - Track-level credits → `Musician -[:CREDITED_ON {scope: "track"}]-> Track`
 
@@ -234,8 +239,8 @@ This is where the richest musician-traversal data lives.
 ## 6. Rate Limiting — Observed Behavior
 
 - 2 requests made (collection + full release) with 1000ms delay — no rate limit hit.
-- Auth header `Authorization: Discogs token {TOKEN}` is correct — no `401` errors.
-- The spec's 60 req/min limit appears accurate. At 1000ms delay the pipeline will use ~4 req/min for single-page collection + one full release per record. Safe headroom.
+- Auth header `Authorization: Discogs token={TOKEN}` is correct — no `401` errors.
+- The spec's 60 req/min limit appears accurate. At 1000ms delay the pipeline makes 1 request/second = 60 req/min, which sits at the authenticated limit. For a 200-release collection: ~40 paginated collection pages + 200 full release fetches ≈ 240 total requests ≈ 4 minutes of ingestion time. The default 1000ms delay is safe in practice since requests are sequential and rarely perfectly spaced at 1/second.
 - No `429` responses observed. Exponential backoff still recommended as a safeguard.
 
 ---
