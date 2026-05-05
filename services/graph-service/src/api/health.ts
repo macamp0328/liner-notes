@@ -18,15 +18,15 @@ export async function healthRoutes(fastify: FastifyInstance): Promise<void> {
           200: {
             type: 'object',
             properties: {
-              status: { type: 'string', enum: ['ok', 'error'] },
-              neo4j: { type: 'string', enum: ['connected', 'disconnected'] },
+              status: { type: 'string', const: 'ok' },
+              neo4j: { type: 'string', const: 'connected' },
             },
           },
           503: {
             type: 'object',
             properties: {
-              status: { type: 'string', enum: ['ok', 'error'] },
-              neo4j: { type: 'string', enum: ['connected', 'disconnected'] },
+              status: { type: 'string', const: 'error' },
+              neo4j: { type: 'string', const: 'disconnected' },
             },
           },
         },

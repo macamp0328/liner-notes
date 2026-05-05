@@ -20,9 +20,6 @@ export async function applySchema(driver: Driver): Promise<void> {
     const session = driver.session();
     try {
       await session.run(statement);
-    } catch (err) {
-      // Log but don't crash — a missing optional plugin won't block startup
-      console.warn(`Schema statement skipped: ${(err as Error).message}`);
     } finally {
       await session.close();
     }
