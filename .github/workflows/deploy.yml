@@ -1,0 +1,18 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+# TODO (Task 5 — infra sprint):
+#   1. Build and push graph-service image to AWS ECR
+#   2. Apply rolling k8s update on EC2 k3s cluster
+#   3. Add Terraform plan/apply with manual approval gate
+jobs:
+  deploy:
+    name: Deploy (stub)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder
+        run: echo "Deploy pipeline — implementation pending (Task 5)"
