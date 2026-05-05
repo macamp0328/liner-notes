@@ -35,8 +35,6 @@ pnpm-debug.log*
 .terraform.lock.hcl
 tfplan
 
-# Docker
-.dockerignore
 
 # Test coverage
 coverage/

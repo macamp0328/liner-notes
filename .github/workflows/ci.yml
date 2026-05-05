@@ -68,7 +68,8 @@ jobs:
       - name: Build graph-service image
         uses: docker/build-push-action@v6
         with:
-          context: ./services/graph-service
+          context: .
+          file: ./services/graph-service/Dockerfile
           push: false
           tags: liner-notes/graph-service:ci
 

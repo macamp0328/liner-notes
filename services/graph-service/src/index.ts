@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 
 const server = Fastify({ logger: true });
 
-server.get('/api/v1/health', async () => {
+server.get('/api/v1/health', () => {
   return { status: 'ok' };
 });
 
