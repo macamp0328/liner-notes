@@ -1,0 +1,278 @@
+# graph-service — Agent Handbook
+
+## Service Purpose & Scope
+
+`graph-service` is the core backend for liner-notes. It:
+1. **Ingests** a Discogs vinyl collection into a Neo4j property graph
+2. **Enriches** tracks with lyrics from LRCLIB (primary) and Genius (fallback)
+3. **Serves** a Fastify REST API for relationship-driven collection exploration
+4. **Auto-generates** OpenAPI documentation via `@fastify/swagger`
+
+This is the **only service that talks to Neo4j**. All other services (future `collection-mcp`, etc.) query graph-service via REST.
+
+---
+
+## Discogs API Integration
+
+> **Agent note:** Verify current rate limits and endpoint behavior against [live Discogs API docs](https://www.discogs.com/developers) before implementation. This section is a guide, not gospel.
+
+**Base URL:** `https://api.discogs.com`  
+**Auth:** Personal access token via `Authorization: Discogs token={DISCOGS_TOKEN}` header  
+**Rate limits:** 60 req/min authenticated (verify against live docs)  
+**User-Agent:** Required by Discogs terms — use `DISCOGS_USER_AGENT` env var
+
+### Key Endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /users/{username}/collection/folders/0/releases` | All collection releases (paginated; folder 0 = all) |
+| `GET /releases/{release_id}` | Full release — artists, labels, credits, tracklist |
+| `GET /artists/{artist_id}` | Artist — name, profile, aliases, members |
+| `GET /labels/{label_id}` | Label — name, parent, country |
+| `GET /masters/{master_id}` | Master — canonical version grouping |
+
+### Data Per Release
+
+```
+title, year, country, genres[], styles[], formats[]
+artists[]       → name, id, role
+extraartists[]  → name, id, role  (producers, engineers, session musicians)
+labels[]        → name, id, catno
+tracklist[]     → position, title, duration, extraartists[]
+companies[]     → name, id, entity_type_name  ("Recorded At" = studio)
+images[]        → uri, type
+master_id
+```
+
+### Rate Limiting
+
+- Configurable delay: `DISCOGS_REQUEST_DELAY_MS` (default 1000ms)
+- Exponential backoff on 429 responses
+- Log all rate limit hits
+- Expected ingestion time: ~10–15 min for 200 records
+
+### Known Gap: Studio Data
+
+Studio data comes from `companies[]` where `entity_type_name === "Recorded At"`. This field is **inconsistently populated** across the Discogs catalog — studio nodes will be sparse. This is expected and documented. Do not try to work around it.
+
+---
+
+## Neo4j Graph Schema
+
+> **Agent note:** Research Neo4j modeling best practices and validate against Task 2 API findings before implementing. Propose improvements explicitly.
+
+### Nodes
+
+| Label | Key Properties |
+|---|---|
+| `Release` | `discogsId` (unique), `title`, `year` (integer), `format`, `thumbUrl`, `masterDiscogsId` |
+| `Artist` | `discogsId` (unique), `name`, `realName`, `profile` |
+| `Label` | `discogsId` (unique), `name`, `profile`, `contactInfo` |
+| `Track` | `position`, `title`, `duration`, `lyrics` (nullable), `lyricsSource` |
+| `Genre` | `name` (unique) |
+| `Style` | `name` (unique) |
+| `Country` | `name` (unique) |
+| `Decade` | `name` (unique) — e.g. `"1970s"` |
+| `Studio` | `name`, `location` |
+| `Musician` | `discogsId` (if available), `name` |
+| `Producer` | `discogsId` (if available), `name` |
+| `Engineer` | `discogsId` (if available), `name` |
+
+> `year` is stored both as a property on `Release` (exact-year queries) and as a `RECORDED_IN_DECADE` relationship to a `Decade` node (decade traversal). Both are needed.
+
+### Relationships
+
+| Relationship | From → To | Properties |
+|---|---|---|
+| `RELEASED_BY` | Release → Artist | `role` |
+| `CREDITED_ON` | Musician → Release | `role`, `instrument` |
+| `PRODUCED_BY` | Release → Producer | |
+| `ENGINEERED_BY` | Release → Engineer | |
+| `ON_LABEL` | Release → Label | `catalogNumber` |
+| `IN_GENRE` | Release → Genre | |
+| `IN_STYLE` | Release → Style | |
+| `FROM_COUNTRY` | Release → Country | |
+| `RECORDED_IN_DECADE` | Release → Decade | |
+| `RECORDED_AT` | Release → Studio | |
+| `HAS_TRACK` | Release → Track | `trackNumber` |
+| `PERFORMED_BY` | Track → Artist | `role` |
+| `SAME_PERSON_AS` | Musician → Artist | |
+| `MEMBER_OF` | Artist → Artist | `startYear`, `endYear` |
+| `SUBSIDIARY_OF` | Label → Label | |
+| `VERSION_OF` | Release → Release | |
+
+### Constraints & Indexes
+
+```cypher
+CREATE CONSTRAINT ON (r:Release) ASSERT r.discogsId IS UNIQUE;
+CREATE CONSTRAINT ON (a:Artist) ASSERT a.discogsId IS UNIQUE;
+CREATE CONSTRAINT ON (l:Label) ASSERT l.discogsId IS UNIQUE;
+CREATE CONSTRAINT ON (g:Genre) ASSERT g.name IS UNIQUE;
+CREATE CONSTRAINT ON (s:Style) ASSERT s.name IS UNIQUE;
+CREATE CONSTRAINT ON (c:Country) ASSERT c.name IS UNIQUE;
+CREATE CONSTRAINT ON (d:Decade) ASSERT d.name IS UNIQUE;
+
+CALL db.index.fulltext.createNodeIndex("trackLyrics", ["Track"], ["lyrics", "title"]);
+
+CREATE INDEX ON :Release(year);
+CREATE INDEX ON :Musician(name);
+CREATE INDEX ON :Studio(name);
+```
+
+Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
+
+---
+
+## API Endpoints
+
+### Collection
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/releases` | List releases, paginated |
+| `GET` | `/api/v1/releases/:discogsId` | Single release with relationships |
+| `GET` | `/api/v1/artists/:discogsId` | Artist with connected releases |
+| `GET` | `/api/v1/labels/:discogsId` | Label with all releases |
+
+### Exploration
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/explore/musician/:name` | Releases featuring this musician |
+| `GET` | `/api/v1/explore/studio/:name` | Releases at this studio |
+| `GET` | `/api/v1/explore/decade/:decade` | Releases from this decade |
+| `GET` | `/api/v1/explore/year/:year` | Releases from this exact year |
+| `GET` | `/api/v1/explore/label/:name` | Releases on this label |
+| `GET` | `/api/v1/explore/genre/:name` | Releases in this genre |
+| `GET` | `/api/v1/explore/style/:name` | Releases in this style |
+| `GET` | `/api/v1/explore/country/:name` | Releases from this country |
+| `GET` | `/api/v1/explore/connections/:discogsId` | Graph traversal (`?depth=2`) |
+| `GET` | `/api/v1/explore/shared-musicians` | Release pairs sharing session musicians |
+
+### Search
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/search?q=` | Full-text across titles, artists, tracks |
+| `GET` | `/api/v1/search/lyrics?q=` | Full-text within lyrics |
+
+### Admin & Ops
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/admin/ingest` | Trigger ingestion (requires `ADMIN_TOKEN`) |
+| `GET` | `/api/v1/admin/ingest/status` | Last ingestion stats |
+| `GET` | `/api/v1/health` | Service + Neo4j status |
+| `GET` | `/api/docs` | Swagger UI |
+
+### Response Shapes
+
+```json
+// List
+{ "data": [...], "pagination": { "page": 1, "limit": 20, "total": 200 } }
+
+// Single
+{ "data": { ... } }
+
+// Error
+{ "error": { "code": "NOT_FOUND", "message": "Release not found" } }
+```
+
+---
+
+## Ingestion Pipeline
+
+```
+1. Validate config (env vars, Neo4j connectivity, Discogs auth)
+2. Apply schema (idempotent)
+3. Fetch collection paginated via GET /users/{username}/collection/folders/0/releases
+4. For each release:
+   a. GET /releases/{release_id}
+   b. Extract all entities
+   c. Derive Decade from year (e.g. 1972 → "1970s")
+   d. MERGE all nodes and relationships
+   e. Sleep DISCOGS_REQUEST_DELAY_MS
+5. Lyrics enrichment:
+   a. For each Track without lyrics → query LRCLIB
+   b. Fallback to Genius API if LRCLIB returns nothing
+   c. Update Track node with lyrics + lyricsSource
+6. Log summary: nodes, relationships, lyrics enriched, errors, duration
+```
+
+**Triggers:**
+- Auto on startup if no `Release` nodes exist in the graph
+- Manual via `POST /api/v1/admin/ingest` (requires `ADMIN_TOKEN` header)
+
+**Idempotency:** All writes use Cypher `MERGE`. Safe to re-run. New collection additions are picked up on re-run.
+
+---
+
+## OpenAPI / Swagger
+
+Swagger UI is a **hard requirement** and must be available at `/api/docs`.
+
+Use `@fastify/swagger` + `@fastify/swagger-ui`. Define JSON schemas on all route inputs/outputs. This enables:
+- Auto-generated OpenAPI spec at `/api/docs/json`
+- Interactive Swagger UI at `/api/docs`
+- Type-safe request/response validation via Fastify's built-in ajv
+
+---
+
+## Testing
+
+**Unit tests** (`tests/unit/`):
+- Discogs response parsing and transformation
+- Neo4j node/relationship builders
+- Decade derivation from year
+- Rate limiting and retry logic
+
+**Integration tests** (`tests/integration/`):
+- All API endpoints via Fastify's `inject()` against a test Neo4j instance
+- Ingestion pipeline against mocked Discogs fixtures
+- Full-text search on seed data
+- Auto-ingest on empty graph
+
+**Coverage requirements:**
+- Unit: 70% minimum
+- Integration: 100% of API routes covered
+
+**Fixtures:** `tests/fixtures/` — JSON fixtures for mocked Discogs responses and seed data
+
+**Run tests:**
+```bash
+pnpm test              # run all tests
+pnpm test:coverage     # with coverage report
+```
+
+---
+
+## Docker Build & Local Run
+
+```bash
+# Build context must be the repo root (Dockerfile copies workspace lockfile)
+docker build -f services/graph-service/Dockerfile -t liner-notes/graph-service .
+
+# Run standalone (needs .env.local with NEO4J_URI pointing to a running instance)
+docker run -p 3000:3000 --env-file .env.local liner-notes/graph-service
+
+# Or use docker-compose from repo root (preferred for local dev)
+docker-compose up
+```
+
+---
+
+## Architecture Notes
+
+Keep Cypher query logic in a **repository layer** (`src/db/`) — not directly in route handlers. This keeps a future GraphQL layer addable without a route rewrite.
+
+```
+Route handler → Repository (Cypher) → Neo4j driver
+```
+
+---
+
+## Known Limitations
+
+- **Studio data is sparse.** `companies[]` in Discogs is inconsistently populated. `Studio` nodes will exist for only a fraction of releases. This is a data quality issue upstream, not a bug.
+- **Musician/Artist deduplication is manual.** Session musicians and credited artists may be the same person with different Discogs IDs. Use `SAME_PERSON_AS` relationships to link them when discovered. No automated deduplication — this is a known tradeoff.
+- **Lyrics are best-effort.** LRCLIB and Genius coverage is incomplete. Missing lyrics are acceptable — the `lyrics` property on `Track` is nullable by design.
