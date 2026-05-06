@@ -284,7 +284,7 @@ Route handler → Repository (Cypher) → Neo4j driver
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
   ```
-- **`esModuleInterop` removed** — `NodeNext` handles CJS interop natively. Do not add it back.
+- **`esModuleInterop` removed** — it was removed to keep the config minimal and to avoid synthetic default imports that paper over module-format differences. With `NodeNext`, TypeScript uses each package's own declared types directly. For the rare CJS-only package that lacks a proper default export, use `import * as x from 'x'` or named imports rather than a synthetic default. Do not add `esModuleInterop` back.
 
 ---
 

@@ -48,7 +48,7 @@ See the [Fork Guide](liner-notes-spec-v0.5.md#16-fork-guide) for step-by-step in
 - **Framework:** Fastify v5
 - **Database:** Neo4j (Aura Free)
 - **Package manager:** pnpm workspaces
-- **Module system:** ESM — `"type": "module"` on all services, `module: NodeNext` in tsconfig. All imports use `.js` extensions (enforced by the TypeScript compiler). This keeps the module format, the TypeScript config, and the runtime all aligned.
+- **Module system:** ESM — `"type": "module"` on all services, `module: NodeNext` in tsconfig. All local/relative imports use `.js` extensions (enforced by the TypeScript compiler). This keeps the module format, the TypeScript config, and the runtime all aligned.
 - **Testing:** Vitest
 - **Infrastructure:** k3s on EC2 t3.micro, AWS ECR, AWS Secrets Manager
 
