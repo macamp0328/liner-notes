@@ -55,7 +55,7 @@ gh api graphql \
 query($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
-      reviewThreads(first: 100) {
+      reviewThreads(first: 100) {  # note: fetches up to 100 threads; sufficient for task-scoped PRs in this repo
         nodes {
           id
           isResolved
@@ -170,7 +170,7 @@ If all checks are green, skip to Phase 4.
 
 ```bash
 # Get the run ID from the check URL or list
-gh run list --branch $(git branch --show-current) --limit 5
+gh run list --branch "$(git branch --show-current)" --limit 5
 
 # Fetch the failure logs
 gh run view {run_id} --log-failed
@@ -180,21 +180,20 @@ gh run view {run_id} --log-failed
 
 | Log signature             | Likely cause     | Fix approach                                          |
 | ------------------------- | ---------------- | ----------------------------------------------------- |
-| `ESLint` errors           | Linting          | `pnpm --filter graph-service lint` then fix manually  |
-| `Prettier` / `Code style` | Formatting       | `pnpm prettier --write .`                             |
-| `TS` / `error TS`         | Type errors      | `pnpm --filter graph-service typecheck` then fix      |
-| `FAIL` / `AssertionError` | Test failure     | Fix the failing test or the code under test           |
-| `Build failed`            | Compilation error| Fix the import/export/syntax error; check `.js` exts  |
-| Coverage below 70%        | Missing tests    | Add unit tests for uncovered code paths               |
-| `pnpm audit`              | Vulnerability    | `pnpm audit --fix` or update the affected package     |
+| `ESLint` errors           | Linting          | `pnpm --filter ./services/graph-service lint` then fix manually  |
+| `Prettier` / `Code style` | Formatting       | `pnpm exec prettier --write .`                                   |
+| `TS` / `error TS`         | Type errors      | `pnpm --filter ./services/graph-service typecheck` then fix      |
+| `FAIL` / `AssertionError` | Test failure     | Fix the failing test or the code under test                      |
+| `Build failed`            | Compilation error| Fix the import/export/syntax error; check `.js` exts             |
+| `pnpm audit`              | Vulnerability    | `pnpm audit --fix` or update the affected package                |
 
 ### Step 3: Apply fix and verify locally
 
 ```bash
 # Fix the identified issue in source files, then run all three gates:
-pnpm prettier --check .
-pnpm --filter graph-service lint
-pnpm --filter graph-service typecheck
+pnpm exec prettier --check .
+pnpm --filter ./services/graph-service lint
+pnpm --filter ./services/graph-service typecheck
 ```
 
 If any gate still fails, iterate on the fix until all three pass **before** committing. Do not commit broken code.
@@ -246,7 +245,7 @@ Summarize everything that was done. Output a clear report:
 
 ## Guardrails
 
-- **Never** use `--no-verify` or skip the three pre-commit gates (`prettier --check`, `lint`, `typecheck`) before pushing
+- **Never** use `--no-verify` or skip the three pre-commit gates (`pnpm exec prettier --check .`, `pnpm --filter ./services/graph-service lint`, `pnpm --filter ./services/graph-service typecheck`) before pushing
 - **Never** `git add -A` — always stage specific files
 - **Always** reply to every non-bot comment, even if declining
 - **Always** ask the user before declining a comment from a human reviewer (not a bot)
