@@ -191,6 +191,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Audit dependencies
+        # --audit-level=high blocks both high AND critical CVEs (stricter than critical-only)
         run: pnpm audit --audit-level=high
 
   secrets-scan:
