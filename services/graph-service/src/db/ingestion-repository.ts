@@ -7,6 +7,7 @@ import neo4j from 'neo4j-driver';
 import type {
   DiscogsArtistCredit,
   DiscogsCompany,
+  DiscogsLabel,
   DiscogsRelease,
   DiscogsTracklistEntry,
 } from '../ingestion/types.js';
@@ -27,9 +28,9 @@ import {
 export async function hasReleases(driver: Driver): Promise<boolean> {
   const session = driver.session();
   try {
-    const result = await session.run('MATCH (r:Release) RETURN count(r) AS cnt LIMIT 1');
-    const cnt = result.records[0]?.get('cnt') as { toNumber: () => number } | undefined;
-    return (cnt?.toNumber() ?? 0) > 0;
+    // RETURN 1 LIMIT 1 short-circuits on the first match — avoids a full count scan.
+    const result = await session.run('MATCH (r:Release) RETURN 1 AS exists LIMIT 1');
+    return result.records.length > 0;
   } finally {
     await session.close();
   }
@@ -147,7 +148,7 @@ async function mergeArtists(
 async function mergeLabels(
   session: Session,
   releaseId: number,
-  labels: DiscogsArtistCredit[] | { name: string; catno: string; id: number }[],
+  labels: DiscogsLabel[],
 ): Promise<void> {
   for (const label of labels) {
     if (label.id === 0) continue;
@@ -162,7 +163,7 @@ async function mergeLabels(
         discogsId: neo4j.int(label.id),
         name: label.name,
         releaseId: neo4j.int(releaseId),
-        catalogNumber: (label as { catno: string }).catno ?? '',
+        catalogNumber: label.catno,
       },
     );
   }

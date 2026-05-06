@@ -57,12 +57,12 @@ export async function buildServer(): Promise<FastifyInstance> {
     const empty = !(await hasReleases(driver));
     if (empty) {
       const username = process.env['DISCOGS_USERNAME'];
-      const delayMs = parseInt(process.env['DISCOGS_REQUEST_DELAY_MS'] ?? '1000', 10);
+      // buildDiscogsClientFromEnv handles delay validation; no separate parsing needed here.
       const discogsClient = buildDiscogsClientFromEnv();
 
       if (discogsClient && username) {
         app.log.info('Graph is empty — starting Discogs ingestion in background');
-        void runIngestion(discogsClient, driver, { username, delayMs })
+        void runIngestion(discogsClient, driver, { username, logger: app.log })
           .then((summary) => {
             app.log.info({ summary }, 'Discogs ingestion complete');
           })

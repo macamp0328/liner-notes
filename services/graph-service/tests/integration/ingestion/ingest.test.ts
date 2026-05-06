@@ -131,7 +131,7 @@ describe('Discogs ingestion pipeline', () => {
     const fakeDriver = {} as import('neo4j-driver').Driver;
     const client = new DiscogsClient({ token: 'test', userAgent: 'test', delayMs: 0 });
 
-    const summary = await runIngestion(client, fakeDriver, { username: 'testuser', delayMs: 0 });
+    const summary = await runIngestion(client, fakeDriver, { username: 'testuser' });
 
     // 3 releases in collection-page-1.json
     expect(summary.releasesProcessed).toBe(3);
@@ -152,8 +152,8 @@ describe('Discogs ingestion pipeline', () => {
     const fakeDriver = {} as import('neo4j-driver').Driver;
     const client = new DiscogsClient({ token: 'test', userAgent: 'test', delayMs: 0 });
 
-    const summary1 = await runIngestion(client, fakeDriver, { username: 'testuser', delayMs: 0 });
-    const summary2 = await runIngestion(client, fakeDriver, { username: 'testuser', delayMs: 0 });
+    const summary1 = await runIngestion(client, fakeDriver, { username: 'testuser' });
+    const summary2 = await runIngestion(client, fakeDriver, { username: 'testuser' });
 
     // Idempotency: same number of releases processed each run
     expect(summary1.releasesProcessed).toBe(summary2.releasesProcessed);
@@ -176,7 +176,7 @@ describe('Discogs ingestion pipeline', () => {
     const fakeDriver = {} as import('neo4j-driver').Driver;
     const client = new DiscogsClient({ token: 'test', userAgent: 'test', delayMs: 0 });
 
-    const summary = await runIngestion(client, fakeDriver, { username: 'testuser', delayMs: 0 });
+    const summary = await runIngestion(client, fakeDriver, { username: 'testuser' });
 
     expect(summary.releasesProcessed).toBe(2); // 13570466 and 9999992 succeeded
     expect(summary.releasesFailed).toBe(1); // 9999991 failed
@@ -214,7 +214,7 @@ describe('Discogs ingestion pipeline', () => {
     const fakeDriver = {} as import('neo4j-driver').Driver;
     const client = new DiscogsClient({ token: 'test', userAgent: 'test', delayMs: 0 });
 
-    await runIngestion(client, fakeDriver, { username: 'testuser', delayMs: 0 });
+    await runIngestion(client, fakeDriver, { username: 'testuser' });
 
     // Both pages must be fetched
     expect(mockGetCollectionReleases).toHaveBeenCalledTimes(2);

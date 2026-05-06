@@ -45,11 +45,12 @@ function makeMockDriver(session: Session): Driver {
 // ---------------------------------------------------------------------------
 // hasReleases
 // ---------------------------------------------------------------------------
+// The query is now `MATCH (r:Release) RETURN 1 AS exists LIMIT 1` which returns one record
+// when at least one Release exists, or zero records when none do. There is no "count=0 record"
+// case; presence/absence of rows is the signal.
 describe('hasReleases', () => {
-  it('returns true when count > 0', async () => {
-    const record = {
-      get: vi.fn().mockReturnValue({ toNumber: () => 3 }),
-    } as unknown as Neo4jRecord;
+  it('returns true when at least one Release exists (records non-empty)', async () => {
+    const record = { get: vi.fn().mockReturnValue(1) } as unknown as Neo4jRecord;
     const result = { records: [record] } as unknown as Result;
     const { session } = makeMockSession(result);
     const driver = makeMockDriver(session);
@@ -60,20 +61,7 @@ describe('hasReleases', () => {
     expect(session.run).toHaveBeenCalledOnce();
   });
 
-  it('returns false when count === 0', async () => {
-    const record = {
-      get: vi.fn().mockReturnValue({ toNumber: () => 0 }),
-    } as unknown as Neo4jRecord;
-    const result = { records: [record] } as unknown as Result;
-    const { session } = makeMockSession(result);
-    const driver = makeMockDriver(session);
-
-    const result2 = await hasReleases(driver);
-
-    expect(result2).toBe(false);
-  });
-
-  it('returns false when no records are returned', async () => {
+  it('returns false when no Release nodes exist (empty records)', async () => {
     const result = { records: [] } as unknown as Result;
     const { session } = makeMockSession(result);
     const driver = makeMockDriver(session);

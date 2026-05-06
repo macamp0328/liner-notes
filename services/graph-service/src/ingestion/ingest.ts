@@ -2,9 +2,17 @@ import type { Driver } from 'neo4j-driver';
 import { DiscogsClient } from './discogs-client.js';
 import { mergeReleaseGraph } from '../db/ingestion-repository.js';
 
+/** Minimal logger interface — satisfied by Fastify's app.log (pino) and by console. */
+export interface Logger {
+  info(msg: string): void;
+  warn(msg: string): void;
+  error(msg: string): void;
+}
+
 export interface IngestionConfig {
   username: string;
-  delayMs: number;
+  /** Optional structured logger; defaults to console when omitted. Pass app.log in production. */
+  logger?: Logger;
 }
 
 export interface IngestionSummary {
@@ -34,12 +42,13 @@ export async function runIngestion(
   driver: Driver,
   config: IngestionConfig,
 ): Promise<IngestionSummary> {
+  const log: Logger = config.logger ?? console;
   const startTime = Date.now();
   const errors: string[] = [];
   let releasesProcessed = 0;
   let releasesFailed = 0;
 
-  console.info(`[ingest] Starting ingestion for user: ${config.username}`);
+  log.info(`[ingest] Starting ingestion for user: ${config.username}`);
 
   // Step 1: Collect all release IDs from the paginated collection endpoint
   const releaseIds: number[] = [];
@@ -47,7 +56,7 @@ export async function runIngestion(
   let totalPages = 1;
 
   do {
-    console.info(`[ingest] Fetching collection page ${page}/${totalPages}`);
+    log.info(`[ingest] Fetching collection page ${page}/${totalPages}`);
     const collectionPage = await client.getCollectionReleases(config.username, page, PER_PAGE);
     totalPages = collectionPage.pagination.pages;
 
@@ -59,7 +68,7 @@ export async function runIngestion(
   } while (page <= totalPages);
 
   const total = releaseIds.length;
-  console.info(`[ingest] Found ${total} releases to process`);
+  log.info(`[ingest] Found ${total} releases to process`);
 
   // Step 2: Fetch and MERGE each release
   for (const releaseId of releaseIds) {
@@ -69,14 +78,14 @@ export async function runIngestion(
       releasesProcessed++;
 
       if (releasesProcessed % PROGRESS_INTERVAL === 0) {
-        console.info(`[ingest] Progress: ${releasesProcessed}/${total} releases processed`);
+        log.info(`[ingest] Progress: ${releasesProcessed}/${total} releases processed`);
       }
     } catch (err) {
       releasesFailed++;
       const msg = err instanceof Error ? err.message : String(err);
       const errorEntry = `Release ${releaseId}: ${msg}`;
       errors.push(errorEntry);
-      console.error(`[ingest] Failed to process release ${releaseId}: ${msg}`);
+      log.error(`[ingest] Failed to process release ${releaseId}: ${msg}`);
     }
   }
 
@@ -92,7 +101,7 @@ export async function runIngestion(
     durationMs,
   };
 
-  console.info(
+  log.info(
     `[ingest] Ingestion complete:\n` +
       `  Releases processed: ${releasesProcessed}\n` +
       `  Releases failed:    ${releasesFailed}\n` +
@@ -109,15 +118,21 @@ export async function runIngestion(
  * Build a DiscogsClient from environment variables.
  * Returns null and logs a warning if required vars are missing (graceful skip).
  */
+const DEFAULT_DELAY_MS = 1_000;
+const MIN_DELAY_MS = 100;
+
 export function buildDiscogsClientFromEnv(): DiscogsClient | null {
   const token = process.env['DISCOGS_TOKEN'];
   const userAgent = process.env['DISCOGS_USER_AGENT'] ?? 'liner-notes/1.0';
-  const delayMs = parseInt(process.env['DISCOGS_REQUEST_DELAY_MS'] ?? '1000', 10);
 
   if (!token) {
     console.warn('[ingest] DISCOGS_TOKEN not set — skipping ingestion');
     return null;
   }
+
+  // Validate and clamp delay: malformed/negative values fall back to the default.
+  const parsed = parseInt(process.env['DISCOGS_REQUEST_DELAY_MS'] ?? '', 10);
+  const delayMs = Number.isFinite(parsed) && parsed >= MIN_DELAY_MS ? parsed : DEFAULT_DELAY_MS;
 
   return new DiscogsClient({ token, userAgent, delayMs });
 }

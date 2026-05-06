@@ -12,11 +12,15 @@ function makeOkResponse(body: unknown): Response {
   } as unknown as Response;
 }
 
-function makeErrorResponse(status: number, statusText: string): Response {
+function makeErrorResponse(status: number, statusText: string, retryAfterSecs?: number): Response {
   return {
     ok: false,
     status,
     statusText,
+    headers: {
+      get: (name: string) =>
+        name === 'Retry-After' && retryAfterSecs !== undefined ? String(retryAfterSecs) : null,
+    },
     json: vi.fn().mockResolvedValue({}),
   } as unknown as Response;
 }
@@ -30,7 +34,8 @@ describe('DiscogsClient', () => {
     client = new DiscogsClient({
       token: 'test-token',
       userAgent: 'liner-notes/test',
-      delayMs: 0, // no delay in unit tests
+      delayMs: 0, // no per-request delay in unit tests
+      backoffBaseMs: 0, // no 429 backoff delay in unit tests
     });
   });
 
@@ -134,6 +139,28 @@ describe('DiscogsClient', () => {
       await expect(client.getRelease(13570466)).rejects.toThrow(/exceeded max retries/);
       // Should have tried MAX_RETRIES+1 = 6 times
       expect(fetchSpy.mock.calls.length).toBe(6);
+    });
+
+    it('honours the Retry-After header: waits at least the server-specified duration', async () => {
+      // Intercept setTimeout so the test doesn't actually sleep, but still capture the delay.
+      const setTimeoutSpy = vi
+        .spyOn(globalThis, 'setTimeout')
+        .mockImplementation((fn, ..._args) => {
+          (fn as () => void)();
+          return 0 as unknown as ReturnType<typeof setTimeout>;
+        });
+
+      fetchSpy
+        .mockResolvedValueOnce(makeErrorResponse(429, 'Too Many Requests', 2)) // Retry-After: 2s
+        .mockResolvedValueOnce(makeOkResponse(release13570466));
+
+      await client.getRelease(13570466);
+
+      // First setTimeout call is the 429 backoff — should be at least 2000ms from Retry-After.
+      const firstDelay = setTimeoutSpy.mock.calls[0]?.[1] ?? 0;
+      expect(firstDelay).toBeGreaterThanOrEqual(2_000);
+
+      setTimeoutSpy.mockRestore();
     });
   });
 });

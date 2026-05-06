@@ -4,21 +4,27 @@ export interface DiscogsClientConfig {
   token: string;
   userAgent: string;
   delayMs: number;
+  /** Minimum backoff in ms for 429 retry. Defaults to 1000. Set to 0 in tests to keep them fast. */
+  backoffBaseMs?: number;
 }
 
 const BASE_URL = 'https://api.discogs.com';
 const MAX_RETRIES = 5;
 const MAX_BACKOFF_MS = 32_000;
+// Backoff starts here on 429 — independent of delayMs so it's always non-zero in production.
+const DEFAULT_BACKOFF_BASE_MS = 1_000;
 
 export class DiscogsClient {
   private readonly token: string;
   private readonly userAgent: string;
   private readonly delayMs: number;
+  private readonly backoffBaseMs: number;
 
   constructor(config: DiscogsClientConfig) {
     this.token = config.token;
     this.userAgent = config.userAgent;
     this.delayMs = config.delayMs;
+    this.backoffBaseMs = config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
   }
 
   async getCollectionReleases(
@@ -37,7 +43,8 @@ export class DiscogsClient {
 
   private async fetchWithBackoff<T>(url: string): Promise<T> {
     let attempt = 0;
-    let currentDelay = this.delayMs;
+    // Backoff starts at backoffBaseMs (independent of delayMs so it's safe even when delayMs=0).
+    let currentDelay = this.backoffBaseMs;
 
     while (attempt <= MAX_RETRIES) {
       const response = await fetch(url, {
@@ -49,12 +56,16 @@ export class DiscogsClient {
       });
 
       if (response.status === 429) {
+        // Honour the server-specified Retry-After delay when present.
+        const retryAfterHeader = response.headers.get('Retry-After');
+        const retryAfterMs = retryAfterHeader ? parseInt(retryAfterHeader, 10) * 1_000 : 0;
+        const waitMs = Math.max(currentDelay, retryAfterMs);
         console.warn(
-          `[discogs-client] Rate limited (429) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${currentDelay}ms`,
+          `[discogs-client] Rate limited (429) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${waitMs}ms`,
         );
-        await this.sleep(currentDelay);
+        await this.sleep(waitMs);
         // Exponential backoff, capped at MAX_BACKOFF_MS
-        currentDelay = Math.min(currentDelay * 2, MAX_BACKOFF_MS);
+        currentDelay = Math.min(Math.max(waitMs, this.backoffBaseMs) * 2, MAX_BACKOFF_MS);
         attempt++;
         continue;
       }
