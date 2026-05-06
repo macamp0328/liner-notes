@@ -1,0 +1,19 @@
+{
+  "meta": { "status": 200 },
+  "response": {
+    "hits": [
+      {
+        "type": "song",
+        "result": {
+          "id": 12345,
+          "title": "Song Title",
+          "url": "https://genius.com/Test-artist-song-title-lyrics",
+          "primary_artist": {
+            "id": 999,
+            "name": "Test Artist"
+          }
+        }
+      }
+    ]
+  }
+}
