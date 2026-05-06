@@ -17,6 +17,7 @@ export async function healthRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           200: {
             type: 'object',
+            required: ['status', 'neo4j'],
             properties: {
               status: { type: 'string', const: 'ok' },
               neo4j: { type: 'string', const: 'connected' },
@@ -24,6 +25,7 @@ export async function healthRoutes(fastify: FastifyInstance): Promise<void> {
           },
           503: {
             type: 'object',
+            required: ['status', 'neo4j'],
             properties: {
               status: { type: 'string', const: 'error' },
               neo4j: { type: 'string', const: 'disconnected' },
