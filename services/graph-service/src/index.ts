@@ -9,7 +9,10 @@ const start = async (): Promise<void> => {
 
     // Graceful shutdown — triggers onClose hook which closes the Neo4j driver
     const shutdown = (): void => {
-      void app!.close().then(() => process.exit(0)).catch(() => process.exit(1));
+      void app!
+        .close()
+        .then(() => process.exit(0))
+        .catch(() => process.exit(1));
     };
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);

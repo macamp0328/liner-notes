@@ -3,6 +3,7 @@
 ## Service Purpose & Scope
 
 `graph-service` is the core backend for liner-notes. It:
+
 1. **Ingests** a Discogs vinyl collection into a Neo4j property graph
 2. **Enriches** tracks with lyrics from LRCLIB (primary) and Genius (fallback)
 3. **Serves** a Fastify REST API for relationship-driven collection exploration
@@ -23,13 +24,13 @@ This is the **only service that talks to Neo4j**. All other services (future `co
 
 ### Key Endpoints
 
-| Endpoint | Purpose |
-|---|---|
+| Endpoint                                              | Purpose                                             |
+| ----------------------------------------------------- | --------------------------------------------------- |
 | `GET /users/{username}/collection/folders/0/releases` | All collection releases (paginated; folder 0 = all) |
-| `GET /releases/{release_id}` | Full release — artists, labels, credits, tracklist |
-| `GET /artists/{artist_id}` | Artist — name, profile, aliases, members |
-| `GET /labels/{label_id}` | Label — name, parent, country |
-| `GET /masters/{master_id}` | Master — canonical version grouping |
+| `GET /releases/{release_id}`                          | Full release — artists, labels, credits, tracklist  |
+| `GET /artists/{artist_id}`                            | Artist — name, profile, aliases, members            |
+| `GET /labels/{label_id}`                              | Label — name, parent, country                       |
+| `GET /masters/{master_id}`                            | Master — canonical version grouping                 |
 
 ### Data Per Release
 
@@ -53,7 +54,9 @@ master_id
 
 ### Known Gap: Studio Data
 
-Studio data comes from `companies[]` where `entity_type_name === "Recorded At"`. This field is **inconsistently populated** across the Discogs catalog — studio nodes will be sparse. This is expected and documented. Do not try to work around it.
+Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At) or `"27"` (Mixed At). This field is **inconsistently populated** across the Discogs catalog — studio nodes will be sparse. This is expected and documented. Do not try to work around it.
+
+> **Implementation note (Task 4):** Filter studios by the numeric `entity_type` code (`"23"` and `"27"`), **not** by `entity_type_name`. The name string is inconsistently capitalized/formatted across different Discogs entries (e.g. "Recorded At" vs "recorded at"). The numeric code is stable.
 
 ---
 
@@ -63,43 +66,43 @@ Studio data comes from `companies[]` where `entity_type_name === "Recorded At"`.
 
 ### Nodes
 
-| Label | Key Properties |
-|---|---|
-| `Release` | `discogsId` (unique), `title`, `year` (integer), `format`, `thumbUrl`, `masterDiscogsId` |
-| `Artist` | `discogsId` (unique), `name`, `realName`, `profile` |
-| `Label` | `discogsId` (unique), `name`, `profile`, `contactInfo` |
-| `Track` | `position`, `title`, `duration`, `lyrics` (nullable), `lyricsSource` |
-| `Genre` | `name` (unique) |
-| `Style` | `name` (unique) |
-| `Country` | `name` (unique) |
-| `Decade` | `name` (unique) — e.g. `"1970s"` |
-| `Studio` | `name`, `location` |
-| `Musician` | `discogsId` (if available), `name` |
-| `Producer` | `discogsId` (if available), `name` |
-| `Engineer` | `discogsId` (if available), `name` |
+| Label      | Key Properties                                                                           |
+| ---------- | ---------------------------------------------------------------------------------------- |
+| `Release`  | `discogsId` (unique), `title`, `year` (integer), `format`, `thumbUrl`, `masterDiscogsId` |
+| `Artist`   | `discogsId` (unique), `name`, `realName`, `profile`                                      |
+| `Label`    | `discogsId` (unique), `name`, `profile`, `contactInfo`                                   |
+| `Track`    | `position`, `title`, `duration`, `lyrics` (nullable), `lyricsSource`                     |
+| `Genre`    | `name` (unique)                                                                          |
+| `Style`    | `name` (unique)                                                                          |
+| `Country`  | `name` (unique)                                                                          |
+| `Decade`   | `name` (unique) — e.g. `"1970s"`                                                         |
+| `Studio`   | `name`, `location`                                                                       |
+| `Musician` | `discogsId` (if available), `name`                                                       |
+| `Producer` | `discogsId` (if available), `name`                                                       |
+| `Engineer` | `discogsId` (if available), `name`                                                       |
 
 > `year` is stored both as a property on `Release` (exact-year queries) and as a `RECORDED_IN_DECADE` relationship to a `Decade` node (decade traversal). Both are needed.
 
 ### Relationships
 
-| Relationship | From → To | Properties |
-|---|---|---|
-| `RELEASED_BY` | Release → Artist | `role` |
-| `CREDITED_ON` | Musician → Release | `role`, `instrument` |
-| `PRODUCED_BY` | Release → Producer | |
-| `ENGINEERED_BY` | Release → Engineer | |
-| `ON_LABEL` | Release → Label | `catalogNumber` |
-| `IN_GENRE` | Release → Genre | |
-| `IN_STYLE` | Release → Style | |
-| `FROM_COUNTRY` | Release → Country | |
-| `RECORDED_IN_DECADE` | Release → Decade | |
-| `RECORDED_AT` | Release → Studio | |
-| `HAS_TRACK` | Release → Track | `trackNumber` |
-| `PERFORMED_BY` | Track → Artist | `role` |
-| `SAME_PERSON_AS` | Musician → Artist | |
-| `MEMBER_OF` | Artist → Artist | `startYear`, `endYear` |
-| `SUBSIDIARY_OF` | Label → Label | |
-| `VERSION_OF` | Release → Release | |
+| Relationship         | From → To          | Properties             |
+| -------------------- | ------------------ | ---------------------- |
+| `RELEASED_BY`        | Release → Artist   | `role`                 |
+| `CREDITED_ON`        | Musician → Release | `role`, `instrument`   |
+| `PRODUCED_BY`        | Release → Producer |                        |
+| `ENGINEERED_BY`      | Release → Engineer |                        |
+| `ON_LABEL`           | Release → Label    | `catalogNumber`        |
+| `IN_GENRE`           | Release → Genre    |                        |
+| `IN_STYLE`           | Release → Style    |                        |
+| `FROM_COUNTRY`       | Release → Country  |                        |
+| `RECORDED_IN_DECADE` | Release → Decade   |                        |
+| `RECORDED_AT`        | Release → Studio   |                        |
+| `HAS_TRACK`          | Release → Track    | `trackNumber`          |
+| `PERFORMED_BY`       | Track → Artist     | `role`                 |
+| `SAME_PERSON_AS`     | Musician → Artist  |                        |
+| `MEMBER_OF`          | Artist → Artist    | `startYear`, `endYear` |
+| `SUBSIDIARY_OF`      | Label → Label      |                        |
+| `VERSION_OF`         | Release → Release  |                        |
 
 ### Constraints & Indexes
 
@@ -127,43 +130,43 @@ Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
 
 ### Collection
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/releases` | List releases, paginated |
-| `GET` | `/api/v1/releases/:discogsId` | Single release with relationships |
-| `GET` | `/api/v1/artists/:discogsId` | Artist with connected releases |
-| `GET` | `/api/v1/labels/:discogsId` | Label with all releases |
+| Method | Path                          | Description                       |
+| ------ | ----------------------------- | --------------------------------- |
+| `GET`  | `/api/v1/releases`            | List releases, paginated          |
+| `GET`  | `/api/v1/releases/:discogsId` | Single release with relationships |
+| `GET`  | `/api/v1/artists/:discogsId`  | Artist with connected releases    |
+| `GET`  | `/api/v1/labels/:discogsId`   | Label with all releases           |
 
 ### Exploration
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/explore/musician/:name` | Releases featuring this musician |
-| `GET` | `/api/v1/explore/studio/:name` | Releases at this studio |
-| `GET` | `/api/v1/explore/decade/:decade` | Releases from this decade |
-| `GET` | `/api/v1/explore/year/:year` | Releases from this exact year |
-| `GET` | `/api/v1/explore/label/:name` | Releases on this label |
-| `GET` | `/api/v1/explore/genre/:name` | Releases in this genre |
-| `GET` | `/api/v1/explore/style/:name` | Releases in this style |
-| `GET` | `/api/v1/explore/country/:name` | Releases from this country |
-| `GET` | `/api/v1/explore/connections/:discogsId` | Graph traversal (`?depth=2`) |
-| `GET` | `/api/v1/explore/shared-musicians` | Release pairs sharing session musicians |
+| Method | Path                                     | Description                             |
+| ------ | ---------------------------------------- | --------------------------------------- |
+| `GET`  | `/api/v1/explore/musician/:name`         | Releases featuring this musician        |
+| `GET`  | `/api/v1/explore/studio/:name`           | Releases at this studio                 |
+| `GET`  | `/api/v1/explore/decade/:decade`         | Releases from this decade               |
+| `GET`  | `/api/v1/explore/year/:year`             | Releases from this exact year           |
+| `GET`  | `/api/v1/explore/label/:name`            | Releases on this label                  |
+| `GET`  | `/api/v1/explore/genre/:name`            | Releases in this genre                  |
+| `GET`  | `/api/v1/explore/style/:name`            | Releases in this style                  |
+| `GET`  | `/api/v1/explore/country/:name`          | Releases from this country              |
+| `GET`  | `/api/v1/explore/connections/:discogsId` | Graph traversal (`?depth=2`)            |
+| `GET`  | `/api/v1/explore/shared-musicians`       | Release pairs sharing session musicians |
 
 ### Search
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/search?q=` | Full-text across titles, artists, tracks |
-| `GET` | `/api/v1/search/lyrics?q=` | Full-text within lyrics |
+| Method | Path                       | Description                              |
+| ------ | -------------------------- | ---------------------------------------- |
+| `GET`  | `/api/v1/search?q=`        | Full-text across titles, artists, tracks |
+| `GET`  | `/api/v1/search/lyrics?q=` | Full-text within lyrics                  |
 
 ### Admin & Ops
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/v1/admin/ingest` | Trigger ingestion (requires `ADMIN_TOKEN`) |
-| `GET` | `/api/v1/admin/ingest/status` | Last ingestion stats |
-| `GET` | `/api/v1/health` | Service + Neo4j status |
-| `GET` | `/api/docs` | Swagger UI |
+| Method | Path                          | Description                                |
+| ------ | ----------------------------- | ------------------------------------------ |
+| `POST` | `/api/v1/admin/ingest`        | Trigger ingestion (requires `ADMIN_TOKEN`) |
+| `GET`  | `/api/v1/admin/ingest/status` | Last ingestion stats                       |
+| `GET`  | `/api/v1/health`              | Service + Neo4j status                     |
+| `GET`  | `/api/docs`                   | Swagger UI                                 |
 
 ### Response Shapes
 
@@ -200,10 +203,47 @@ Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
 ```
 
 **Triggers:**
+
 - Auto on startup if no `Release` nodes exist in the graph
 - Manual via `POST /api/v1/admin/ingest` (requires `ADMIN_TOKEN` header)
 
 **Idempotency:** All writes use Cypher `MERGE`. Safe to re-run. New collection additions are picked up on re-run.
+
+---
+
+### Ingestion Implementation Notes (Task 4)
+
+Added in Task 4. Source files:
+
+- `src/ingestion/types.ts` — Discogs API TypeScript types
+- `src/ingestion/transforms.ts` — Pure parsing/derivation functions (no I/O, fully unit-testable)
+- `src/ingestion/discogs-client.ts` — `DiscogsClient` class with rate limiting and 429 backoff
+- `src/ingestion/ingest.ts` — `runIngestion()` pipeline orchestrator + `buildDiscogsClientFromEnv()` helper
+- `src/db/ingestion-repository.ts` — All Cypher MERGE queries; `hasReleases()` + `mergeReleaseGraph()`
+
+**Non-obvious decisions:**
+
+1. **Track node MERGE key uses `(position, releaseDiscogsId)` as a composite key stored as properties.** Neo4j has no unique constraint on Track (position alone is not globally unique — "A1" appears on thousands of releases). Storing `releaseDiscogsId` on the Track node makes each track uniquely identifiable without always needing the Release context. Changing these key properties will orphan existing Track nodes on re-ingest.
+
+2. **Musicians with `id === 0` are merged by name only.** When `extraartists[n].id === 0`, the person is not in the Discogs database (catering staff, etc.). These are merged by `{name}` only — no `discogsId` is ever set on them. This is intentional; do not change it to merge by discogsId.
+
+3. **Studio filter uses numeric entity_type codes.** `extractStudios()` in `transforms.ts` checks `entity_type === "23"` (Recorded At) and `entity_type === "27"` (Mixed At). Do not change to `entity_type_name` — the name string is unreliable across Discogs entries.
+
+4. **Ingestion fires async without blocking `onReady`.** The pipeline takes ~4 min for 200 releases. Blocking `onReady` would delay the HTTP server from becoming ready and fail container liveness/readiness health checks. It is fired with `void runIngestion(...).then(...).catch(...)` intentionally.
+
+5. **`CREDITED_ON` scope convention.** Relationships from a `Musician` to a `Release` use `scope: "release"`; to a `Track` use `scope: "track"`. The scope does **not** need to be part of the MERGE key because the relationship endpoint type (Release vs Track) already makes them distinct — but it is stored as a property for query convenience. Future explore-by-musician queries depend on `scope` being present.
+
+6. **`anv` → `creditedAs`.** When `extraartists[n].anv` is non-empty, it is stored as `creditedAs` on the `CREDITED_ON` relationship. This captures sleeve credits where an artist used a different name (e.g. "Dom Monks" credited as "Dominic Monks"). When `anv` is empty string, `creditedAs` is `null`.
+
+**Regression guards — what breaks if you change X:**
+
+| Change                                                                | Impact                                                                                                      |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Modify `Track` MERGE key (`position`, `releaseDiscogsId`)             | Existing Track nodes become orphaned on re-ingest; HAS_TRACK relationships break                            |
+| Remove `scope` from `CREDITED_ON` properties                          | Future explore-by-musician queries (Task 5+) that filter on scope stop working                              |
+| Change `hasReleases()` query logic                                    | Auto-trigger decision changes; empty graph may not trigger, or non-empty may re-trigger                     |
+| Reorder hooks in `server.ts` onReady                                  | `applySchema` must run before `hasReleases`; incorrect order causes schema not applied before first queries |
+| Change studio `entity_type` filter from numeric codes to name strings | Studio filtering becomes unreliable across differently-formatted Discogs entries                            |
 
 ---
 
@@ -212,6 +252,7 @@ Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
 Swagger UI is a **hard requirement** and must be available at `/api/docs`.
 
 Use `@fastify/swagger` + `@fastify/swagger-ui`. Define JSON schemas on all route inputs/outputs. This enables:
+
 - Auto-generated OpenAPI spec at `/api/docs/json`
 - Interactive Swagger UI at `/api/docs`
 - Type-safe request/response validation via Fastify's built-in ajv
@@ -221,24 +262,28 @@ Use `@fastify/swagger` + `@fastify/swagger-ui`. Define JSON schemas on all route
 ## Testing
 
 **Unit tests** (`tests/unit/`):
+
 - Discogs response parsing and transformation
 - Neo4j node/relationship builders
 - Decade derivation from year
 - Rate limiting and retry logic
 
 **Integration tests** (`tests/integration/`):
+
 - All API endpoints via Fastify's `inject()` against a test Neo4j instance
 - Ingestion pipeline against mocked Discogs fixtures
 - Full-text search on seed data
 - Auto-ingest on empty graph
 
 **Coverage requirements:**
+
 - Unit: 70% minimum
 - Integration: 100% of API routes covered
 
 **Fixtures:** `tests/fixtures/` — JSON fixtures for mocked Discogs responses and seed data
 
 **Run tests:**
+
 ```bash
 pnpm test              # run all tests
 pnpm test:coverage     # with coverage report
@@ -293,3 +338,7 @@ Route handler → Repository (Cypher) → Neo4j driver
 - **Studio data is sparse.** `companies[]` in Discogs is inconsistently populated. `Studio` nodes will exist for only a fraction of releases. This is a data quality issue upstream, not a bug.
 - **Musician/Artist deduplication is manual.** Session musicians and credited artists may be the same person with different Discogs IDs. Use `SAME_PERSON_AS` relationships to link them when discovered. No automated deduplication — this is a known tradeoff.
 - **Lyrics are best-effort.** LRCLIB and Genius coverage is incomplete. Missing lyrics are acceptable — the `lyrics` property on `Track` is nullable by design.
+- **`formats[].qty` is a string in the API.** The Discogs API returns `qty` as a string (e.g. `"1"`), not a number. Always `parseInt` before storing. Do not assume it is numeric.
+- **Track `duration` is frequently empty string.** The API returns `""` for tracks without listed duration. Treat `""` as null — do not store the empty string.
+- **`basic_information` in collection responses is incomplete.** The collection endpoint's `basic_information` object omits `country`, `extraartists`, and other fields. Always fetch the full release via `GET /releases/{id}` before ingesting.
+- **`CREDITED_ON` deduplication on re-run.** Because MERGE on a relationship between two nodes does not have a separate key — it matches by the full (from, type, to) pattern — re-running ingest updates relationship properties in-place. This is correct and intentional.

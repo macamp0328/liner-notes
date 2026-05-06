@@ -1,0 +1,155 @@
+{
+  "id": 9999991,
+  "status": "Accepted",
+  "year": 1972,
+  "resource_url": "https://api.discogs.com/releases/9999991",
+  "uri": "https://www.discogs.com/release/9999991-Test-Artist-Harvest-Moon",
+  "artists": [
+    {
+      "name": "Test Artist",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 1111111,
+      "resource_url": "https://api.discogs.com/artists/1111111",
+      "thumbnail_url": ""
+    }
+  ],
+  "artists_sort": "Test Artist",
+  "labels": [
+    {
+      "name": "Reprise Records",
+      "catno": "MS 2032",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 1234,
+      "resource_url": "https://api.discogs.com/labels/1234",
+      "thumbnail_url": ""
+    }
+  ],
+  "series": [],
+  "companies": [
+    {
+      "name": "RCA Studios",
+      "catno": "",
+      "entity_type": "13",
+      "entity_type_name": "Phonographic Copyright (p)",
+      "id": 5678,
+      "resource_url": "https://api.discogs.com/labels/5678"
+    }
+  ],
+  "formats": [
+    {
+      "name": "Vinyl",
+      "qty": "1",
+      "descriptions": ["LP", "Album"]
+    }
+  ],
+  "data_quality": "Correct",
+  "community": {
+    "have": 500,
+    "want": 200,
+    "rating": {
+      "count": 75,
+      "average": 4.2
+    },
+    "submitter": {
+      "username": "testuser",
+      "resource_url": "https://api.discogs.com/users/testuser"
+    },
+    "contributors": [],
+    "data_quality": "Correct",
+    "status": "Accepted"
+  },
+  "format_quantity": 1,
+  "date_added": "2021-03-15T10:00:00-07:00",
+  "date_changed": "2022-01-01T00:00:00-07:00",
+  "num_for_sale": 12,
+  "lowest_price": 8.5,
+  "master_id": 0,
+  "master_url": "",
+  "title": "Harvest Moon",
+  "country": "US",
+  "released": "1972-11-01",
+  "notes": "A classic folk rock album.",
+  "released_formatted": "01 Nov 1972",
+  "identifiers": [],
+  "videos": [],
+  "genres": ["Folk, World, & Country"],
+  "styles": ["Folk Rock", "Country Rock"],
+  "tracklist": [
+    {
+      "position": "",
+      "type_": "heading",
+      "title": "Side A",
+      "duration": ""
+    },
+    {
+      "position": "A1",
+      "type_": "track",
+      "title": "Out on the Weekend",
+      "duration": "4:35",
+      "extraartists": []
+    },
+    {
+      "position": "A2",
+      "type_": "track",
+      "title": "Harvest",
+      "duration": "3:05",
+      "extraartists": []
+    },
+    {
+      "position": "A3",
+      "type_": "track",
+      "title": "A Man Needs a Maid",
+      "duration": "4:00",
+      "extraartists": []
+    },
+    {
+      "position": "",
+      "type_": "heading",
+      "title": "Side B",
+      "duration": ""
+    },
+    {
+      "position": "B1",
+      "type_": "track",
+      "title": "Heart of Gold",
+      "duration": "3:06",
+      "extraartists": []
+    },
+    {
+      "position": "B2",
+      "type_": "track",
+      "title": "Are You Ready for the Country?",
+      "duration": "3:23",
+      "extraartists": []
+    }
+  ],
+  "extraartists": [
+    {
+      "name": "Jane Producer",
+      "anv": "J.P.",
+      "join": "",
+      "role": "Producer",
+      "tracks": "",
+      "id": 2222222,
+      "resource_url": "https://api.discogs.com/artists/2222222"
+    }
+  ],
+  "images": [
+    {
+      "type": "primary",
+      "uri": "https://i.discogs.com/primary-image.jpeg",
+      "resource_url": "https://i.discogs.com/primary-image.jpeg",
+      "uri150": "https://i.discogs.com/primary-image-150.jpeg",
+      "width": 600,
+      "height": 600
+    }
+  ],
+  "thumb": "https://i.discogs.com/primary-image-150.jpeg",
+  "estimated_weight": 200,
+  "blocked_from_sale": false,
+  "is_offensive": false
+}

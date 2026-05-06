@@ -15,6 +15,12 @@ vi.mock('../../src/db/schema.js', () => ({
   applySchema: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Mock ingestion repository — server.ts calls hasReleases() in onReady after applySchema
+vi.mock('../../src/db/ingestion-repository.js', () => ({
+  hasReleases: vi.fn().mockResolvedValue(true), // pretend graph is populated → no auto-ingest
+  mergeReleaseGraph: vi.fn().mockResolvedValue(undefined),
+}));
+
 describe('GET /api/v1/health', () => {
   let app: FastifyInstance;
 

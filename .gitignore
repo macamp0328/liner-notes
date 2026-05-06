@@ -39,3 +39,6 @@ tfplan
 # Test coverage
 coverage/
 .vitest-cache/
+
+# Claude Code
+.claude/

@@ -1,0 +1,113 @@
+// Discogs API response type definitions.
+// Field presence/types verified against live API in Task 2 (see scripts/discogs-api-notes.md).
+
+export interface DiscogsArtistCredit {
+  name: string;
+  anv: string; // Artist Name Variation — credited sleeve name when different from canonical name
+  join: string;
+  role: string;
+  tracks: string;
+  id: number; // 0 when person is not in Discogs database (acknowledgments, catering, etc.)
+  resource_url: string;
+}
+
+export interface DiscogsLabel {
+  name: string;
+  catno: string;
+  entity_type: string; // numeric string: "1"=Label, "23"=Recorded At, "27"=Mixed At, etc.
+  entity_type_name: string;
+  id: number;
+  resource_url: string;
+  thumbnail_url?: string;
+}
+
+// companies[] uses the same shape as labels[]
+export type DiscogsCompany = DiscogsLabel;
+
+export interface DiscogsFormat {
+  name: string;
+  qty: string; // NOTE: API returns qty as a string, not a number — must parseInt
+  descriptions?: string[];
+}
+
+export interface DiscogsTracklistEntry {
+  position: string;
+  type_: string; // "track" | "heading" | "index" — only "track" entries are real songs
+  title: string;
+  duration: string; // frequently "" (empty string) — treat as null/absent
+  extraartists?: DiscogsArtistCredit[];
+}
+
+export interface DiscogsImage {
+  type: string; // "primary" | "secondary"
+  uri: string;
+  uri150: string; // 150px thumbnail URL
+  resource_url: string;
+  width: number;
+  height: number;
+}
+
+export interface DiscogsIdentifier {
+  type: string; // "Barcode" | "Matrix / Runout" | etc.
+  value: string;
+  description?: string;
+}
+
+export interface DiscogsCommunity {
+  have: number;
+  want: number;
+  rating: {
+    count: number;
+    average: number;
+  };
+}
+
+export interface DiscogsRelease {
+  id: number;
+  title: string;
+  year: number;
+  country?: string;
+  released?: string; // ISO date string e.g. "2019-05-03"
+  notes?: string;
+  uri: string;
+  resource_url: string;
+  master_id?: number;
+  genres?: string[];
+  styles?: string[];
+  formats: DiscogsFormat[];
+  artists: DiscogsArtistCredit[];
+  extraartists?: DiscogsArtistCredit[];
+  labels: DiscogsLabel[];
+  tracklist: DiscogsTracklistEntry[];
+  companies?: DiscogsCompany[];
+  images?: DiscogsImage[];
+  identifiers?: DiscogsIdentifier[];
+  community?: DiscogsCommunity;
+}
+
+export interface DiscogsCollectionRelease {
+  id: number;
+  instance_id: number;
+  date_added: string;
+  rating: number;
+  basic_information: {
+    id: number;
+    title: string;
+    year: number;
+    // basic_information omits country, extraartists — must fetch full release
+  };
+}
+
+export interface DiscogsCollectionPage {
+  pagination: {
+    page: number;
+    pages: number;
+    per_page: number;
+    items: number;
+    urls: {
+      next?: string;
+      last?: string;
+    };
+  };
+  releases: DiscogsCollectionRelease[];
+}
