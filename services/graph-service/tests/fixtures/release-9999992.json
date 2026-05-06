@@ -1,0 +1,98 @@
+{
+  "id": 9999992,
+  "status": "Accepted",
+  "year": 1984,
+  "resource_url": "https://api.discogs.com/releases/9999992",
+  "uri": "https://www.discogs.com/release/9999992-Minimal-Band-Simple-Album",
+  "artists": [
+    {
+      "name": "Minimal Band",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 3333333,
+      "resource_url": "https://api.discogs.com/artists/3333333",
+      "thumbnail_url": ""
+    }
+  ],
+  "artists_sort": "Minimal Band",
+  "labels": [
+    {
+      "name": "Basic Label",
+      "catno": "BL-001",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 9876,
+      "resource_url": "https://api.discogs.com/labels/9876"
+    }
+  ],
+  "series": [],
+  "companies": [],
+  "formats": [
+    {
+      "name": "Vinyl",
+      "qty": "1",
+      "descriptions": ["LP"]
+    }
+  ],
+  "data_quality": "Correct",
+  "community": {
+    "have": 50,
+    "want": 20,
+    "rating": {
+      "count": 10,
+      "average": 3.8
+    },
+    "submitter": {
+      "username": "anotheruser",
+      "resource_url": "https://api.discogs.com/users/anotheruser"
+    },
+    "contributors": [],
+    "data_quality": "Correct",
+    "status": "Accepted"
+  },
+  "format_quantity": 1,
+  "date_added": "2020-06-01T08:00:00-07:00",
+  "date_changed": "2021-01-01T00:00:00-07:00",
+  "num_for_sale": 3,
+  "lowest_price": 5.0,
+  "master_id": 0,
+  "master_url": "",
+  "title": "Simple Album",
+  "country": "UK",
+  "released": "1984-06-15",
+  "notes": null,
+  "released_formatted": "15 Jun 1984",
+  "identifiers": [
+    {
+      "type": "Barcode",
+      "value": "5012345678901"
+    }
+  ],
+  "videos": [],
+  "genres": ["Electronic"],
+  "styles": ["Synth-pop"],
+  "tracklist": [
+    {
+      "position": "A1",
+      "type_": "track",
+      "title": "Track One",
+      "duration": "3:30",
+      "extraartists": []
+    },
+    {
+      "position": "A2",
+      "type_": "track",
+      "title": "Track Two",
+      "duration": "4:00",
+      "extraartists": []
+    }
+  ],
+  "extraartists": [],
+  "images": [],
+  "thumb": "",
+  "estimated_weight": 180,
+  "blocked_from_sale": false,
+  "is_offensive": false
+}

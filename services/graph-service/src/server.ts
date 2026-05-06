@@ -5,6 +5,8 @@ import swaggerUi from '@fastify/swagger-ui';
 import { healthRoutes } from './api/health.js';
 import { initDriver, closeDriver } from './db/client.js';
 import { applySchema } from './db/schema.js';
+import { hasReleases } from './db/ingestion-repository.js';
+import { buildDiscogsClientFromEnv, runIngestion } from './ingestion/ingest.js';
 
 export async function buildServer(): Promise<FastifyInstance> {
   const app = Fastify({ logger: true });
@@ -47,6 +49,35 @@ export async function buildServer(): Promise<FastifyInstance> {
     app.log.info('Neo4j connected');
     await applySchema(driver);
     app.log.info('Neo4j schema applied');
+
+    // Auto-trigger ingestion when the graph is empty (first run).
+    // Fire-and-forget: do NOT await — ingestion takes ~4 min for 200 releases
+    // and must not block onReady (which would delay the health endpoint and
+    // cause container health checks to fail during startup).
+    const empty = !(await hasReleases(driver));
+    if (empty) {
+      const username = process.env['DISCOGS_USERNAME'];
+      // buildDiscogsClientFromEnv handles delay validation; no separate parsing needed here.
+      // Pass app.log so 429 warnings from DiscogsClient go through the structured pino logger.
+      const discogsClient = buildDiscogsClientFromEnv(app.log);
+
+      if (discogsClient && username) {
+        app.log.info('Graph is empty — starting Discogs ingestion in background');
+        void runIngestion(discogsClient, driver, { username, logger: app.log })
+          .then((summary) => {
+            app.log.info({ summary }, 'Discogs ingestion complete');
+          })
+          .catch((err: unknown) => {
+            app.log.error({ err }, 'Discogs ingestion failed');
+          });
+      } else {
+        app.log.warn(
+          'Graph is empty but DISCOGS_TOKEN or DISCOGS_USERNAME not set — skipping auto-ingestion',
+        );
+      }
+    } else {
+      app.log.info('Graph already populated — skipping auto-ingestion');
+    }
   });
 
   app.addHook('onClose', async () => {

@@ -1,0 +1,140 @@
+{
+  "pagination": {
+    "page": 1,
+    "pages": 1,
+    "per_page": 50,
+    "items": 3,
+    "urls": {}
+  },
+  "releases": [
+    {
+      "id": 13570466,
+      "instance_id": 1001,
+      "date_added": "2021-05-01T10:00:00-07:00",
+      "rating": 5,
+      "basic_information": {
+        "id": 13570466,
+        "title": "U.F.O.F.",
+        "year": 2019,
+        "resource_url": "https://api.discogs.com/releases/13570466",
+        "thumb": "https://i.discogs.com/thumb-13570466.jpeg",
+        "artists": [
+          {
+            "name": "Big Thief",
+            "anv": "",
+            "join": "",
+            "role": "",
+            "tracks": "",
+            "id": 5009441,
+            "resource_url": "https://api.discogs.com/artists/5009441"
+          }
+        ],
+        "labels": [
+          {
+            "name": "4AD",
+            "catno": "4AD0129LP",
+            "entity_type": "1",
+            "entity_type_name": "Label",
+            "id": 634,
+            "resource_url": "https://api.discogs.com/labels/634"
+          }
+        ],
+        "formats": [
+          {
+            "name": "Vinyl",
+            "qty": "1",
+            "descriptions": ["LP", "Album"]
+          }
+        ],
+        "genres": ["Rock"],
+        "styles": ["Indie Rock", "Folk Rock"]
+      }
+    },
+    {
+      "id": 9999991,
+      "instance_id": 1002,
+      "date_added": "2021-06-15T10:00:00-07:00",
+      "rating": 4,
+      "basic_information": {
+        "id": 9999991,
+        "title": "Harvest Moon",
+        "year": 1972,
+        "resource_url": "https://api.discogs.com/releases/9999991",
+        "thumb": "https://i.discogs.com/thumb-9999991.jpeg",
+        "artists": [
+          {
+            "name": "Test Artist",
+            "anv": "",
+            "join": "",
+            "role": "",
+            "tracks": "",
+            "id": 1111111,
+            "resource_url": "https://api.discogs.com/artists/1111111"
+          }
+        ],
+        "labels": [
+          {
+            "name": "Reprise Records",
+            "catno": "MS 2032",
+            "entity_type": "1",
+            "entity_type_name": "Label",
+            "id": 1234,
+            "resource_url": "https://api.discogs.com/labels/1234"
+          }
+        ],
+        "formats": [
+          {
+            "name": "Vinyl",
+            "qty": "1",
+            "descriptions": ["LP", "Album"]
+          }
+        ],
+        "genres": ["Folk, World, & Country"],
+        "styles": ["Folk Rock", "Country Rock"]
+      }
+    },
+    {
+      "id": 9999992,
+      "instance_id": 1003,
+      "date_added": "2022-01-10T10:00:00-07:00",
+      "rating": 3,
+      "basic_information": {
+        "id": 9999992,
+        "title": "Simple Album",
+        "year": 1984,
+        "resource_url": "https://api.discogs.com/releases/9999992",
+        "thumb": "",
+        "artists": [
+          {
+            "name": "Minimal Band",
+            "anv": "",
+            "join": "",
+            "role": "",
+            "tracks": "",
+            "id": 3333333,
+            "resource_url": "https://api.discogs.com/artists/3333333"
+          }
+        ],
+        "labels": [
+          {
+            "name": "Basic Label",
+            "catno": "BL-001",
+            "entity_type": "1",
+            "entity_type_name": "Label",
+            "id": 9876,
+            "resource_url": "https://api.discogs.com/labels/9876"
+          }
+        ],
+        "formats": [
+          {
+            "name": "Vinyl",
+            "qty": "1",
+            "descriptions": ["LP"]
+          }
+        ],
+        "genres": ["Electronic"],
+        "styles": ["Synth-pop"]
+      }
+    }
+  ]
+}
