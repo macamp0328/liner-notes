@@ -36,7 +36,9 @@ describe('applySchema', () => {
   it('creates the release uniqueness constraint', async () => {
     await applySchema(driver);
     const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
-    expect(stmts.some((s) => s.includes('release_discogs_id') && s.includes('IS UNIQUE'))).toBe(true);
+    expect(stmts.some((s) => s.includes('release_discogs_id') && s.includes('IS UNIQUE'))).toBe(
+      true,
+    );
   });
 
   it('creates the trackLyrics full-text index', async () => {

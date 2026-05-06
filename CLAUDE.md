@@ -17,6 +17,8 @@ liner-notes/
 ├── .devcontainer/
 │   └── devcontainer.json        ← VS Code / Codespaces dev environment
 ├── .github/
+│   ├── dependabot.yml           ← automated dependency updates
+│   ├── pull_request_template.md ← PR checklist for agents
 │   └── workflows/
 │       ├── ci.yml               ← runs on every PR
 │       └── deploy.yml           ← runs on merge to main (Task 5)
@@ -62,15 +64,15 @@ liner-notes/
 
 ### 4.1 Runtime & Framework
 
-| Decision        | Value                         |
-| --------------- | ----------------------------- |
-| Language        | TypeScript — strict mode      |
-| Runtime         | Node.js v22.x LTS             |
-| Package manager | pnpm (workspaces)             |
-| HTTP framework  | **Fastify**                   |
-| Test runner     | Vitest                        |
-| Linter          | ESLint with TypeScript plugin |
-| Formatter       | Prettier                      |
+| Decision        | Value                                                                                                                                                                                                                                                               |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Language        | TypeScript — strict mode                                                                                                                                                                                                                                            |
+| Runtime         | Node.js v22.x LTS                                                                                                                                                                                                                                                   |
+| Package manager | pnpm (workspaces)                                                                                                                                                                                                                                                   |
+| HTTP framework  | **Fastify**                                                                                                                                                                                                                                                         |
+| Test runner     | Vitest                                                                                                                                                                                                                                                              |
+| Linter          | ESLint with TypeScript plugin                                                                                                                                                                                                                                       |
+| Formatter       | Prettier                                                                                                                                                                                                                                                            |
 | Module system   | ESM — `"type": "module"` on all services, `module: NodeNext` + `moduleResolution: NodeNext` in tsconfig; `.js` extensions on **local/relative** imports are required and enforced by the TypeScript compiler (package imports like `from 'fastify'` are unaffected) |
 
 **Why Fastify over Express:** Native TypeScript support, built-in JSON schema validation, `@fastify/swagger` + `@fastify/swagger-ui` for zero-friction OpenAPI docs (hard requirement), and a cleaner plugin architecture.
@@ -142,9 +144,9 @@ Each worktree is a fully independent working directory on its own branch. **Agen
 **Agent requirement — run before every commit:**
 
 ```bash
-pnpm prettier --check .          # formatting must pass
-pnpm --filter graph-service lint # ESLint must pass (zero warnings/errors)
-pnpm --filter graph-service typecheck # TypeScript strict must pass
+pnpm prettier --check .                     # formatting must pass
+pnpm --filter graph-service lint            # ESLint must pass (zero warnings/errors)
+pnpm --filter graph-service typecheck       # TypeScript strict must pass (src + tests)
 ```
 
 Formatting and lint errors that slip through to PR review are agent mistakes, not reviewer catches. Run these locally before opening a PR. CI enforces them as hard gates — fix before pushing, not after.
@@ -165,18 +167,43 @@ No service talks to Neo4j directly except `graph-service`. `graph-service` is th
 
 ## CI Requirements
 
-All 8 checks must pass before a PR is mergeable:
+All CI checks must pass before a PR is mergeable. The following jobs run on every PR and push to `main`:
 
-| Check             | Tool                      | Requirement                         |
-| ----------------- | ------------------------- | ----------------------------------- |
-| Linting           | ESLint                    | Zero warnings or errors             |
-| Type checking     | TypeScript strict         | Zero errors                         |
-| Unit tests        | Vitest                    | 70% coverage minimum                |
-| Integration tests | Fastify inject()          | 100% of API routes covered          |
-| Docker build      | Docker                    | Image builds successfully           |
-| Schema validation | Custom script             | Constraints + indexes apply cleanly |
-| Security scan     | `pnpm audit` + Dependabot | No critical vulnerabilities         |
-| Secrets scan      | TruffleHog                | No credentials in committed code    |
+| Check             | Job name            | Tool                              | Requirement                                                      |
+| ----------------- | ------------------- | --------------------------------- | ---------------------------------------------------------------- |
+| Format check      | `format`            | Prettier                          | Zero formatting differences                                      |
+| Linting           | `lint`              | ESLint + `eslint-plugin-security` | Zero warnings or errors                                          |
+| Type checking     | `typecheck`         | TypeScript strict (src + tests)   | Zero errors                                                      |
+| Unit tests        | `unit-tests`        | Vitest                            | All unit tests pass                                              |
+| Coverage gate     | `coverage`          | Vitest + coverage-v8 (all tests)  | 70% lines/functions/branches/statements                          |
+| Integration tests | `integration-tests` | Vitest + Neo4j service container  | All integration tests pass                                       |
+| Schema validation | `schema-validation` | tsx + Neo4j service container     | Constraints + indexes apply idempotently                         |
+| Docker build      | `docker-build`      | Docker Buildx                     | Image builds successfully (gated on lint + typecheck + coverage) |
+| Security audit    | `audit`             | `pnpm audit`                      | No high or critical vulnerabilities                              |
+| Secrets scan      | `secrets-scan`      | TruffleHog                        | No credentials in committed code                                 |
+| CodeQL scan       | `codeql`            | GitHub CodeQL (security-extended) | No security alerts introduced                                    |
+| Commit lint       | `commitlint`        | wagoid/commitlint-github-action   | All commits follow Conventional Commits                          |
+
+### Branch Protection (GitHub Settings)
+
+The following branch protection rules are required on `main` — **configure these in the GitHub repository settings under Branches → Branch protection rules**:
+
+- **Require a pull request before merging** — no direct pushes to `main`
+- **Require status checks to pass before merging** — required checks:
+  - `Format Check`
+  - `Lint`
+  - `Type Check`
+  - `Unit Tests`
+  - `Test Coverage`
+  - `Integration Tests`
+  - `Schema Validation`
+  - `Docker Build`
+  - `Security Audit`
+  - `Secrets Scan`
+  - `CodeQL Security Scan`
+  - `Commit Message Lint`
+- **Require branches to be up to date before merging**
+- **Do not allow bypassing the above settings**
 
 ---
 

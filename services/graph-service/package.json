@@ -9,8 +9,11 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.test.json",
     "test": "vitest run --passWithNoTests",
+    "test:unit": "vitest run tests/unit --passWithNoTests",
+    "test:unit:coverage": "vitest run --coverage tests/unit",
+    "test:integration": "vitest run tests/integration --passWithNoTests",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src --ext .ts --max-warnings 0"
   },

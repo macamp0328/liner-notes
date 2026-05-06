@@ -3,6 +3,7 @@
 ## Service Purpose & Scope
 
 `graph-service` is the core backend for liner-notes. It:
+
 1. **Ingests** a Discogs vinyl collection into a Neo4j property graph
 2. **Enriches** tracks with lyrics from LRCLIB (primary) and Genius (fallback)
 3. **Serves** a Fastify REST API for relationship-driven collection exploration
@@ -23,13 +24,13 @@ This is the **only service that talks to Neo4j**. All other services (future `co
 
 ### Key Endpoints
 
-| Endpoint | Purpose |
-|---|---|
+| Endpoint                                              | Purpose                                             |
+| ----------------------------------------------------- | --------------------------------------------------- |
 | `GET /users/{username}/collection/folders/0/releases` | All collection releases (paginated; folder 0 = all) |
-| `GET /releases/{release_id}` | Full release — artists, labels, credits, tracklist |
-| `GET /artists/{artist_id}` | Artist — name, profile, aliases, members |
-| `GET /labels/{label_id}` | Label — name, parent, country |
-| `GET /masters/{master_id}` | Master — canonical version grouping |
+| `GET /releases/{release_id}`                          | Full release — artists, labels, credits, tracklist  |
+| `GET /artists/{artist_id}`                            | Artist — name, profile, aliases, members            |
+| `GET /labels/{label_id}`                              | Label — name, parent, country                       |
+| `GET /masters/{master_id}`                            | Master — canonical version grouping                 |
 
 ### Data Per Release
 
@@ -63,43 +64,43 @@ Studio data comes from `companies[]` where `entity_type_name === "Recorded At"`.
 
 ### Nodes
 
-| Label | Key Properties |
-|---|---|
-| `Release` | `discogsId` (unique), `title`, `year` (integer), `format`, `thumbUrl`, `masterDiscogsId` |
-| `Artist` | `discogsId` (unique), `name`, `realName`, `profile` |
-| `Label` | `discogsId` (unique), `name`, `profile`, `contactInfo` |
-| `Track` | `position`, `title`, `duration`, `lyrics` (nullable), `lyricsSource` |
-| `Genre` | `name` (unique) |
-| `Style` | `name` (unique) |
-| `Country` | `name` (unique) |
-| `Decade` | `name` (unique) — e.g. `"1970s"` |
-| `Studio` | `name`, `location` |
-| `Musician` | `discogsId` (if available), `name` |
-| `Producer` | `discogsId` (if available), `name` |
-| `Engineer` | `discogsId` (if available), `name` |
+| Label      | Key Properties                                                                           |
+| ---------- | ---------------------------------------------------------------------------------------- |
+| `Release`  | `discogsId` (unique), `title`, `year` (integer), `format`, `thumbUrl`, `masterDiscogsId` |
+| `Artist`   | `discogsId` (unique), `name`, `realName`, `profile`                                      |
+| `Label`    | `discogsId` (unique), `name`, `profile`, `contactInfo`                                   |
+| `Track`    | `position`, `title`, `duration`, `lyrics` (nullable), `lyricsSource`                     |
+| `Genre`    | `name` (unique)                                                                          |
+| `Style`    | `name` (unique)                                                                          |
+| `Country`  | `name` (unique)                                                                          |
+| `Decade`   | `name` (unique) — e.g. `"1970s"`                                                         |
+| `Studio`   | `name`, `location`                                                                       |
+| `Musician` | `discogsId` (if available), `name`                                                       |
+| `Producer` | `discogsId` (if available), `name`                                                       |
+| `Engineer` | `discogsId` (if available), `name`                                                       |
 
 > `year` is stored both as a property on `Release` (exact-year queries) and as a `RECORDED_IN_DECADE` relationship to a `Decade` node (decade traversal). Both are needed.
 
 ### Relationships
 
-| Relationship | From → To | Properties |
-|---|---|---|
-| `RELEASED_BY` | Release → Artist | `role` |
-| `CREDITED_ON` | Musician → Release | `role`, `instrument` |
-| `PRODUCED_BY` | Release → Producer | |
-| `ENGINEERED_BY` | Release → Engineer | |
-| `ON_LABEL` | Release → Label | `catalogNumber` |
-| `IN_GENRE` | Release → Genre | |
-| `IN_STYLE` | Release → Style | |
-| `FROM_COUNTRY` | Release → Country | |
-| `RECORDED_IN_DECADE` | Release → Decade | |
-| `RECORDED_AT` | Release → Studio | |
-| `HAS_TRACK` | Release → Track | `trackNumber` |
-| `PERFORMED_BY` | Track → Artist | `role` |
-| `SAME_PERSON_AS` | Musician → Artist | |
-| `MEMBER_OF` | Artist → Artist | `startYear`, `endYear` |
-| `SUBSIDIARY_OF` | Label → Label | |
-| `VERSION_OF` | Release → Release | |
+| Relationship         | From → To          | Properties             |
+| -------------------- | ------------------ | ---------------------- |
+| `RELEASED_BY`        | Release → Artist   | `role`                 |
+| `CREDITED_ON`        | Musician → Release | `role`, `instrument`   |
+| `PRODUCED_BY`        | Release → Producer |                        |
+| `ENGINEERED_BY`      | Release → Engineer |                        |
+| `ON_LABEL`           | Release → Label    | `catalogNumber`        |
+| `IN_GENRE`           | Release → Genre    |                        |
+| `IN_STYLE`           | Release → Style    |                        |
+| `FROM_COUNTRY`       | Release → Country  |                        |
+| `RECORDED_IN_DECADE` | Release → Decade   |                        |
+| `RECORDED_AT`        | Release → Studio   |                        |
+| `HAS_TRACK`          | Release → Track    | `trackNumber`          |
+| `PERFORMED_BY`       | Track → Artist     | `role`                 |
+| `SAME_PERSON_AS`     | Musician → Artist  |                        |
+| `MEMBER_OF`          | Artist → Artist    | `startYear`, `endYear` |
+| `SUBSIDIARY_OF`      | Label → Label      |                        |
+| `VERSION_OF`         | Release → Release  |                        |
 
 ### Constraints & Indexes
 
@@ -127,43 +128,43 @@ Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
 
 ### Collection
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/releases` | List releases, paginated |
-| `GET` | `/api/v1/releases/:discogsId` | Single release with relationships |
-| `GET` | `/api/v1/artists/:discogsId` | Artist with connected releases |
-| `GET` | `/api/v1/labels/:discogsId` | Label with all releases |
+| Method | Path                          | Description                       |
+| ------ | ----------------------------- | --------------------------------- |
+| `GET`  | `/api/v1/releases`            | List releases, paginated          |
+| `GET`  | `/api/v1/releases/:discogsId` | Single release with relationships |
+| `GET`  | `/api/v1/artists/:discogsId`  | Artist with connected releases    |
+| `GET`  | `/api/v1/labels/:discogsId`   | Label with all releases           |
 
 ### Exploration
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/explore/musician/:name` | Releases featuring this musician |
-| `GET` | `/api/v1/explore/studio/:name` | Releases at this studio |
-| `GET` | `/api/v1/explore/decade/:decade` | Releases from this decade |
-| `GET` | `/api/v1/explore/year/:year` | Releases from this exact year |
-| `GET` | `/api/v1/explore/label/:name` | Releases on this label |
-| `GET` | `/api/v1/explore/genre/:name` | Releases in this genre |
-| `GET` | `/api/v1/explore/style/:name` | Releases in this style |
-| `GET` | `/api/v1/explore/country/:name` | Releases from this country |
-| `GET` | `/api/v1/explore/connections/:discogsId` | Graph traversal (`?depth=2`) |
-| `GET` | `/api/v1/explore/shared-musicians` | Release pairs sharing session musicians |
+| Method | Path                                     | Description                             |
+| ------ | ---------------------------------------- | --------------------------------------- |
+| `GET`  | `/api/v1/explore/musician/:name`         | Releases featuring this musician        |
+| `GET`  | `/api/v1/explore/studio/:name`           | Releases at this studio                 |
+| `GET`  | `/api/v1/explore/decade/:decade`         | Releases from this decade               |
+| `GET`  | `/api/v1/explore/year/:year`             | Releases from this exact year           |
+| `GET`  | `/api/v1/explore/label/:name`            | Releases on this label                  |
+| `GET`  | `/api/v1/explore/genre/:name`            | Releases in this genre                  |
+| `GET`  | `/api/v1/explore/style/:name`            | Releases in this style                  |
+| `GET`  | `/api/v1/explore/country/:name`          | Releases from this country              |
+| `GET`  | `/api/v1/explore/connections/:discogsId` | Graph traversal (`?depth=2`)            |
+| `GET`  | `/api/v1/explore/shared-musicians`       | Release pairs sharing session musicians |
 
 ### Search
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/search?q=` | Full-text across titles, artists, tracks |
-| `GET` | `/api/v1/search/lyrics?q=` | Full-text within lyrics |
+| Method | Path                       | Description                              |
+| ------ | -------------------------- | ---------------------------------------- |
+| `GET`  | `/api/v1/search?q=`        | Full-text across titles, artists, tracks |
+| `GET`  | `/api/v1/search/lyrics?q=` | Full-text within lyrics                  |
 
 ### Admin & Ops
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/v1/admin/ingest` | Trigger ingestion (requires `ADMIN_TOKEN`) |
-| `GET` | `/api/v1/admin/ingest/status` | Last ingestion stats |
-| `GET` | `/api/v1/health` | Service + Neo4j status |
-| `GET` | `/api/docs` | Swagger UI |
+| Method | Path                          | Description                                |
+| ------ | ----------------------------- | ------------------------------------------ |
+| `POST` | `/api/v1/admin/ingest`        | Trigger ingestion (requires `ADMIN_TOKEN`) |
+| `GET`  | `/api/v1/admin/ingest/status` | Last ingestion stats                       |
+| `GET`  | `/api/v1/health`              | Service + Neo4j status                     |
+| `GET`  | `/api/docs`                   | Swagger UI                                 |
 
 ### Response Shapes
 
@@ -200,6 +201,7 @@ Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
 ```
 
 **Triggers:**
+
 - Auto on startup if no `Release` nodes exist in the graph
 - Manual via `POST /api/v1/admin/ingest` (requires `ADMIN_TOKEN` header)
 
@@ -212,6 +214,7 @@ Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
 Swagger UI is a **hard requirement** and must be available at `/api/docs`.
 
 Use `@fastify/swagger` + `@fastify/swagger-ui`. Define JSON schemas on all route inputs/outputs. This enables:
+
 - Auto-generated OpenAPI spec at `/api/docs/json`
 - Interactive Swagger UI at `/api/docs`
 - Type-safe request/response validation via Fastify's built-in ajv
@@ -221,24 +224,28 @@ Use `@fastify/swagger` + `@fastify/swagger-ui`. Define JSON schemas on all route
 ## Testing
 
 **Unit tests** (`tests/unit/`):
+
 - Discogs response parsing and transformation
 - Neo4j node/relationship builders
 - Decade derivation from year
 - Rate limiting and retry logic
 
 **Integration tests** (`tests/integration/`):
+
 - All API endpoints via Fastify's `inject()` against a test Neo4j instance
 - Ingestion pipeline against mocked Discogs fixtures
 - Full-text search on seed data
 - Auto-ingest on empty graph
 
 **Coverage requirements:**
+
 - Unit: 70% minimum
 - Integration: 100% of API routes covered
 
 **Fixtures:** `tests/fixtures/` — JSON fixtures for mocked Discogs responses and seed data
 
 **Run tests:**
+
 ```bash
 pnpm test              # run all tests
 pnpm test:coverage     # with coverage report

@@ -1,4 +1,5 @@
 # liner-notes
+
 ## Graph Service — Product & Architecture Specification
 
 > **Status:** Draft v0.5 — Ready for Claude Code handoff  
@@ -61,6 +62,7 @@ These have been completed by Miles before handing off to Claude Code:
 **Git:** Before writing any files, create and check out branch `task/1-scaffold`. All work for this task happens on that branch. Open a PR to `main` when complete. Do not merge — Miles reviews and merges.
 
 **Deliverables:**
+
 - Full directory structure per Section 3
 - Root `CLAUDE.md` — complete, per Section 5.2
 - `services/graph-service/CLAUDE.md` — complete, per Section 5.3
@@ -90,6 +92,7 @@ These have been completed by Miles before handing off to Claude Code:
 **Git:** Create branch `task/2-discogs-exploration` from `main` (not from Task 1 branch). Use a worktree if running in parallel: `git worktree add ../liner-notes-task-2 task/2-discogs-exploration`.
 
 **Deliverables:**
+
 - `scripts/explore-discogs.ts` — standalone script that:
   1. Authenticates via `DISCOGS_TOKEN` from `.env.local`
   2. Fetches the first 5 releases from the collection
@@ -118,6 +121,7 @@ These have been completed by Miles before handing off to Claude Code:
 **Git:** Branch `task/3-neo4j-connection` from `main`.
 
 **Deliverables:**
+
 - Full `src/` directory structure
 - Fastify server setup at `src/server.ts`
 - Neo4j driver at `src/db/client.ts`
@@ -143,17 +147,20 @@ Starting with a collection of ~200 records spanning the 1950s to present day, ca
 ### 1.2 Goals
 
 **Primary:**
+
 - Hands-on experience with graph data structures, Neo4j, and Cypher
 - Use graph modeling to answer questions that would be awkward or expensive in a relational database
 - Deploy a running service on AWS with proper infrastructure as code
 - Serve as solutions architect — designing the system and orchestrating AI agents to implement it
 
 **Secondary:**
+
 - Demonstrate full-stack product engineering competency (data modeling, API design, containerization, cloud infra)
 - Portfolio artifact for product engineering role applications
 - Build a system any music lover can fork and run with their own Discogs collection
 
 **Non-goals (this sprint):**
+
 - Frontend development (beyond Neo4j Bloom as POC explorer)
 - Real-time sync
 - Multi-user support
@@ -172,7 +179,7 @@ Starting with a collection of ~200 records spanning the 1950s to present day, ca
 
 ## 2. Learning Objectives
 
-This project was directly motivated by *Designing Data-Intensive Applications* by Martin Kleppmann (O'Reilly, 2017) — specifically Chapter 2, which compares relational, document, and graph data models. Having worked almost exclusively with relational databases professionally, this project is the hands-on companion: build something real with a graph to understand it from the inside.
+This project was directly motivated by _Designing Data-Intensive Applications_ by Martin Kleppmann (O'Reilly, 2017) — specifically Chapter 2, which compares relational, document, and graph data models. Having worked almost exclusively with relational databases professionally, this project is the hands-on companion: build something real with a graph to understand it from the inside.
 
 Key concepts to build through this project:
 
@@ -182,7 +189,7 @@ Key concepts to build through this project:
 - **Graph vs. relational tradeoffs** — when graphs win and when they don't
 - **Neo4j operational basics** — indexing, constraints, schema design, query optimization
 
-> 📚 *Designing Data-Intensive Applications*, Kleppmann — Chapter 2: Data Models and Query Languages. The property graph model sections are the direct inspiration for this architecture.
+> 📚 _Designing Data-Intensive Applications_, Kleppmann — Chapter 2: Data Models and Query Languages. The property graph model sections are the direct inspiration for this architecture.
 
 ---
 
@@ -253,15 +260,15 @@ liner-notes/
 
 ### 4.1 Runtime & Framework
 
-| Decision | Value |
-|---|---|
-| Language | TypeScript — strict mode |
-| Runtime | Node.js v22.x LTS |
-| Package manager | pnpm (workspaces) |
-| HTTP framework | **Fastify** |
-| Test runner | Vitest |
-| Linter | ESLint with TypeScript plugin |
-| Formatter | Prettier |
+| Decision        | Value                         |
+| --------------- | ----------------------------- |
+| Language        | TypeScript — strict mode      |
+| Runtime         | Node.js v22.x LTS             |
+| Package manager | pnpm (workspaces)             |
+| HTTP framework  | **Fastify**                   |
+| Test runner     | Vitest                        |
+| Linter          | ESLint with TypeScript plugin |
+| Formatter       | Prettier                      |
 
 **Why Fastify over Express:** Native TypeScript support, built-in JSON schema validation on request/response, `@fastify/swagger` + `@fastify/swagger-ui` for zero-friction OpenAPI docs (a hard requirement), and a cleaner plugin architecture. Significantly faster than Express under load.
 
@@ -269,14 +276,15 @@ liner-notes/
 
 **Branching:**
 
-| Branch type | Naming pattern | Created by |
-|---|---|---|
-| Agent tasks | `task/{n}-{short-description}` | Agent |
-| Human features | `feat/{short-description}` | Miles |
-| Fixes | `fix/{short-description}` | Agent or Miles |
-| Docs/config | `chore/{short-description}` | Agent or Miles |
+| Branch type    | Naming pattern                 | Created by     |
+| -------------- | ------------------------------ | -------------- |
+| Agent tasks    | `task/{n}-{short-description}` | Agent          |
+| Human features | `feat/{short-description}`     | Miles          |
+| Fixes          | `fix/{short-description}`      | Agent or Miles |
+| Docs/config    | `chore/{short-description}`    | Agent or Miles |
 
 **Rules:**
+
 - `main` is protected — no direct commits ever
 - All changes via PR with CI passing
 - Squash merge into `main` — one clean commit per task
@@ -299,6 +307,7 @@ git worktree add ../liner-notes-task-3 task/3-neo4j-connection
 Each worktree is a fully independent working directory pointing to its own branch. Agents operate entirely within their assigned worktree. **Agents manage all their own git operations** — branch creation, commits, and opening the PR. Miles only reviews and merges.
 
 **Agent git workflow (every task):**
+
 ```bash
 # 1. Start from latest main
 git fetch origin
@@ -317,11 +326,11 @@ gh pr create --title "task/{n}: {description}" --body "Closes #{issue}"
 
 ### 4.3 Secrets Management
 
-| File | Committed? | Purpose |
-|---|---|---|
-| `.env.example` | ✅ Yes | Documents all variables with descriptions, no values |
-| `.env.local` | ❌ No (gitignored) | Local development values |
-| AWS Secrets Manager | N/A (runtime) | Production secrets injected at container startup |
+| File                | Committed?         | Purpose                                              |
+| ------------------- | ------------------ | ---------------------------------------------------- |
+| `.env.example`      | ✅ Yes             | Documents all variables with descriptions, no values |
+| `.env.local`        | ❌ No (gitignored) | Local development values                             |
+| AWS Secrets Manager | N/A (runtime)      | Production secrets injected at container startup     |
 
 `.gitignore` must include: `.env`, `.env.local`, `.env.*.local`
 
@@ -379,16 +388,16 @@ The root `CLAUDE.md` must contain:
 
 ### 5.4 CI Gates (GitHub Actions)
 
-| Check | Tool | Requirement |
-|---|---|---|
-| Linting | ESLint | Zero warnings or errors |
-| Type checking | TypeScript strict | Zero errors |
-| Unit tests | Vitest | 70% coverage minimum |
-| Integration tests | Supertest/inject | 100% of API routes covered |
-| Docker build | Docker | Image builds successfully |
-| Schema validation | Custom script | Constraints + indexes apply cleanly to seed data |
-| Security scan | `pnpm audit` + Dependabot | No critical vulnerabilities |
-| Secrets scan | `trufflehog` | No credentials or tokens in committed code |
+| Check             | Tool                      | Requirement                                      |
+| ----------------- | ------------------------- | ------------------------------------------------ |
+| Linting           | ESLint                    | Zero warnings or errors                          |
+| Type checking     | TypeScript strict         | Zero errors                                      |
+| Unit tests        | Vitest                    | 70% coverage minimum                             |
+| Integration tests | Supertest/inject          | 100% of API routes covered                       |
+| Docker build      | Docker                    | Image builds successfully                        |
+| Schema validation | Custom script             | Constraints + indexes apply cleanly to seed data |
+| Security scan     | `pnpm audit` + Dependabot | No critical vulnerabilities                      |
+| Secrets scan      | `trufflehog`              | No credentials or tokens in committed code       |
 
 ---
 
@@ -415,13 +424,13 @@ DISCOGS_REQUEST_DELAY_MS=1000
 
 ### 6.3 Key Endpoints
 
-| Endpoint | Purpose |
-|---|---|
+| Endpoint                                              | Purpose                                             |
+| ----------------------------------------------------- | --------------------------------------------------- |
 | `GET /users/{username}/collection/folders/0/releases` | All collection releases (paginated; folder 0 = all) |
-| `GET /releases/{release_id}` | Full release — artists, labels, credits, tracklist |
-| `GET /artists/{artist_id}` | Artist — name, profile, aliases, members |
-| `GET /labels/{label_id}` | Label — name, parent, country |
-| `GET /masters/{master_id}` | Master — canonical version grouping |
+| `GET /releases/{release_id}`                          | Full release — artists, labels, credits, tracklist  |
+| `GET /artists/{artist_id}`                            | Artist — name, profile, aliases, members            |
+| `GET /labels/{label_id}`                              | Label — name, parent, country                       |
+| `GET /masters/{master_id}`                            | Master — canonical version grouping                 |
 
 ### 6.4 Data Per Release
 
@@ -448,6 +457,7 @@ master_id
 ### 6.6 Auth
 
 Personal token for this sprint. Discogs OAuth in a future sprint.
+
 > 📌 GitHub Issue to create: `feat: Discogs OAuth for fork-friendly auth`
 
 ---
@@ -456,26 +466,26 @@ Personal token for this sprint. Discogs OAuth in a future sprint.
 
 ### 7.1 Philosophy
 
-Guiding question for every data field: *Should this be a node with relationships, or a property?* If other nodes might share it, or if you'd want to traverse to/from it — make it a node. Goal: thousands of nodes, tens of thousands of edges from a 200-record collection.
+Guiding question for every data field: _Should this be a node with relationships, or a property?_ If other nodes might share it, or if you'd want to traverse to/from it — make it a node. Goal: thousands of nodes, tens of thousands of edges from a 200-record collection.
 
 > ⚠️ **Agent note:** Research Neo4j modeling best practices and validate against actual API responses (Agent Task 2 findings) before implementing. Propose improvements explicitly.
 
 ### 7.2 Nodes
 
-| Label | Key Properties |
-|---|---|
-| `Release` | `discogsId` (unique), `title`, `year` (integer — also related to Decade), `format`, `thumbUrl`, `masterDiscogsId` |
-| `Artist` | `discogsId` (unique), `name`, `realName`, `profile` |
-| `Label` | `discogsId` (unique), `name`, `profile`, `contactInfo` |
-| `Track` | `position`, `title`, `duration`, `lyrics` (nullable), `lyricsSource` |
-| `Genre` | `name` (unique) |
-| `Style` | `name` (unique) |
-| `Country` | `name` (unique) |
-| `Decade` | `name` (unique) — e.g., `"1970s"` |
-| `Studio` | `name`, `location` |
-| `Musician` | `discogsId` (if available), `name` |
-| `Producer` | `discogsId` (if available), `name` |
-| `Engineer` | `discogsId` (if available), `name` |
+| Label      | Key Properties                                                                                                    |
+| ---------- | ----------------------------------------------------------------------------------------------------------------- |
+| `Release`  | `discogsId` (unique), `title`, `year` (integer — also related to Decade), `format`, `thumbUrl`, `masterDiscogsId` |
+| `Artist`   | `discogsId` (unique), `name`, `realName`, `profile`                                                               |
+| `Label`    | `discogsId` (unique), `name`, `profile`, `contactInfo`                                                            |
+| `Track`    | `position`, `title`, `duration`, `lyrics` (nullable), `lyricsSource`                                              |
+| `Genre`    | `name` (unique)                                                                                                   |
+| `Style`    | `name` (unique)                                                                                                   |
+| `Country`  | `name` (unique)                                                                                                   |
+| `Decade`   | `name` (unique) — e.g., `"1970s"`                                                                                 |
+| `Studio`   | `name`, `location`                                                                                                |
+| `Musician` | `discogsId` (if available), `name`                                                                                |
+| `Producer` | `discogsId` (if available), `name`                                                                                |
+| `Engineer` | `discogsId` (if available), `name`                                                                                |
 
 > `year` is stored both as a property on `Release` (for exact-year queries) and as a `RECORDED_IN_DECADE` relationship to a `Decade` node (for decade traversal). Both are needed.
 
@@ -483,24 +493,24 @@ Guiding question for every data field: *Should this be a node with relationships
 
 ### 7.3 Relationships
 
-| Relationship | From → To | Properties |
-|---|---|---|
-| `RELEASED_BY` | Release → Artist | `role` |
-| `CREDITED_ON` | Musician → Release | `role`, `instrument` |
-| `PRODUCED_BY` | Release → Producer | |
-| `ENGINEERED_BY` | Release → Engineer | |
-| `ON_LABEL` | Release → Label | `catalogNumber` |
-| `IN_GENRE` | Release → Genre | |
-| `IN_STYLE` | Release → Style | |
-| `FROM_COUNTRY` | Release → Country | |
-| `RECORDED_IN_DECADE` | Release → Decade | |
-| `RECORDED_AT` | Release → Studio | |
-| `HAS_TRACK` | Release → Track | `trackNumber` |
-| `PERFORMED_BY` | Track → Artist | `role` |
-| `SAME_PERSON_AS` | Musician → Artist | |
-| `MEMBER_OF` | Artist → Artist | `startYear`, `endYear` |
-| `SUBSIDIARY_OF` | Label → Label | |
-| `VERSION_OF` | Release → Release | |
+| Relationship         | From → To          | Properties             |
+| -------------------- | ------------------ | ---------------------- |
+| `RELEASED_BY`        | Release → Artist   | `role`                 |
+| `CREDITED_ON`        | Musician → Release | `role`, `instrument`   |
+| `PRODUCED_BY`        | Release → Producer |                        |
+| `ENGINEERED_BY`      | Release → Engineer |                        |
+| `ON_LABEL`           | Release → Label    | `catalogNumber`        |
+| `IN_GENRE`           | Release → Genre    |                        |
+| `IN_STYLE`           | Release → Style    |                        |
+| `FROM_COUNTRY`       | Release → Country  |                        |
+| `RECORDED_IN_DECADE` | Release → Decade   |                        |
+| `RECORDED_AT`        | Release → Studio   |                        |
+| `HAS_TRACK`          | Release → Track    | `trackNumber`          |
+| `PERFORMED_BY`       | Track → Artist     | `role`                 |
+| `SAME_PERSON_AS`     | Musician → Artist  |                        |
+| `MEMBER_OF`          | Artist → Artist    | `startYear`, `endYear` |
+| `SUBSIDIARY_OF`      | Label → Label      |                        |
+| `VERSION_OF`         | Release → Release  |                        |
 
 ### 7.4 Constraints & Indexes
 
@@ -594,40 +604,44 @@ All writes use Cypher `MERGE`. Re-running is safe. New additions picked up on re
 ### 9.2 Endpoints
 
 #### Collection
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/releases` | List releases, paginated |
-| `GET` | `/api/v1/releases/:discogsId` | Single release with relationships |
-| `GET` | `/api/v1/artists/:discogsId` | Artist with connected releases |
-| `GET` | `/api/v1/labels/:discogsId` | Label with all releases |
+
+| Method | Path                          | Description                       |
+| ------ | ----------------------------- | --------------------------------- |
+| `GET`  | `/api/v1/releases`            | List releases, paginated          |
+| `GET`  | `/api/v1/releases/:discogsId` | Single release with relationships |
+| `GET`  | `/api/v1/artists/:discogsId`  | Artist with connected releases    |
+| `GET`  | `/api/v1/labels/:discogsId`   | Label with all releases           |
 
 #### Exploration
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/explore/musician/:name` | Releases featuring this musician |
-| `GET` | `/api/v1/explore/studio/:name` | Releases at this studio |
-| `GET` | `/api/v1/explore/decade/:decade` | Releases from this decade |
-| `GET` | `/api/v1/explore/year/:year` | Releases from this exact year |
-| `GET` | `/api/v1/explore/label/:name` | Releases on this label |
-| `GET` | `/api/v1/explore/genre/:name` | Releases in this genre |
-| `GET` | `/api/v1/explore/style/:name` | Releases in this style |
-| `GET` | `/api/v1/explore/country/:name` | Releases from this country |
-| `GET` | `/api/v1/explore/connections/:discogsId` | Graph traversal (`?depth=2`) |
-| `GET` | `/api/v1/explore/shared-musicians` | Release pairs sharing session musicians |
+
+| Method | Path                                     | Description                             |
+| ------ | ---------------------------------------- | --------------------------------------- |
+| `GET`  | `/api/v1/explore/musician/:name`         | Releases featuring this musician        |
+| `GET`  | `/api/v1/explore/studio/:name`           | Releases at this studio                 |
+| `GET`  | `/api/v1/explore/decade/:decade`         | Releases from this decade               |
+| `GET`  | `/api/v1/explore/year/:year`             | Releases from this exact year           |
+| `GET`  | `/api/v1/explore/label/:name`            | Releases on this label                  |
+| `GET`  | `/api/v1/explore/genre/:name`            | Releases in this genre                  |
+| `GET`  | `/api/v1/explore/style/:name`            | Releases in this style                  |
+| `GET`  | `/api/v1/explore/country/:name`          | Releases from this country              |
+| `GET`  | `/api/v1/explore/connections/:discogsId` | Graph traversal (`?depth=2`)            |
+| `GET`  | `/api/v1/explore/shared-musicians`       | Release pairs sharing session musicians |
 
 #### Search
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/search?q=` | Full-text across titles, artists, tracks |
-| `GET` | `/api/v1/search/lyrics?q=` | Full-text within lyrics |
+
+| Method | Path                       | Description                              |
+| ------ | -------------------------- | ---------------------------------------- |
+| `GET`  | `/api/v1/search?q=`        | Full-text across titles, artists, tracks |
+| `GET`  | `/api/v1/search/lyrics?q=` | Full-text within lyrics                  |
 
 #### Admin & Ops
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/v1/admin/ingest` | Trigger ingestion (requires `ADMIN_TOKEN`) |
-| `GET` | `/api/v1/admin/ingest/status` | Last ingestion stats |
-| `GET` | `/api/v1/health` | Service + Neo4j status |
-| `GET` | `/api/docs` | Swagger UI |
+
+| Method | Path                          | Description                                |
+| ------ | ----------------------------- | ------------------------------------------ |
+| `POST` | `/api/v1/admin/ingest`        | Trigger ingestion (requires `ADMIN_TOKEN`) |
+| `GET`  | `/api/v1/admin/ingest/status` | Last ingestion stats                       |
+| `GET`  | `/api/v1/health`              | Service + Neo4j status                     |
+| `GET`  | `/api/docs`                   | Swagger UI                                 |
 
 ### 9.3 Response Shapes
 
@@ -677,13 +691,13 @@ Internet
 
 ### 10.3 Decisions
 
-| Component | Choice | Rationale |
-|---|---|---|
+| Component  | Choice              | Rationale                                                                       |
+| ---------- | ------------------- | ------------------------------------------------------------------------------- |
 | Kubernetes | k3s on EC2 t3.micro | EKS = ~$72/month (off the table). k3s is fully conformant K8s on free-tier EC2. |
-| Neo4j | Aura Free | Managed, 200MB free, zero ops burden. |
-| Registry | AWS ECR | 500MB free tier, native AWS integration. |
-| Logs | CloudWatch | Free tier sufficient. |
-| Secrets | AWS Secrets Manager | Cleanest for a public repo (~$0.40/secret/month). |
+| Neo4j      | Aura Free           | Managed, 200MB free, zero ops burden.                                           |
+| Registry   | AWS ECR             | 500MB free tier, native AWS integration.                                        |
+| Logs       | CloudWatch          | Free tier sufficient.                                                           |
+| Secrets    | AWS Secrets Manager | Cleanest for a public repo (~$0.40/secret/month).                               |
 
 > **k3s:** Lightweight certified Kubernetes, runs as a single binary on EC2 t3.micro. Supports all standard K8s manifests. Control plane runs on the same instance. Functionally equivalent to EKS for this project's scale.
 
@@ -702,18 +716,21 @@ Infrequent traffic — EC2 Scheduler to stop the instance on a schedule and rest
 ## 11. Testing
 
 ### 11.1 Unit Tests
+
 - Discogs response parsing and transformation
 - Neo4j node/relationship builders
 - Decade derivation from year
 - Rate limiting and retry logic
 
 ### 11.2 Integration Tests
+
 - All API endpoints via Fastify's `inject()` against a test Neo4j instance
 - Ingestion pipeline against mocked Discogs fixtures
 - Full-text search on seed data
 - Auto-ingest on empty graph
 
 ### 11.3 Seed Data
+
 First 10 releases from the collection. Stored as JSON fixtures in `tests/fixtures/`. Review after first ingestion for graph richness (want: shared musicians, overlapping studios/labels).
 
 ---
@@ -721,12 +738,14 @@ First 10 releases from the collection. Stored as JSON fixtures in `tests/fixture
 ## 12. Observability
 
 **Minimum viable this sprint:**
+
 - Structured JSON logging (request ID, timestamps, error context, ingestion stats)
 - `/api/v1/health` returns Neo4j + service status
 - Ingestion summary logged on completion
 - CloudWatch log shipping + service-down alarm
 
 **Future (add when justified):**
+
 - Neo4j slow query log
 - API response time histograms
 - Discogs rate limit headroom
@@ -796,10 +815,10 @@ Edge caching, CDN for album art, bot protection. Add when there's a concrete nee
 
 ## 14. Open Questions
 
-| # | Question | Priority | Decision |
-|---|---|---|---|
-| 2 | k3s on EC2 vs ECS Fargate for scale-to-zero? | 🟡 | k3s current recommendation; dedicated discussion needed |
-| — | All other questions | ✅ | Resolved — see Section 4 and throughout |
+| #   | Question                                     | Priority | Decision                                                |
+| --- | -------------------------------------------- | -------- | ------------------------------------------------------- |
+| 2   | k3s on EC2 vs ECS Fargate for scale-to-zero? | 🟡       | k3s current recommendation; dedicated discussion needed |
+| —   | All other questions                          | ✅       | Resolved — see Section 4 and throughout                 |
 
 ---
 
@@ -851,5 +870,5 @@ curl -X POST http://localhost:3000/api/v1/admin/ingest \
 
 ---
 
-*Draft v0.5 — May 2026*  
-*All decisions locked. Prerequisites complete. Ready for Agent Task 1.*
+_Draft v0.5 — May 2026_  
+_All decisions locked. Prerequisites complete. Ready for Agent Task 1._

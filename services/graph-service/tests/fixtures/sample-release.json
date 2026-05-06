@@ -78,10 +78,7 @@
     {
       "name": "Vinyl",
       "qty": "1",
-      "descriptions": [
-        "LP",
-        "Album"
-      ]
+      "descriptions": ["LP", "Album"]
     }
   ],
   "data_quality": "Needs Vote",
@@ -200,13 +197,8 @@
       "embed": true
     }
   ],
-  "genres": [
-    "Rock"
-  ],
-  "styles": [
-    "Indie Rock",
-    "Folk Rock"
-  ],
+  "genres": ["Rock"],
+  "styles": ["Indie Rock", "Folk Rock"],
   "tracklist": [
     {
       "position": "A1",
