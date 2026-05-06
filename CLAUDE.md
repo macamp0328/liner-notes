@@ -71,6 +71,7 @@ liner-notes/
 | Test runner     | Vitest                        |
 | Linter          | ESLint with TypeScript plugin |
 | Formatter       | Prettier                      |
+| Module system   | ESM — `"type": "module"` on all services, `module: NodeNext` + `moduleResolution: NodeNext` in tsconfig; `.js` extensions on **local/relative** imports are required and enforced by the TypeScript compiler (package imports like `from 'fastify'` are unaffected) |
 
 **Why Fastify over Express:** Native TypeScript support, built-in JSON schema validation, `@fastify/swagger` + `@fastify/swagger-ui` for zero-friction OpenAPI docs (hard requirement), and a cleaner plugin architecture.
 
