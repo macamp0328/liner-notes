@@ -81,9 +81,9 @@ describe('parseDisplayRole', () => {
     expect(parseDisplayRole('Technician [Studio Brain]')).toBe('Technician [Studio Brain]');
   });
 
-  it('handles bracket-embedded commas correctly (only splits on top-level commas)', () => {
-    // The role string "Technician [Studio Brain], Engineer [Assistant Engineer]"
-    // should yield "Technician [Studio Brain]" as the display role.
+  it('splits on the first comma even when role text contains bracket annotations', () => {
+    // The plain split(',') implementation works here because bracket annotations in
+    // real Discogs role strings do not themselves contain commas.
     expect(parseDisplayRole('Technician [Studio Brain], Engineer [Assistant Engineer]')).toBe(
       'Technician [Studio Brain]',
     );

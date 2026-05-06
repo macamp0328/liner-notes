@@ -1,11 +1,20 @@
 import type { DiscogsCollectionPage, DiscogsRelease } from './types.js';
 
+/** Minimal logger interface — satisfied by Fastify's app.log (pino) and by console. */
+export interface Logger {
+  info(msg: string): void;
+  warn(msg: string): void;
+  error(msg: string): void;
+}
+
 export interface DiscogsClientConfig {
   token: string;
   userAgent: string;
   delayMs: number;
   /** Minimum backoff in ms for 429 retry. Defaults to 1000. Set to 0 in tests to keep them fast. */
   backoffBaseMs?: number;
+  /** Optional structured logger; defaults to console when omitted. Pass app.log in production. */
+  logger?: Logger;
 }
 
 const BASE_URL = 'https://api.discogs.com';
@@ -19,12 +28,14 @@ export class DiscogsClient {
   private readonly userAgent: string;
   private readonly delayMs: number;
   private readonly backoffBaseMs: number;
+  private readonly log: Logger;
 
   constructor(config: DiscogsClientConfig) {
     this.token = config.token;
     this.userAgent = config.userAgent;
     this.delayMs = config.delayMs;
     this.backoffBaseMs = config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
+    this.log = config.logger ?? console;
   }
 
   async getCollectionReleases(
@@ -57,10 +68,13 @@ export class DiscogsClient {
 
       if (response.status === 429) {
         // Honour the server-specified Retry-After delay when present.
+        // Validate the parsed value — a non-integer header produces NaN which Math.max
+        // propagates, effectively disabling backoff. Fall back to 0 on invalid values.
         const retryAfterHeader = response.headers.get('Retry-After');
-        const retryAfterMs = retryAfterHeader ? parseInt(retryAfterHeader, 10) * 1_000 : 0;
+        const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
+        const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
         const waitMs = Math.max(currentDelay, retryAfterMs);
-        console.warn(
+        this.log.warn(
           `[discogs-client] Rate limited (429) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${waitMs}ms`,
         );
         await this.sleep(waitMs);

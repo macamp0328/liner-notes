@@ -58,7 +58,8 @@ export async function buildServer(): Promise<FastifyInstance> {
     if (empty) {
       const username = process.env['DISCOGS_USERNAME'];
       // buildDiscogsClientFromEnv handles delay validation; no separate parsing needed here.
-      const discogsClient = buildDiscogsClientFromEnv();
+      // Pass app.log so 429 warnings from DiscogsClient go through the structured pino logger.
+      const discogsClient = buildDiscogsClientFromEnv(app.log);
 
       if (discogsClient && username) {
         app.log.info('Graph is empty — starting Discogs ingestion in background');

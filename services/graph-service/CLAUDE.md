@@ -71,7 +71,7 @@ Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At)
 | `Release`  | `discogsId` (unique), `title`, `year` (integer), `format`, `thumbUrl`, `masterDiscogsId` |
 | `Artist`   | `discogsId` (unique), `name`, `realName`, `profile`                                      |
 | `Label`    | `discogsId` (unique), `name`, `profile`, `contactInfo`                                   |
-| `Track`    | `position`, `title`, `duration`, `lyrics` (nullable), `lyricsSource`                     |
+| `Track`    | `position` + `releaseDiscogsId` (composite MERGE key), `title`, `duration`, `lyrics` (nullable), `lyricsSource` |
 | `Genre`    | `name` (unique)                                                                          |
 | `Style`    | `name` (unique)                                                                          |
 | `Country`  | `name` (unique)                                                                          |
@@ -88,7 +88,7 @@ Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At)
 | Relationship         | From → To          | Properties             |
 | -------------------- | ------------------ | ---------------------- |
 | `RELEASED_BY`        | Release → Artist   | `role`                 |
-| `CREDITED_ON`        | Musician → Release | `role`, `instrument`   |
+| `CREDITED_ON`        | Musician → Release or Track | `role`, `displayRole`, `creditedAs`, `scope` (`"release"` or `"track"`) |
 | `PRODUCED_BY`        | Release → Producer |                        |
 | `ENGINEERED_BY`      | Release → Engineer |                        |
 | `ON_LABEL`           | Release → Label    | `catalogNumber`        |

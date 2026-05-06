@@ -1,13 +1,9 @@
 import type { Driver } from 'neo4j-driver';
 import { DiscogsClient } from './discogs-client.js';
+import type { Logger } from './discogs-client.js';
 import { mergeReleaseGraph } from '../db/ingestion-repository.js';
 
-/** Minimal logger interface — satisfied by Fastify's app.log (pino) and by console. */
-export interface Logger {
-  info(msg: string): void;
-  warn(msg: string): void;
-  error(msg: string): void;
-}
+export type { Logger };
 
 export interface IngestionConfig {
   username: string;
@@ -121,12 +117,12 @@ export async function runIngestion(
 const DEFAULT_DELAY_MS = 1_000;
 const MIN_DELAY_MS = 100;
 
-export function buildDiscogsClientFromEnv(): DiscogsClient | null {
+export function buildDiscogsClientFromEnv(logger?: Logger): DiscogsClient | null {
   const token = process.env['DISCOGS_TOKEN'];
   const userAgent = process.env['DISCOGS_USER_AGENT'] ?? 'liner-notes/1.0';
 
   if (!token) {
-    console.warn('[ingest] DISCOGS_TOKEN not set — skipping ingestion');
+    // Return null silently — callers (e.g. server.ts onReady) log the skip via their own logger.
     return null;
   }
 
@@ -134,5 +130,10 @@ export function buildDiscogsClientFromEnv(): DiscogsClient | null {
   const parsed = parseInt(process.env['DISCOGS_REQUEST_DELAY_MS'] ?? '', 10);
   const delayMs = Number.isFinite(parsed) && parsed >= MIN_DELAY_MS ? parsed : DEFAULT_DELAY_MS;
 
-  return new DiscogsClient({ token, userAgent, delayMs });
+  return new DiscogsClient({
+    token,
+    userAgent,
+    delayMs,
+    ...(logger !== undefined ? { logger } : {}),
+  });
 }
