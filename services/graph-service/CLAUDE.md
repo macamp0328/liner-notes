@@ -271,6 +271,23 @@ Route handler → Repository (Cypher) → Neo4j driver
 
 ---
 
+## Module System
+
+`graph-service` is ESM. Key rules for agents writing code in this service:
+
+- **`"type": "module"`** is set in `package.json` — Node.js treats all `.js` output as ESM. Do not remove it.
+- **`NodeNext` resolution** — TypeScript enforces `.js` extensions on all local imports. `from './db/client.js'` is correct; `from './db/client'` will error at compile time.
+- **No `__dirname` / `__filename`** — these CJS globals are unavailable in ESM. If path resolution is needed, use:
+  ```ts
+  import { fileURLToPath } from 'url';
+  import { dirname } from 'path';
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  ```
+- **`esModuleInterop` removed** — `NodeNext` handles CJS interop natively. Do not add it back.
+
+---
+
 ## Known Limitations
 
 - **Studio data is sparse.** `companies[]` in Discogs is inconsistently populated. `Studio` nodes will exist for only a fraction of releases. This is a data quality issue upstream, not a bug.
