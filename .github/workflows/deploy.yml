@@ -16,6 +16,6 @@ jobs:
     if: false
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Placeholder
         run: echo "Deploy pipeline — implementation pending (Task 5)"
