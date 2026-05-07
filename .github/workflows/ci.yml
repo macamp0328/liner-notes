@@ -224,6 +224,12 @@ jobs:
           queries: security-extended
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
+        with:
+          # GitHub default CodeQL setup is also enabled on this repo, which causes
+          # the SARIF upload to be rejected asynchronously. Default setup already
+          # provides coverage; skip waiting for processing to unblock CI.
+          # Long-term fix: disable default CodeQL setup in repo Settings > Security.
+          wait-for-processing: false
 
   commitlint:
     name: Commit Message Lint
