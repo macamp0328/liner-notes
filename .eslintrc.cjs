@@ -6,11 +6,12 @@ module.exports = {
     sourceType: 'module',
     project: true,
   },
-  plugins: ['@typescript-eslint'],
+  plugins: ['@typescript-eslint', 'security'],
   extends: [
     'eslint:recommended',
     'plugin:@typescript-eslint/recommended',
     'plugin:@typescript-eslint/recommended-requiring-type-checking',
+    'plugin:security/recommended-legacy',
   ],
   rules: {
     '@typescript-eslint/no-explicit-any': 'warn',

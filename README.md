@@ -4,8 +4,8 @@ A personal, open-source, forkable monorepo for exploring a vinyl record collecti
 
 ## Services
 
-| Service | Path | Description |
-|---------|------|-------------|
+| Service       | Path                      | Description                                 |
+| ------------- | ------------------------- | ------------------------------------------- |
 | graph-service | `services/graph-service/` | Fastify REST API + Neo4j ingestion pipeline |
 
 ## Quick Start

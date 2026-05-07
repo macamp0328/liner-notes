@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest';
 import type { Driver } from 'neo4j-driver';
 import { enrichLyrics } from '../../../src/enrichment/lyrics.js';
 
@@ -53,7 +53,7 @@ const sampleTrack = {
 // Tests
 // ---------------------------------------------------------------------------
 describe('enrichLyrics', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     vi.clearAllMocks();

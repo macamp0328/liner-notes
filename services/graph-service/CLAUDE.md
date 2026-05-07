@@ -66,43 +66,43 @@ Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At)
 
 ### Nodes
 
-| Label      | Key Properties                                                                           |
-| ---------- | ---------------------------------------------------------------------------------------- |
-| `Release`  | `discogsId` (unique), `title`, `year` (integer), `format`, `thumbUrl`, `masterDiscogsId` |
-| `Artist`   | `discogsId` (unique), `name`, `realName`, `profile`                                      |
-| `Label`    | `discogsId` (unique), `name`, `profile`, `contactInfo`                                   |
+| Label      | Key Properties                                                                                                  |
+| ---------- | --------------------------------------------------------------------------------------------------------------- |
+| `Release`  | `discogsId` (unique), `title`, `year` (integer), `format`, `thumbUrl`, `masterDiscogsId`                        |
+| `Artist`   | `discogsId` (unique), `name`, `realName`, `profile`                                                             |
+| `Label`    | `discogsId` (unique), `name`, `profile`, `contactInfo`                                                          |
 | `Track`    | `position` + `releaseDiscogsId` (composite MERGE key), `title`, `duration`, `lyrics` (nullable), `lyricsSource` |
-| `Genre`    | `name` (unique)                                                                          |
-| `Style`    | `name` (unique)                                                                          |
-| `Country`  | `name` (unique)                                                                          |
-| `Decade`   | `name` (unique) — e.g. `"1970s"`                                                         |
-| `Studio`   | `name`, `location`                                                                       |
-| `Musician` | `discogsId` (if available), `name`                                                       |
-| `Producer` | `discogsId` (if available), `name`                                                       |
-| `Engineer` | `discogsId` (if available), `name`                                                       |
+| `Genre`    | `name` (unique)                                                                                                 |
+| `Style`    | `name` (unique)                                                                                                 |
+| `Country`  | `name` (unique)                                                                                                 |
+| `Decade`   | `name` (unique) — e.g. `"1970s"`                                                                                |
+| `Studio`   | `name`, `location`                                                                                              |
+| `Musician` | `discogsId` (if available), `name`                                                                              |
+| `Producer` | `discogsId` (if available), `name`                                                                              |
+| `Engineer` | `discogsId` (if available), `name`                                                                              |
 
 > `year` is stored both as a property on `Release` (exact-year queries) and as a `RECORDED_IN_DECADE` relationship to a `Decade` node (decade traversal). Both are needed.
 
 ### Relationships
 
-| Relationship         | From → To          | Properties             |
-| -------------------- | ------------------ | ---------------------- |
-| `RELEASED_BY`        | Release → Artist   | `role`                 |
+| Relationship         | From → To                   | Properties                                                              |
+| -------------------- | --------------------------- | ----------------------------------------------------------------------- |
+| `RELEASED_BY`        | Release → Artist            | `role`                                                                  |
 | `CREDITED_ON`        | Musician → Release or Track | `role`, `displayRole`, `creditedAs`, `scope` (`"release"` or `"track"`) |
-| `PRODUCED_BY`        | Release → Producer |                        |
-| `ENGINEERED_BY`      | Release → Engineer |                        |
-| `ON_LABEL`           | Release → Label    | `catalogNumber`        |
-| `IN_GENRE`           | Release → Genre    |                        |
-| `IN_STYLE`           | Release → Style    |                        |
-| `FROM_COUNTRY`       | Release → Country  |                        |
-| `RECORDED_IN_DECADE` | Release → Decade   |                        |
-| `RECORDED_AT`        | Release → Studio   |                        |
-| `HAS_TRACK`          | Release → Track    | `trackNumber`          |
-| `PERFORMED_BY`       | Track → Artist     | `role`                 |
-| `SAME_PERSON_AS`     | Musician → Artist  |                        |
-| `MEMBER_OF`          | Artist → Artist    | `startYear`, `endYear` |
-| `SUBSIDIARY_OF`      | Label → Label      |                        |
-| `VERSION_OF`         | Release → Release  |                        |
+| `PRODUCED_BY`        | Release → Producer          |                                                                         |
+| `ENGINEERED_BY`      | Release → Engineer          |                                                                         |
+| `ON_LABEL`           | Release → Label             | `catalogNumber`                                                         |
+| `IN_GENRE`           | Release → Genre             |                                                                         |
+| `IN_STYLE`           | Release → Style             |                                                                         |
+| `FROM_COUNTRY`       | Release → Country           |                                                                         |
+| `RECORDED_IN_DECADE` | Release → Decade            |                                                                         |
+| `RECORDED_AT`        | Release → Studio            |                                                                         |
+| `HAS_TRACK`          | Release → Track             | `trackNumber`                                                           |
+| `PERFORMED_BY`       | Track → Artist              | `role`                                                                  |
+| `SAME_PERSON_AS`     | Musician → Artist           |                                                                         |
+| `MEMBER_OF`          | Artist → Artist             | `startYear`, `endYear`                                                  |
+| `SUBSIDIARY_OF`      | Label → Label               |                                                                         |
+| `VERSION_OF`         | Release → Release           |                                                                         |
 
 ### Constraints & Indexes
 

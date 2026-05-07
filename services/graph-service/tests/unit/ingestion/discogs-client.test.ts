@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { DiscogsClient } from '../../../src/ingestion/discogs-client.js';
 import collectionPage1 from '../../fixtures/collection-page-1.json' with { type: 'json' };
 import release13570466 from '../../fixtures/release-13570466.json' with { type: 'json' };
@@ -26,7 +26,7 @@ function makeErrorResponse(status: number, statusText: string, retryAfterSecs?: 
 }
 
 describe('DiscogsClient', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
   let client: DiscogsClient;
 
   beforeEach(() => {
