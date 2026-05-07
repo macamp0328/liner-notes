@@ -3,10 +3,12 @@ import Fastify, { FastifyInstance } from 'fastify';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { healthRoutes } from './api/health.js';
+import { adminRoutes } from './api/admin.js';
 import { initDriver, closeDriver } from './db/client.js';
 import { applySchema } from './db/schema.js';
 import { hasReleases } from './db/ingestion-repository.js';
 import { buildDiscogsClientFromEnv, runIngestion } from './ingestion/ingest.js';
+import { startJob, completeJob, failJob, type IngestionStats } from './ingestion/job-state.js';
 
 export async function buildServer(): Promise<FastifyInstance> {
   const app = Fastify({ logger: true });
@@ -21,6 +23,7 @@ export async function buildServer(): Promise<FastifyInstance> {
       servers: [{ url: 'http://localhost:3000' }],
       tags: [
         { name: 'ops', description: 'Health and admin operations' },
+        { name: 'admin', description: 'Ingestion control and operational status' },
         { name: 'collection', description: 'Release, artist, and label queries' },
         { name: 'explore', description: 'Relationship traversal endpoints' },
         { name: 'search', description: 'Full-text search' },
@@ -34,6 +37,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   });
 
   await app.register(healthRoutes);
+  await app.register(adminRoutes, { prefix: '/api/v1/admin' });
 
   app.addHook('onReady', async () => {
     const uri = process.env['NEO4J_URI'];
@@ -42,6 +46,10 @@ export async function buildServer(): Promise<FastifyInstance> {
 
     if (!uri || !user || !password) {
       throw new Error('NEO4J_URI, NEO4J_USER, and NEO4J_PASSWORD are required');
+    }
+
+    if (!process.env['ADMIN_TOKEN']) {
+      app.log.warn('ADMIN_TOKEN not set — admin endpoints will return 503');
     }
 
     const driver = initDriver(uri, user, password);
@@ -63,11 +71,24 @@ export async function buildServer(): Promise<FastifyInstance> {
 
       if (discogsClient && username) {
         app.log.info('Graph is empty — starting Discogs ingestion in background');
+        startJob();
         void runIngestion(discogsClient, driver, { username, logger: app.log })
           .then((summary) => {
+            const stats: IngestionStats = {
+              nodes: {},
+              relationships: {},
+              lyricsEnriched: summary.lyricsEnrichment.enriched,
+              lyricsSkipped: summary.lyricsEnrichment.skipped,
+              lyricsFailed: summary.lyricsEnrichment.failed,
+              errorCount: summary.errors.length,
+              errors: summary.errors.slice(0, 50),
+            };
+            completeJob(stats);
             app.log.info({ summary }, 'Discogs ingestion complete');
           })
           .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            failJob(msg);
             app.log.error({ err }, 'Discogs ingestion failed');
           });
       } else {
