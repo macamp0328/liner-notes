@@ -10,26 +10,50 @@ import { hasReleases } from './db/ingestion-repository.js';
 import { buildDiscogsClientFromEnv, runIngestion } from './ingestion/ingest.js';
 import { startJob, completeJob, failJob, type IngestionStats } from './ingestion/job-state.js';
 
+const OPENAPI_CONFIG = {
+  openapi: {
+    info: {
+      title: 'liner-notes API',
+      description: 'Graph-driven vinyl record collection explorer',
+      version: '1.0.0',
+    },
+    servers: [{ url: 'http://localhost:3000' }],
+    tags: [
+      { name: 'ops', description: 'Health and admin operations' },
+      { name: 'admin', description: 'Ingestion control and operational status' },
+      { name: 'collection', description: 'Release, artist, and label queries' },
+      { name: 'explore', description: 'Relationship traversal endpoints' },
+      { name: 'search', description: 'Full-text search' },
+    ],
+    components: {
+      securitySchemes: {
+        bearerAuth: { type: 'http' as const, scheme: 'bearer' },
+      },
+    },
+  },
+};
+
+/**
+ * Minimal server for OpenAPI spec generation — registers swagger + routes but
+ * skips the onReady DB hook, so it runs without a Neo4j connection.
+ * Used by scripts/generate-openapi.ts.
+ */
+export async function buildDocsServer(): Promise<FastifyInstance> {
+  const app = Fastify({ logger: false });
+  await app.register(swagger, OPENAPI_CONFIG);
+  await app.register(swaggerUi, {
+    routePrefix: '/api/docs',
+    uiConfig: { docExpansion: 'list' },
+  });
+  await app.register(healthRoutes);
+  await app.register(adminRoutes, { prefix: '/api/v1/admin' });
+  return app;
+}
+
 export async function buildServer(): Promise<FastifyInstance> {
   const app = Fastify({ logger: true });
 
-  await app.register(swagger, {
-    openapi: {
-      info: {
-        title: 'liner-notes API',
-        description: 'Graph-driven vinyl record collection explorer',
-        version: '1.0.0',
-      },
-      servers: [{ url: 'http://localhost:3000' }],
-      tags: [
-        { name: 'ops', description: 'Health and admin operations' },
-        { name: 'admin', description: 'Ingestion control and operational status' },
-        { name: 'collection', description: 'Release, artist, and label queries' },
-        { name: 'explore', description: 'Relationship traversal endpoints' },
-        { name: 'search', description: 'Full-text search' },
-      ],
-    },
-  });
+  await app.register(swagger, OPENAPI_CONFIG);
 
   await app.register(swaggerUi, {
     routePrefix: '/api/docs',

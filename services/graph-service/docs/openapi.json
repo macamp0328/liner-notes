@@ -1,0 +1,92 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "liner-notes API",
+    "description": "Graph-driven vinyl record collection explorer",
+    "version": "1.0.0"
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {}
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "summary": "Service and Neo4j health check",
+        "tags": ["ops"],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["status", "neo4j"],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["ok"]
+                    },
+                    "neo4j": {
+                      "type": "string",
+                      "enum": ["connected"]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["status", "neo4j"],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["error"]
+                    },
+                    "neo4j": {
+                      "type": "string",
+                      "enum": ["disconnected"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000"
+    }
+  ],
+  "tags": [
+    {
+      "name": "ops",
+      "description": "Health and admin operations"
+    },
+    {
+      "name": "collection",
+      "description": "Release, artist, and label queries"
+    },
+    {
+      "name": "explore",
+      "description": "Relationship traversal endpoints"
+    },
+    {
+      "name": "search",
+      "description": "Full-text search"
+    }
+  ]
+}
