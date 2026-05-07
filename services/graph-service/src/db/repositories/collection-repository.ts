@@ -470,7 +470,7 @@ RETURN l.discogsId AS discogsId, l.name AS name,
         format: toStr(r.format),
         thumbUrl: toStr(r.thumbUrl),
         catalogNumber: toStr(r.catalogNumber) ?? '',
-        artistName: ([...(r.artistNames as string[])].sort()[0] as string | undefined) ?? null,
+        artistName: [...(r.artistNames as string[])].sort()[0] ?? null,
       }))
       .sort((a, b) => {
         const yearDiff = (b.year ?? 0) - (a.year ?? 0);
