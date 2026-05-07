@@ -81,10 +81,22 @@ describe('job-state', () => {
   });
 
   it('getJobState returns a copy and mutations do not affect internal state', async () => {
-    const { getJobState, startJob } = await import('../../../src/ingestion/job-state.js');
+    const { getJobState, startJob, completeJob } =
+      await import('../../../src/ingestion/job-state.js');
     startJob();
-    const state = getJobState();
-    state.status = 'idle';
-    expect(getJobState().status).toBe('running');
+    completeJob(sampleStats);
+
+    // Top-level primitive mutation
+    const snap1 = getJobState();
+    snap1.status = 'idle';
+    expect(getJobState().status).toBe('complete');
+
+    // Nested object mutation — structuredClone ensures these don't bleed through
+    const snap2 = getJobState();
+    snap2.stats!.nodes['Release'] = 9999;
+    snap2.stats!.errors.push('injected');
+    const fresh = getJobState();
+    expect(fresh.stats!.nodes['Release']).toBe(10);
+    expect(fresh.stats!.errors).toHaveLength(0);
   });
 });

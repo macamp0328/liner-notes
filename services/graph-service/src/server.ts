@@ -28,6 +28,11 @@ export async function buildServer(): Promise<FastifyInstance> {
         { name: 'explore', description: 'Relationship traversal endpoints' },
         { name: 'search', description: 'Full-text search' },
       ],
+      components: {
+        securitySchemes: {
+          bearerAuth: { type: 'http', scheme: 'bearer' },
+        },
+      },
     },
   });
 
