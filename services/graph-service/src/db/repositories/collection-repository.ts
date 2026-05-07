@@ -155,25 +155,29 @@ export async function listReleases(
 OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
 OPTIONAL MATCH (r)-[:ON_LABEL]->(l:Label)
 WITH r,
-     collect(DISTINCT a.name)[0] AS artistName,
-     collect(DISTINCT l.name)[0] AS labelName
+     [x IN collect(DISTINCT a.name) WHERE x IS NOT NULL | x] AS artistNames,
+     [x IN collect(DISTINCT l.name) WHERE x IS NOT NULL | x] AS labelNames
 RETURN r.discogsId AS discogsId, r.title AS title, r.year AS year,
        r.format AS format, r.thumbUrl AS thumbUrl,
-       artistName, labelName
+       artistNames, labelNames
 ORDER BY r.title ASC
 SKIP $skip LIMIT $limit`,
       { skip: neo4j.int(skip), limit: neo4j.int(limit) },
     );
 
-    const items: ReleaseListItem[] = dataResult.records.map((record) => ({
-      discogsId: toInt(record.get('discogsId') as unknown) ?? 0,
-      title: toStr(record.get('title') as unknown) ?? '',
-      year: toInt(record.get('year') as unknown),
-      format: toStr(record.get('format') as unknown),
-      thumbUrl: toStr(record.get('thumbUrl') as unknown),
-      artistName: toStr(record.get('artistName') as unknown),
-      labelName: toStr(record.get('labelName') as unknown),
-    }));
+    const items: ReleaseListItem[] = dataResult.records.map((record) => {
+      const artistNames = ([...(record.get('artistNames') as string[])] as string[]).sort();
+      const labelNames = ([...(record.get('labelNames') as string[])] as string[]).sort();
+      return {
+        discogsId: toInt(record.get('discogsId') as unknown) ?? 0,
+        title: toStr(record.get('title') as unknown) ?? '',
+        year: toInt(record.get('year') as unknown),
+        format: toStr(record.get('format') as unknown),
+        thumbUrl: toStr(record.get('thumbUrl') as unknown),
+        artistName: artistNames[0] ?? null,
+        labelName: labelNames[0] ?? null,
+      };
+    });
 
     return { items, total };
   } finally {
@@ -245,7 +249,8 @@ RETURN r,
         discogsId: toInt(a.discogsId) ?? 0,
         name: toStr(a.name) ?? '',
         role: toStr(a.role) ?? '',
-      }));
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
 
     const rawLabels = rec.get('labels') as RawLabelMap[];
     const labels: ReleaseLabel[] = rawLabels
@@ -254,17 +259,18 @@ RETURN r,
         discogsId: toInt(l.discogsId) ?? 0,
         name: toStr(l.name) ?? '',
         catalogNumber: toStr(l.catalogNumber) ?? '',
-      }));
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
 
-    const genres: string[] = (rec.get('genres') as unknown[]).filter(
-      (g): g is string => g !== null,
-    );
-    const styles: string[] = (rec.get('styles') as unknown[]).filter(
-      (s): s is string => s !== null,
-    );
-    const studios: string[] = (rec.get('studios') as unknown[]).filter(
-      (s): s is string => s !== null,
-    );
+    const genres: string[] = (rec.get('genres') as unknown[])
+      .filter((g): g is string => g !== null)
+      .sort();
+    const styles: string[] = (rec.get('styles') as unknown[])
+      .filter((s): s is string => s !== null)
+      .sort();
+    const studios: string[] = (rec.get('studios') as unknown[])
+      .filter((s): s is string => s !== null)
+      .sort();
 
     const rawCredits = rec.get('credits') as RawCreditMap[];
     const credits: ReleaseCredit[] = rawCredits
@@ -274,16 +280,17 @@ RETURN r,
         role: toStr(c.role) ?? '',
         displayRole: toStr(c.displayRole) ?? '',
         creditedAs: toStr(c.creditedAs),
-      }));
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
 
     const tracksResult = await session.run(
-      `MATCH (r:Release {discogsId: $discogsId})-[:HAS_TRACK]->(t:Track)
+      `MATCH (r:Release {discogsId: $discogsId})-[ht:HAS_TRACK]->(t:Track)
 OPTIONAL MATCH (m:Musician)-[co:CREDITED_ON]->(t)
-WITH t, collect({name: m.name, role: co.role,
+WITH t, ht.trackNumber AS trackNumber, collect({name: m.name, role: co.role,
      displayRole: co.displayRole, creditedAs: co.creditedAs}) AS musicians
 RETURN t.position AS position, t.title AS title, t.duration AS duration,
        t.lyrics AS lyrics, t.lyricsSource AS lyricsSource, musicians
-ORDER BY t.position ASC`,
+ORDER BY trackNumber ASC`,
       { discogsId: neo4j.int(discogsId) },
     );
 
@@ -376,7 +383,11 @@ RETURN a.discogsId AS discogsId, a.name AS name,
         format: toStr(r.format),
         thumbUrl: toStr(r.thumbUrl),
         role: toStr(r.role) ?? '',
-      }));
+      }))
+      .sort((a, b) => {
+        const yearDiff = (b.year ?? 0) - (a.year ?? 0);
+        return yearDiff !== 0 ? yearDiff : a.title.localeCompare(b.title);
+      });
 
     const creditsResult = await session.run(
       `MATCH (m:Musician)-[:SAME_PERSON_AS]->(a:Artist {discogsId: $discogsId})
@@ -427,7 +438,7 @@ interface RawLabelReleaseMap {
   format: unknown;
   thumbUrl: unknown;
   catalogNumber: unknown;
-  artistName: unknown;
+  artistNames: unknown;
 }
 
 export async function getLabelById(driver: Driver, discogsId: number): Promise<LabelFull | null> {
@@ -437,12 +448,12 @@ export async function getLabelById(driver: Driver, discogsId: number): Promise<L
       `MATCH (l:Label {discogsId: $discogsId})
 OPTIONAL MATCH (r:Release)-[ol:ON_LABEL]->(l)
 OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
-WITH l, r, ol, collect(DISTINCT a.name)[0] AS artistName
+WITH l, r, ol, [x IN collect(DISTINCT a.name) WHERE x IS NOT NULL | x] AS artistNames
 RETURN l.discogsId AS discogsId, l.name AS name,
        l.profile AS profile, l.contactInfo AS contactInfo,
   collect(DISTINCT {discogsId: r.discogsId, title: r.title, year: r.year,
     format: r.format, thumbUrl: r.thumbUrl,
-    catalogNumber: ol.catalogNumber, artistName: artistName}) AS releases`,
+    catalogNumber: ol.catalogNumber, artistNames: artistNames}) AS releases`,
       { discogsId: neo4j.int(discogsId) },
     );
 
@@ -459,8 +470,12 @@ RETURN l.discogsId AS discogsId, l.name AS name,
         format: toStr(r.format),
         thumbUrl: toStr(r.thumbUrl),
         catalogNumber: toStr(r.catalogNumber) ?? '',
-        artistName: toStr(r.artistName),
-      }));
+        artistName: ([...(r.artistNames as string[])].sort()[0] as string | undefined) ?? null,
+      }))
+      .sort((a, b) => {
+        const yearDiff = (b.year ?? 0) - (a.year ?? 0);
+        return yearDiff !== 0 ? yearDiff : a.title.localeCompare(b.title);
+      });
 
     return {
       discogsId: toInt(rec.get('discogsId') as unknown) ?? 0,

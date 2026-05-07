@@ -76,8 +76,8 @@ describe('listReleases', () => {
       year: makeNeo4jInt(2019),
       format: 'Vinyl',
       thumbUrl: 'https://example.com/thumb.jpg',
-      artistName: 'Big Thief',
-      labelName: '4AD',
+      artistNames: ['Big Thief'],
+      labelNames: ['4AD'],
     });
 
     const { session } = makeMockSession([makeResult([countRecord]), makeResult([dataRecord])]);
@@ -134,8 +134,8 @@ describe('listReleases', () => {
       year: null,
       format: null,
       thumbUrl: null,
-      artistName: null,
-      labelName: null,
+      artistNames: [],
+      labelNames: [],
     });
 
     const { session } = makeMockSession([
@@ -461,7 +461,7 @@ describe('getLabelById', () => {
           format: 'Vinyl',
           thumbUrl: null,
           catalogNumber: '4AD0129LP',
-          artistName: 'Big Thief',
+          artistNames: ['Big Thief'],
         },
       ],
     });
@@ -496,7 +496,7 @@ describe('getLabelById', () => {
           format: null,
           thumbUrl: null,
           catalogNumber: null,
-          artistName: null,
+          artistNames: [],
         },
       ],
     });
