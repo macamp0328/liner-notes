@@ -1,0 +1,924 @@
+{
+  "id": 13570466,
+  "status": "Accepted",
+  "year": 2019,
+  "resource_url": "https://api.discogs.com/releases/13570466",
+  "uri": "https://www.discogs.com/release/13570466-Big-Thief-UFOF",
+  "artists": [
+    {
+      "name": "Big Thief",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 5009441,
+      "resource_url": "https://api.discogs.com/artists/5009441",
+      "thumbnail_url": "https://i.discogs.com/uldSI_8y9-EVTFKjv3E29Jn3gnu25YGfGavFABX3w9g/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9BLTUwMDk0/NDEtMTc2Njg2NDgx/NC00MTgzLnBuZw.jpeg"
+    }
+  ],
+  "artists_sort": "Big Thief",
+  "labels": [
+    {
+      "name": "4AD",
+      "catno": "4AD0129LP",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 634,
+      "resource_url": "https://api.discogs.com/labels/634",
+      "thumbnail_url": "https://i.discogs.com/2xCfhG-Zmz-gt18imyL4Q9pbuzOhEHEZ1EEW1qJ0r5I/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTYzNC0x/NDk4MTU1NzY0LTI3/MDIucG5n.jpeg"
+    }
+  ],
+  "series": [],
+  "companies": [
+    {
+      "name": "Sterling Sound",
+      "catno": "",
+      "entity_type": "30",
+      "entity_type_name": "Lacquer Cut At",
+      "id": 264060,
+      "resource_url": "https://api.discogs.com/labels/264060",
+      "thumbnail_url": "https://i.discogs.com/Z8f0gMBrt5jLL4TAcCYDGXmMPOLi9V0UW593WXP6BUU/rs:fit/g:sm/q:90/h:118/w:400/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTI2NDA2/MC0xNTAwMjgzMzYy/LTMyMTguanBlZw.jpeg"
+    },
+    {
+      "name": "4AD Ltd.",
+      "catno": "",
+      "entity_type": "13",
+      "entity_type_name": "Phonographic Copyright (p)",
+      "id": 273745,
+      "resource_url": "https://api.discogs.com/labels/273745"
+    },
+    {
+      "name": "4AD Ltd.",
+      "catno": "",
+      "entity_type": "14",
+      "entity_type_name": "Copyright (c)",
+      "id": 273745,
+      "resource_url": "https://api.discogs.com/labels/273745"
+    },
+    {
+      "name": "Bear Creek Studios",
+      "catno": "",
+      "entity_type": "23",
+      "entity_type_name": "Recorded At",
+      "id": 274542,
+      "resource_url": "https://api.discogs.com/labels/274542",
+      "thumbnail_url": "https://i.discogs.com/18GteH79ZJ3j5ogm1a_ldRRC2U6G1Ih5W4ktjCJ51yg/rs:fit/g:sm/q:90/h:153/w:287/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTI3NDU0/Mi0xMzE2NjI3NDMx/LmpwZWc.jpeg"
+    },
+    {
+      "name": "Bear Creek Studios",
+      "catno": "",
+      "entity_type": "27",
+      "entity_type_name": "Mixed At",
+      "id": 274542,
+      "resource_url": "https://api.discogs.com/labels/274542",
+      "thumbnail_url": "https://i.discogs.com/18GteH79ZJ3j5ogm1a_ldRRC2U6G1Ih5W4ktjCJ51yg/rs:fit/g:sm/q:90/h:153/w:287/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTI3NDU0/Mi0xMzE2NjI3NDMx/LmpwZWc.jpeg"
+    }
+  ],
+  "formats": [
+    {
+      "name": "Vinyl",
+      "qty": "1",
+      "descriptions": ["LP", "Album"]
+    }
+  ],
+  "data_quality": "Needs Vote",
+  "community": {
+    "have": 2846,
+    "want": 699,
+    "rating": {
+      "count": 119,
+      "average": 4.44
+    },
+    "submitter": {
+      "username": "vinyILs",
+      "resource_url": "https://api.discogs.com/users/vinyILs"
+    },
+    "contributors": [
+      {
+        "username": "vinyILs",
+        "resource_url": "https://api.discogs.com/users/vinyILs"
+      },
+      {
+        "username": "DeadDogRecords",
+        "resource_url": "https://api.discogs.com/users/DeadDogRecords"
+      },
+      {
+        "username": "ninohernes",
+        "resource_url": "https://api.discogs.com/users/ninohernes"
+      },
+      {
+        "username": "DLoew",
+        "resource_url": "https://api.discogs.com/users/DLoew"
+      },
+      {
+        "username": "abyss.kiss",
+        "resource_url": "https://api.discogs.com/users/abyss.kiss"
+      }
+    ],
+    "data_quality": "Needs Vote",
+    "status": "Accepted"
+  },
+  "format_quantity": 1,
+  "date_added": "2019-05-01T05:55:18-07:00",
+  "date_changed": "2021-09-07T18:17:45-07:00",
+  "num_for_sale": 33,
+  "lowest_price": 17.77,
+  "master_id": 1542369,
+  "master_url": "https://api.discogs.com/masters/1542369",
+  "title": "U.F.O.F.",
+  "country": "US",
+  "released": "2019-05-03",
+  "notes": "Standard US pressing on black vinyl. Comes in a gatefold jacket and includes download card. \n\nSide B ends in a locked groove before the runout.",
+  "released_formatted": "03 May 2019",
+  "identifiers": [
+    {
+      "type": "Barcode",
+      "value": "191400012912"
+    },
+    {
+      "type": "Matrix / Runout",
+      "value": "4AD0129LP-A  US  JN-H STERLING",
+      "description": "Side A"
+    },
+    {
+      "type": "Matrix / Runout",
+      "value": "4AD0129LP-B US  JN-H STERLING",
+      "description": "Side B"
+    }
+  ],
+  "videos": [
+    {
+      "uri": "https://www.youtube.com/watch?v=AjPa7M5n2CU",
+      "title": "Big Thief - UFOF (Official Audio)",
+      "description": "'UFOF' by Big Thief, from the new album 'U.F.O.F.', released May 3rd on 4AD. Available to pre-order and pre-save here: https://bigthief.ffm.to/ufof.oyd\n\nto my ufo friend\ngoodbye, goodbye\nlike a seed in the wind\nshe’s taking up root in the sky\nsee her fl",
+      "duration": 189,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=dUR-Ad8QcmA",
+      "title": "Big Thief - Cattails (Official Audio)",
+      "description": "'Cattails' by Big Thief, from the new album 'U.F.O.F.', released May 3rd on 4AD. Available to pre-order and pre-save here: https://bigthief.ffm.to/ufof.oyd\n\nCaroline, Caroline\ni never could leave you to struggle \nhold the line, hold the line\ni’ll be the",
+      "duration": 246,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=R1CvjxgWgTU",
+      "title": "Big Thief - Century (Official Audio)",
+      "description": "'Century' by Big Thief, from the new album 'U.F.O.F.', released May 3rd on 4AD. Available to pre-order and pre-save here: https://bigthief.ffm.to/ufof.oyd\n\ndogs eyes\nin the headlights of the driveway\ncool autumn rain\nbugs died\non your windshield on the fr",
+      "duration": 187,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=AjPa7M5n2CU",
+      "title": "Big Thief - UFOF (Official Audio)",
+      "description": "'UFOF' by Big Thief, from the new album 'U.F.O.F.', released May 3rd on 4AD. Available to pre-order and pre-save here: https://bigthief.ffm.to/ufof.oyd\n\nto my ufo friend\ngoodbye, goodbye\nlike a seed in the wind\nshe’s taking up root in the sky\nsee her fl",
+      "duration": 189,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=dUR-Ad8QcmA",
+      "title": "Big Thief - Cattails (Official Audio)",
+      "description": "'Cattails' by Big Thief, from the new album 'U.F.O.F.', released May 3rd on 4AD. Available to pre-order and pre-save here: https://bigthief.ffm.to/ufof.oyd\n\nCaroline, Caroline\ni never could leave you to struggle \nhold the line, hold the line\ni’ll be the",
+      "duration": 246,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=R1CvjxgWgTU",
+      "title": "Big Thief - Century (Official Audio)",
+      "description": "'Century' by Big Thief, from the new album 'U.F.O.F.', released May 3rd on 4AD. Available to pre-order and pre-save here: https://bigthief.ffm.to/ufof.oyd\n\ndogs eyes\nin the headlights of the driveway\ncool autumn rain\nbugs died\non your windshield on the fr",
+      "duration": 187,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=ejzzO51e4xI",
+      "title": "Big Thief - Mythological Beauty",
+      "description": "Big Thief - Mythological Beauty\nFrom the album Capacity - June 9th, 2017\nOrder Capacity here: https://bigthief.lnk.to/capacity\n\nA Slopehouse Production\n\nIn association with Panoptica Films and Riot Time Pictures\n\nDirected by Vanessa Haddad\nCinematography ",
+      "duration": 314,
+      "embed": true
+    }
+  ],
+  "genres": ["Rock"],
+  "styles": ["Indie Rock", "Folk Rock"],
+  "tracklist": [
+    {
+      "position": "A1",
+      "type_": "track",
+      "title": "Contact",
+      "extraartists": [
+        {
+          "name": "Adrianne Lenker",
+          "anv": "",
+          "join": "",
+          "role": "Acoustic Guitar, Electric Guitar, Vocals",
+          "tracks": "",
+          "id": 4389708,
+          "resource_url": "https://api.discogs.com/artists/4389708"
+        },
+        {
+          "name": "Max Oleartchik",
+          "anv": "",
+          "join": "",
+          "role": "Bass, Drone [Bass Drone]",
+          "tracks": "",
+          "id": 5082777,
+          "resource_url": "https://api.discogs.com/artists/5082777"
+        },
+        {
+          "name": "James Krivchenia",
+          "anv": "",
+          "join": "",
+          "role": "Drums",
+          "tracks": "",
+          "id": 4620347,
+          "resource_url": "https://api.discogs.com/artists/4620347"
+        },
+        {
+          "name": "Buck Meek",
+          "anv": "",
+          "join": "",
+          "role": "Electric Guitar",
+          "tracks": "",
+          "id": 5076304,
+          "resource_url": "https://api.discogs.com/artists/5076304"
+        }
+      ],
+      "duration": ""
+    },
+    {
+      "position": "A2",
+      "type_": "track",
+      "title": "UFOF",
+      "extraartists": [
+        {
+          "name": "Adrianne Lenker",
+          "anv": "",
+          "join": "",
+          "role": "Acoustic Guitar, Vocals, Choir, Keyboards [Sk5]",
+          "tracks": "",
+          "id": 4389708,
+          "resource_url": "https://api.discogs.com/artists/4389708"
+        },
+        {
+          "name": "Max Oleartchik",
+          "anv": "",
+          "join": "",
+          "role": "Bass, Drone [Bass Drone], Choir",
+          "tracks": "",
+          "id": 5082777,
+          "resource_url": "https://api.discogs.com/artists/5082777"
+        },
+        {
+          "name": "James Krivchenia",
+          "anv": "",
+          "join": "",
+          "role": "Drums, Percussion, Choir, Keyboards [Sk5]",
+          "tracks": "",
+          "id": 4620347,
+          "resource_url": "https://api.discogs.com/artists/4620347"
+        },
+        {
+          "name": "Buck Meek",
+          "anv": "",
+          "join": "",
+          "role": "Electric Guitar",
+          "tracks": "",
+          "id": 5076304,
+          "resource_url": "https://api.discogs.com/artists/5076304"
+        }
+      ],
+      "duration": ""
+    },
+    {
+      "position": "A3",
+      "type_": "track",
+      "title": "Cattails",
+      "extraartists": [
+        {
+          "name": "Adrianne Lenker",
+          "anv": "",
+          "join": "",
+          "role": "Acoustic Guitar, Vocals, Piano",
+          "tracks": "",
+          "id": 4389708,
+          "resource_url": "https://api.discogs.com/artists/4389708"
+        },
+        {
+          "name": "James Krivchenia",
+          "anv": "",
+          "join": "",
+          "role": "Drums",
+          "tracks": "",
+          "id": 4620347,
+          "resource_url": "https://api.discogs.com/artists/4620347"
+        },
+        {
+          "name": "Buck Meek",
+          "anv": "",
+          "join": "",
+          "role": "Electric Guitar",
+          "tracks": "",
+          "id": 5076304,
+          "resource_url": "https://api.discogs.com/artists/5076304"
+        },
+        {
+          "name": "Max Oleartchik",
+          "anv": "",
+          "join": "",
+          "role": "Piano, Drone [Bass Drone]",
+          "tracks": "",
+          "id": 5082777,
+          "resource_url": "https://api.discogs.com/artists/5082777"
+        }
+      ],
+      "duration": ""
+    },
+    {
+      "position": "A4",
+      "type_": "track",
+      "title": "From",
+      "extraartists": [
+        {
+          "name": "Adrianne Lenker",
+          "anv": "",
+          "join": "",
+          "role": "Acoustic Guitar, Vocals, Choir",
+          "tracks": "",
+          "id": 4389708,
+          "resource_url": "https://api.discogs.com/artists/4389708"
+        },
+        {
+          "name": "Max Oleartchik",
+          "anv": "",
+          "join": "",
+          "role": "Bass, Bells, Choir",
+          "tracks": "",
+          "id": 5082777,
+          "resource_url": "https://api.discogs.com/artists/5082777"
+        },
+        {
+          "name": "Zoë Lenker",
+          "anv": "",
+          "join": "",
+          "role": "Choir",
+          "tracks": "",
+          "id": 5847493,
+          "resource_url": "https://api.discogs.com/artists/5847493"
+        },
+        {
+          "name": "James Krivchenia",
+          "anv": "",
+          "join": "",
+          "role": "Drums, Choir, Sampler [Magic Box]",
+          "tracks": "",
+          "id": 4620347,
+          "resource_url": "https://api.discogs.com/artists/4620347"
+        },
+        {
+          "name": "Buck Meek",
+          "anv": "",
+          "join": "",
+          "role": "Electric Guitar, Handclaps [Clap], Choir",
+          "tracks": "",
+          "id": 5076304,
+          "resource_url": "https://api.discogs.com/artists/5076304"
+        }
+      ],
+      "duration": ""
+    },
+    {
+      "position": "A5",
+      "type_": "track",
+      "title": "Open Desert",
+      "extraartists": [
+        {
+          "name": "Adrianne Lenker",
+          "anv": "",
+          "join": "",
+          "role": "Acoustic Guitar, Electric Guitar, Vocals, Chimes, Choir",
+          "tracks": "",
+          "id": 4389708,
+          "resource_url": "https://api.discogs.com/artists/4389708"
+        },
+        {
+          "name": "Max Oleartchik",
+          "anv": "",
+          "join": "",
+          "role": "Bass",
+          "tracks": "",
+          "id": 5082777,
+          "resource_url": "https://api.discogs.com/artists/5082777"
+        },
+        {
+          "name": "James Krivchenia",
+          "anv": "",
+          "join": "",
+          "role": "Drums, Chimes, Choir, Sampler [Magic Box]",
+          "tracks": "",
+          "id": 4620347,
+          "resource_url": "https://api.discogs.com/artists/4620347"
+        },
+        {
+          "name": "Buck Meek",
+          "anv": "",
+          "join": "",
+          "role": "Electric Guitar",
+          "tracks": "",
+          "id": 5076304,
+          "resource_url": "https://api.discogs.com/artists/5076304"
+        }
+      ],
+      "duration": ""
+    },
+    {
+      "position": "A6",
+      "type_": "track",
+      "title": "Orange",
+      "extraartists": [
+        {
+          "name": "Adrianne Lenker",
+          "anv": "",
+          "join": "",
+          "role": "Acoustic Guitar, Vocals",
+          "tracks": "",
+          "id": 4389708,
+          "resource_url": "https://api.discogs.com/artists/4389708"
+        }
+      ],
+      "duration": ""
+    },
+    {
+      "position": "B1",
+      "type_": "track",
+      "title": "Century",
+      "extraartists": [
+        {
+          "name": "Adrianne Lenker",
+          "anv": "",
+          "join": "",
+          "role": "Acoustic Guitar, Vocals",
+          "tracks": "",
+          "id": 4389708,
+          "resource_url": "https://api.discogs.com/artists/4389708"
+        },
+        {
+          "name": "Max Oleartchik",
+          "anv": "",
+          "join": "",
+          "role": "Bass",
+          "tracks": "",
+          "id": 5082777,
+          "resource_url": "https://api.discogs.com/artists/5082777"
+        },
+        {
+          "name": "James Krivchenia",
+          "anv": "",
+          "join": "",
+          "role": "Drums",
+          "tracks": "",
+          "id": 4620347,
+          "resource_url": "https://api.discogs.com/artists/4620347"
+        },
+        {
+          "name": "Buck Meek",
+          "anv": "",
+          "join": "",
+          "role": "Electric Guitar, Vocals",
+          "tracks": "",
+          "id": 5076304,
+          "resource_url": "https://api.discogs.com/artists/5076304"
+        }
+      ],
+      "duration": ""
+    },
+    {
+      "position": "B2",
+      "type_": "track",
+      "title": "Strange",
+      "extraartists": [
+        {
+          "name": "Max Oleartchik",
+          "anv": "",
+          "join": "",
+          "role": "Bass, Drone [Bass Drone], Voice [Breath], Shaker",
+          "tracks": "",
+          "id": 5082777,
+          "resource_url": "https://api.discogs.com/artists/5082777"
+        },
+        {
+          "name": "James Krivchenia",
+          "anv": "",
+          "join": "",
+          "role": "Drums, Voice [Breath], Synthesizer [Moog], Sampler [Magic Box]",
+          "tracks": "",
+          "id": 4620347,
+          "resource_url": "https://api.discogs.com/artists/4620347"
+        },
+        {
+          "name": "Buck Meek",
+          "anv": "",
+          "join": "",
+          "role": "Electric Guitar",
+          "tracks": "",
+          "id": 5076304,
+          "resource_url": "https://api.discogs.com/artists/5076304"
+        },
+        {
+          "name": "Adrianne Lenker",
+          "anv": "",
+          "join": "",
+          "role": "Electric Guitar, Vocals, Voice [Breath], Choir, Percussion",
+          "tracks": "",
+          "id": 4389708,
+          "resource_url": "https://api.discogs.com/artists/4389708"
+        }
+      ],
+      "duration": ""
+    },
+    {
+      "position": "B3",
+      "type_": "track",
+      "title": "Betsy",
+      "extraartists": [
+        {
+          "name": "Adrianne Lenker",
+          "anv": "",
+          "join": "",
+          "role": "Acoustic Guitar, Electric Guitar, Vocals",
+          "tracks": "",
+          "id": 4389708,
+          "resource_url": "https://api.discogs.com/artists/4389708"
+        },
+        {
+          "name": "Max Oleartchik",
+          "anv": "",
+          "join": "",
+          "role": "Bass",
+          "tracks": "",
+          "id": 5082777,
+          "resource_url": "https://api.discogs.com/artists/5082777"
+        },
+        {
+          "name": "James Krivchenia",
+          "anv": "",
+          "join": "",
+          "role": "Drums, Tambourine",
+          "tracks": "",
+          "id": 4620347,
+          "resource_url": "https://api.discogs.com/artists/4620347"
+        },
+        {
+          "name": "Buck Meek",
+          "anv": "",
+          "join": "",
+          "role": "Electric Guitar",
+          "tracks": "",
+          "id": 5076304,
+          "resource_url": "https://api.discogs.com/artists/5076304"
+        },
+        {
+          "name": "Andrew Sarlo",
+          "anv": "",
+          "join": "",
+          "role": "Wind",
+          "tracks": "",
+          "id": 3227570,
+          "resource_url": "https://api.discogs.com/artists/3227570"
+        }
+      ],
+      "duration": ""
+    },
+    {
+      "position": "B4",
+      "type_": "track",
+      "title": "Terminal Paradise",
+      "extraartists": [
+        {
+          "name": "Adrianne Lenker",
+          "anv": "",
+          "join": "",
+          "role": "Acoustic Guitar, Vocals, Keyboards [Sk5]",
+          "tracks": "",
+          "id": 4389708,
+          "resource_url": "https://api.discogs.com/artists/4389708"
+        },
+        {
+          "name": "Max Oleartchik",
+          "anv": "",
+          "join": "",
+          "role": "Bass, Drone [Bass Drone]",
+          "tracks": "",
+          "id": 5082777,
+          "resource_url": "https://api.discogs.com/artists/5082777"
+        },
+        {
+          "name": "James Krivchenia",
+          "anv": "",
+          "join": "",
+          "role": "Drums",
+          "tracks": "",
+          "id": 4620347,
+          "resource_url": "https://api.discogs.com/artists/4620347"
+        },
+        {
+          "name": "Buck Meek",
+          "anv": "",
+          "join": "",
+          "role": "Electric Guitar, Vocals",
+          "tracks": "",
+          "id": 5076304,
+          "resource_url": "https://api.discogs.com/artists/5076304"
+        }
+      ],
+      "duration": ""
+    },
+    {
+      "position": "B5",
+      "type_": "track",
+      "title": "Jenni",
+      "extraartists": [
+        {
+          "name": "Max Oleartchik",
+          "anv": "",
+          "join": "",
+          "role": "Bass",
+          "tracks": "",
+          "id": 5082777,
+          "resource_url": "https://api.discogs.com/artists/5082777"
+        },
+        {
+          "name": "James Krivchenia",
+          "anv": "",
+          "join": "",
+          "role": "Drums, Vocals",
+          "tracks": "",
+          "id": 4620347,
+          "resource_url": "https://api.discogs.com/artists/4620347"
+        },
+        {
+          "name": "Adrianne Lenker",
+          "anv": "",
+          "join": "",
+          "role": "Electric Guitar, Vocals",
+          "tracks": "",
+          "id": 4389708,
+          "resource_url": "https://api.discogs.com/artists/4389708"
+        },
+        {
+          "name": "Buck Meek",
+          "anv": "",
+          "join": "",
+          "role": "Guitar [Feedback]",
+          "tracks": "",
+          "id": 5076304,
+          "resource_url": "https://api.discogs.com/artists/5076304"
+        }
+      ],
+      "duration": ""
+    },
+    {
+      "position": "B6",
+      "type_": "track",
+      "title": "Magic Dealer",
+      "extraartists": [
+        {
+          "name": "Max Oleartchik",
+          "anv": "",
+          "join": "",
+          "role": "Bass, Sounds [Ambience]",
+          "tracks": "",
+          "id": 5082777,
+          "resource_url": "https://api.discogs.com/artists/5082777"
+        },
+        {
+          "name": "James Krivchenia",
+          "anv": "",
+          "join": "",
+          "role": "Drums [Drum Fill], Sounds [Ambience]",
+          "tracks": "",
+          "id": 4620347,
+          "resource_url": "https://api.discogs.com/artists/4620347"
+        },
+        {
+          "name": "Andrew Sarlo",
+          "anv": "",
+          "join": "",
+          "role": "Sounds [Ambience]",
+          "tracks": "",
+          "id": 3227570,
+          "resource_url": "https://api.discogs.com/artists/3227570"
+        },
+        {
+          "name": "Buck Meek",
+          "anv": "",
+          "join": "",
+          "role": "Sounds [Ambience]",
+          "tracks": "",
+          "id": 5076304,
+          "resource_url": "https://api.discogs.com/artists/5076304"
+        },
+        {
+          "name": "Dominic Monks",
+          "anv": "Dom Monks",
+          "join": "",
+          "role": "Sounds [Ambience]",
+          "tracks": "",
+          "id": 812134,
+          "resource_url": "https://api.discogs.com/artists/812134"
+        },
+        {
+          "name": "Adrianne Lenker",
+          "anv": "",
+          "join": "",
+          "role": "Vocals, Sounds [Ambience]",
+          "tracks": "",
+          "id": 4389708,
+          "resource_url": "https://api.discogs.com/artists/4389708"
+        }
+      ],
+      "duration": ""
+    }
+  ],
+  "extraartists": [
+    {
+      "name": "Alison Fielding",
+      "anv": "",
+      "join": "",
+      "role": "Design [Production Design]",
+      "tracks": "",
+      "id": 524232,
+      "resource_url": "https://api.discogs.com/artists/524232"
+    },
+    {
+      "name": "Sarah Schiesser",
+      "anv": "",
+      "join": "",
+      "role": "Design, Layout",
+      "tracks": "",
+      "id": 7146076,
+      "resource_url": "https://api.discogs.com/artists/7146076"
+    },
+    {
+      "name": "Dominic Monks",
+      "anv": "",
+      "join": "",
+      "role": "Engineer, Mixed By",
+      "tracks": "",
+      "id": 812134,
+      "resource_url": "https://api.discogs.com/artists/812134"
+    },
+    {
+      "name": "Joe Nino-Hernes",
+      "anv": "JN-H",
+      "join": "",
+      "role": "Lacquer Cut By",
+      "tracks": "",
+      "id": 6012918,
+      "resource_url": "https://api.discogs.com/artists/6012918"
+    },
+    {
+      "name": "Greg Calbi",
+      "anv": "",
+      "join": "",
+      "role": "Mastered By",
+      "tracks": "",
+      "id": 244135,
+      "resource_url": "https://api.discogs.com/artists/244135"
+    },
+    {
+      "name": "McKenna Lee",
+      "anv": "",
+      "join": "",
+      "role": "Other [Catered By]",
+      "tracks": "",
+      "id": 0,
+      "resource_url": ""
+    },
+    {
+      "name": "Tom Wironen",
+      "anv": "",
+      "join": "",
+      "role": "Other [Catered By]",
+      "tracks": "",
+      "id": 0,
+      "resource_url": ""
+    },
+    {
+      "name": "Zoë Lenker",
+      "anv": "",
+      "join": "",
+      "role": "Other [Catered By]",
+      "tracks": "",
+      "id": 0,
+      "resource_url": ""
+    },
+    {
+      "name": "Carson Talerico",
+      "anv": "",
+      "join": "",
+      "role": "Other [Extra Care By]",
+      "tracks": "",
+      "id": 0,
+      "resource_url": ""
+    },
+    {
+      "name": "Jeremy Binder",
+      "anv": "",
+      "join": "",
+      "role": "Other [Extra Care By]",
+      "tracks": "",
+      "id": 0,
+      "resource_url": ""
+    },
+    {
+      "name": "Big Thief",
+      "anv": "",
+      "join": "",
+      "role": "Performer",
+      "tracks": "",
+      "id": 5009441,
+      "resource_url": "https://api.discogs.com/artists/5009441"
+    },
+    {
+      "name": "Dustin Condren",
+      "anv": "",
+      "join": "",
+      "role": "Photography By [Cover Photography]",
+      "tracks": "",
+      "id": 5822064,
+      "resource_url": "https://api.discogs.com/artists/5822064"
+    },
+    {
+      "name": "Andrew Sarlo",
+      "anv": "",
+      "join": "",
+      "role": "Producer",
+      "tracks": "",
+      "id": 3227570,
+      "resource_url": "https://api.discogs.com/artists/3227570"
+    },
+    {
+      "name": "Adrianne Lenker",
+      "anv": "",
+      "join": "",
+      "role": "Songwriter",
+      "tracks": "",
+      "id": 4389708,
+      "resource_url": "https://api.discogs.com/artists/4389708"
+    },
+    {
+      "name": "Taylor Carroll",
+      "anv": "",
+      "join": "",
+      "role": "Technician [Studio Brain], Engineer [Assistant Engineer]",
+      "tracks": "",
+      "id": 5082804,
+      "resource_url": "https://api.discogs.com/artists/5082804"
+    }
+  ],
+  "images": [
+    {
+      "type": "primary",
+      "uri": "https://i.discogs.com/tkMUW09acTl4EZI37CFY0p3PebcFHde0wi69XlETkc4/rs:fit/g:sm/q:90/h:595/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEzNTcw/NDY2LTE2MzEwNjM4/MjUtMTAxMy5qcGVn.jpeg",
+      "resource_url": "https://i.discogs.com/tkMUW09acTl4EZI37CFY0p3PebcFHde0wi69XlETkc4/rs:fit/g:sm/q:90/h:595/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEzNTcw/NDY2LTE2MzEwNjM4/MjUtMTAxMy5qcGVn.jpeg",
+      "uri150": "https://i.discogs.com/aSEy2kKehQ2czVObiXyCXlSZNW545TtiXWeSTza7S7Y/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEzNTcw/NDY2LTE2MzEwNjM4/MjUtMTAxMy5qcGVn.jpeg",
+      "width": 600,
+      "height": 595
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/WY5LbnyJQ0Pp8ohEKv2a_aoNGw4cExI37N_flEeeYHw/rs:fit/g:sm/q:90/h:280/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEzNTcw/NDY2LTE2MzEwNjM4/MjEtMjY5My5qcGVn.jpeg",
+      "resource_url": "https://i.discogs.com/WY5LbnyJQ0Pp8ohEKv2a_aoNGw4cExI37N_flEeeYHw/rs:fit/g:sm/q:90/h:280/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEzNTcw/NDY2LTE2MzEwNjM4/MjEtMjY5My5qcGVn.jpeg",
+      "uri150": "https://i.discogs.com/gpY79thNXNvxiMgbqxDDfqOmAlc89DO35ZgOAsC9P78/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEzNTcw/NDY2LTE2MzEwNjM4/MjEtMjY5My5qcGVn.jpeg",
+      "width": 600,
+      "height": 280
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/jfuFUs10QLzMYZu0iGMr9JitvqzkdOUx4XLS3taS_wk/rs:fit/g:sm/q:90/h:600/w:599/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEzNTcw/NDY2LTE2MzEwNjM4/MjQtNDE4OS5qcGVn.jpeg",
+      "resource_url": "https://i.discogs.com/jfuFUs10QLzMYZu0iGMr9JitvqzkdOUx4XLS3taS_wk/rs:fit/g:sm/q:90/h:600/w:599/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEzNTcw/NDY2LTE2MzEwNjM4/MjQtNDE4OS5qcGVn.jpeg",
+      "uri150": "https://i.discogs.com/c9lF6yd2hoSizjsFj4x5CPOrIZegAboAABmlj-c5mm8/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEzNTcw/NDY2LTE2MzEwNjM4/MjQtNDE4OS5qcGVn.jpeg",
+      "width": 599,
+      "height": 600
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/vNyLDbchZf8v_KMLitstPeUxoq3LRmviFY7cF1V-2A8/rs:fit/g:sm/q:90/h:597/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEzNTcw/NDY2LTE2MzEwNjM4/MjQtMjUxNS5qcGVn.jpeg",
+      "resource_url": "https://i.discogs.com/vNyLDbchZf8v_KMLitstPeUxoq3LRmviFY7cF1V-2A8/rs:fit/g:sm/q:90/h:597/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEzNTcw/NDY2LTE2MzEwNjM4/MjQtMjUxNS5qcGVn.jpeg",
+      "uri150": "https://i.discogs.com/8E3VBluZ3hCpGuQsg1zycdLDgQeV28TWqzwOKPU61D0/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEzNTcw/NDY2LTE2MzEwNjM4/MjQtMjUxNS5qcGVn.jpeg",
+      "width": 600,
+      "height": 597
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/hgsZcFKAH-KWMQjQ18QmC9RmIT5Dx5IE44a0JLMUnOM/rs:fit/g:sm/q:90/h:598/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEzNTcw/NDY2LTE2MzEwNjM4/MjMtNDQ1NS5qcGVn.jpeg",
+      "resource_url": "https://i.discogs.com/hgsZcFKAH-KWMQjQ18QmC9RmIT5Dx5IE44a0JLMUnOM/rs:fit/g:sm/q:90/h:598/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEzNTcw/NDY2LTE2MzEwNjM4/MjMtNDQ1NS5qcGVn.jpeg",
+      "uri150": "https://i.discogs.com/0Vj2LDMBnpSTdwHgl4a4xr5NXvlieLQQogcezT_Lftg/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEzNTcw/NDY2LTE2MzEwNjM4/MjMtNDQ1NS5qcGVn.jpeg",
+      "width": 600,
+      "height": 598
+    }
+  ],
+  "thumb": "https://i.discogs.com/aSEy2kKehQ2czVObiXyCXlSZNW545TtiXWeSTza7S7Y/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEzNTcw/NDY2LTE2MzEwNjM4/MjUtMTAxMy5qcGVn.jpeg",
+  "estimated_weight": 230,
+  "blocked_from_sale": false,
+  "is_offensive": false
+}

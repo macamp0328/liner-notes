@@ -1,0 +1,10 @@
+{
+  "id": 12345,
+  "trackName": "Song Title",
+  "artistName": "Test Artist",
+  "albumName": "Test Album",
+  "duration": 180,
+  "instrumental": false,
+  "plainLyrics": "Verse one\nLine one\n\nVerse two\nLine two",
+  "syncedLyrics": "[00:12.34] Verse one\n[00:14.00] Line one"
+}
