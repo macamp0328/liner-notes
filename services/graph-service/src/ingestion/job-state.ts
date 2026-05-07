@@ -31,7 +31,7 @@ let state: JobState = {
 };
 
 export function getJobState(): JobState {
-  return { ...state };
+  return structuredClone(state);
 }
 
 export function startJob(): string {

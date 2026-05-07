@@ -55,7 +55,6 @@ const jobStateShape = {
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post<{
-    Body: { force?: boolean };
     Reply:
       | { data: { jobId: string; message: string } }
       | { error: { code: string; message: string; jobId?: string } };
@@ -66,17 +65,6 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['admin'],
         summary: 'Trigger full Discogs → Neo4j ingestion pipeline',
         security: [{ bearerAuth: [] }],
-        body: {
-          anyOf: [
-            {
-              type: 'object',
-              properties: {
-                force: { type: 'boolean', description: 'Re-run even if graph is not empty' },
-              },
-            },
-            { type: 'null' },
-          ],
-        },
         response: {
           202: {
             type: 'object',
