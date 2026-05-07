@@ -13,6 +13,9 @@ const mockHasReleases = vi.hoisted(() => vi.fn());
 const mockMergeReleaseGraph = vi.hoisted(() => vi.fn());
 const mockGetCollectionReleases = vi.hoisted(() => vi.fn());
 const mockGetRelease = vi.hoisted(() => vi.fn());
+const mockEnrichLyrics = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 }),
+);
 
 vi.mock('../../../src/db/client.js', () => ({
   initDriver: vi.fn().mockReturnValue({ verifyConnectivity: mockVerifyConnectivity }),
@@ -34,6 +37,10 @@ vi.mock('../../../src/ingestion/discogs-client.js', () => ({
     getCollectionReleases: mockGetCollectionReleases,
     getRelease: mockGetRelease,
   })),
+}));
+
+vi.mock('../../../src/enrichment/lyrics.js', () => ({
+  enrichLyrics: mockEnrichLyrics,
 }));
 
 // ---------------------------------------------------------------------------
@@ -62,6 +69,7 @@ describe('Discogs ingestion pipeline', () => {
     // Default behaviours — graph is empty, all requests succeed
     mockHasReleases.mockResolvedValue(false);
     mockMergeReleaseGraph.mockResolvedValue(undefined);
+    mockEnrichLyrics.mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
     mockGetCollectionReleases.mockResolvedValue(collectionPage1 as DiscogsCollectionPage);
     mockGetRelease.mockImplementation((id: number) => {
       const r = releaseMap[id];
