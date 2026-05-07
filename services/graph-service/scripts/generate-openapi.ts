@@ -10,20 +10,31 @@
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import type { FastifyInstance } from 'fastify';
 import { buildDocsServer } from '../src/server.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outDir = join(__dirname, '../docs');
 const outFile = join(outDir, 'openapi.json');
 
-const app = await buildDocsServer();
-await app.ready();
+async function main(): Promise<void> {
+  let app: FastifyInstance | undefined;
+  try {
+    app = await buildDocsServer();
+    await app.ready();
+    const spec = app.swagger();
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(outFile, JSON.stringify(spec, null, 2) + '\n');
+    console.log(`OpenAPI spec written to services/graph-service/docs/openapi.json`);
+  } catch (err) {
+    console.error('Failed to generate OpenAPI spec:', err);
+    process.exitCode = 1;
+  } finally {
+    await app?.close();
+  }
+}
 
-const spec = app.swagger();
-
-mkdirSync(outDir, { recursive: true });
-writeFileSync(outFile, JSON.stringify(spec, null, 2) + '\n');
-
-await app.close();
-
-console.log(`OpenAPI spec written to services/graph-service/docs/openapi.json`);
+main().catch((err) => {
+  console.error('Unexpected error:', err);
+  process.exitCode = 1;
+});
