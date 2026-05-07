@@ -9,13 +9,13 @@ importers:
     devDependencies:
       '@typescript-eslint/eslint-plugin':
         specifier: ^7.18.0
-        version: 7.18.0(@typescript-eslint/parser@7.18.0(eslint@8.57.1)(typescript@5.9.3))(eslint@8.57.1)(typescript@5.9.3)
+        version: 7.18.0(@typescript-eslint/parser@7.18.0(eslint@8.57.1)(typescript@6.0.3))(eslint@8.57.1)(typescript@6.0.3)
       '@typescript-eslint/parser':
         specifier: ^7.18.0
-        version: 7.18.0(eslint@8.57.1)(typescript@5.9.3)
+        version: 7.18.0(eslint@8.57.1)(typescript@6.0.3)
       dotenv:
-        specifier: ^16.4.0
-        version: 16.6.1
+        specifier: ^17.4.2
+        version: 17.4.2
       eslint:
         specifier: ^8.57.1
         version: 8.57.1
@@ -29,14 +29,14 @@ importers:
         specifier: ^4.19.2
         version: 4.21.0
       typescript:
-        specifier: ^5.5.4
-        version: 5.9.3
+        specifier: ^6.0.3
+        version: 6.0.3
 
   services/graph-service:
     dependencies:
       '@fastify/rate-limit':
-        specifier: ^9.1.0
-        version: 9.1.0
+        specifier: ^10.3.0
+        version: 10.3.0
       '@fastify/swagger':
         specifier: ^9.1.0
         version: 9.7.0
@@ -50,11 +50,11 @@ importers:
         specifier: ^5.1.0
         version: 5.8.5
       neo4j-driver:
-        specifier: ^5.26.0
-        version: 5.28.3
+        specifier: ^6.0.1
+        version: 6.0.1
     devDependencies:
       '@types/node':
-        specifier: ^22.9.0
+        specifier: ^22.0.0
         version: 22.19.17
       '@vitest/coverage-v8':
         specifier: ^2.1.8
@@ -63,8 +63,8 @@ importers:
         specifier: ^4.19.2
         version: 4.21.0
       typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
+        specifier: ^6.0.3
+        version: 6.0.3
       vitest:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.17)
@@ -625,10 +625,10 @@ packages:
         integrity: sha512-INS+6gh91cLUjB+PVHfu1UqcB76Sqtpyp7bnL+FYojhjygvOPA9ctiD/JDKsyD9Xgu4hUhCSJBPig/w7duNajw==,
       }
 
-  '@fastify/rate-limit@9.1.0':
+  '@fastify/rate-limit@10.3.0':
     resolution:
       {
-        integrity: sha512-h5dZWCkuZXN0PxwqaFQLxeln8/LNwQwH9popywmDCFdKfgpi4b/HoMH1lluy6P+30CG9yzzpSpwTCIPNB9T1JA==,
+        integrity: sha512-eIGkG9XKQs0nyynatApA3EVrojHOuq4l6fhB4eeCk4PIOeadvOJz9/4w3vGI44Go17uaXOWEcPkaD8kuKm7g6Q==,
       }
 
   '@fastify/send@4.1.0':
@@ -1419,6 +1419,13 @@ packages:
       }
     engines: { node: '>=12' }
 
+  dotenv@17.4.2:
+    resolution:
+      {
+        integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==,
+      }
+    engines: { node: '>=12' }
+
   eastasianwidth@0.2.0:
     resolution:
       {
@@ -1597,12 +1604,6 @@ packages:
     resolution:
       {
         integrity: sha512-rVjf7ArG3LTk+FS6Yw81V1DLuZl1bRbNrev6Tmd/9RaroeeRRJhAt7jg/6YFxbvAQXUCavSoZhPPj6oOx+5KjQ==,
-      }
-
-  fastify-plugin@4.5.1:
-    resolution:
-      {
-        integrity: sha512-stRHYGeuqpEZTL1Ef0Ovr2ltazUT9g844X5z/zEBFLG8RYlpDiOCIG+ATvYEp+/zmc7sN29mcIMp8gvYplYPIQ==,
       }
 
   fastify-plugin@5.1.0:
@@ -2072,23 +2073,24 @@ packages:
         integrity: sha512-OWND8ei3VtNC9h7V60qff3SVobHr996CTwgxubgyQYEpg290h9J0buyECNNJexkFm5sOajh5G116RYA1c8ZMSw==,
       }
 
-  neo4j-driver-bolt-connection@5.28.3:
+  neo4j-driver-bolt-connection@6.0.1:
     resolution:
       {
-        integrity: sha512-wqHBYcU0FVRDmdsoZ+Fk0S/InYmu9/4BT6fPYh45Jimg/J7vQBUcdkiHGU7nop7HRb1ZgJmL305mJb6g5Bv35Q==,
+        integrity: sha512-1KyG73TO+CwnYJisdHD0sjUw9yR+P5q3JFcmVPzsHT4/whzCjuXSMpmY4jZcHH2PdY2cBUq4l/6WcDiPMxW2UA==,
       }
 
-  neo4j-driver-core@5.28.3:
+  neo4j-driver-core@6.0.1:
     resolution:
       {
-        integrity: sha512-Jk+hAmjFmO5YzVH/U7FyKXigot9zmIfLz6SZQy0xfr4zfTE/S8fOYFOGqKQTHBE86HHOWH2RbTslbxIb+XtU2g==,
+        integrity: sha512-5I2KxICAvcHxnWdJyDqwu8PBAQvWVTlQH2ve3VQmtVdJScPqWhpXN1PiX5IIl+cRF3pFpz9GQF53B5n6s0QQUQ==,
       }
 
-  neo4j-driver@5.28.3:
+  neo4j-driver@6.0.1:
     resolution:
       {
-        integrity: sha512-k7c0wEh3HoONv1v5AyLp9/BDAbYHJhz2TZvzWstSEU3g3suQcXmKEaYBfrK2UMzxcy3bCT0DrnfRbzsOW5G/Ag==,
+        integrity: sha512-8DDF2MwEJNz7y7cp97x4u8fmVIP4CWS8qNBxdwxTG0fWtsS+2NdeC+7uXwmmuFOpHvkfXqv63uWY73bfDtOH8Q==,
       }
+    engines: { node: '>=18.0.0' }
 
   on-exit-leak-free@2.1.2:
     resolution:
@@ -2649,10 +2651,10 @@ packages:
       }
     engines: { node: '>=10' }
 
-  typescript@5.9.3:
+  typescript@6.0.3:
     resolution:
       {
-        integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==,
+        integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==,
       }
     engines: { node: '>=14.17' }
     hasBin: true
@@ -3013,10 +3015,10 @@ snapshots:
       '@fastify/forwarded': 3.0.1
       ipaddr.js: 2.4.0
 
-  '@fastify/rate-limit@9.1.0':
+  '@fastify/rate-limit@10.3.0':
     dependencies:
       '@lukeed/ms': 2.0.2
-      fastify-plugin: 4.5.1
+      fastify-plugin: 5.1.0
       toad-cache: 3.7.0
 
   '@fastify/send@4.1.0':
@@ -3191,34 +3193,34 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
-  '@typescript-eslint/eslint-plugin@7.18.0(@typescript-eslint/parser@7.18.0(eslint@8.57.1)(typescript@5.9.3))(eslint@8.57.1)(typescript@5.9.3)':
+  '@typescript-eslint/eslint-plugin@7.18.0(@typescript-eslint/parser@7.18.0(eslint@8.57.1)(typescript@6.0.3))(eslint@8.57.1)(typescript@6.0.3)':
     dependencies:
       '@eslint-community/regexpp': 4.12.2
-      '@typescript-eslint/parser': 7.18.0(eslint@8.57.1)(typescript@5.9.3)
+      '@typescript-eslint/parser': 7.18.0(eslint@8.57.1)(typescript@6.0.3)
       '@typescript-eslint/scope-manager': 7.18.0
-      '@typescript-eslint/type-utils': 7.18.0(eslint@8.57.1)(typescript@5.9.3)
-      '@typescript-eslint/utils': 7.18.0(eslint@8.57.1)(typescript@5.9.3)
+      '@typescript-eslint/type-utils': 7.18.0(eslint@8.57.1)(typescript@6.0.3)
+      '@typescript-eslint/utils': 7.18.0(eslint@8.57.1)(typescript@6.0.3)
       '@typescript-eslint/visitor-keys': 7.18.0
       eslint: 8.57.1
       graphemer: 1.4.0
       ignore: 5.3.2
       natural-compare: 1.4.0
-      ts-api-utils: 1.4.3(typescript@5.9.3)
+      ts-api-utils: 1.4.3(typescript@6.0.3)
     optionalDependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
-  '@typescript-eslint/parser@7.18.0(eslint@8.57.1)(typescript@5.9.3)':
+  '@typescript-eslint/parser@7.18.0(eslint@8.57.1)(typescript@6.0.3)':
     dependencies:
       '@typescript-eslint/scope-manager': 7.18.0
       '@typescript-eslint/types': 7.18.0
-      '@typescript-eslint/typescript-estree': 7.18.0(typescript@5.9.3)
+      '@typescript-eslint/typescript-estree': 7.18.0(typescript@6.0.3)
       '@typescript-eslint/visitor-keys': 7.18.0
       debug: 4.4.3
       eslint: 8.57.1
     optionalDependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
@@ -3227,21 +3229,21 @@ snapshots:
       '@typescript-eslint/types': 7.18.0
       '@typescript-eslint/visitor-keys': 7.18.0
 
-  '@typescript-eslint/type-utils@7.18.0(eslint@8.57.1)(typescript@5.9.3)':
+  '@typescript-eslint/type-utils@7.18.0(eslint@8.57.1)(typescript@6.0.3)':
     dependencies:
-      '@typescript-eslint/typescript-estree': 7.18.0(typescript@5.9.3)
-      '@typescript-eslint/utils': 7.18.0(eslint@8.57.1)(typescript@5.9.3)
+      '@typescript-eslint/typescript-estree': 7.18.0(typescript@6.0.3)
+      '@typescript-eslint/utils': 7.18.0(eslint@8.57.1)(typescript@6.0.3)
       debug: 4.4.3
       eslint: 8.57.1
-      ts-api-utils: 1.4.3(typescript@5.9.3)
+      ts-api-utils: 1.4.3(typescript@6.0.3)
     optionalDependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
   '@typescript-eslint/types@7.18.0': {}
 
-  '@typescript-eslint/typescript-estree@7.18.0(typescript@5.9.3)':
+  '@typescript-eslint/typescript-estree@7.18.0(typescript@6.0.3)':
     dependencies:
       '@typescript-eslint/types': 7.18.0
       '@typescript-eslint/visitor-keys': 7.18.0
@@ -3250,18 +3252,18 @@ snapshots:
       is-glob: 4.0.3
       minimatch: 9.0.9
       semver: 7.7.4
-      ts-api-utils: 1.4.3(typescript@5.9.3)
+      ts-api-utils: 1.4.3(typescript@6.0.3)
     optionalDependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
-  '@typescript-eslint/utils@7.18.0(eslint@8.57.1)(typescript@5.9.3)':
+  '@typescript-eslint/utils@7.18.0(eslint@8.57.1)(typescript@6.0.3)':
     dependencies:
       '@eslint-community/eslint-utils': 4.9.1(eslint@8.57.1)
       '@typescript-eslint/scope-manager': 7.18.0
       '@typescript-eslint/types': 7.18.0
-      '@typescript-eslint/typescript-estree': 7.18.0(typescript@5.9.3)
+      '@typescript-eslint/typescript-estree': 7.18.0(typescript@6.0.3)
       eslint: 8.57.1
     transitivePeerDependencies:
       - supports-color
@@ -3472,6 +3474,8 @@ snapshots:
 
   dotenv@16.6.1: {}
 
+  dotenv@17.4.2: {}
+
   eastasianwidth@0.2.0: {}
 
   emoji-regex@8.0.0: {}
@@ -3647,8 +3651,6 @@ snapshots:
       fast-decode-uri-component: 1.0.1
 
   fast-uri@3.1.2: {}
-
-  fastify-plugin@4.5.1: {}
 
   fastify-plugin@5.1.0: {}
 
@@ -3929,18 +3931,18 @@ snapshots:
 
   natural-compare@1.4.0: {}
 
-  neo4j-driver-bolt-connection@5.28.3:
+  neo4j-driver-bolt-connection@6.0.1:
     dependencies:
       buffer: 6.0.3
-      neo4j-driver-core: 5.28.3
+      neo4j-driver-core: 6.0.1
       string_decoder: 1.3.0
 
-  neo4j-driver-core@5.28.3: {}
+  neo4j-driver-core@6.0.1: {}
 
-  neo4j-driver@5.28.3:
+  neo4j-driver@6.0.1:
     dependencies:
-      neo4j-driver-bolt-connection: 5.28.3
-      neo4j-driver-core: 5.28.3
+      neo4j-driver-bolt-connection: 6.0.1
+      neo4j-driver-core: 6.0.1
       rxjs: 7.8.2
 
   on-exit-leak-free@2.1.2: {}
@@ -4205,9 +4207,9 @@ snapshots:
 
   toidentifier@1.0.1: {}
 
-  ts-api-utils@1.4.3(typescript@5.9.3):
+  ts-api-utils@1.4.3(typescript@6.0.3):
     dependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
 
   tslib@2.8.1: {}
 
@@ -4224,7 +4226,7 @@ snapshots:
 
   type-fest@0.20.2: {}
 
-  typescript@5.9.3: {}
+  typescript@6.0.3: {}
 
   undici-types@6.21.0: {}
 
