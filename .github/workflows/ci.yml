@@ -11,7 +11,7 @@ jobs:
     name: Format Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
         with:
           version: 9
@@ -28,7 +28,7 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
         with:
           version: 9
@@ -45,7 +45,7 @@ jobs:
     name: Type Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
         with:
           version: 9
@@ -62,7 +62,7 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
         with:
           version: 9
@@ -79,7 +79,7 @@ jobs:
     name: Test Coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
         with:
           version: 9
@@ -109,7 +109,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
         with:
           version: 9
@@ -143,7 +143,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
         with:
           version: 9
@@ -165,9 +165,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint, typecheck, coverage]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       - name: Build graph-service image
         uses: docker/build-push-action@v6
         with:
@@ -180,7 +180,7 @@ jobs:
     name: Security Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
         with:
           version: 9
@@ -198,11 +198,11 @@ jobs:
     name: Secrets Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: TruffleHog OSS
-        uses: trufflesecurity/trufflehog@v3.88.26
+        uses: trufflesecurity/trufflehog@v3.95.2
         with:
           path: ./
           base: ${{ github.event_name == 'pull_request' && github.event.repository.default_branch || github.event.before }}
@@ -216,14 +216,14 @@ jobs:
       actions: read
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript
           queries: security-extended
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
 
   commitlint:
     name: Commit Message Lint
@@ -233,7 +233,7 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: wagoid/commitlint-github-action@v6

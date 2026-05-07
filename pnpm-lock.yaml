@@ -9,13 +9,13 @@ importers:
     devDependencies:
       '@typescript-eslint/eslint-plugin':
         specifier: ^7.18.0
-        version: 7.18.0(@typescript-eslint/parser@7.18.0(eslint@8.57.1)(typescript@5.9.3))(eslint@8.57.1)(typescript@5.9.3)
+        version: 7.18.0(@typescript-eslint/parser@7.18.0(eslint@8.57.1)(typescript@6.0.3))(eslint@8.57.1)(typescript@6.0.3)
       '@typescript-eslint/parser':
         specifier: ^7.18.0
-        version: 7.18.0(eslint@8.57.1)(typescript@5.9.3)
+        version: 7.18.0(eslint@8.57.1)(typescript@6.0.3)
       dotenv:
-        specifier: ^16.4.0
-        version: 16.6.1
+        specifier: ^17.4.2
+        version: 17.4.2
       eslint:
         specifier: ^8.57.1
         version: 8.57.1
@@ -29,14 +29,14 @@ importers:
         specifier: ^4.19.2
         version: 4.21.0
       typescript:
-        specifier: ^5.5.4
-        version: 5.9.3
+        specifier: ^6.0.3
+        version: 6.0.3
 
   services/graph-service:
     dependencies:
       '@fastify/rate-limit':
-        specifier: ^9.1.0
-        version: 9.1.0
+        specifier: ^10.3.0
+        version: 10.3.0
       '@fastify/swagger':
         specifier: ^9.1.0
         version: 9.7.0
@@ -50,24 +50,24 @@ importers:
         specifier: ^5.1.0
         version: 5.8.5
       neo4j-driver:
-        specifier: ^5.26.0
-        version: 5.28.3
+        specifier: ^6.0.1
+        version: 6.0.1
     devDependencies:
       '@types/node':
-        specifier: ^22.9.0
-        version: 22.19.17
+        specifier: ^25.6.0
+        version: 25.6.1
       '@vitest/coverage-v8':
         specifier: ^2.1.8
-        version: 2.1.9(vitest@2.1.9(@types/node@22.19.17))
+        version: 2.1.9(vitest@2.1.9(@types/node@25.6.1))
       tsx:
         specifier: ^4.19.2
         version: 4.21.0
       typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
+        specifier: ^6.0.3
+        version: 6.0.3
       vitest:
         specifier: ^2.1.8
-        version: 2.1.9(@types/node@22.19.17)
+        version: 2.1.9(@types/node@25.6.1)
 
 packages:
   '@ampproject/remapping@2.3.0':
@@ -625,10 +625,10 @@ packages:
         integrity: sha512-INS+6gh91cLUjB+PVHfu1UqcB76Sqtpyp7bnL+FYojhjygvOPA9ctiD/JDKsyD9Xgu4hUhCSJBPig/w7duNajw==,
       }
 
-  '@fastify/rate-limit@9.1.0':
+  '@fastify/rate-limit@10.3.0':
     resolution:
       {
-        integrity: sha512-h5dZWCkuZXN0PxwqaFQLxeln8/LNwQwH9popywmDCFdKfgpi4b/HoMH1lluy6P+30CG9yzzpSpwTCIPNB9T1JA==,
+        integrity: sha512-eIGkG9XKQs0nyynatApA3EVrojHOuq4l6fhB4eeCk4PIOeadvOJz9/4w3vGI44Go17uaXOWEcPkaD8kuKm7g6Q==,
       }
 
   '@fastify/send@4.1.0':
@@ -963,10 +963,10 @@ packages:
         integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==,
       }
 
-  '@types/node@22.19.17':
+  '@types/node@25.6.1':
     resolution:
       {
-        integrity: sha512-wGdMcf+vPYM6jikpS/qhg6WiqSV/OhG+jeeHT/KlVqxYfD40iYJf9/AE1uQxVWFvU7MipKRkRv8NSHiCGgPr8Q==,
+        integrity: sha512-coJCN8O1q4AGyyqCAUSP06P+SrMTu18BkEj3NVAK07q6QUneD2wzj3CLv9+yP+BMeZQlMvneXqqvDe3w+xcq7g==,
       }
 
   '@typescript-eslint/eslint-plugin@7.18.0':
@@ -1419,6 +1419,13 @@ packages:
       }
     engines: { node: '>=12' }
 
+  dotenv@17.4.2:
+    resolution:
+      {
+        integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==,
+      }
+    engines: { node: '>=12' }
+
   eastasianwidth@0.2.0:
     resolution:
       {
@@ -1597,12 +1604,6 @@ packages:
     resolution:
       {
         integrity: sha512-rVjf7ArG3LTk+FS6Yw81V1DLuZl1bRbNrev6Tmd/9RaroeeRRJhAt7jg/6YFxbvAQXUCavSoZhPPj6oOx+5KjQ==,
-      }
-
-  fastify-plugin@4.5.1:
-    resolution:
-      {
-        integrity: sha512-stRHYGeuqpEZTL1Ef0Ovr2ltazUT9g844X5z/zEBFLG8RYlpDiOCIG+ATvYEp+/zmc7sN29mcIMp8gvYplYPIQ==,
       }
 
   fastify-plugin@5.1.0:
@@ -2072,23 +2073,24 @@ packages:
         integrity: sha512-OWND8ei3VtNC9h7V60qff3SVobHr996CTwgxubgyQYEpg290h9J0buyECNNJexkFm5sOajh5G116RYA1c8ZMSw==,
       }
 
-  neo4j-driver-bolt-connection@5.28.3:
+  neo4j-driver-bolt-connection@6.0.1:
     resolution:
       {
-        integrity: sha512-wqHBYcU0FVRDmdsoZ+Fk0S/InYmu9/4BT6fPYh45Jimg/J7vQBUcdkiHGU7nop7HRb1ZgJmL305mJb6g5Bv35Q==,
+        integrity: sha512-1KyG73TO+CwnYJisdHD0sjUw9yR+P5q3JFcmVPzsHT4/whzCjuXSMpmY4jZcHH2PdY2cBUq4l/6WcDiPMxW2UA==,
       }
 
-  neo4j-driver-core@5.28.3:
+  neo4j-driver-core@6.0.1:
     resolution:
       {
-        integrity: sha512-Jk+hAmjFmO5YzVH/U7FyKXigot9zmIfLz6SZQy0xfr4zfTE/S8fOYFOGqKQTHBE86HHOWH2RbTslbxIb+XtU2g==,
+        integrity: sha512-5I2KxICAvcHxnWdJyDqwu8PBAQvWVTlQH2ve3VQmtVdJScPqWhpXN1PiX5IIl+cRF3pFpz9GQF53B5n6s0QQUQ==,
       }
 
-  neo4j-driver@5.28.3:
+  neo4j-driver@6.0.1:
     resolution:
       {
-        integrity: sha512-k7c0wEh3HoONv1v5AyLp9/BDAbYHJhz2TZvzWstSEU3g3suQcXmKEaYBfrK2UMzxcy3bCT0DrnfRbzsOW5G/Ag==,
+        integrity: sha512-8DDF2MwEJNz7y7cp97x4u8fmVIP4CWS8qNBxdwxTG0fWtsS+2NdeC+7uXwmmuFOpHvkfXqv63uWY73bfDtOH8Q==,
       }
+    engines: { node: '>=18.0.0' }
 
   on-exit-leak-free@2.1.2:
     resolution:
@@ -2649,18 +2651,18 @@ packages:
       }
     engines: { node: '>=10' }
 
-  typescript@5.9.3:
+  typescript@6.0.3:
     resolution:
       {
-        integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==,
+        integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==,
       }
     engines: { node: '>=14.17' }
     hasBin: true
 
-  undici-types@6.21.0:
+  undici-types@7.19.2:
     resolution:
       {
-        integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==,
+        integrity: sha512-qYVnV5OEm2AW8cJMCpdV20CDyaN3g0AjDlOGf1OW4iaDEx8MwdtChUp4zu4H0VP3nDRF/8RKWH+IPp9uW0YGZg==,
       }
 
   uri-js@4.4.1:
@@ -3013,10 +3015,10 @@ snapshots:
       '@fastify/forwarded': 3.0.1
       ipaddr.js: 2.4.0
 
-  '@fastify/rate-limit@9.1.0':
+  '@fastify/rate-limit@10.3.0':
     dependencies:
       '@lukeed/ms': 2.0.2
-      fastify-plugin: 4.5.1
+      fastify-plugin: 5.1.0
       toad-cache: 3.7.0
 
   '@fastify/send@4.1.0':
@@ -3187,38 +3189,38 @@ snapshots:
 
   '@types/estree@1.0.8': {}
 
-  '@types/node@22.19.17':
+  '@types/node@25.6.1':
     dependencies:
-      undici-types: 6.21.0
+      undici-types: 7.19.2
 
-  '@typescript-eslint/eslint-plugin@7.18.0(@typescript-eslint/parser@7.18.0(eslint@8.57.1)(typescript@5.9.3))(eslint@8.57.1)(typescript@5.9.3)':
+  '@typescript-eslint/eslint-plugin@7.18.0(@typescript-eslint/parser@7.18.0(eslint@8.57.1)(typescript@6.0.3))(eslint@8.57.1)(typescript@6.0.3)':
     dependencies:
       '@eslint-community/regexpp': 4.12.2
-      '@typescript-eslint/parser': 7.18.0(eslint@8.57.1)(typescript@5.9.3)
+      '@typescript-eslint/parser': 7.18.0(eslint@8.57.1)(typescript@6.0.3)
       '@typescript-eslint/scope-manager': 7.18.0
-      '@typescript-eslint/type-utils': 7.18.0(eslint@8.57.1)(typescript@5.9.3)
-      '@typescript-eslint/utils': 7.18.0(eslint@8.57.1)(typescript@5.9.3)
+      '@typescript-eslint/type-utils': 7.18.0(eslint@8.57.1)(typescript@6.0.3)
+      '@typescript-eslint/utils': 7.18.0(eslint@8.57.1)(typescript@6.0.3)
       '@typescript-eslint/visitor-keys': 7.18.0
       eslint: 8.57.1
       graphemer: 1.4.0
       ignore: 5.3.2
       natural-compare: 1.4.0
-      ts-api-utils: 1.4.3(typescript@5.9.3)
+      ts-api-utils: 1.4.3(typescript@6.0.3)
     optionalDependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
-  '@typescript-eslint/parser@7.18.0(eslint@8.57.1)(typescript@5.9.3)':
+  '@typescript-eslint/parser@7.18.0(eslint@8.57.1)(typescript@6.0.3)':
     dependencies:
       '@typescript-eslint/scope-manager': 7.18.0
       '@typescript-eslint/types': 7.18.0
-      '@typescript-eslint/typescript-estree': 7.18.0(typescript@5.9.3)
+      '@typescript-eslint/typescript-estree': 7.18.0(typescript@6.0.3)
       '@typescript-eslint/visitor-keys': 7.18.0
       debug: 4.4.3
       eslint: 8.57.1
     optionalDependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
@@ -3227,21 +3229,21 @@ snapshots:
       '@typescript-eslint/types': 7.18.0
       '@typescript-eslint/visitor-keys': 7.18.0
 
-  '@typescript-eslint/type-utils@7.18.0(eslint@8.57.1)(typescript@5.9.3)':
+  '@typescript-eslint/type-utils@7.18.0(eslint@8.57.1)(typescript@6.0.3)':
     dependencies:
-      '@typescript-eslint/typescript-estree': 7.18.0(typescript@5.9.3)
-      '@typescript-eslint/utils': 7.18.0(eslint@8.57.1)(typescript@5.9.3)
+      '@typescript-eslint/typescript-estree': 7.18.0(typescript@6.0.3)
+      '@typescript-eslint/utils': 7.18.0(eslint@8.57.1)(typescript@6.0.3)
       debug: 4.4.3
       eslint: 8.57.1
-      ts-api-utils: 1.4.3(typescript@5.9.3)
+      ts-api-utils: 1.4.3(typescript@6.0.3)
     optionalDependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
   '@typescript-eslint/types@7.18.0': {}
 
-  '@typescript-eslint/typescript-estree@7.18.0(typescript@5.9.3)':
+  '@typescript-eslint/typescript-estree@7.18.0(typescript@6.0.3)':
     dependencies:
       '@typescript-eslint/types': 7.18.0
       '@typescript-eslint/visitor-keys': 7.18.0
@@ -3250,18 +3252,18 @@ snapshots:
       is-glob: 4.0.3
       minimatch: 9.0.9
       semver: 7.7.4
-      ts-api-utils: 1.4.3(typescript@5.9.3)
+      ts-api-utils: 1.4.3(typescript@6.0.3)
     optionalDependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
 
-  '@typescript-eslint/utils@7.18.0(eslint@8.57.1)(typescript@5.9.3)':
+  '@typescript-eslint/utils@7.18.0(eslint@8.57.1)(typescript@6.0.3)':
     dependencies:
       '@eslint-community/eslint-utils': 4.9.1(eslint@8.57.1)
       '@typescript-eslint/scope-manager': 7.18.0
       '@typescript-eslint/types': 7.18.0
-      '@typescript-eslint/typescript-estree': 7.18.0(typescript@5.9.3)
+      '@typescript-eslint/typescript-estree': 7.18.0(typescript@6.0.3)
       eslint: 8.57.1
     transitivePeerDependencies:
       - supports-color
@@ -3274,7 +3276,7 @@ snapshots:
 
   '@ungap/structured-clone@1.3.0': {}
 
-  '@vitest/coverage-v8@2.1.9(vitest@2.1.9(@types/node@22.19.17))':
+  '@vitest/coverage-v8@2.1.9(vitest@2.1.9(@types/node@25.6.1))':
     dependencies:
       '@ampproject/remapping': 2.3.0
       '@bcoe/v8-coverage': 0.2.3
@@ -3288,7 +3290,7 @@ snapshots:
       std-env: 3.10.0
       test-exclude: 7.0.2
       tinyrainbow: 1.2.0
-      vitest: 2.1.9(@types/node@22.19.17)
+      vitest: 2.1.9(@types/node@25.6.1)
     transitivePeerDependencies:
       - supports-color
 
@@ -3299,13 +3301,13 @@ snapshots:
       chai: 5.3.3
       tinyrainbow: 1.2.0
 
-  '@vitest/mocker@2.1.9(vite@5.4.21(@types/node@22.19.17))':
+  '@vitest/mocker@2.1.9(vite@5.4.21(@types/node@25.6.1))':
     dependencies:
       '@vitest/spy': 2.1.9
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 5.4.21(@types/node@22.19.17)
+      vite: 5.4.21(@types/node@25.6.1)
 
   '@vitest/pretty-format@2.1.9':
     dependencies:
@@ -3471,6 +3473,8 @@ snapshots:
       dotenv: 16.6.1
 
   dotenv@16.6.1: {}
+
+  dotenv@17.4.2: {}
 
   eastasianwidth@0.2.0: {}
 
@@ -3647,8 +3651,6 @@ snapshots:
       fast-decode-uri-component: 1.0.1
 
   fast-uri@3.1.2: {}
-
-  fastify-plugin@4.5.1: {}
 
   fastify-plugin@5.1.0: {}
 
@@ -3929,18 +3931,18 @@ snapshots:
 
   natural-compare@1.4.0: {}
 
-  neo4j-driver-bolt-connection@5.28.3:
+  neo4j-driver-bolt-connection@6.0.1:
     dependencies:
       buffer: 6.0.3
-      neo4j-driver-core: 5.28.3
+      neo4j-driver-core: 6.0.1
       string_decoder: 1.3.0
 
-  neo4j-driver-core@5.28.3: {}
+  neo4j-driver-core@6.0.1: {}
 
-  neo4j-driver@5.28.3:
+  neo4j-driver@6.0.1:
     dependencies:
-      neo4j-driver-bolt-connection: 5.28.3
-      neo4j-driver-core: 5.28.3
+      neo4j-driver-bolt-connection: 6.0.1
+      neo4j-driver-core: 6.0.1
       rxjs: 7.8.2
 
   on-exit-leak-free@2.1.2: {}
@@ -4205,9 +4207,9 @@ snapshots:
 
   toidentifier@1.0.1: {}
 
-  ts-api-utils@1.4.3(typescript@5.9.3):
+  ts-api-utils@1.4.3(typescript@6.0.3):
     dependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
 
   tslib@2.8.1: {}
 
@@ -4224,21 +4226,21 @@ snapshots:
 
   type-fest@0.20.2: {}
 
-  typescript@5.9.3: {}
+  typescript@6.0.3: {}
 
-  undici-types@6.21.0: {}
+  undici-types@7.19.2: {}
 
   uri-js@4.4.1:
     dependencies:
       punycode: 2.3.1
 
-  vite-node@2.1.9(@types/node@22.19.17):
+  vite-node@2.1.9(@types/node@25.6.1):
     dependencies:
       cac: 6.7.14
       debug: 4.4.3
       es-module-lexer: 1.7.0
       pathe: 1.1.2
-      vite: 5.4.21(@types/node@22.19.17)
+      vite: 5.4.21(@types/node@25.6.1)
     transitivePeerDependencies:
       - '@types/node'
       - less
@@ -4250,19 +4252,19 @@ snapshots:
       - supports-color
       - terser
 
-  vite@5.4.21(@types/node@22.19.17):
+  vite@5.4.21(@types/node@25.6.1):
     dependencies:
       esbuild: 0.21.5
       postcss: 8.5.14
       rollup: 4.60.3
     optionalDependencies:
-      '@types/node': 22.19.17
+      '@types/node': 25.6.1
       fsevents: 2.3.3
 
-  vitest@2.1.9(@types/node@22.19.17):
+  vitest@2.1.9(@types/node@25.6.1):
     dependencies:
       '@vitest/expect': 2.1.9
-      '@vitest/mocker': 2.1.9(vite@5.4.21(@types/node@22.19.17))
+      '@vitest/mocker': 2.1.9(vite@5.4.21(@types/node@25.6.1))
       '@vitest/pretty-format': 2.1.9
       '@vitest/runner': 2.1.9
       '@vitest/snapshot': 2.1.9
@@ -4278,11 +4280,11 @@ snapshots:
       tinyexec: 0.3.2
       tinypool: 1.1.1
       tinyrainbow: 1.2.0
-      vite: 5.4.21(@types/node@22.19.17)
-      vite-node: 2.1.9(@types/node@22.19.17)
+      vite: 5.4.21(@types/node@25.6.1)
+      vite-node: 2.1.9(@types/node@25.6.1)
       why-is-node-running: 2.3.0
     optionalDependencies:
-      '@types/node': 22.19.17
+      '@types/node': 25.6.1
     transitivePeerDependencies:
       - less
       - lightningcss
