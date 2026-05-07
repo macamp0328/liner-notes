@@ -4,10 +4,10 @@
  *
  * Usage:
  *   NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=test \
- *     tsx scripts/validate-schema.ts
+ *     tsx services/graph-service/scripts/validate-schema.ts
  */
 import neo4j from 'neo4j-driver';
-import { applySchema } from '../services/graph-service/src/db/schema.js';
+import { applySchema } from '../src/db/schema.js';
 
 async function main(): Promise<void> {
   const uri = process.env['NEO4J_URI'];

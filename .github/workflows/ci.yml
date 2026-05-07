@@ -158,7 +158,7 @@ jobs:
           NEO4J_URI: bolt://localhost:7687
           NEO4J_USER: neo4j
           NEO4J_PASSWORD: test-password
-        run: pnpm tsx scripts/validate-schema.ts
+        run: pnpm tsx services/graph-service/scripts/validate-schema.ts
 
   docker-build:
     name: Docker Build
