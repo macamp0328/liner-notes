@@ -73,7 +73,7 @@ describe('listReleases', () => {
     const dataRecord = makeRecord({
       discogsId: makeNeo4jInt(13570466),
       title: 'U.F.O.F.',
-      year: makeNeo4jInt(2019),
+      pressingYear: makeNeo4jInt(2019),
       format: 'Vinyl',
       thumbUrl: 'https://example.com/thumb.jpg',
       artistNames: ['Big Thief'],
@@ -90,7 +90,7 @@ describe('listReleases', () => {
     expect(items[0]).toMatchObject({
       discogsId: 13570466,
       title: 'U.F.O.F.',
-      year: 2019,
+      pressingYear: 2019,
       format: 'Vinyl',
       thumbUrl: 'https://example.com/thumb.jpg',
       artistName: 'Big Thief',
@@ -131,7 +131,7 @@ describe('listReleases', () => {
     const dataRecord = makeRecord({
       discogsId: makeNeo4jInt(1),
       title: 'Title',
-      year: null,
+      pressingYear: null,
       format: null,
       thumbUrl: null,
       artistNames: [],
@@ -147,7 +147,7 @@ describe('listReleases', () => {
     const { items } = await listReleases(driver, 0, 20);
 
     expect(items[0]).toMatchObject({
-      year: null,
+      pressingYear: null,
       format: null,
       thumbUrl: null,
       artistName: null,
@@ -182,10 +182,11 @@ describe('getReleaseById', () => {
         properties: {
           discogsId: makeNeo4jInt(13570466),
           title: 'U.F.O.F.',
-          year: makeNeo4jInt(2019),
+          pressingYear: makeNeo4jInt(2019),
           format: 'Vinyl',
           thumbUrl: 'https://example.com/thumb.jpg',
           masterDiscogsId: makeNeo4jInt(1234),
+          originalYear: makeNeo4jInt(2019),
           releaseDate: '2019-05-03',
           notes: null,
           discogsUrl: 'https://www.discogs.com/release/13570466',
@@ -234,7 +235,7 @@ describe('getReleaseById', () => {
     expect(release).not.toBeNull();
     expect(release?.discogsId).toBe(13570466);
     expect(release?.title).toBe('U.F.O.F.');
-    expect(release?.year).toBe(2019);
+    expect(release?.pressingYear).toBe(2019);
     expect(release?.artists).toHaveLength(1);
     expect(release?.artists[0]).toMatchObject({ discogsId: 5009441, name: 'Big Thief' });
     expect(release?.labels[0]).toMatchObject({ discogsId: 634, name: '4AD' });
@@ -253,10 +254,11 @@ describe('getReleaseById', () => {
         properties: {
           discogsId: makeNeo4jInt(1),
           title: 'Test',
-          year: null,
+          pressingYear: null,
           format: null,
           thumbUrl: null,
           masterDiscogsId: null,
+          originalYear: null,
           releaseDate: null,
           notes: null,
           discogsUrl: null,
@@ -349,7 +351,7 @@ describe('getArtistById', () => {
         {
           discogsId: makeNeo4jInt(13570466),
           title: 'U.F.O.F.',
-          year: makeNeo4jInt(2019),
+          pressingYear: makeNeo4jInt(2019),
           format: 'Vinyl',
           thumbUrl: null,
           role: '',
@@ -408,7 +410,14 @@ describe('getArtistById', () => {
       realName: null,
       profile: null,
       releases: [
-        { discogsId: null, title: null, year: null, format: null, thumbUrl: null, role: null },
+        {
+          discogsId: null,
+          title: null,
+          pressingYear: null,
+          format: null,
+          thumbUrl: null,
+          role: null,
+        },
       ],
     });
 
@@ -457,7 +466,7 @@ describe('getLabelById', () => {
         {
           discogsId: makeNeo4jInt(13570466),
           title: 'U.F.O.F.',
-          year: makeNeo4jInt(2019),
+          pressingYear: makeNeo4jInt(2019),
           format: 'Vinyl',
           thumbUrl: null,
           catalogNumber: '4AD0129LP',
@@ -492,7 +501,7 @@ describe('getLabelById', () => {
         {
           discogsId: null,
           title: null,
-          year: null,
+          pressingYear: null,
           format: null,
           thumbUrl: null,
           catalogNumber: null,

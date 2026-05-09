@@ -55,6 +55,7 @@ const completeSummary: IngestionSummary = {
   errors: [],
   durationMs: 5000,
   lyricsEnrichment: { enriched: 8, skipped: 2, failed: 0, durationMs: 1000 },
+  originalYearEnrichment: { enriched: 5, skipped: 2, failed: 0, durationMs: 500 },
 };
 
 const idleState: JobState = {

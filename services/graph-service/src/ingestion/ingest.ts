@@ -4,9 +4,12 @@ import type { Logger } from './discogs-client.js';
 import { mergeReleaseGraph } from '../db/ingestion-repository.js';
 import { enrichLyrics } from '../enrichment/lyrics.js';
 import type { LyricsEnrichmentSummary } from '../enrichment/lyrics.js';
+import { enrichOriginalYear } from '../enrichment/original-year.js';
+import type { OriginalYearEnrichmentSummary } from '../enrichment/original-year.js';
 
 export type { Logger };
 export type { LyricsEnrichmentSummary };
+export type { OriginalYearEnrichmentSummary };
 
 export interface IngestionConfig {
   username: string;
@@ -20,6 +23,7 @@ export interface IngestionSummary {
   errors: string[];
   durationMs: number;
   lyricsEnrichment: LyricsEnrichmentSummary;
+  originalYearEnrichment: OriginalYearEnrichmentSummary;
 }
 
 const PER_PAGE = 50;
@@ -92,6 +96,9 @@ export async function runIngestion(
   // Step 3: Enrich tracks with lyrics (LRCLIB primary, Genius fallback)
   const lyricsEnrichment = await enrichLyrics(driver, log);
 
+  // Step 4: Enrich releases with originalYear from Discogs master API
+  const originalYearEnrichment = await enrichOriginalYear(client, driver, log);
+
   const durationMs = Date.now() - startTime;
   const durationSec = Math.round(durationMs / 1000);
   const minutes = Math.floor(durationSec / 60);
@@ -103,16 +110,20 @@ export async function runIngestion(
     errors,
     durationMs,
     lyricsEnrichment,
+    originalYearEnrichment,
   };
 
   log.info(
     `[ingest] Ingestion complete:\n` +
-      `  Releases processed: ${releasesProcessed}\n` +
-      `  Releases failed:    ${releasesFailed}\n` +
-      `  Lyrics enriched:    ${lyricsEnrichment.enriched}\n` +
-      `  Lyrics skipped:     ${lyricsEnrichment.skipped}\n` +
-      `  Lyrics failed:      ${lyricsEnrichment.failed}\n` +
-      `  Duration:           ${minutes}m ${seconds}s\n` +
+      `  Releases processed:   ${releasesProcessed}\n` +
+      `  Releases failed:      ${releasesFailed}\n` +
+      `  Lyrics enriched:      ${lyricsEnrichment.enriched}\n` +
+      `  Lyrics skipped:       ${lyricsEnrichment.skipped}\n` +
+      `  Lyrics failed:        ${lyricsEnrichment.failed}\n` +
+      `  Original year enrich: ${originalYearEnrichment.enriched}\n` +
+      `  Original year skip:   ${originalYearEnrichment.skipped}\n` +
+      `  Original year failed: ${originalYearEnrichment.failed}\n` +
+      `  Duration:             ${minutes}m ${seconds}s\n` +
       (errors.length > 0
         ? `  Errors:\n${errors.map((e) => `    - ${e}`).join('\n')}`
         : `  Errors:             none`),

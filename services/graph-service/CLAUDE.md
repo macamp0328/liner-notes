@@ -66,22 +66,22 @@ Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At)
 
 ### Nodes
 
-| Label      | Key Properties                                                                                                  |
-| ---------- | --------------------------------------------------------------------------------------------------------------- |
-| `Release`  | `discogsId` (unique), `title`, `year` (integer), `format`, `thumbUrl`, `masterDiscogsId`                        |
-| `Artist`   | `discogsId` (unique), `name`, `realName`, `profile`                                                             |
-| `Label`    | `discogsId` (unique), `name`, `profile`, `contactInfo`                                                          |
-| `Track`    | `position` + `releaseDiscogsId` (composite MERGE key), `title`, `duration`, `lyrics` (nullable), `lyricsSource` |
-| `Genre`    | `name` (unique)                                                                                                 |
-| `Style`    | `name` (unique)                                                                                                 |
-| `Country`  | `name` (unique)                                                                                                 |
-| `Decade`   | `name` (unique) — e.g. `"1970s"`                                                                                |
-| `Studio`   | `name`, `location`                                                                                              |
-| `Musician` | `discogsId` (if available), `name`                                                                              |
-| `Producer` | `discogsId` (if available), `name`                                                                              |
-| `Engineer` | `discogsId` (if available), `name`                                                                              |
+| Label      | Key Properties                                                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `Release`  | `discogsId` (unique), `title`, `pressingYear` (integer), `originalYear` (integer, nullable), `format`, `thumbUrl`, `masterDiscogsId` |
+| `Artist`   | `discogsId` (unique), `name`, `realName`, `profile`                                                                                  |
+| `Label`    | `discogsId` (unique), `name`, `profile`, `contactInfo`                                                                               |
+| `Track`    | `position` + `releaseDiscogsId` (composite MERGE key), `title`, `duration`, `lyrics` (nullable), `lyricsSource`                      |
+| `Genre`    | `name` (unique)                                                                                                                      |
+| `Style`    | `name` (unique)                                                                                                                      |
+| `Country`  | `name` (unique)                                                                                                                      |
+| `Decade`   | `name` (unique) — e.g. `"1970s"`                                                                                                     |
+| `Studio`   | `name`, `location`                                                                                                                   |
+| `Musician` | `discogsId` (if available), `name`                                                                                                   |
+| `Producer` | `discogsId` (if available), `name`                                                                                                   |
+| `Engineer` | `discogsId` (if available), `name`                                                                                                   |
 
-> `year` is stored both as a property on `Release` (exact-year queries) and as a `RECORDED_IN_DECADE` relationship to a `Decade` node (decade traversal). Both are needed.
+> `pressingYear` is the year this specific pressing was manufactured (from Discogs `release.year`). `originalYear` is the year the album was first released anywhere, fetched from the Discogs master release endpoint and stored as a post-ingestion enrichment step. Queries that order or filter by release date should prefer `coalesce(r.originalYear, r.pressingYear)`. `pressingYear` is also used to derive the `RECORDED_IN_DECADE` relationship.
 
 ### Relationships
 
@@ -117,7 +117,7 @@ CREATE CONSTRAINT ON (d:Decade) ASSERT d.name IS UNIQUE;
 
 CALL db.index.fulltext.createNodeIndex("trackLyrics", ["Track"], ["lyrics", "title"]);
 
-CREATE INDEX ON :Release(year);
+CREATE INDEX ON :Release(pressingYear);
 CREATE INDEX ON :Musician(name);
 CREATE INDEX ON :Studio(name);
 ```
@@ -199,7 +199,11 @@ Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
    a. For each Track without lyrics → query LRCLIB
    b. Fallback to Genius API if LRCLIB returns nothing
    c. Update Track node with lyrics + lyricsSource
-6. Log summary: nodes, relationships, lyrics enriched, errors, duration
+6. originalYear enrichment:
+   a. For each Release where masterDiscogsId IS NOT NULL AND originalYear IS NULL
+   b. GET /masters/{masterDiscogsId} → extract year field
+   c. SET r.originalYear on the Release node
+7. Log summary: nodes, relationships, lyrics enriched, originalYear enriched, errors, duration
 ```
 
 **Triggers:**
