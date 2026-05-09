@@ -17,7 +17,11 @@ interface GeniusSearchResponse {
   response: {
     hits: Array<{
       type: string;
-      result: { url: string };
+      result: {
+        id: number;
+        url: string;
+        primary_artist: { name: string };
+      };
     }>;
   };
 }
@@ -40,31 +44,95 @@ async function fetchLrclib(artistName: string, title: string): Promise<string | 
   return data.plainLyrics ?? null;
 }
 
-/**
- * Extract plain text from Genius HTML lyrics containers.
- * Targets <div data-lyrics-container> elements — strips all inner HTML tags.
- */
-function extractLyricsFromHtml(html: string): string | null {
-  const containerPattern = /<div[^>]+data-lyrics-container[^>]*>([\s\S]*?)<\/div>/g;
-  const parts: string[] = [];
+// Decodes the most common HTML entities found in song lyrics.
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(parseInt(dec, 10)))
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&mdash;/g, '—')
+    .replace(/&ndash;/g, '–')
+    .replace(/&lsquo;/g, '‘')
+    .replace(/&rsquo;/g, '’')
+    .replace(/&ldquo;/g, '“')
+    .replace(/&rdquo;/g, '”');
+}
 
-  let match: RegExpExecArray | null;
-  while ((match = containerPattern.exec(html)) !== null) {
-    const inner = match[1];
-    if (inner === undefined) continue;
-    const text = inner
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<[^>]+>/g, '')
-      .trim();
-    if (text) parts.push(text);
+// Extracts plain text from <div data-lyrics-container> elements using a
+// balanced-bracket depth counter to handle nested divs correctly.
+// The previous regex approach used non-greedy matching which stopped at the
+// first inner </div>, capturing only the header block Genius now prepends.
+function extractLyricsFromHtml(html: string): string | null {
+  const OPEN_TAG = 'data-lyrics-container';
+  const parts: string[] = [];
+  let pos = 0;
+
+  while (pos < html.length) {
+    const attrIdx = html.indexOf(OPEN_TAG, pos);
+    if (attrIdx === -1) break;
+
+    const tagEnd = html.indexOf('>', attrIdx);
+    if (tagEnd === -1) break;
+
+    let depth = 1;
+    let cursor = tagEnd + 1;
+    let closingStart = -1;
+
+    while (depth > 0 && cursor < html.length) {
+      const nextOpen = html.indexOf('<div', cursor);
+      const nextClose = html.indexOf('</div>', cursor);
+      if (nextClose === -1) break;
+
+      if (nextOpen !== -1 && nextOpen < nextClose) {
+        depth++;
+        cursor = nextOpen + 4;
+      } else {
+        depth--;
+        if (depth === 0) closingStart = nextClose;
+        cursor = nextClose + 6;
+      }
+    }
+
+    if (closingStart !== -1) {
+      const raw = html.slice(tagEnd + 1, closingStart);
+      const text = decodeHtmlEntities(
+        raw.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ''),
+      ).trim();
+      if (text) parts.push(text);
+      pos = closingStart + 6;
+    } else {
+      pos = tagEnd + 1;
+    }
   }
 
   return parts.length > 0 ? parts.join('\n\n') : null;
 }
 
+// Rejects content that is known garbage: Genius header blocks, bare title
+// matches, and oversized results (books/articles scraped instead of lyrics).
+function isValidGeniusLyrics(text: string): boolean {
+  if (text.length > 15_000) return false;
+  if (/^\d+\s+Contributor/i.test(text)) return false;
+  if (/\bLyrics\s*$/.test(text)) return false;
+  return true;
+}
+
+function normalizeArtistName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
  * Fetch lyrics from Genius: search API to find the song page, then scrape HTML.
- * Returns lyrics text or null if not found. Throws on network/API errors.
+ * Returns lyrics text or null if not found/valid. Throws on network/API errors.
  */
 async function fetchGenius(
   token: string,
@@ -82,13 +150,25 @@ async function fetchGenius(
 
   const searchData = (await searchResponse.json()) as GeniusSearchResponse;
   const firstHit = searchData.response.hits[0];
-  if (!firstHit) return null;
+
+  // Genius also indexes books and articles — only accept song results.
+  if (!firstHit || firstHit.type !== 'song') return null;
+
+  // Reject hits where the primary artist doesn't fuzzy-match the query artist
+  // to avoid storing lyrics for completely different songs.
+  const geniusArtist = normalizeArtistName(firstHit.result.primary_artist.name);
+  const queryArtist = normalizeArtistName(artistName);
+  if (queryArtist && !geniusArtist.includes(queryArtist) && !queryArtist.includes(geniusArtist)) {
+    return null;
+  }
 
   const pageResponse = await fetch(firstHit.result.url);
   if (!pageResponse.ok) throw new Error(`Genius page returned ${pageResponse.status}`);
 
   const html = await pageResponse.text();
-  return extractLyricsFromHtml(html);
+  const lyrics = extractLyricsFromHtml(html);
+  if (!lyrics || !isValidGeniusLyrics(lyrics)) return null;
+  return lyrics;
 }
 
 /**

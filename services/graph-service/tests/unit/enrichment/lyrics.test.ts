@@ -278,4 +278,176 @@ describe('enrichLyrics', () => {
     expect(lrclibUrl).toContain('artist_name=');
     expect(mockSetTrackLyrics).toHaveBeenCalledOnce();
   });
+
+  // -------------------------------------------------------------------------
+  // Genius — type !== 'song' guard
+  // -------------------------------------------------------------------------
+  it('skips track when Genius search hit type is not song', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+
+    const articleHit = {
+      meta: { status: 200 },
+      response: {
+        hits: [
+          {
+            type: 'article',
+            result: {
+              id: 12345,
+              url: 'https://genius.com/some-article',
+              primary_artist: { name: 'Test Artist' },
+            },
+          },
+        ],
+      },
+    };
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse(articleHit)); // Genius search returns article
+
+    const summary = await enrichLyrics(fakeDriver);
+
+    expect(summary.skipped).toBe(1);
+    expect(summary.enriched).toBe(0);
+    expect(mockSetTrackLyrics).not.toHaveBeenCalled();
+    // No page fetch — type guard fired before fetching the page
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  // -------------------------------------------------------------------------
+  // Genius — artist mismatch guard
+  // -------------------------------------------------------------------------
+  it('skips track when Genius primary artist does not match query artist', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+
+    const wrongArtistHit = {
+      meta: { status: 200 },
+      response: {
+        hits: [
+          {
+            type: 'song',
+            result: {
+              id: 99999,
+              url: 'https://genius.com/completely-different-artist-song-lyrics',
+              primary_artist: { name: 'Completely Different Artist' },
+            },
+          },
+        ],
+      },
+    };
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse(wrongArtistHit)); // Genius search with wrong artist
+
+    const summary = await enrichLyrics(fakeDriver);
+
+    expect(summary.skipped).toBe(1);
+    expect(summary.enriched).toBe(0);
+    expect(mockSetTrackLyrics).not.toHaveBeenCalled();
+    // No page fetch — artist guard fired before fetching the page
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  // -------------------------------------------------------------------------
+  // Genius — garbage content guard (header prefix leaked via nested div)
+  // -------------------------------------------------------------------------
+  it('skips track when extracted Genius lyrics start with contributor header', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+
+    // Simulates Genius page where a header div nests inside the lyrics container.
+    // The balanced-bracket extractor captures the full outer div content including
+    // the header text, which isValidGeniusLyrics then rejects.
+    const headerHtml = `
+      <div data-lyrics-container="true">
+        <div class="header">8 ContributorsMusic For Indigo Lyrics</div>
+        Actual lyrics would follow here
+      </div>
+    `;
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
+      .mockResolvedValueOnce(makeHtmlResponse(headerHtml)); // Genius page with header
+
+    const summary = await enrichLyrics(fakeDriver);
+
+    expect(summary.skipped).toBe(1);
+    expect(summary.enriched).toBe(0);
+    expect(mockSetTrackLyrics).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Genius — oversized content guard (book / article scraped)
+  // -------------------------------------------------------------------------
+  it('skips track when Genius page returns content exceeding 15,000 characters', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+
+    const oversizedContent = 'A'.repeat(15_001);
+    const oversizedHtml = `<div data-lyrics-container="true">${oversizedContent}</div>`;
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
+      .mockResolvedValueOnce(makeHtmlResponse(oversizedHtml));
+
+    const summary = await enrichLyrics(fakeDriver);
+
+    expect(summary.skipped).toBe(1);
+    expect(summary.enriched).toBe(0);
+    expect(mockSetTrackLyrics).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Genius — HTML entity decoding
+  // -------------------------------------------------------------------------
+  it('stores lyrics with HTML entities decoded', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+
+    const entityHtml = '<div data-lyrics-container="true">I&#x27;ll never leave you &amp; me</div>';
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
+      .mockResolvedValueOnce(makeHtmlResponse(entityHtml));
+
+    const summary = await enrichLyrics(fakeDriver);
+
+    expect(summary.enriched).toBe(1);
+    expect(mockSetTrackLyrics).toHaveBeenCalledWith(
+      fakeDriver,
+      sampleTrack.releaseDiscogsId,
+      sampleTrack.position,
+      "I'll never leave you & me",
+      'genius',
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // Genius — multiple lyrics containers joined
+  // -------------------------------------------------------------------------
+  it('joins multiple data-lyrics-container divs with double newline', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+
+    const multiHtml = `
+      <div data-lyrics-container="true">Verse 1</div>
+      <div data-lyrics-container="true">Chorus</div>
+    `;
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
+      .mockResolvedValueOnce(makeHtmlResponse(multiHtml));
+
+    const summary = await enrichLyrics(fakeDriver);
+
+    expect(summary.enriched).toBe(1);
+    expect(mockSetTrackLyrics).toHaveBeenCalledWith(
+      fakeDriver,
+      sampleTrack.releaseDiscogsId,
+      sampleTrack.position,
+      'Verse 1\n\nChorus',
+      'genius',
+    );
+  });
 });
