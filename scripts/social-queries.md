@@ -56,6 +56,7 @@ year, which can be decades later.
 ```cypher
 MATCH (a:Artist)<-[:RELEASED_BY]-(r:Release)
 WHERE coalesce(r.originalYear, r.pressingYear) IS NOT NULL
+  AND coalesce(r.originalYear, r.pressingYear) > 0
 WITH a, coalesce(r.originalYear, r.pressingYear) AS effectiveYear, r.title AS title
 ORDER BY a.name, effectiveYear
 WITH a,
