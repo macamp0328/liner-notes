@@ -231,8 +231,8 @@ describe('Admin API', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      const body = JSON.parse(response.payload) as { cleared: number };
-      expect(body.cleared).toBe(460);
+      const body = JSON.parse(response.payload) as { data: { cleared: number } };
+      expect(body.data.cleared).toBe(460);
     });
 
     it('returns 200 with cleared: 0 when no Genius tracks exist', async () => {
@@ -245,8 +245,8 @@ describe('Admin API', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      const body = JSON.parse(response.payload) as { cleared: number };
-      expect(body.cleared).toBe(0);
+      const body = JSON.parse(response.payload) as { data: { cleared: number } };
+      expect(body.data.cleared).toBe(0);
     });
 
     it('returns 401 when Authorization header is missing', async () => {

@@ -106,11 +106,27 @@ describe('enrichLyrics integration', () => {
     process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue(tracks);
 
+    // Artist name must match track[1].artistName ('Artist A') to pass the fuzzy match guard.
+    const artistAHit = {
+      meta: { status: 200 },
+      response: {
+        hits: [
+          {
+            type: 'song',
+            result: {
+              id: 12345,
+              url: 'https://genius.com/Artist-a-track-two-lyrics',
+              primary_artist: { id: 999, name: 'Artist A' },
+            },
+          },
+        ],
+      },
+    };
     const geniusHtml = '<div data-lyrics-container="true">Genius lyrics</div>';
     fetchSpy
       .mockResolvedValueOnce(makeOkResponse(lrclibHit)) // track[0]: LRCLIB hit
       .mockResolvedValueOnce(makeOkResponse({}, 404)) // track[1]: LRCLIB 404
-      .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) //   Genius search
+      .mockResolvedValueOnce(makeOkResponse(artistAHit)) //   Genius search — artist matches
       .mockResolvedValueOnce(makeHtmlResponse(geniusHtml)) //   Genius page
       .mockRejectedValueOnce(new Error('LRCLIB timeout')); // track[2]: LRCLIB throws
 

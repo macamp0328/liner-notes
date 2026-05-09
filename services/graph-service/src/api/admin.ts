@@ -179,7 +179,9 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     },
   );
 
-  fastify.post<{ Reply: { cleared: number } | { error: { code: string; message: string } } }>(
+  fastify.post<{
+    Reply: { data: { cleared: number } } | { error: { code: string; message: string } };
+  }>(
     '/lyrics/clear-genius',
     {
       schema: {
@@ -190,19 +192,24 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           200: {
             type: 'object',
-            required: ['cleared'],
+            required: ['data'],
             properties: {
-              cleared: { type: 'integer' },
+              data: {
+                type: 'object',
+                required: ['cleared'],
+                properties: { cleared: { type: 'integer' } },
+              },
             },
           },
           401: errorShape,
+          503: errorShape,
         },
       },
       preHandler: adminAuthHook,
     },
     async (_request, reply) => {
       const cleared = await clearGeniusLyrics(getDriver());
-      return reply.send({ cleared });
+      return reply.send({ data: { cleared } });
     },
   );
 }

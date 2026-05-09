@@ -47,7 +47,7 @@ async function fetchLrclib(artistName: string, title: string): Promise<string | 
 // Decodes the most common HTML entities found in song lyrics.
 function decodeHtmlEntities(text: string): string {
   return text
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#[xX]([0-9a-fA-F]+);/g, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
     .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(parseInt(dec, 10)))
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
