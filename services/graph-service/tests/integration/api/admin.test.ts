@@ -13,6 +13,11 @@ vi.mock('../../../src/db/client.js', () => ({
   closeDriver: vi.fn().mockResolvedValue(undefined),
 }));
 
+const mockClearGeniusLyrics = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/db/lyrics-repository.js', () => ({
+  clearGeniusLyrics: mockClearGeniusLyrics,
+}));
+
 vi.mock('../../../src/db/schema.js', () => ({
   applySchema: vi.fn().mockResolvedValue(undefined),
 }));
@@ -100,6 +105,7 @@ describe('Admin API', () => {
     mockRunIngestion.mockResolvedValue(completeSummary);
     mockGetJobState.mockReturnValue(idleState);
     mockStartJob.mockReturnValue('test-job-id');
+    mockClearGeniusLyrics.mockResolvedValue(460);
     app = await buildServer();
     await app.ready();
   });
@@ -209,6 +215,58 @@ describe('Admin API', () => {
         url: '/api/v1/admin/ingest/status',
         headers: { authorization: 'Bearer bad' },
       });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── POST /lyrics/clear-genius ─────────────────────────────────────────────
+  describe('POST /api/v1/admin/lyrics/clear-genius', () => {
+    it('returns 200 with count of cleared tracks', async () => {
+      mockClearGeniusLyrics.mockResolvedValueOnce(460);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/clear-genius',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as { data: { cleared: number } };
+      expect(body.data.cleared).toBe(460);
+    });
+
+    it('returns 200 with cleared: 0 when no Genius tracks exist', async () => {
+      mockClearGeniusLyrics.mockResolvedValueOnce(0);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/clear-genius',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as { data: { cleared: number } };
+      expect(body.data.cleared).toBe(0);
+    });
+
+    it('returns 401 when Authorization header is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/clear-genius',
+      });
+
+      expect(response.statusCode).toBe(401);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('UNAUTHORIZED');
+    });
+
+    it('returns 401 when token is wrong', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/clear-genius',
+        headers: { authorization: 'Bearer wrong-token' },
+      });
+
       expect(response.statusCode).toBe(401);
     });
   });

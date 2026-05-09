@@ -1,6 +1,8 @@
 import type { Driver } from 'neo4j-driver';
 import neo4j from 'neo4j-driver';
 
+type Neo4jInt = { toNumber(): number };
+
 export interface UnenrichedTrack {
   title: string;
   position: string;
@@ -60,6 +62,29 @@ export async function setTrackLyrics(
         lyricsSource,
       },
     );
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Null out all Track nodes enriched from Genius.
+ * Returns the count of tracks cleared.
+ */
+export async function clearGeniusLyrics(driver: Driver): Promise<number> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `MATCH (t:Track)
+       WHERE t.lyricsSource = 'genius'
+       SET t.lyrics = null, t.lyricsSource = null
+       RETURN count(t) AS cleared`,
+    );
+    const raw = result.records[0]?.get('cleared') as Neo4jInt | number | null | undefined;
+    if (raw === null || raw === undefined) return 0;
+    return typeof (raw as Neo4jInt).toNumber === 'function'
+      ? (raw as Neo4jInt).toNumber()
+      : (raw as number);
   } finally {
     await session.close();
   }

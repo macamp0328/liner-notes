@@ -9,6 +9,7 @@ import {
   failJob,
   type IngestionStats,
 } from '../ingestion/job-state.js';
+import { clearGeniusLyrics } from '../db/lyrics-repository.js';
 
 const errorShape = {
   type: 'object',
@@ -175,6 +176,40 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (_request, reply) => {
       return reply.send({ data: getJobState() });
+    },
+  );
+
+  fastify.post<{
+    Reply: { data: { cleared: number } } | { error: { code: string; message: string } };
+  }>(
+    '/lyrics/clear-genius',
+    {
+      schema: {
+        tags: ['admin'],
+        summary:
+          'Null out all Genius-sourced lyrics so affected tracks are re-enriched on next run',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['cleared'],
+                properties: { cleared: { type: 'integer' } },
+              },
+            },
+          },
+          401: errorShape,
+          503: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => {
+      const cleared = await clearGeniusLyrics(getDriver());
+      return reply.send({ data: { cleared } });
     },
   );
 }
