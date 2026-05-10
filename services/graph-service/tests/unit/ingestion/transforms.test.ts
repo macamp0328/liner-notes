@@ -133,9 +133,9 @@ describe('parseRoleCategory', () => {
     expect(parseRoleCategory('Engineer, Mixed By')).toBe('engineer');
     expect(parseRoleCategory('Mastered By')).toBe('engineer');
     expect(parseRoleCategory('Lacquer Cut By')).toBe('engineer');
-    expect(
-      parseRoleCategory('Technician [Studio Brain], Engineer [Assistant Engineer]'),
-    ).toBe('engineer');
+    expect(parseRoleCategory('Technician [Studio Brain], Engineer [Assistant Engineer]')).toBe(
+      'engineer',
+    );
   });
 
   // visual

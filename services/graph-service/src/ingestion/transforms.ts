@@ -52,17 +52,73 @@ const ROLE_CATEGORY_RULES: ReadonlyArray<readonly [RoleCategory, readonly string
   [
     'performer',
     [
-      'guitar', 'bass', 'drums', 'vocals', 'piano', 'saxophone', 'trumpet', 'violin',
-      'cello', 'flute', 'keyboards', 'synthesizer', 'organ', 'percussion',
-      'tambourine', 'harmonica', 'banjo', 'mandolin', 'harp', 'strings',
-      'horns', 'brass', 'woodwind', 'wind', 'voice', 'choir', 'chimes',
-      'bells', 'shaker', 'sampler', 'handclaps', 'clap', 'sounds', 'drone', 'performer',
+      'guitar',
+      'bass',
+      'drums',
+      'vocals',
+      'piano',
+      'saxophone',
+      'trumpet',
+      'violin',
+      'cello',
+      'flute',
+      'keyboards',
+      'synthesizer',
+      'organ',
+      'percussion',
+      'tambourine',
+      'harmonica',
+      'banjo',
+      'mandolin',
+      'harp',
+      'strings',
+      'horns',
+      'brass',
+      'woodwind',
+      'wind',
+      'voice',
+      'choir',
+      'chimes',
+      'bells',
+      'shaker',
+      'sampler',
+      'handclaps',
+      'clap',
+      'sounds',
+      'drone',
+      'performer',
     ],
   ],
-  ['composer', ['written-by', 'composed by', 'songwriter', 'music by', 'lyrics by', 'arranged by', 'arranger']],
+  [
+    'composer',
+    ['written-by', 'composed by', 'songwriter', 'music by', 'lyrics by', 'arranged by', 'arranger'],
+  ],
   ['producer', ['producer']],
-  ['engineer', ['engineer', 'recorded by', 'mixed by', 'mastered by', 'lacquer cut by', 'technician', 'cut by']],
-  ['visual', ['photography', 'artwork', 'design', 'illustration', 'sleeve', 'liner notes', 'layout', 'cover']],
+  [
+    'engineer',
+    [
+      'engineer',
+      'recorded by',
+      'mixed by',
+      'mastered by',
+      'lacquer cut by',
+      'technician',
+      'cut by',
+    ],
+  ],
+  [
+    'visual',
+    [
+      'photography',
+      'artwork',
+      'design',
+      'illustration',
+      'sleeve',
+      'liner notes',
+      'layout',
+      'cover',
+    ],
+  ],
   ['crew', ['management', 'coordinator', 'a&r', 'legal', 'catered by']],
 ];
 
@@ -76,7 +132,10 @@ const ROLE_CATEGORY_RULES: ReadonlyArray<readonly [RoleCategory, readonly string
 export function parseRoleCategory(role: string): RoleCategory {
   const tokens: string[] = [];
   for (const segment of role.split(',')) {
-    const base = segment.replace(/\[.*?\]/g, '').trim().toLowerCase();
+    const base = segment
+      .replace(/\[.*?\]/g, '')
+      .trim()
+      .toLowerCase();
     if (base.length > 0) tokens.push(base);
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for (const match of segment.matchAll(/\[([^\]]*)\]/g)) {
