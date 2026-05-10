@@ -10,7 +10,10 @@ const statements = [
   'CREATE CONSTRAINT country_name IF NOT EXISTS FOR (c:Country) REQUIRE c.name IS UNIQUE',
   'CREATE CONSTRAINT decade_name IF NOT EXISTS FOR (d:Decade) REQUIRE d.name IS UNIQUE',
   'CREATE FULLTEXT INDEX trackLyrics IF NOT EXISTS FOR (t:Track) ON EACH [t.lyrics, t.title]',
-  'CREATE INDEX release_year IF NOT EXISTS FOR (r:Release) ON (r.year)',
+  'CREATE INDEX release_pressing_year IF NOT EXISTS FOR (r:Release) ON (r.pressingYear)',
+  // One-time migration: copy r.year → r.pressingYear for existing nodes created before the rename.
+  // Safe to re-run: the WHERE guard makes it a no-op once all nodes are migrated.
+  'MATCH (r:Release) WHERE r.year IS NOT NULL AND r.pressingYear IS NULL SET r.pressingYear = r.year',
   'CREATE INDEX musician_name IF NOT EXISTS FOR (m:Musician) ON (m.name)',
   'CREATE INDEX studio_name IF NOT EXISTS FOR (s:Studio) ON (s.name)',
 ];

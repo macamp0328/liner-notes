@@ -47,7 +47,7 @@ vi.mock('../../../src/db/repositories/collection-repository.js', () => ({
 const sampleListItem: ReleaseListItem = {
   discogsId: 13570466,
   title: 'U.F.O.F.',
-  year: 2019,
+  pressingYear: 2019,
   format: 'Vinyl',
   thumbUrl: 'https://example.com/thumb.jpg',
   artistName: 'Big Thief',
@@ -57,12 +57,13 @@ const sampleListItem: ReleaseListItem = {
 const sampleReleaseFull: ReleaseFull = {
   discogsId: 13570466,
   title: 'U.F.O.F.',
-  year: 2019,
+  pressingYear: 2019,
   format: 'Vinyl',
   thumbUrl: 'https://example.com/thumb.jpg',
   artistName: 'Big Thief',
   labelName: '4AD',
   masterDiscogsId: 1234,
+  originalYear: 2019,
   releaseDate: '2019-05-03',
   notes: null,
   discogsUrl: 'https://www.discogs.com/release/13570466',
@@ -98,7 +99,7 @@ const sampleArtistFull: ArtistFull = {
     {
       discogsId: 13570466,
       title: 'U.F.O.F.',
-      year: 2019,
+      pressingYear: 2019,
       format: 'Vinyl',
       thumbUrl: null,
       role: '',
@@ -116,7 +117,7 @@ const sampleLabelFull: LabelFull = {
     {
       discogsId: 13570466,
       title: 'U.F.O.F.',
-      year: 2019,
+      pressingYear: 2019,
       format: 'Vinyl',
       thumbUrl: null,
       catalogNumber: '4AD0129LP',

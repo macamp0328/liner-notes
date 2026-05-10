@@ -7,7 +7,7 @@ import neo4j, { Driver } from 'neo4j-driver';
 export interface ReleaseListItem {
   discogsId: number;
   title: string;
-  year: number | null;
+  pressingYear: number | null;
   format: string | null;
   thumbUrl: string | null;
   artistName: string | null;
@@ -51,6 +51,7 @@ export interface ReleaseCredit {
 
 export interface ReleaseFull extends ReleaseListItem {
   masterDiscogsId: number | null;
+  originalYear: number | null;
   releaseDate: string | null;
   notes: string | null;
   discogsUrl: string | null;
@@ -71,7 +72,7 @@ export interface ReleaseFull extends ReleaseListItem {
 export interface ArtistRelease {
   discogsId: number;
   title: string;
-  year: number | null;
+  pressingYear: number | null;
   format: string | null;
   thumbUrl: string | null;
   role: string;
@@ -98,7 +99,7 @@ export interface ArtistFull {
 export interface LabelRelease {
   discogsId: number;
   title: string;
-  year: number | null;
+  pressingYear: number | null;
   format: string | null;
   thumbUrl: string | null;
   catalogNumber: string;
@@ -157,7 +158,7 @@ OPTIONAL MATCH (r)-[:ON_LABEL]->(l:Label)
 WITH r,
      [x IN collect(DISTINCT a.name) WHERE x IS NOT NULL | x] AS artistNames,
      [x IN collect(DISTINCT l.name) WHERE x IS NOT NULL | x] AS labelNames
-RETURN r.discogsId AS discogsId, r.title AS title, r.year AS year,
+RETURN r.discogsId AS discogsId, r.title AS title, r.pressingYear AS pressingYear,
        r.format AS format, r.thumbUrl AS thumbUrl,
        artistNames, labelNames
 ORDER BY r.title ASC
@@ -171,7 +172,7 @@ SKIP $skip LIMIT $limit`,
       return {
         discogsId: toInt(record.get('discogsId') as unknown) ?? 0,
         title: toStr(record.get('title') as unknown) ?? '',
-        year: toInt(record.get('year') as unknown),
+        pressingYear: toInt(record.get('pressingYear') as unknown),
         format: toStr(record.get('format') as unknown),
         thumbUrl: toStr(record.get('thumbUrl') as unknown),
         artistName: artistNames[0] ?? null,
@@ -317,12 +318,13 @@ ORDER BY trackNumber ASC`,
     return {
       discogsId: toInt(props['discogsId']) ?? 0,
       title: toStr(props['title']) ?? '',
-      year: toInt(props['year']),
+      pressingYear: toInt(props['pressingYear']),
       format: toStr(props['format']),
       thumbUrl: toStr(props['thumbUrl']),
       artistName: artists[0]?.name ?? null,
       labelName: labels[0]?.name ?? null,
       masterDiscogsId: toInt(props['masterDiscogsId']),
+      originalYear: toInt(props['originalYear']),
       releaseDate: toStr(props['releaseDate']),
       notes: toStr(props['notes']),
       discogsUrl: toStr(props['discogsUrl']),
@@ -351,7 +353,7 @@ ORDER BY trackNumber ASC`,
 interface RawReleaseMap {
   discogsId: unknown;
   title: unknown;
-  year: unknown;
+  pressingYear: unknown;
   format: unknown;
   thumbUrl: unknown;
   role: unknown;
@@ -365,7 +367,7 @@ export async function getArtistById(driver: Driver, discogsId: number): Promise<
 OPTIONAL MATCH (r:Release)-[rb:RELEASED_BY]->(a)
 RETURN a.discogsId AS discogsId, a.name AS name,
        a.realName AS realName, a.profile AS profile,
-  collect(DISTINCT {discogsId: r.discogsId, title: r.title, year: r.year,
+  collect(DISTINCT {discogsId: r.discogsId, title: r.title, pressingYear: r.pressingYear,
     format: r.format, thumbUrl: r.thumbUrl, role: rb.role}) AS releases`,
       { discogsId: neo4j.int(discogsId) },
     );
@@ -379,13 +381,13 @@ RETURN a.discogsId AS discogsId, a.name AS name,
       .map((r) => ({
         discogsId: toInt(r.discogsId) ?? 0,
         title: toStr(r.title) ?? '',
-        year: toInt(r.year),
+        pressingYear: toInt(r.pressingYear),
         format: toStr(r.format),
         thumbUrl: toStr(r.thumbUrl),
         role: toStr(r.role) ?? '',
       }))
       .sort((a, b) => {
-        const yearDiff = (b.year ?? 0) - (a.year ?? 0);
+        const yearDiff = (b.pressingYear ?? 0) - (a.pressingYear ?? 0);
         return yearDiff !== 0 ? yearDiff : a.title.localeCompare(b.title);
       });
 
@@ -434,7 +436,7 @@ RETURN release.discogsId AS releaseDiscogsId, release.title AS releaseTitle,
 interface RawLabelReleaseMap {
   discogsId: unknown;
   title: unknown;
-  year: unknown;
+  pressingYear: unknown;
   format: unknown;
   thumbUrl: unknown;
   catalogNumber: unknown;
@@ -451,7 +453,7 @@ OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
 WITH l, r, ol, [x IN collect(DISTINCT a.name) WHERE x IS NOT NULL | x] AS artistNames
 RETURN l.discogsId AS discogsId, l.name AS name,
        l.profile AS profile, l.contactInfo AS contactInfo,
-  collect(DISTINCT {discogsId: r.discogsId, title: r.title, year: r.year,
+  collect(DISTINCT {discogsId: r.discogsId, title: r.title, pressingYear: r.pressingYear,
     format: r.format, thumbUrl: r.thumbUrl,
     catalogNumber: ol.catalogNumber, artistNames: artistNames}) AS releases`,
       { discogsId: neo4j.int(discogsId) },
@@ -466,14 +468,14 @@ RETURN l.discogsId AS discogsId, l.name AS name,
       .map((r) => ({
         discogsId: toInt(r.discogsId) ?? 0,
         title: toStr(r.title) ?? '',
-        year: toInt(r.year),
+        pressingYear: toInt(r.pressingYear),
         format: toStr(r.format),
         thumbUrl: toStr(r.thumbUrl),
         catalogNumber: toStr(r.catalogNumber) ?? '',
         artistName: [...(r.artistNames as string[])].sort()[0] ?? null,
       }))
       .sort((a, b) => {
-        const yearDiff = (b.year ?? 0) - (a.year ?? 0);
+        const yearDiff = (b.pressingYear ?? 0) - (a.pressingYear ?? 0);
         return yearDiff !== 0 ? yearDiff : a.title.localeCompare(b.title);
       });
 

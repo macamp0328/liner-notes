@@ -16,6 +16,9 @@ const mockGetRelease = vi.hoisted(() => vi.fn());
 const mockEnrichLyrics = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 }),
 );
+const mockEnrichOriginalYear = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 }),
+);
 
 vi.mock('../../../src/db/client.js', () => ({
   initDriver: vi.fn().mockReturnValue({ verifyConnectivity: mockVerifyConnectivity }),
@@ -36,11 +39,16 @@ vi.mock('../../../src/ingestion/discogs-client.js', () => ({
   DiscogsClient: vi.fn().mockImplementation(() => ({
     getCollectionReleases: mockGetCollectionReleases,
     getRelease: mockGetRelease,
+    getMaster: vi.fn().mockResolvedValue({ id: 1, title: 'Master', year: 2019 }),
   })),
 }));
 
 vi.mock('../../../src/enrichment/lyrics.js', () => ({
   enrichLyrics: mockEnrichLyrics,
+}));
+
+vi.mock('../../../src/enrichment/original-year.js', () => ({
+  enrichOriginalYear: mockEnrichOriginalYear,
 }));
 
 // ---------------------------------------------------------------------------
@@ -70,6 +78,7 @@ describe('Discogs ingestion pipeline', () => {
     mockHasReleases.mockResolvedValue(false);
     mockMergeReleaseGraph.mockResolvedValue(undefined);
     mockEnrichLyrics.mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
+    mockEnrichOriginalYear.mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
     mockGetCollectionReleases.mockResolvedValue(collectionPage1 as DiscogsCollectionPage);
     mockGetRelease.mockImplementation((id: number) => {
       const r = releaseMap[id];

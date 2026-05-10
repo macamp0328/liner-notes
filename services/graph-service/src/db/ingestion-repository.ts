@@ -83,7 +83,7 @@ async function mergeRelease(session: Session, release: DiscogsRelease): Promise<
     `MERGE (r:Release {discogsId: $discogsId})
      ON CREATE SET
        r.title              = $title,
-       r.year               = $year,
+       r.pressingYear       = $pressingYear,
        r.format             = $format,
        r.thumbUrl           = $thumbUrl,
        r.masterDiscogsId    = $masterDiscogsId,
@@ -95,7 +95,7 @@ async function mergeRelease(session: Session, release: DiscogsRelease): Promise<
        r.barcode            = $barcode
      ON MATCH SET
        r.title              = $title,
-       r.year               = $year,
+       r.pressingYear       = $pressingYear,
        r.format             = $format,
        r.thumbUrl           = $thumbUrl,
        r.masterDiscogsId    = $masterDiscogsId,
@@ -108,7 +108,7 @@ async function mergeRelease(session: Session, release: DiscogsRelease): Promise<
     {
       discogsId: neo4j.int(release.id),
       title: release.title,
-      year: neo4j.int(release.year),
+      pressingYear: neo4j.int(release.year),
       format,
       thumbUrl,
       masterDiscogsId,

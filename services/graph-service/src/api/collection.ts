@@ -47,7 +47,7 @@ const releaseListItemSchema = {
   properties: {
     discogsId: { type: 'integer' },
     title: { type: 'string' },
-    year: { type: 'integer', nullable: true },
+    pressingYear: { type: 'integer', nullable: true },
     format: { type: 'string', nullable: true },
     thumbUrl: { type: 'string', nullable: true },
     artistName: { type: 'string', nullable: true },
@@ -96,12 +96,13 @@ const releaseFullSchema = {
   properties: {
     discogsId: { type: 'integer' },
     title: { type: 'string' },
-    year: { type: 'integer', nullable: true },
+    pressingYear: { type: 'integer', nullable: true },
     format: { type: 'string', nullable: true },
     thumbUrl: { type: 'string', nullable: true },
     artistName: { type: 'string', nullable: true },
     labelName: { type: 'string', nullable: true },
     masterDiscogsId: { type: 'integer', nullable: true },
+    originalYear: { type: 'integer', nullable: true },
     releaseDate: { type: 'string', nullable: true },
     notes: { type: 'string', nullable: true },
     discogsUrl: { type: 'string', nullable: true },
@@ -160,7 +161,7 @@ const artistReleaseSchema = {
   properties: {
     discogsId: { type: 'integer' },
     title: { type: 'string' },
-    year: { type: 'integer', nullable: true },
+    pressingYear: { type: 'integer', nullable: true },
     format: { type: 'string', nullable: true },
     thumbUrl: { type: 'string', nullable: true },
     role: { type: 'string' },
@@ -199,7 +200,7 @@ const labelReleaseSchema = {
   properties: {
     discogsId: { type: 'integer' },
     title: { type: 'string' },
-    year: { type: 'integer', nullable: true },
+    pressingYear: { type: 'integer', nullable: true },
     format: { type: 'string', nullable: true },
     thumbUrl: { type: 'string', nullable: true },
     catalogNumber: { type: 'string' },

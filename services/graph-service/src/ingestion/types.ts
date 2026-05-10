@@ -98,6 +98,12 @@ export interface DiscogsCollectionRelease {
   };
 }
 
+export interface DiscogsMasterRelease {
+  id: number;
+  title: string;
+  year: number; // earliest known release year across all versions
+}
+
 export interface DiscogsCollectionPage {
   pagination: {
     page: number;
