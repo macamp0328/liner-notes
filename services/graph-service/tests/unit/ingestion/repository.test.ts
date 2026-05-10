@@ -198,6 +198,22 @@ describe('mergeReleaseGraph', () => {
     expect(creditedAsCalls.length).toBeGreaterThan(0);
   });
 
+  it('sets roleCategory on all CREDITED_ON relationships', async () => {
+    await mergeReleaseGraph(driver, release13570466 as unknown as DiscogsRelease);
+
+    const calls = (session.run as ReturnType<typeof vi.fn>).mock.calls as [
+      string,
+      Record<string, unknown>,
+    ][];
+    const creditedOnCalls = calls.filter(([q]) => q.includes('CREDITED_ON'));
+    expect(creditedOnCalls.length).toBeGreaterThan(0);
+    for (const [, params] of creditedOnCalls) {
+      expect(params).toHaveProperty('roleCategory');
+      expect(typeof params['roleCategory']).toBe('string');
+      expect((params['roleCategory'] as string).length).toBeGreaterThan(0);
+    }
+  });
+
   it('merges SAME_PERSON_AS when musician discogsId is non-zero', async () => {
     await mergeReleaseGraph(driver, release13570466 as unknown as DiscogsRelease);
 

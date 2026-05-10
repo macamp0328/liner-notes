@@ -3,6 +3,7 @@ import {
   deriveDecade,
   parseTrackNumber,
   parseDisplayRole,
+  parseRoleCategory,
   filterTracks,
   extractStudios,
   extractBarcode,
@@ -89,6 +90,76 @@ describe('parseDisplayRole', () => {
     expect(parseDisplayRole('Technician [Studio Brain], Engineer [Assistant Engineer]')).toBe(
       'Technician [Studio Brain]',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseRoleCategory
+// ---------------------------------------------------------------------------
+describe('parseRoleCategory', () => {
+  // performer
+  it('categorizes single instrument roles as performer', () => {
+    expect(parseRoleCategory('Bass')).toBe('performer');
+    expect(parseRoleCategory('Drums')).toBe('performer');
+    expect(parseRoleCategory('Piano')).toBe('performer');
+  });
+
+  it('categorizes multi-token performer roles on first match', () => {
+    expect(parseRoleCategory('Acoustic Guitar, Electric Guitar, Vocals')).toBe('performer');
+    expect(parseRoleCategory('Drums, Percussion, Choir, Keyboards [Sk5]')).toBe('performer');
+  });
+
+  it('matches performer via bracket content when base token is generic', () => {
+    expect(parseRoleCategory('Sounds [Ambience]')).toBe('performer');
+    expect(parseRoleCategory('Drone [Bass Drone]')).toBe('performer');
+  });
+
+  // composer
+  it('categorizes writing credits as composer', () => {
+    expect(parseRoleCategory('Written-By')).toBe('composer');
+    expect(parseRoleCategory('Songwriter')).toBe('composer');
+    expect(parseRoleCategory('Arranged By')).toBe('composer');
+  });
+
+  // producer
+  it('categorizes producer credits', () => {
+    expect(parseRoleCategory('Producer')).toBe('producer');
+    expect(parseRoleCategory('Executive Producer')).toBe('producer');
+    expect(parseRoleCategory('Co-Producer')).toBe('producer');
+  });
+
+  // engineer
+  it('categorizes engineering credits', () => {
+    expect(parseRoleCategory('Engineer, Mixed By')).toBe('engineer');
+    expect(parseRoleCategory('Mastered By')).toBe('engineer');
+    expect(parseRoleCategory('Lacquer Cut By')).toBe('engineer');
+    expect(parseRoleCategory('Technician [Studio Brain], Engineer [Assistant Engineer]')).toBe('engineer');
+  });
+
+  // visual
+  it('categorizes visual / design credits', () => {
+    expect(parseRoleCategory('Photography By [Cover Photography]')).toBe('visual');
+    expect(parseRoleCategory('Design [Production Design]')).toBe('visual');
+    expect(parseRoleCategory('Design, Layout')).toBe('visual');
+  });
+
+  // crew — bracket content is the only signal
+  it('categorizes crew roles via bracket content', () => {
+    expect(parseRoleCategory('Other [Catered By]')).toBe('crew');
+  });
+
+  // other / default
+  it('returns "other" for unrecognized roles', () => {
+    expect(parseRoleCategory('Other')).toBe('other');
+    expect(parseRoleCategory('')).toBe('other');
+    expect(parseRoleCategory('Flowers [Flowers]')).toBe('other');
+  });
+
+  // case-insensitive
+  it('matches case-insensitively', () => {
+    expect(parseRoleCategory('BASS')).toBe('performer');
+    expect(parseRoleCategory('WRITTEN-BY')).toBe('composer');
+    expect(parseRoleCategory('Mastered By')).toBe('engineer');
   });
 });
 

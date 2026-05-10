@@ -19,6 +19,7 @@ import {
   filterTracks,
   isInstrumental,
   parseDisplayRole,
+  parseRoleCategory,
   parseDurationSeconds,
   parseTrackNumber,
 } from '../ingestion/transforms.js';
@@ -299,6 +300,7 @@ async function mergeReleaseCredits(
   for (const credit of extraartists) {
     const creditedAs = credit.anv !== '' ? credit.anv : null;
     const displayRole = parseDisplayRole(credit.role);
+    const roleCategory = parseRoleCategory(credit.role);
 
     if (credit.id !== 0) {
       // Musician with a Discogs ID — merge by discogsId for deduplication
@@ -310,13 +312,14 @@ async function mergeReleaseCredits(
          MATCH (r:Release {discogsId: $releaseId})
          MERGE (m)-[co:CREDITED_ON]->(r)
          SET co.role = $role, co.displayRole = $displayRole,
-             co.creditedAs = $creditedAs, co.scope = "release"`,
+             co.roleCategory = $roleCategory, co.creditedAs = $creditedAs, co.scope = "release"`,
         {
           discogsId: neo4j.int(credit.id),
           name: credit.name,
           releaseId: neo4j.int(releaseId),
           role: credit.role,
           displayRole,
+          roleCategory,
           creditedAs,
         },
       );
@@ -331,12 +334,13 @@ async function mergeReleaseCredits(
          MATCH (r:Release {discogsId: $releaseId})
          MERGE (m)-[co:CREDITED_ON]->(r)
          SET co.role = $role, co.displayRole = $displayRole,
-             co.creditedAs = $creditedAs, co.scope = "release"`,
+             co.roleCategory = $roleCategory, co.creditedAs = $creditedAs, co.scope = "release"`,
         {
           name: credit.name,
           releaseId: neo4j.int(releaseId),
           role: credit.role,
           displayRole,
+          roleCategory,
           creditedAs,
         },
       );
@@ -358,6 +362,7 @@ async function mergeTrackCredits(
     for (const credit of track.extraartists ?? []) {
       const creditedAs = credit.anv !== '' ? credit.anv : null;
       const displayRole = parseDisplayRole(credit.role);
+      const roleCategory = parseRoleCategory(credit.role);
 
       if (credit.id !== 0) {
         await session.run(
@@ -368,7 +373,7 @@ async function mergeTrackCredits(
            MATCH (t:Track {position: $position, releaseDiscogsId: $releaseDiscogsId})
            MERGE (m)-[co:CREDITED_ON]->(t)
            SET co.role = $role, co.displayRole = $displayRole,
-               co.creditedAs = $creditedAs, co.scope = "track"`,
+               co.roleCategory = $roleCategory, co.creditedAs = $creditedAs, co.scope = "track"`,
           {
             discogsId: neo4j.int(credit.id),
             name: credit.name,
@@ -376,6 +381,7 @@ async function mergeTrackCredits(
             releaseDiscogsId: neo4j.int(releaseId),
             role: credit.role,
             displayRole,
+            roleCategory,
             creditedAs,
           },
         );
@@ -389,13 +395,14 @@ async function mergeTrackCredits(
            MATCH (t:Track {position: $position, releaseDiscogsId: $releaseDiscogsId})
            MERGE (m)-[co:CREDITED_ON]->(t)
            SET co.role = $role, co.displayRole = $displayRole,
-               co.creditedAs = $creditedAs, co.scope = "track"`,
+               co.roleCategory = $roleCategory, co.creditedAs = $creditedAs, co.scope = "track"`,
           {
             name: credit.name,
             position: track.position,
             releaseDiscogsId: neo4j.int(releaseId),
             role: credit.role,
             displayRole,
+            roleCategory,
             creditedAs,
           },
         );
