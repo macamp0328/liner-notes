@@ -39,6 +39,122 @@ export function parseDisplayRole(role: string): string {
   return first !== undefined ? first.trim() : role;
 }
 
+export type RoleCategory =
+  | 'performer'
+  | 'composer'
+  | 'producer'
+  | 'engineer'
+  | 'visual'
+  | 'crew'
+  | 'other';
+
+const ROLE_CATEGORY_RULES: ReadonlyArray<readonly [RoleCategory, readonly string[]]> = [
+  [
+    'performer',
+    [
+      'guitar',
+      'bass',
+      'drums',
+      'vocals',
+      'piano',
+      'saxophone',
+      'trumpet',
+      'violin',
+      'cello',
+      'flute',
+      'keyboards',
+      'synthesizer',
+      'organ',
+      'percussion',
+      'tambourine',
+      'harmonica',
+      'banjo',
+      'mandolin',
+      'harp',
+      'strings',
+      'horns',
+      'brass',
+      'woodwind',
+      'wind',
+      'voice',
+      'choir',
+      'chimes',
+      'bells',
+      'shaker',
+      'sampler',
+      'handclaps',
+      'clap',
+      'sounds',
+      'drone',
+      'performer',
+    ],
+  ],
+  [
+    'composer',
+    ['written-by', 'composed by', 'songwriter', 'music by', 'lyrics by', 'arranged by', 'arranger'],
+  ],
+  ['producer', ['producer']],
+  [
+    'engineer',
+    [
+      'engineer',
+      'recorded by',
+      'mixed by',
+      'mastered by',
+      'lacquer cut by',
+      'technician',
+      'cut by',
+    ],
+  ],
+  [
+    'visual',
+    [
+      'photography',
+      'artwork',
+      'design',
+      'illustration',
+      'sleeve',
+      'liner notes',
+      'layout',
+      'cover',
+    ],
+  ],
+  ['crew', ['management', 'coordinator', 'a&r', 'legal', 'catered by']],
+];
+
+/**
+ * Derive a role category from a comma-delimited Discogs role string.
+ * Each token is checked against the lookup table using substring matching.
+ * Bracket content is also scanned as additional tokens — some roles encode
+ * the real category inside brackets (e.g. "Other [Catered By]" → "crew").
+ * Falls back to "other" when no category matches.
+ */
+export function parseRoleCategory(role: string): RoleCategory {
+  const tokens: string[] = [];
+  for (const segment of role.split(',')) {
+    const base = segment
+      .replace(/\[.*?\]/g, '')
+      .trim()
+      .toLowerCase();
+    if (base.length > 0) tokens.push(base);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    for (const match of segment.matchAll(/\[([^\]]*)\]/g)) {
+      const inner = match[1]!.trim().toLowerCase();
+      if (inner.length > 0) tokens.push(inner);
+    }
+  }
+
+  for (const [category, keywords] of ROLE_CATEGORY_RULES) {
+    for (const token of tokens) {
+      for (const keyword of keywords) {
+        if (token.includes(keyword)) return category;
+      }
+    }
+  }
+
+  return 'other';
+}
+
 /**
  * Filter a tracklist to only real song entries.
  * Discogs uses type_ === "heading" for side labels ("Side A") and
