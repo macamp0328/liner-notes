@@ -217,4 +217,159 @@ describe('mergeReleaseGraph', () => {
     ).rejects.toThrow('Cypher error');
     expect(session.close).toHaveBeenCalledOnce();
   });
+
+  // -------------------------------------------------------------------------
+  // Issue #36 — year 0 normalization
+  // -------------------------------------------------------------------------
+
+  it('stores pressingYear as null when release.year is 0', async () => {
+    const unknownYearRelease = {
+      ...(release9999992 as unknown as DiscogsRelease),
+      year: 0,
+    };
+    await mergeReleaseGraph(driver, unknownYearRelease);
+
+    const calls = (session.run as ReturnType<typeof vi.fn>).mock.calls as [
+      string,
+      Record<string, unknown>,
+    ][];
+    const releaseCall = calls.find(([q]) => q.includes('MERGE (r:Release'));
+    expect(releaseCall).toBeDefined();
+    expect(releaseCall![1]['pressingYear']).toBeNull();
+  });
+
+  it('does not MERGE RECORDED_IN_DECADE when release.year is 0', async () => {
+    const unknownYearRelease = {
+      ...(release9999992 as unknown as DiscogsRelease),
+      year: 0,
+    };
+    await mergeReleaseGraph(driver, unknownYearRelease);
+
+    const calls = (session.run as ReturnType<typeof vi.fn>).mock.calls as [string, unknown][];
+    // The DELETE cleanup query also references RECORDED_IN_DECADE — check that no MERGE is made
+    expect(calls.some(([q]) => q.includes('MERGE') && q.includes('RECORDED_IN_DECADE'))).toBe(
+      false,
+    );
+  });
+
+  it('deletes stale RECORDED_IN_DECADE relationships when release.year is 0', async () => {
+    const unknownYearRelease = {
+      ...(release9999992 as unknown as DiscogsRelease),
+      year: 0,
+    };
+    await mergeReleaseGraph(driver, unknownYearRelease);
+
+    const calls = (session.run as ReturnType<typeof vi.fn>).mock.calls as [string, unknown][];
+    const deleteCall = calls.find(
+      ([q]) => q.includes('DELETE') && q.includes('RECORDED_IN_DECADE'),
+    );
+    expect(deleteCall).toBeDefined();
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #35 — durationSeconds on Track nodes
+  // -------------------------------------------------------------------------
+
+  it('stores durationSeconds as an integer on Track nodes with parseable durations', async () => {
+    // release-9999991 tracks have actual duration strings like "4:35"
+    await mergeReleaseGraph(driver, release9999991 as unknown as DiscogsRelease);
+
+    const calls = (session.run as ReturnType<typeof vi.fn>).mock.calls as [
+      string,
+      Record<string, unknown>,
+    ][];
+    const trackCallsWithDuration = calls.filter(
+      ([q, params]) =>
+        q.includes('MERGE (t:Track') &&
+        params['durationSeconds'] !== null &&
+        params['durationSeconds'] !== undefined,
+    );
+    expect(trackCallsWithDuration.length).toBeGreaterThan(0);
+  });
+
+  it('stores durationSeconds as null on Track nodes with empty duration', async () => {
+    // release-13570466 tracks all have empty duration strings
+    await mergeReleaseGraph(driver, release13570466 as unknown as DiscogsRelease);
+
+    const calls = (session.run as ReturnType<typeof vi.fn>).mock.calls as [
+      string,
+      Record<string, unknown>,
+    ][];
+    const trackCalls = calls.filter(([q]) => q.includes('MERGE (t:Track'));
+    expect(trackCalls.every(([, params]) => params['durationSeconds'] === null)).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #37 — isVariousArtists on Release nodes
+  // -------------------------------------------------------------------------
+
+  it('sets isVariousArtists=true when primary artist id is a known VA id (194)', async () => {
+    const vaRelease = {
+      ...(release9999992 as unknown as DiscogsRelease),
+      artists: [
+        { id: 194, name: 'Various', anv: '', join: '', role: '', tracks: '', resource_url: '' },
+      ],
+    };
+    await mergeReleaseGraph(driver, vaRelease);
+
+    const calls = (session.run as ReturnType<typeof vi.fn>).mock.calls as [
+      string,
+      Record<string, unknown>,
+    ][];
+    const releaseCall = calls.find(([q]) => q.includes('MERGE (r:Release'));
+    expect(releaseCall![1]['isVariousArtists']).toBe(true);
+  });
+
+  it('sets isVariousArtists=true when primary artist name is "various artists"', async () => {
+    const vaRelease = {
+      ...(release9999992 as unknown as DiscogsRelease),
+      artists: [
+        {
+          id: 99999,
+          name: 'Various Artists',
+          anv: '',
+          join: '',
+          role: '',
+          tracks: '',
+          resource_url: '',
+        },
+      ],
+    };
+    await mergeReleaseGraph(driver, vaRelease);
+
+    const calls = (session.run as ReturnType<typeof vi.fn>).mock.calls as [
+      string,
+      Record<string, unknown>,
+    ][];
+    const releaseCall = calls.find(([q]) => q.includes('MERGE (r:Release'));
+    expect(releaseCall![1]['isVariousArtists']).toBe(true);
+  });
+
+  it('sets isVariousArtists=false for a normal release', async () => {
+    // release-13570466 artist is Big Thief (id 1214695)
+    await mergeReleaseGraph(driver, release13570466 as unknown as DiscogsRelease);
+
+    const calls = (session.run as ReturnType<typeof vi.fn>).mock.calls as [
+      string,
+      Record<string, unknown>,
+    ][];
+    const releaseCall = calls.find(([q]) => q.includes('MERGE (r:Release'));
+    expect(releaseCall![1]['isVariousArtists']).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #39 — isInstrumental on Track nodes
+  // -------------------------------------------------------------------------
+
+  it('sets isInstrumental=false for regular tracks', async () => {
+    // release-9999991 tracks are standard song titles with no instrumental keywords
+    await mergeReleaseGraph(driver, release9999991 as unknown as DiscogsRelease);
+
+    const calls = (session.run as ReturnType<typeof vi.fn>).mock.calls as [
+      string,
+      Record<string, unknown>,
+    ][];
+    const trackCalls = calls.filter(([q]) => q.includes('MERGE (t:Track'));
+    expect(trackCalls.every(([, params]) => params['isInstrumental'] === false)).toBe(true);
+  });
 });

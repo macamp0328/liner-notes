@@ -8,6 +8,9 @@ import type {
   DiscogsTracklistEntry,
 } from './types.js';
 
+const INSTRUMENTAL_PATTERNS =
+  /\b(instrumental|reprise|overture|intro|interlude|outro|theme|prelude|coda)\b/i;
+
 /**
  * Derive the decade string from a release year.
  * e.g. 1972 → "1970s", 1980 → "1980s", 2000 → "2000s"
@@ -69,4 +72,28 @@ export function extractBarcode(identifiers: DiscogsIdentifier[]): string | null 
  */
 export function extractThumbUrl(images: DiscogsImage[]): string | null {
   return images.find((i) => i.type === 'primary')?.uri150 ?? null;
+}
+
+/**
+ * Parse a Discogs duration string into total seconds.
+ * Handles "MM:SS" and "HH:MM:SS" formats. Returns null for empty, missing, or
+ * unparseable values — never 0 for unknown duration.
+ */
+export function parseDurationSeconds(duration: string): number | null {
+  if (!duration) return null;
+  const parts = duration.split(':').map(Number);
+  if (parts.some(isNaN)) return null;
+  if (parts.length === 2) return parts[0]! * 60 + parts[1]!;
+  if (parts.length === 3) return parts[0]! * 3600 + parts[1]! * 60 + parts[2]!;
+  return null;
+}
+
+/**
+ * Determine whether a track is instrumental based on available signals.
+ * Checks Discogs type_ and common title keywords. Note: type_ "index" entries
+ * are filtered out by filterTracks() before ingestion, so in practice only
+ * the title pattern fires on merged Track nodes.
+ */
+export function isInstrumental(track: DiscogsTracklistEntry): boolean {
+  return track.type_ === 'index' || INSTRUMENTAL_PATTERNS.test(track.title);
 }

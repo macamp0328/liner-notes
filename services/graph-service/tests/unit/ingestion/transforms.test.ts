@@ -7,6 +7,8 @@ import {
   extractStudios,
   extractBarcode,
   extractThumbUrl,
+  parseDurationSeconds,
+  isInstrumental,
 } from '../../../src/ingestion/transforms.js';
 import type {
   DiscogsCompany,
@@ -259,5 +261,82 @@ describe('extractThumbUrl', () => {
 
   it('returns null for an empty images array', () => {
     expect(extractThumbUrl([])).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseDurationSeconds
+// ---------------------------------------------------------------------------
+describe('parseDurationSeconds', () => {
+  it('parses MM:SS format', () => {
+    expect(parseDurationSeconds('3:47')).toBe(227);
+    expect(parseDurationSeconds('4:33')).toBe(273);
+  });
+
+  it('parses HH:MM:SS format', () => {
+    expect(parseDurationSeconds('1:02:34')).toBe(3754);
+    expect(parseDurationSeconds('0:01:00')).toBe(60);
+  });
+
+  it('returns 0 for 0:00', () => {
+    expect(parseDurationSeconds('0:00')).toBe(0);
+  });
+
+  it('returns null for an empty string', () => {
+    expect(parseDurationSeconds('')).toBeNull();
+  });
+
+  it('returns null for an unparseable string', () => {
+    expect(parseDurationSeconds('badvalue')).toBeNull();
+    expect(parseDurationSeconds('abc:def')).toBeNull();
+  });
+
+  it('returns null for more than three colon-separated parts', () => {
+    expect(parseDurationSeconds('4:5:6:7')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isInstrumental
+// ---------------------------------------------------------------------------
+describe('isInstrumental', () => {
+  const track = (title: string, type_: string = 'track'): DiscogsTracklistEntry => ({
+    position: 'A1',
+    type_,
+    title,
+    duration: '',
+  });
+
+  it('returns true for titles containing "Instrumental"', () => {
+    expect(isInstrumental(track('Theme (Instrumental)'))).toBe(true);
+    expect(isInstrumental(track('INSTRUMENTAL'))).toBe(true);
+  });
+
+  it('returns true for titles containing "Reprise"', () => {
+    expect(isInstrumental(track('Song Title (Reprise)'))).toBe(true);
+  });
+
+  it('returns true for titles that are standalone instrumental keywords', () => {
+    expect(isInstrumental(track('Overture'))).toBe(true);
+    expect(isInstrumental(track('Intro'))).toBe(true);
+    expect(isInstrumental(track('Interlude'))).toBe(true);
+    expect(isInstrumental(track('Outro'))).toBe(true);
+    expect(isInstrumental(track('Theme'))).toBe(true);
+    expect(isInstrumental(track('Prelude'))).toBe(true);
+    expect(isInstrumental(track('Coda'))).toBe(true);
+  });
+
+  it('returns false for regular song titles', () => {
+    expect(isInstrumental(track('Regular Song'))).toBe(false);
+    expect(isInstrumental(track('Introduction to Nothing'))).toBe(false);
+  });
+
+  it('returns false for an empty title with type track', () => {
+    expect(isInstrumental(track(''))).toBe(false);
+  });
+
+  it('returns true for type_ "index" regardless of title', () => {
+    expect(isInstrumental(track('Hidden Track', 'index'))).toBe(true);
+    expect(isInstrumental(track('Normal Title', 'index'))).toBe(true);
   });
 });
