@@ -10,6 +10,7 @@ import {
   type IngestionStats,
 } from '../ingestion/job-state.js';
 import { clearGeniusLyrics } from '../db/lyrics-repository.js';
+import { enrichLyrics } from '../enrichment/lyrics.js';
 
 const errorShape = {
   type: 'object',
@@ -210,6 +211,46 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     async (_request, reply) => {
       const cleared = await clearGeniusLyrics(getDriver());
       return reply.send({ data: { cleared } });
+    },
+  );
+
+  fastify.post<{
+    Reply:
+      | { data: { enriched: number; skipped: number; failed: number; durationMs: number } }
+      | { error: { code: string; message: string } };
+  }>(
+    '/lyrics/enrich',
+    {
+      schema: {
+        tags: ['admin'],
+        summary:
+          'Run lyrics enrichment for all tracks with null lyrics (LRCLIB first, Genius fallback). Blocks until complete.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['enriched', 'skipped', 'failed', 'durationMs'],
+                properties: {
+                  enriched: { type: 'integer' },
+                  skipped: { type: 'integer' },
+                  failed: { type: 'integer' },
+                  durationMs: { type: 'integer' },
+                },
+              },
+            },
+          },
+          401: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (request, reply) => {
+      const summary = await enrichLyrics(getDriver(), request.log);
+      return reply.send({ data: summary });
     },
   );
 }
