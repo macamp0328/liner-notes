@@ -238,7 +238,7 @@ describe('mergeReleaseGraph', () => {
     expect(releaseCall![1]['pressingYear']).toBeNull();
   });
 
-  it('does not create RECORDED_IN_DECADE when release.year is 0', async () => {
+  it('does not MERGE RECORDED_IN_DECADE when release.year is 0', async () => {
     const unknownYearRelease = {
       ...(release9999992 as unknown as DiscogsRelease),
       year: 0,
@@ -246,7 +246,24 @@ describe('mergeReleaseGraph', () => {
     await mergeReleaseGraph(driver, unknownYearRelease);
 
     const calls = (session.run as ReturnType<typeof vi.fn>).mock.calls as [string, unknown][];
-    expect(calls.some(([q]) => q.includes('RECORDED_IN_DECADE'))).toBe(false);
+    // The DELETE cleanup query also references RECORDED_IN_DECADE — check that no MERGE is made
+    expect(calls.some(([q]) => q.includes('MERGE') && q.includes('RECORDED_IN_DECADE'))).toBe(
+      false,
+    );
+  });
+
+  it('deletes stale RECORDED_IN_DECADE relationships when release.year is 0', async () => {
+    const unknownYearRelease = {
+      ...(release9999992 as unknown as DiscogsRelease),
+      year: 0,
+    };
+    await mergeReleaseGraph(driver, unknownYearRelease);
+
+    const calls = (session.run as ReturnType<typeof vi.fn>).mock.calls as [string, unknown][];
+    const deleteCall = calls.find(
+      ([q]) => q.includes('DELETE') && q.includes('RECORDED_IN_DECADE'),
+    );
+    expect(deleteCall).toBeDefined();
   });
 
   // -------------------------------------------------------------------------

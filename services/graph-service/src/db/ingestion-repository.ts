@@ -58,6 +58,13 @@ export async function mergeReleaseGraph(driver: Driver, release: DiscogsRelease)
     }
     if (release.year > 0) {
       await mergeDecade(session, release.id, release.year);
+    } else {
+      // Remove any stale RECORDED_IN_DECADE link created before the year-0 guard was added.
+      await session.run(
+        `MATCH (r:Release {discogsId: $discogsId})-[rel:RECORDED_IN_DECADE]->(:Decade)
+         DELETE rel`,
+        { discogsId: neo4j.int(release.id) },
+      );
     }
     await mergeStudios(session, release.id, release.companies ?? []);
     const tracks = filterTracks(release.tracklist);
