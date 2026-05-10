@@ -108,12 +108,7 @@ Tracks grouped by first-listed writer name, then sorted by duration descending w
 
 ```cypher
 MATCH (r:Release)-[:HAS_TRACK]->(t:Track)
-WHERE t.duration IS NOT NULL AND t.duration <> ''
-WITH t, r, split(t.duration, ':') AS parts
-WHERE size(parts) = 2
-WITH t, r,
-     toInteger(parts[0]) * 60 + toInteger(parts[1]) AS totalSeconds
-WHERE totalSeconds > 720
+WHERE t.durationSeconds IS NOT NULL AND t.durationSeconds > 720
 
 MATCH (r)-[:RELEASED_BY]->(a:Artist)
 
@@ -122,20 +117,19 @@ WHERE toLower(co.role) CONTAINS 'writ'
    OR toLower(co.role) CONTAINS 'compos'
    OR co.displayRole IN ['Songwriter', 'Music By', 'Lyrics By', 'Lyricon']
 
-WITH t.title    AS track,
-     r.title    AS album,
-     a.name     AS artist,
-     t.duration AS duration,
-     collect(DISTINCT m.name) AS writers,
-     totalSeconds
+WITH t.title         AS track,
+     r.title         AS album,
+     a.name          AS artist,
+     t.durationSeconds AS durationSeconds,
+     collect(DISTINCT m.name) AS writers
 
-WITH track, album, artist, duration, writers, totalSeconds,
+WITH track, album, artist, durationSeconds, writers,
      CASE WHEN size(writers) > 0 THEN writers[0]
           ELSE 'zzz_No Writing Credit'
      END AS sortKey
 
-ORDER BY sortKey, totalSeconds DESC
-RETURN track, album, artist, duration, writers
+ORDER BY sortKey, durationSeconds DESC
+RETURN track, album, artist, durationSeconds, writers
 ```
 
 > **Results:** Autobahn (Kraftwerk, 22:30 — no credit), Iberia (Claude Debussy, 19:50),
@@ -146,8 +140,9 @@ RETURN track, album, artist, duration, writers
 
 ## 4. What collaborator is seen across the most genres?
 
-Returns the top musicians by genre/style span. Excludes non-musical roles (management, photography, etc.)
-and requires at least 2 distinct releases to filter out Various Artists compilation noise.
+Returns the top musicians by genre/style span. Excludes non-musical roles using `co.roleCategory`
+(set at ingestion on all `CREDITED_ON` relationships).
+Requires at least 2 distinct releases to filter out Various Artists compilation noise.
 Includes the linked Artist node name when the musician also has an Artist credit,
 and a list of the releases they appear on.
 
@@ -158,14 +153,7 @@ Also returns a deduplicated list of credited roles per musician.
 ```cypher
 MATCH (m:Musician)-[co:CREDITED_ON]->(target)
 WHERE (target:Track OR target:Release)
-  AND NOT coalesce(toLower(co.role), '') CONTAINS 'manag'
-  AND NOT coalesce(toLower(co.role), '') CONTAINS 'photog'
-  AND NOT coalesce(toLower(co.role), '') CONTAINS 'artwork'
-  AND NOT coalesce(toLower(co.role), '') CONTAINS 'design'
-  AND NOT coalesce(toLower(co.role), '') CONTAINS 'sleeve'
-  AND NOT coalesce(toLower(co.role), '') CONTAINS 'liner'
-  AND NOT coalesce(toLower(co.role), '') CONTAINS 'research'
-  AND NOT coalesce(toLower(co.role), '') CONTAINS 'remaster'
+  AND co.roleCategory IN ['performer', 'composer']
 
 OPTIONAL MATCH (rFromTrack:Release)-[:HAS_TRACK]->(target)
 WITH m, co, target,
@@ -182,7 +170,7 @@ OPTIONAL MATCH (r)-[:IN_STYLE]->(s:Style)
 
 WITH m,
      collect(DISTINCT r.discogsId) AS releaseIds,
-  collect(DISTINCT {id: r.discogsId, title: r.title, year: r.year}) AS releaseRefs,
+  collect(DISTINCT {id: r.discogsId, title: r.title, year: r.pressingYear}) AS releaseRefs,
      collect(DISTINCT g.name)      AS genres,
   collect(DISTINCT s.name)      AS styles,
   collect(DISTINCT roleLabel)   AS rawRoles
@@ -222,19 +210,19 @@ LIMIT 10
 Returns the largest consecutive year gap between any two releases in the collection.
 Includes the full list of release titles and years.
 
-> **⚠ Reissue caveat:** Release years reflect the pressing in the collection, not the
-> original release date. Jackson Browne's "Late For The Sky" (1974) is held as the
-> 2017 reissue, inflating his gap to 37 years. The `masterDiscogsId` field exists on
-> Release nodes to identify originals, but `originalYear` is not yet enriched from
-> the Discogs master release API — that's a future data task.
+> **⚠ Reissue caveat:** `originalYear` is now enriched from the Discogs master release API.
+> The query below uses `coalesce(r.originalYear, r.pressingYear)` so reissues correctly
+> reflect their original release year rather than the pressing date.
 
 ```cypher
 MATCH (a:Artist)<-[:RELEASED_BY]-(r:Release)
-WHERE r.year IS NOT NULL AND r.year > 0
-WITH a, r ORDER BY a.name, r.year
+WHERE coalesce(r.originalYear, r.pressingYear) IS NOT NULL
+  AND coalesce(r.originalYear, r.pressingYear) > 0
+WITH a, coalesce(r.originalYear, r.pressingYear) AS effectiveYear, r.title AS title
+ORDER BY a.name, effectiveYear
 WITH a,
-     collect(DISTINCT toInteger(r.year))              AS years,
-     collect(DISTINCT toInteger(r.year) + '|' + r.title) AS yearTitles
+     collect(DISTINCT toInteger(effectiveYear))                       AS years,
+     collect(DISTINCT toString(toInteger(effectiveYear)) + '|' + title) AS yearTitles
 WHERE size(years) > 1
 WITH a, apoc.coll.sort(years) AS sortedYears, yearTitles
 WITH a, sortedYears, yearTitles,
@@ -267,10 +255,10 @@ LIMIT 10
 
 ```cypher
 MATCH (r:Release)-[:IN_GENRE]->(g:Genre)
-WHERE r.year IS NOT NULL AND r.year > 0
-WITH g.name   AS genre,
-     r.year   AS year,
-     r.title  AS album,
+WHERE r.pressingYear IS NOT NULL AND r.pressingYear > 0
+WITH g.name        AS genre,
+     r.pressingYear AS year,
+     r.title        AS album,
      [(r)-[:RELEASED_BY]->(a) | a.name][0] AS artist
 ORDER BY genre, year
 RETURN genre, year, album, artist

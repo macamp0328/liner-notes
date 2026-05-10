@@ -54,6 +54,8 @@ const jobStateShape = {
   },
 } as const;
 
+let isEnriching = false;
+
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post<{
@@ -244,13 +246,25 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
             },
           },
           401: errorShape,
+          409: errorShape,
+          503: errorShape,
         },
       },
       preHandler: adminAuthHook,
     },
     async (request, reply) => {
-      const summary = await enrichLyrics(getDriver(), request.log);
-      return reply.send({ data: summary });
+      if (isEnriching) {
+        return reply.code(409).send({
+          error: { code: 'ENRICHMENT_RUNNING', message: 'Lyrics enrichment already in progress' },
+        });
+      }
+      isEnriching = true;
+      try {
+        const summary = await enrichLyrics(getDriver(), request.log);
+        return reply.send({ data: summary });
+      } finally {
+        isEnriching = false;
+      }
     },
   );
 }

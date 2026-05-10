@@ -1,6 +1,6 @@
 # Graph Gaps & Proposed Solutions
 
-Analysis of what the 14 social-query questions revealed about the current data model.
+Analysis of what the 19 social-query questions revealed about the current data model.
 Gaps are grouped by category: some are fixable today with existing data, others require
 new data sources.
 
@@ -28,21 +28,9 @@ WHERE totalSeconds > 720
 Every duration query requires this four-line parse. Tracks with missing or
 malformed durations (empty string, `""`, multi-part like `"1:02:34"`) are silently dropped.
 
-**Proposed fix:**
-Store `durationSeconds: Integer` on Track nodes at ingestion time alongside the raw string.
-Discard the raw string or keep it as `durationRaw` for display only.
-
-```ts
-// In transforms.ts — add alongside existing duration parse
-export function parseDurationSeconds(duration: string): number | null {
-  const parts = duration.split(':').map(Number);
-  if (parts.length === 2) return parts[0] * 60 + parts[1];
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  return null;
-}
-```
-
-Queries then become simply:
+**Fix applied (PR #48):**
+`durationSeconds: Integer` is now stored on Track nodes at ingestion time.
+Queries use it directly:
 
 ```cypher
 WHERE t.durationSeconds > 720
@@ -54,21 +42,13 @@ WHERE t.durationSeconds > 720
 
 **Queries affected:** Q5 (release gap), Q6 (genre by date), Q11b (avg title length)
 
-**Current workaround:**
-Every query that touches `r.year` must add:
+**Fix applied (PR #34):**
+The pressing year is now stored as `r.pressingYear` (renamed from `r.year`). At ingestion,
+`release.year === 0` is treated as absent and stored as `null`, so standard `IS NOT NULL`
+checks work without extra guards.
 
 ```cypher
-WHERE r.year IS NOT NULL AND r.year > 0
-```
-
-**Proposed fix:**
-At ingestion, if `release.year === 0` treat it as absent — either don't set the property
-or set it to `null`. The Discogs API returns `0` as a sentinel for "unknown year";
-the graph should normalize this to `null` so standard `IS NOT NULL` checks work.
-
-```ts
-// In ingestion-repository.ts mergeRelease()
-year: release.year && release.year > 0 ? neo4j.int(release.year) : null,
+WHERE r.pressingYear IS NOT NULL
 ```
 
 ---
@@ -90,25 +70,13 @@ AND NOT toLower(co.role) CONTAINS 'sleeve'
 
 This is brittle — any new role string not in the list leaks through.
 
-**Proposed fix — Option 1 (preferred):** Add a `roleCategory` property to the `CREDITED_ON`
-relationship at ingestion, derived by matching against a canonical lookup table:
-
-| Category    | Matching role substrings                                              |
-| ----------- | --------------------------------------------------------------------- |
-| `performer` | guitar, bass, drums, vocals, piano, saxophone, trumpet, violin, …     |
-| `composer`  | written-by, composed by, songwriter, music by, lyrics by, arranged by |
-| `producer`  | producer, co-producer, executive producer                             |
-| `engineer`  | engineer, recorded by, mixed by, mastered by                          |
-| `visual`    | photography, artwork, design, illustration, sleeve, liner notes       |
-| `crew`      | management, coordinator, a&r, legal                                   |
+**Fix applied (PR #49):** `roleCategory` is now set on all `CREDITED_ON` relationships at
+ingestion, derived from a canonical lookup table mapping role substrings to categories
+(`performer`, `composer`, `producer`, `engineer`, `visual`, `crew`).
 
 ```cypher
-// Queries become clean:
 WHERE co.roleCategory IN ['performer', 'composer']
 ```
-
-**Option 2 (lighter):** Add `isMusical: Boolean` to the `CREDITED_ON` relationship —
-a simpler binary that separates creative credits from logistical ones.
 
 ---
 
@@ -122,13 +90,9 @@ _We have the keys to fetch this data from Discogs; we just haven't done so yet._
 
 **Queries affected:** Q5 (release gap), Q6 (genre timeline)
 
-**Current state:** `r.year` is the pressing year — can be decades after the original release.
-Jackson Browne's 37-year gap and Joni Mitchell's "Hejira" at 2014 are artifacts.
-`masterDiscogsId` exists on 189 of 196 releases but its year is never fetched.
-
-**Proposed fix:**
-Enrich `originalYear` from `GET /masters/{masterDiscogsId}` (issue #33 already filed).
-Queries then use `coalesce(r.originalYear, r.year)`.
+**Fix applied (PR #34):** `r.originalYear` is now enriched from `GET /masters/{masterDiscogsId}`
+as a post-ingestion step. Queries use `coalesce(r.originalYear, r.pressingYear)` so reissues
+correctly reflect their original release year rather than the pressing date.
 
 ---
 
@@ -258,20 +222,12 @@ information.
 
 **Queries affected:** Q4 (cross-genre collaborator — Various Artists releases inflate genre counts)
 
-**Current state:** Releases attributed to "Various" or "Various Artists" are filtered out
-by requiring `size(releaseIds) > 1` — a rough heuristic that also excludes legitimate
-single-release contributors.
-
-**Proposed fix:**
-Set `r.isVariousArtists: Boolean` at ingestion when the primary artist is "Various",
-"Various Artists", or similar. Queries can then explicitly include or exclude them:
+**Fix applied (PR #48):** `r.isVariousArtists: Boolean` is now set at ingestion when the
+primary artist matches Discogs IDs 194 or 355. Queries can filter directly:
 
 ```cypher
 WHERE NOT r.isVariousArtists
 ```
-
-Discogs artist IDs 194 and 355 are the canonical "Various Artists" entries and can be
-checked directly.
 
 ---
 
@@ -299,10 +255,9 @@ additional `NOT toLower(t.lyrics) CONTAINS 'contributor'` guards.
 
 **Queries affected:** Q7 (fewest words — instrumental tracks should be out-of-scope but may have lyrics = null or lyrics = garbage)
 
-**Proposed fix:**
-Set `t.isInstrumental: Boolean` during ingestion when the track type or title clearly
-indicates no lyrics (Discogs track type "index" or title contains common instrumental
-markers: `"(Instrumental)"`, `"(Reprise)"`, `"Overture"` etc.).
+**Fix applied (PR #48):** `t.isInstrumental: Boolean` is now set at ingestion when the
+track type is `"index"` or the title contains common instrumental markers
+(`"(Instrumental)"`, `"(Reprise)"`, `"Overture"`, etc.).
 
 ---
 
@@ -408,18 +363,18 @@ the widest geographic artistic spread" — rather than pressing geography.
 
 | Gap                            | Questions   | Effort                               | Recommended Fix                     |
 | ------------------------------ | ----------- | ------------------------------------ | ----------------------------------- |
-| A1. Duration as string         | Q3          | Low — migration + ingestion change   | `durationSeconds: Integer` on Track |
-| A2. Year = 0 not null          | Q5, Q6, Q11 | Low — ingestion change               | Store null when year is 0           |
-| A3. No role category           | Q3, Q4      | Medium — ingestion lookup table      | `roleCategory` on CREDITED_ON       |
-| B1. No originalYear            | Q5, Q6      | Medium — new API call (issue #33)    | Enrich from master release          |
+| A1. Duration as string         | Q3          | ✅ Implemented (PR #48)              | `durationSeconds: Integer` on Track |
+| A2. Year = 0 not null          | Q5, Q6, Q11 | ✅ Implemented (PR #34)              | `pressingYear`; null when year is 0 |
+| A3. No role category           | Q3, Q4      | ✅ Implemented (PR #49)              | `roleCategory` on CREDITED_ON       |
+| B1. No originalYear            | Q5, Q6      | ✅ Implemented (PR #34)              | Enriched from master release API    |
 | B2. No genre on Artist         | Q1          | Medium — post-ingestion aggregate    | Aggregate onto Artist node          |
 | B3. No artist nationality      | Q10         | Medium — Discogs artist page         | `artistCountry` on Artist           |
 | C1. No version relationship    | Q9, Q13     | Medium — post-ingestion step         | `IS_VERSION_OF` relationship        |
 | C2. No cover song relationship | Q9, Q10     | High — needs MusicBrainz             | `COVERS` relationship               |
 | C3. No sampling relationship   | Q9          | High — no free API                   | WhoSampled / MusicBrainz            |
-| C4. No Various Artists flag    | Q4          | Low — ingestion check                | `isVariousArtists` on Release       |
+| C4. No Various Artists flag    | Q4          | ✅ Implemented (PR #48)              | `isVariousArtists` on Release       |
 | D1. Genius lyrics corrupt      | Q2, Q7      | Medium (issue #31)                   | Fix scraper, re-enrich              |
-| D2. No instrumental flag       | Q7          | Low — ingestion heuristic            | `isInstrumental` on Track           |
+| D2. No instrumental flag       | Q7          | ✅ Implemented (PR #48)              | `isInstrumental` on Track           |
 | E1. No cover art tags          | Q8, Q12     | Medium — multimodal LLM at ingestion | `coverTags[]` on Release            |
 | E2. No audio features          | Q14         | High — Spotify API match             | Spotify audio features              |
 | F1. Non-standard country codes | Q10         | Low — normalization map              | ISO 3166 codes + region split       |
