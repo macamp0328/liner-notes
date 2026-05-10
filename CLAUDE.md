@@ -147,9 +147,10 @@ Each worktree is a fully independent working directory on its own branch. **Agen
 pnpm prettier --check .                     # formatting must pass
 pnpm --filter graph-service lint            # ESLint must pass (zero warnings/errors)
 pnpm --filter graph-service typecheck       # TypeScript strict must pass (src + tests)
+pnpm --filter graph-service test:unit       # all unit tests must pass
 ```
 
-Formatting and lint errors that slip through to PR review are agent mistakes, not reviewer catches. Run these locally before opening a PR. CI enforces them as hard gates — fix before pushing, not after.
+**CI is the last wall of defense, not the first.** Running only prettier/lint/typecheck and skipping unit tests before pushing is not acceptable. Any code change that touches production code — including schema files, utility functions, and configuration — must be followed by a local unit test run before committing. Discovering a broken test in CI means the agent was lazy: it caused unnecessary wait time and wasted a CI cycle. Fix it locally, then push. Every time.
 
 ---
 
