@@ -78,8 +78,9 @@ export function parseRoleCategory(role: string): RoleCategory {
   for (const segment of role.split(',')) {
     const base = segment.replace(/\[.*?\]/g, '').trim().toLowerCase();
     if (base.length > 0) tokens.push(base);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for (const match of segment.matchAll(/\[([^\]]*)\]/g)) {
-      const inner = match[1].trim().toLowerCase();
+      const inner = match[1]!.trim().toLowerCase();
       if (inner.length > 0) tokens.push(inner);
     }
   }
