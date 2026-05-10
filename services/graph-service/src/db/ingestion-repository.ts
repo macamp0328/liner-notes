@@ -17,9 +17,13 @@ import {
   extractStudios,
   extractThumbUrl,
   filterTracks,
+  isInstrumental,
   parseDisplayRole,
+  parseDurationSeconds,
   parseTrackNumber,
 } from '../ingestion/transforms.js';
+
+const VARIOUS_ARTISTS_IDS = [194, 355];
 
 /**
  * Check whether any Release nodes exist in the graph.
@@ -52,7 +56,9 @@ export async function mergeReleaseGraph(driver: Driver, release: DiscogsRelease)
     if (release.country) {
       await mergeCountry(session, release.id, release.country);
     }
-    await mergeDecade(session, release.id, release.year);
+    if (release.year > 0) {
+      await mergeDecade(session, release.id, release.year);
+    }
     await mergeStudios(session, release.id, release.companies ?? []);
     const tracks = filterTracks(release.tracklist);
     await mergeTracks(session, release.id, tracks);
@@ -78,12 +84,20 @@ async function mergeRelease(session: Session, release: DiscogsRelease): Promise<
   const communityRating = release.community?.rating?.average ?? null;
   const communityRatingCount =
     release.community?.rating?.count != null ? neo4j.int(release.community.rating.count) : null;
+  const pressingYear = release.year > 0 ? neo4j.int(release.year) : null;
+  const primaryArtist = release.artists[0];
+  const isVariousArtists =
+    primaryArtist != null
+      ? VARIOUS_ARTISTS_IDS.includes(primaryArtist.id) ||
+        ['various', 'various artists'].includes(primaryArtist.name.toLowerCase())
+      : false;
 
   await session.run(
     `MERGE (r:Release {discogsId: $discogsId})
      ON CREATE SET
        r.title              = $title,
        r.pressingYear       = $pressingYear,
+       r.isVariousArtists   = $isVariousArtists,
        r.format             = $format,
        r.thumbUrl           = $thumbUrl,
        r.masterDiscogsId    = $masterDiscogsId,
@@ -96,6 +110,7 @@ async function mergeRelease(session: Session, release: DiscogsRelease): Promise<
      ON MATCH SET
        r.title              = $title,
        r.pressingYear       = $pressingYear,
+       r.isVariousArtists   = $isVariousArtists,
        r.format             = $format,
        r.thumbUrl           = $thumbUrl,
        r.masterDiscogsId    = $masterDiscogsId,
@@ -108,7 +123,8 @@ async function mergeRelease(session: Session, release: DiscogsRelease): Promise<
     {
       discogsId: neo4j.int(release.id),
       title: release.title,
-      pressingYear: neo4j.int(release.year),
+      pressingYear,
+      isVariousArtists,
       format,
       thumbUrl,
       masterDiscogsId,
@@ -240,10 +256,14 @@ async function mergeTracks(
     // Track MERGE key: (position + releaseDiscogsId) — no unique constraint on Track,
     // so we store releaseDiscogsId as a property to uniquely identify tracks across releases.
     const duration = track.duration === '' ? null : track.duration;
+    const durationSeconds = parseDurationSeconds(track.duration);
+    const instrumental = isInstrumental(track);
     await session.run(
       `MERGE (t:Track {position: $position, releaseDiscogsId: $releaseDiscogsId})
-       ON CREATE SET t.title = $title, t.duration = $duration
-       ON MATCH SET  t.title = $title, t.duration = $duration
+       ON CREATE SET t.title = $title, t.duration = $duration,
+                     t.durationSeconds = $durationSeconds, t.isInstrumental = $isInstrumental
+       ON MATCH SET  t.title = $title, t.duration = $duration,
+                     t.durationSeconds = $durationSeconds, t.isInstrumental = $isInstrumental
        WITH t
        MATCH (r:Release {discogsId: $releaseDiscogsId})
        MERGE (r)-[:HAS_TRACK {trackNumber: $trackNumber}]->(t)`,
@@ -252,6 +272,8 @@ async function mergeTracks(
         releaseDiscogsId: neo4j.int(releaseId),
         title: track.title,
         duration,
+        durationSeconds: durationSeconds != null ? neo4j.int(durationSeconds) : null,
+        isInstrumental: instrumental,
         trackNumber: neo4j.int(parseTrackNumber(track.position)),
       },
     );
