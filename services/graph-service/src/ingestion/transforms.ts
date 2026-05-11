@@ -213,3 +213,123 @@ export function parseDurationSeconds(duration: string): number | null {
 export function isInstrumental(track: DiscogsTracklistEntry): boolean {
   return track.type_ === 'index' || INSTRUMENTAL_PATTERNS.test(track.title);
 }
+
+// ---------------------------------------------------------------------------
+// Country normalization (Issue 40)
+// ---------------------------------------------------------------------------
+
+// Discogs uses non-ISO regional codes and compound market strings.
+// This map normalises them to canonical ISO 3166-1 alpha-2 codes (or regional
+// tokens EU / WW). Compound values (e.g. "USA & Canada") expand to multiple
+// codes. Unmapped values fall through as-is so no data is silently dropped.
+const COUNTRY_NORMALIZATION: Readonly<Record<string, string[]>> = {
+  US: ['US'],
+  USA: ['US'],
+  UK: ['GB'],
+  England: ['GB'],
+  Scotland: ['GB'],
+  Wales: ['GB'],
+  Europe: ['EU'],
+  Germany: ['DE'],
+  France: ['FR'],
+  Japan: ['JP'],
+  Canada: ['CA'],
+  Australia: ['AU'],
+  Netherlands: ['NL'],
+  Italy: ['IT'],
+  Spain: ['ES'],
+  Brazil: ['BR'],
+  Mexico: ['MX'],
+  Sweden: ['SE'],
+  Norway: ['NO'],
+  Denmark: ['DK'],
+  Finland: ['FI'],
+  Belgium: ['BE'],
+  Switzerland: ['CH'],
+  Austria: ['AT'],
+  Portugal: ['PT'],
+  Greece: ['GR'],
+  Poland: ['PL'],
+  'Czech Republic': ['CZ'],
+  Hungary: ['HU'],
+  Russia: ['RU'],
+  'South Korea': ['KR'],
+  Korea: ['KR'],
+  'New Zealand': ['NZ'],
+  'South Africa': ['ZA'],
+  Argentina: ['AR'],
+  'USA & Canada': ['US', 'CA'],
+  'US & Canada': ['US', 'CA'],
+  'UK & Europe': ['GB', 'EU'],
+  'Europe & UK': ['EU', 'GB'],
+  'Europe & US': ['EU', 'US'],
+  'US & Europe': ['US', 'EU'],
+  Worldwide: ['WW'],
+};
+
+/**
+ * Normalise a raw Discogs country string to an array of canonical codes.
+ * Returns a single-element array for most inputs; compound market strings
+ * (e.g. "USA & Canada") expand to multiple codes.
+ * Unknown values fall back to [raw] — data is never silently discarded.
+ */
+export function normalizeCountry(raw: string): string[] {
+  // eslint-disable-next-line security/detect-object-injection
+  return COUNTRY_NORMALIZATION[raw] ?? [raw];
+}
+
+// ---------------------------------------------------------------------------
+// Track title normalization (Issue 43)
+// ---------------------------------------------------------------------------
+
+const VERSION_TYPE_PATTERNS: ReadonlyArray<readonly [string, RegExp]> = [
+  ['remix', /remix|rmx/i],
+  ['live', /\blive\b|concert|in concert/i],
+  ['acoustic', /acoustic/i],
+  ['demo', /\bdemo\b/i],
+  ['alternate', /alternate|alternative|\balt\b\./i],
+  ['instrumental', /instrumental/i],
+];
+
+/**
+ * Strip version descriptors from a track title to produce a canonical base
+ * title for matching across releases.
+ * Strips: (parenthetical), [bracketed], and common prefix markers like
+ * "Live - " or "Extended - ". Result is trimmed and lowercased.
+ */
+export function normalizeTrackTitle(title: string): string {
+  return title
+    .replace(/\s*\([^)]*\)/g, '')
+    .replace(/\s*\[[^\]]*\]/g, '')
+    .replace(/^(?:live|extended|acoustic|demo|alternate|instrumental)\s*[-–—]\s*/i, '')
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Derive a version type by inspecting the content stripped from a track title
+ * (parentheticals, brackets, and leading prefix markers).
+ * Returns 'unknown' when no pattern matches.
+ */
+export function deriveVersionType(originalTitle: string): string {
+  const fragments: string[] = [];
+
+  for (const match of originalTitle.matchAll(/\(([^)]*)\)/g)) {
+    if (match[1]) fragments.push(match[1]);
+  }
+  for (const match of originalTitle.matchAll(/\[([^\]]*)\]/g)) {
+    if (match[1]) fragments.push(match[1]);
+  }
+  const prefixMatch = /^(live|extended|acoustic|demo|alternate|instrumental)\s*[-–—]\s*/i.exec(
+    originalTitle,
+  );
+  if (prefixMatch?.[1]) fragments.push(prefixMatch[1]);
+
+  const combined = fragments.join(' ').toLowerCase();
+
+  for (const [type, pattern] of VERSION_TYPE_PATTERNS) {
+    if (pattern.test(combined)) return type;
+  }
+
+  return 'unknown';
+}

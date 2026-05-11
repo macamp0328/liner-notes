@@ -19,6 +19,15 @@ const mockEnrichLyrics = vi.hoisted(() =>
 const mockEnrichOriginalYear = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 }),
 );
+const mockEnrichArtistGenres = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 }),
+);
+const mockEnrichTrackVersions = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 }),
+);
+const mockEnrichArtistProfiles = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 }),
+);
 
 vi.mock('../../../src/db/client.js', () => ({
   initDriver: vi.fn().mockReturnValue({ verifyConnectivity: mockVerifyConnectivity }),
@@ -51,6 +60,18 @@ vi.mock('../../../src/enrichment/original-year.js', () => ({
   enrichOriginalYear: mockEnrichOriginalYear,
 }));
 
+vi.mock('../../../src/enrichment/artist-genres.js', () => ({
+  enrichArtistGenres: mockEnrichArtistGenres,
+}));
+
+vi.mock('../../../src/enrichment/track-versions.js', () => ({
+  enrichTrackVersions: mockEnrichTrackVersions,
+}));
+
+vi.mock('../../../src/enrichment/artist-profiles.js', () => ({
+  enrichArtistProfiles: mockEnrichArtistProfiles,
+}));
+
 // ---------------------------------------------------------------------------
 // Load fixtures (JSON). These are loaded after hoisted mocks run.
 // ---------------------------------------------------------------------------
@@ -79,6 +100,19 @@ describe('Discogs ingestion pipeline', () => {
     mockMergeReleaseGraph.mockResolvedValue(undefined);
     mockEnrichLyrics.mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
     mockEnrichOriginalYear.mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
+    mockEnrichArtistGenres.mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
+    mockEnrichTrackVersions.mockResolvedValue({
+      enriched: 0,
+      skipped: 0,
+      failed: 0,
+      durationMs: 0,
+    });
+    mockEnrichArtistProfiles.mockResolvedValue({
+      enriched: 0,
+      skipped: 0,
+      failed: 0,
+      durationMs: 0,
+    });
     mockGetCollectionReleases.mockResolvedValue(collectionPage1 as DiscogsCollectionPage);
     mockGetRelease.mockImplementation((id: number) => {
       const r = releaseMap[id];

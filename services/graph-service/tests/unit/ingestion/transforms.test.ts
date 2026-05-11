@@ -10,6 +10,9 @@ import {
   extractThumbUrl,
   parseDurationSeconds,
   isInstrumental,
+  normalizeCountry,
+  normalizeTrackTitle,
+  deriveVersionType,
 } from '../../../src/ingestion/transforms.js';
 import type {
   DiscogsCompany,
@@ -411,5 +414,109 @@ describe('isInstrumental', () => {
   it('returns true for type_ "index" regardless of title', () => {
     expect(isInstrumental(track('Hidden Track', 'index'))).toBe(true);
     expect(isInstrumental(track('Normal Title', 'index'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeCountry
+// ---------------------------------------------------------------------------
+describe('normalizeCountry', () => {
+  it('normalises US aliases to ["US"]', () => {
+    expect(normalizeCountry('US')).toEqual(['US']);
+    expect(normalizeCountry('USA')).toEqual(['US']);
+  });
+
+  it('normalises UK aliases to ["GB"]', () => {
+    expect(normalizeCountry('UK')).toEqual(['GB']);
+    expect(normalizeCountry('England')).toEqual(['GB']);
+    expect(normalizeCountry('Scotland')).toEqual(['GB']);
+  });
+
+  it('normalises Europe to ["EU"]', () => {
+    expect(normalizeCountry('Europe')).toEqual(['EU']);
+  });
+
+  it('normalises Worldwide to ["WW"]', () => {
+    expect(normalizeCountry('Worldwide')).toEqual(['WW']);
+  });
+
+  it('expands compound values to multiple codes', () => {
+    expect(normalizeCountry('USA & Canada')).toEqual(['US', 'CA']);
+    expect(normalizeCountry('UK & Europe')).toEqual(['GB', 'EU']);
+  });
+
+  it('falls back to [raw] for unmapped values', () => {
+    expect(normalizeCountry('Atlantis')).toEqual(['Atlantis']);
+    expect(normalizeCountry('Unknown Market')).toEqual(['Unknown Market']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeTrackTitle
+// ---------------------------------------------------------------------------
+describe('normalizeTrackTitle', () => {
+  it('strips trailing parentheticals', () => {
+    expect(normalizeTrackTitle('Song Title (Remix)')).toBe('song title');
+    expect(normalizeTrackTitle('Track (Live at Fillmore)')).toBe('track');
+  });
+
+  it('strips trailing bracketed content', () => {
+    expect(normalizeTrackTitle('Song [Radio Edit]')).toBe('song');
+    expect(normalizeTrackTitle('Track [Bonus Track]')).toBe('track');
+  });
+
+  it('strips double-parenthetical patterns', () => {
+    expect(normalizeTrackTitle('Song (Remix) [Bonus Track]')).toBe('song');
+  });
+
+  it('strips leading prefix markers', () => {
+    expect(normalizeTrackTitle('Live - Just Like That')).toBe('just like that');
+    expect(normalizeTrackTitle('Acoustic - My Song')).toBe('my song');
+  });
+
+  it('lowercases the result', () => {
+    expect(normalizeTrackTitle('Song Title')).toBe('song title');
+  });
+
+  it('returns empty string for a title that is entirely a descriptor', () => {
+    expect(normalizeTrackTitle('(Remix)')).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deriveVersionType
+// ---------------------------------------------------------------------------
+describe('deriveVersionType', () => {
+  it('detects remix', () => {
+    expect(deriveVersionType('Song (Remix)')).toBe('remix');
+    expect(deriveVersionType('Song [RMX]')).toBe('remix');
+  });
+
+  it('detects live', () => {
+    expect(deriveVersionType('Song (Live)')).toBe('live');
+    expect(deriveVersionType('Song [Live at Wembley]')).toBe('live');
+    expect(deriveVersionType('Live - Song')).toBe('live');
+  });
+
+  it('detects acoustic', () => {
+    expect(deriveVersionType('Song (Acoustic Version)')).toBe('acoustic');
+  });
+
+  it('detects demo', () => {
+    expect(deriveVersionType('Song (Demo)')).toBe('demo');
+  });
+
+  it('detects alternate', () => {
+    expect(deriveVersionType('Song (Alternate Take)')).toBe('alternate');
+    expect(deriveVersionType('Song (Alternative Version)')).toBe('alternate');
+  });
+
+  it('detects instrumental', () => {
+    expect(deriveVersionType('Song (Instrumental)')).toBe('instrumental');
+  });
+
+  it('returns unknown when no keyword matches', () => {
+    expect(deriveVersionType('Song (7" Single)')).toBe('unknown');
+    expect(deriveVersionType('Song')).toBe('unknown');
   });
 });

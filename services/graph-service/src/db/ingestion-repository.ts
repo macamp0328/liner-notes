@@ -18,6 +18,8 @@ import {
   extractThumbUrl,
   filterTracks,
   isInstrumental,
+  normalizeCountry,
+  normalizeTrackTitle,
   parseDisplayRole,
   parseRoleCategory,
   parseDurationSeconds,
@@ -55,7 +57,8 @@ export async function mergeReleaseGraph(driver: Driver, release: DiscogsRelease)
     await mergeGenres(session, release.id, release.genres ?? []);
     await mergeStyles(session, release.id, release.styles ?? []);
     if (release.country) {
-      await mergeCountry(session, release.id, release.country);
+      const normalizedCountries = normalizeCountry(release.country);
+      await mergeCountry(session, release.id, normalizedCountries);
     }
     if (release.year > 0) {
       await mergeDecade(session, release.id, release.year);
@@ -217,14 +220,20 @@ async function mergeStyles(session: Session, releaseId: number, styles: string[]
   }
 }
 
-async function mergeCountry(session: Session, releaseId: number, country: string): Promise<void> {
-  await session.run(
-    `MERGE (c:Country {name: $name})
-     WITH c
-     MATCH (r:Release {discogsId: $releaseId})
-     MERGE (r)-[:FROM_COUNTRY]->(c)`,
-    { name: country, releaseId: neo4j.int(releaseId) },
-  );
+async function mergeCountry(
+  session: Session,
+  releaseId: number,
+  countries: string[],
+): Promise<void> {
+  for (const country of countries) {
+    await session.run(
+      `MERGE (c:Country {name: $name})
+       WITH c
+       MATCH (r:Release {discogsId: $releaseId})
+       MERGE (r)-[:FROM_COUNTRY]->(c)`,
+      { name: country, releaseId: neo4j.int(releaseId) },
+    );
+  }
 }
 
 async function mergeDecade(session: Session, releaseId: number, year: number): Promise<void> {
@@ -266,11 +275,14 @@ async function mergeTracks(
     const duration = track.duration === '' ? null : track.duration;
     const durationSeconds = parseDurationSeconds(track.duration);
     const instrumental = isInstrumental(track);
+    const normalizedTitle = normalizeTrackTitle(track.title);
     await session.run(
       `MERGE (t:Track {position: $position, releaseDiscogsId: $releaseDiscogsId})
-       ON CREATE SET t.title = $title, t.duration = $duration,
+       ON CREATE SET t.title = $title, t.normalizedTitle = $normalizedTitle,
+                     t.duration = $duration,
                      t.durationSeconds = $durationSeconds, t.isInstrumental = $isInstrumental
-       ON MATCH SET  t.title = $title, t.duration = $duration,
+       ON MATCH SET  t.title = $title, t.normalizedTitle = $normalizedTitle,
+                     t.duration = $duration,
                      t.durationSeconds = $durationSeconds, t.isInstrumental = $isInstrumental
        WITH t
        MATCH (r:Release {discogsId: $releaseDiscogsId})
@@ -279,6 +291,7 @@ async function mergeTracks(
         position: track.position,
         releaseDiscogsId: neo4j.int(releaseId),
         title: track.title,
+        normalizedTitle,
         duration,
         durationSeconds: durationSeconds != null ? neo4j.int(durationSeconds) : null,
         isInstrumental: instrumental,
