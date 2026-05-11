@@ -24,9 +24,9 @@ describe('applySchema', () => {
     } as unknown as Driver;
   });
 
-  it('opens and closes a fresh session for each of the 13 statements', async () => {
+  it('opens and closes a fresh session for each of the 15 statements', async () => {
     await applySchema(driver);
-    expect(sessions).toHaveLength(13);
+    expect(sessions).toHaveLength(15);
     for (const s of sessions) {
       expect(s.run).toHaveBeenCalledTimes(1);
       expect(s.close).toHaveBeenCalledTimes(1);
@@ -45,6 +45,13 @@ describe('applySchema', () => {
     await applySchema(driver);
     const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
     expect(stmts.some((s) => s.includes('trackLyrics') && s.includes('FULLTEXT INDEX'))).toBe(true);
+  });
+
+  it('creates the releaseArtistTrackSearch and lyricsSearch full-text indexes', async () => {
+    await applySchema(driver);
+    const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
+    expect(stmts.some((s) => s.includes('releaseArtistTrackSearch'))).toBe(true);
+    expect(stmts.some((s) => s.includes('lyricsSearch'))).toBe(true);
   });
 
   it('closes the session even when run() throws', async () => {
