@@ -6,10 +6,19 @@ import { enrichLyrics } from '../enrichment/lyrics.js';
 import type { LyricsEnrichmentSummary } from '../enrichment/lyrics.js';
 import { enrichOriginalYear } from '../enrichment/original-year.js';
 import type { OriginalYearEnrichmentSummary } from '../enrichment/original-year.js';
+import { enrichArtistGenres } from '../enrichment/artist-genres.js';
+import type { ArtistGenresEnrichmentSummary } from '../enrichment/artist-genres.js';
+import { enrichTrackVersions } from '../enrichment/track-versions.js';
+import type { TrackVersionsEnrichmentSummary } from '../enrichment/track-versions.js';
+import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
+import type { ArtistProfilesEnrichmentSummary } from '../enrichment/artist-profiles.js';
 
 export type { Logger };
 export type { LyricsEnrichmentSummary };
 export type { OriginalYearEnrichmentSummary };
+export type { ArtistGenresEnrichmentSummary };
+export type { TrackVersionsEnrichmentSummary };
+export type { ArtistProfilesEnrichmentSummary };
 
 export interface IngestionConfig {
   username: string;
@@ -24,6 +33,9 @@ export interface IngestionSummary {
   durationMs: number;
   lyricsEnrichment: LyricsEnrichmentSummary;
   originalYearEnrichment: OriginalYearEnrichmentSummary;
+  artistGenresEnrichment: ArtistGenresEnrichmentSummary;
+  trackVersionsEnrichment: TrackVersionsEnrichmentSummary;
+  artistProfilesEnrichment: ArtistProfilesEnrichmentSummary;
 }
 
 const PER_PAGE = 50;
@@ -99,6 +111,15 @@ export async function runIngestion(
   // Step 4: Enrich releases with originalYear from Discogs master API
   const originalYearEnrichment = await enrichOriginalYear(client, driver, log);
 
+  // Step 5: Aggregate genres/styles from Release nodes onto Artist nodes
+  const artistGenresEnrichment = await enrichArtistGenres(driver, log);
+
+  // Step 6: Create IS_VERSION_OF relationships between track variants
+  const trackVersionsEnrichment = await enrichTrackVersions(driver, log);
+
+  // Step 7: Enrich Artist nodes with realName + profile from Discogs artist API
+  const artistProfilesEnrichment = await enrichArtistProfiles(client, driver, log);
+
   const durationMs = Date.now() - startTime;
   const durationSec = Math.round(durationMs / 1000);
   const minutes = Math.floor(durationSec / 60);
@@ -111,6 +132,9 @@ export async function runIngestion(
     durationMs,
     lyricsEnrichment,
     originalYearEnrichment,
+    artistGenresEnrichment,
+    trackVersionsEnrichment,
+    artistProfilesEnrichment,
   };
 
   log.info(
@@ -123,6 +147,14 @@ export async function runIngestion(
       `  Original year enrich: ${originalYearEnrichment.enriched}\n` +
       `  Original year skip:   ${originalYearEnrichment.skipped}\n` +
       `  Original year failed: ${originalYearEnrichment.failed}\n` +
+      `  Artist genres enrich: ${artistGenresEnrichment.enriched}\n` +
+      `  Artist genres failed: ${artistGenresEnrichment.failed}\n` +
+      `  Track versions enrich:${trackVersionsEnrichment.enriched}\n` +
+      `  Track versions skip:  ${trackVersionsEnrichment.skipped}\n` +
+      `  Track versions failed:${trackVersionsEnrichment.failed}\n` +
+      `  Artist profiles enrich:${artistProfilesEnrichment.enriched}\n` +
+      `  Artist profiles skip: ${artistProfilesEnrichment.skipped}\n` +
+      `  Artist profiles failed:${artistProfilesEnrichment.failed}\n` +
       `  Duration:             ${minutes}m ${seconds}s\n` +
       (errors.length > 0
         ? `  Errors:\n${errors.map((e) => `    - ${e}`).join('\n')}`

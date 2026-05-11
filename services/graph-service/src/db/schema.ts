@@ -16,6 +16,7 @@ const statements = [
   'MATCH (r:Release) WHERE r.year IS NOT NULL AND r.pressingYear IS NULL SET r.pressingYear = r.year',
   'CREATE INDEX musician_name IF NOT EXISTS FOR (m:Musician) ON (m.name)',
   'CREATE INDEX studio_name IF NOT EXISTS FOR (s:Studio) ON (s.name)',
+  'CREATE INDEX track_normalized_title IF NOT EXISTS FOR (t:Track) ON (t.normalizedTitle)',
 ];
 
 export async function applySchema(driver: Driver): Promise<void> {

@@ -104,6 +104,16 @@ export interface DiscogsMasterRelease {
   year: number; // earliest known release year across all versions
 }
 
+export interface DiscogsArtistProfile {
+  id: number;
+  name: string;
+  realname?: string;
+  profile?: string;
+  namevariations?: string[];
+  urls?: string[];
+  members?: Array<{ id: number; name: string; active: boolean; resource_url: string }>;
+}
+
 export interface DiscogsCollectionPage {
   pagination: {
     page: number;

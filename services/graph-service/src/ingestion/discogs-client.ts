@@ -1,4 +1,9 @@
-import type { DiscogsCollectionPage, DiscogsMasterRelease, DiscogsRelease } from './types.js';
+import type {
+  DiscogsArtistProfile,
+  DiscogsCollectionPage,
+  DiscogsMasterRelease,
+  DiscogsRelease,
+} from './types.js';
 
 /** Minimal logger interface — satisfied by Fastify's app.log (pino) and by console. */
 export interface Logger {
@@ -56,6 +61,11 @@ export class DiscogsClient {
   async getMaster(masterDiscogsId: number): Promise<DiscogsMasterRelease> {
     const url = `${BASE_URL}/masters/${masterDiscogsId}`;
     return this.fetchWithBackoff<DiscogsMasterRelease>(url);
+  }
+
+  async getArtist(artistId: number): Promise<DiscogsArtistProfile> {
+    const url = `${BASE_URL}/artists/${artistId}`;
+    return this.fetchWithBackoff<DiscogsArtistProfile>(url);
   }
 
   private async fetchWithBackoff<T>(url: string): Promise<T> {
