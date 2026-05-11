@@ -1,5 +1,27 @@
 name: CI
 
+# Runs on every PR against main and on every push to main.
+# All jobs must pass before a PR is mergeable (branch protection enforces this — see CLAUDE.md).
+#
+# Job dependency graph (arrows = "requires passing first"):
+#
+#   format ──┐
+#   lint ────┼──→ tests-and-coverage (unit + integration, Neo4j, 70% threshold) ──→ docker-build
+#   typecheck ┤
+#             └──→ schema-validation (Neo4j service container)
+#
+#   audit, secrets-scan, codeql — independent, always run in parallel
+#   commitlint — PR-only (skipped on pushes to main)
+#
+# For agents: if format/lint/typecheck fail, all test jobs are skipped (fast-fail).
+# Fix static checks first, then re-push to re-trigger the full suite.
+#
+# Why unit + integration tests are combined in one job:
+#   The 70% coverage threshold applies to the full test suite. Unit tests alone only
+#   reach ~57% because route handlers and the ingestion pipeline are only exercised via
+#   Fastify inject() and a live Neo4j instance. Combining them means one Neo4j startup
+#   instead of two, and coverage is measured against the complete test run.
+
 on:
   pull_request:
     branches: [main]
@@ -7,8 +29,13 @@ on:
     branches: [main]
 
 jobs:
+  # ── Static checks ────────────────────────────────────────────────────────────
+  # These three jobs run in parallel and gate everything downstream.
+  # Fix all three before expecting tests to run.
+
   format:
     name: Format Check
+    # Prettier must report zero diffs. Fix locally: pnpm prettier --write .
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -26,6 +53,8 @@ jobs:
 
   lint:
     name: Lint
+    # ESLint with eslint-plugin-security. Zero warnings or errors allowed.
+    # Fix locally: pnpm lint (most issues auto-fixable with --fix).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -43,6 +72,9 @@ jobs:
 
   typecheck:
     name: Type Check
+    # TypeScript strict mode. Covers both tsconfig.json (src/) and tsconfig.test.json (tests/).
+    # Fix locally: pnpm typecheck
+    # Note: NodeNext resolution requires .js extensions on local relative imports.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -58,42 +90,18 @@ jobs:
       - name: Type check (src + tests)
         run: pnpm typecheck
 
-  unit-tests:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Run unit tests
-        run: pnpm --filter graph-service test:unit
+  # ── Tests ────────────────────────────────────────────────────────────────────
+  # Only run after all three static checks pass (fast-fail prevents wasting Neo4j
+  # container startup time on code that already has lint/type errors).
 
-  coverage:
-    name: Test Coverage
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Run all tests with coverage enforcement (70% threshold)
-        run: pnpm --filter graph-service test:coverage
-
-  integration-tests:
-    name: Integration Tests
+  tests-and-coverage:
+    name: Tests & Coverage
+    # Runs the full test suite (unit + integration) with coverage enforcement against a
+    # live Neo4j 5 instance. Thresholds: 70% lines/functions/branches/statements (vitest.config.ts).
+    # Unit tests alone only reach ~57% — route handlers and the ingestion pipeline are only
+    # exercised via Fastify inject() and a real DB, so both suites must run together.
+    # Fix locally: start Neo4j via docker-compose, then pnpm --filter graph-service test:coverage
+    needs: [format, lint, typecheck]
     runs-on: ubuntu-latest
     services:
       neo4j:
@@ -119,15 +127,20 @@ jobs:
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Run integration tests
+      - name: Run all tests with coverage (70% threshold)
         env:
           NEO4J_URI: bolt://localhost:7687
           NEO4J_USER: neo4j
           NEO4J_PASSWORD: test-password
-        run: pnpm --filter graph-service test:integration
+        run: pnpm --filter graph-service test:coverage
 
   schema-validation:
     name: Schema Validation
+    # Runs services/graph-service/scripts/validate-schema.ts against a live Neo4j instance.
+    # Verifies that all constraints and indexes (src/db/schema.ts) apply idempotently —
+    # the script runs schema setup twice and asserts no error on either run.
+    # Fix locally: start Neo4j via docker-compose, then pnpm tsx services/graph-service/scripts/validate-schema.ts
+    needs: [format, lint, typecheck]
     runs-on: ubuntu-latest
     services:
       neo4j:
@@ -162,8 +175,12 @@ jobs:
 
   docker-build:
     name: Docker Build
+    # Builds the multi-stage graph-service image (does NOT push to ECR — that's deploy.yml).
+    # Build context is the repo root (Dockerfile copies the workspace lockfile).
+    # GitHub Actions cache (type=gha) stores BuildKit layers between runs.
+    # Gated on coverage (not just lint/typecheck) so broken tests never reach a built image.
+    needs: [lint, typecheck, tests-and-coverage]
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, coverage]
     steps:
       - uses: actions/checkout@v6
       - name: Set up Docker Buildx
@@ -175,9 +192,17 @@ jobs:
           file: ./services/graph-service/Dockerfile
           push: false
           tags: liner-notes/graph-service:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Security ─────────────────────────────────────────────────────────────────
+  # These jobs run unconditionally in parallel — they're independent of source correctness.
 
   audit:
     name: Security Audit
+    # pnpm audit blocks on high AND critical CVEs (--audit-level=high is stricter than critical).
+    # New CVEs in existing dependencies will surface here even with no code changes.
+    # If this fails: check `pnpm audit` output, update the affected package, and re-push.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -191,11 +216,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Audit dependencies
-        # --audit-level=high blocks both high AND critical CVEs (stricter than critical-only)
         run: pnpm audit --audit-level=high
 
   secrets-scan:
     name: Secrets Scan
+    # TruffleHog scans every commit in the PR for accidentally committed credentials.
+    # fetch-depth: 0 is required — TruffleHog diffs git history and needs the full log.
+    # On PRs: scans from the default branch tip to HEAD (only new commits).
+    # On pushes to main: scans from before the push to HEAD.
+    # If this fails: the credential is in git history — rotate it immediately, then
+    # use `git filter-branch` or BFG to scrub the history before re-pushing.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -210,6 +240,11 @@ jobs:
 
   codeql:
     name: CodeQL Security Scan
+    # Static security analysis using GitHub CodeQL (security-extended query suite).
+    # Results appear in the repo's Security → Code scanning tab as SARIF alerts.
+    # wait-for-processing: false avoids a conflict with GitHub's default CodeQL setup:
+    # both upload SARIF and the async rejection blocks CI. Long-term fix: disable the
+    # default setup in repo Settings → Security → Code scanning → Default setup → Disable.
     runs-on: ubuntu-latest
     permissions:
       security-events: write
@@ -225,14 +260,15 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
         with:
-          # GitHub default CodeQL setup is also enabled on this repo, which causes
-          # the SARIF upload to be rejected asynchronously. Default setup already
-          # provides coverage; skip waiting for processing to unblock CI.
-          # Long-term fix: disable default CodeQL setup in repo Settings > Security.
           wait-for-processing: false
 
   commitlint:
     name: Commit Message Lint
+    # Enforces Conventional Commits on all commits in the PR.
+    # Only runs on PRs — pushes to main are squash merges validated at PR time.
+    # Config: commitlint.config.mjs at the repo root.
+    # Agents: commits must follow Conventional Commits (e.g. feat:, fix:, chore:, docs:, test:, refactor:, perf:, ci:).
+    # fetch-depth: 0 is required — wagoid/commitlint-github-action walks the full commit range.
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     permissions:
