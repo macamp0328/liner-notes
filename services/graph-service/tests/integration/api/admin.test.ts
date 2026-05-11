@@ -18,6 +18,11 @@ vi.mock('../../../src/db/lyrics-repository.js', () => ({
   clearGeniusLyrics: mockClearGeniusLyrics,
 }));
 
+const mockEnrichLyrics = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/enrichment/lyrics.js', () => ({
+  enrichLyrics: mockEnrichLyrics,
+}));
+
 vi.mock('../../../src/db/schema.js', () => ({
   applySchema: vi.fn().mockResolvedValue(undefined),
 }));
@@ -107,6 +112,7 @@ describe('Admin API', () => {
     mockGetJobState.mockReturnValue(idleState);
     mockStartJob.mockReturnValue('test-job-id');
     mockClearGeniusLyrics.mockResolvedValue(460);
+    mockEnrichLyrics.mockResolvedValue({ enriched: 10, skipped: 5, failed: 0, durationMs: 3000 });
     app = await buildServer();
     await app.ready();
   });
@@ -269,6 +275,91 @@ describe('Admin API', () => {
       });
 
       expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── POST /lyrics/enrich ───────────────────────────────────────────────────
+  describe('POST /api/v1/admin/lyrics/enrich', () => {
+    it('returns 200 with enrichment summary when called with valid token', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { enriched: number; skipped: number; failed: number; durationMs: number };
+      };
+      expect(body.data.enriched).toBe(10);
+      expect(body.data.skipped).toBe(5);
+      expect(body.data.failed).toBe(0);
+      expect(body.data.durationMs).toBe(3000);
+    });
+
+    it('returns 401 when Authorization header is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+      });
+
+      expect(response.statusCode).toBe(401);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('UNAUTHORIZED');
+    });
+
+    it('returns 401 when token is wrong', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: 'Bearer wrong-token' },
+      });
+
+      expect(response.statusCode).toBe(401);
+    });
+
+    it('returns 503 when ADMIN_TOKEN is not configured', async () => {
+      delete process.env['ADMIN_TOKEN'];
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(503);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('SERVICE_UNAVAILABLE');
+    });
+
+    it('returns 409 when enrichment is already in progress', async () => {
+      // First call is slow so the second arrives while it's still running
+      mockEnrichLyrics.mockImplementationOnce(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(() => resolve({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 }), 100),
+          ),
+      );
+
+      const [r1, r2] = await Promise.all([
+        app.inject({
+          method: 'POST',
+          url: '/api/v1/admin/lyrics/enrich',
+          headers: { authorization: `Bearer ${VALID_TOKEN}` },
+        }),
+        app.inject({
+          method: 'POST',
+          url: '/api/v1/admin/lyrics/enrich',
+          headers: { authorization: `Bearer ${VALID_TOKEN}` },
+        }),
+      ]);
+
+      const codes = [r1.statusCode, r2.statusCode].sort((a, b) => a - b);
+      expect(codes).toEqual([200, 409]);
+
+      const body409 = r1.statusCode === 409 ? r1 : r2;
+      const parsed = JSON.parse(body409.payload) as { error: { code: string } };
+      expect(parsed.error.code).toBe('ENRICHMENT_RUNNING');
     });
   });
 });
