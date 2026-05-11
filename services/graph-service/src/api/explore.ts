@@ -305,6 +305,7 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
         },
         response: {
           200: { type: 'array', items: exploreReleaseSchema },
+          400: errorSchema,
         },
       },
     },
@@ -376,11 +377,6 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
       reply,
     ): Promise<{ seed: ExploreRelease; nodes: ConnectionNode[] } | ErrorReply> => {
       const depth = request.query.depth ?? 2;
-      if (depth < 1 || depth > 3) {
-        return reply.code(400).send({
-          error: { code: 'INVALID_DEPTH', message: 'depth must be between 1 and 3' },
-        });
-      }
       const graph = await getConnections(getDriver(), request.params.discogsId, depth as 1 | 2 | 3);
       if (!graph) {
         return reply.code(404).send({

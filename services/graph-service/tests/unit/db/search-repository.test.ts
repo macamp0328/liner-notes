@@ -66,7 +66,7 @@ describe('searchGeneral', () => {
       score: 3.14,
       trackReleaseTitle: null,
       trackReleaseDiscogsId: null,
-      artistReleaseTitle: null,
+      releaseArtistName: null,
     });
     const { session } = makeMockSession([makeResult([rec])]);
     const driver = makeMockDriver(session);
@@ -90,7 +90,7 @@ describe('searchGeneral', () => {
       score: 2.71,
       trackReleaseTitle: null,
       trackReleaseDiscogsId: null,
-      artistReleaseTitle: 'Coltrane Discography',
+      releaseArtistName: 'John Coltrane',
     });
     const { session } = makeMockSession([makeResult([rec])]);
     const driver = makeMockDriver(session);
@@ -101,6 +101,7 @@ describe('searchGeneral', () => {
     if (item.type === 'Release') {
       expect(item.title).toBe('A Love Supreme');
       expect(item.discogsId).toBe(12345);
+      expect(item.artist).toBe('John Coltrane');
       expect(item.score).toBe(2.71);
     }
   });
@@ -112,7 +113,7 @@ describe('searchGeneral', () => {
       score: 1.62,
       trackReleaseTitle: 'A Love Supreme',
       trackReleaseDiscogsId: makeNeo4jInt(12345),
-      artistReleaseTitle: null,
+      releaseArtistName: null,
     });
     const { session } = makeMockSession([makeResult([rec])]);
     const driver = makeMockDriver(session);
@@ -142,7 +143,7 @@ describe('searchGeneral', () => {
       score: 1.0,
       trackReleaseTitle: null,
       trackReleaseDiscogsId: null,
-      artistReleaseTitle: null,
+      releaseArtistName: null,
     });
     const { session } = makeMockSession([makeResult([rec])]);
     const driver = makeMockDriver(session);

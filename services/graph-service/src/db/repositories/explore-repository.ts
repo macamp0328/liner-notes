@@ -298,18 +298,19 @@ export async function getConnections(
   try {
     const query = `
       MATCH (start:Release {discogsId: $discogsId})
-      OPTIONAL MATCH (r)-[:RELEASED_BY]->(sa:Artist)
-        WHERE r = start
+      OPTIONAL MATCH (start)-[:RELEASED_BY]->(sa:Artist)
       OPTIONAL MATCH (start)-[*1..${depth}]-(connected)
         WHERE (connected:Release OR connected:Artist OR connected:Musician OR connected:Studio)
           AND connected <> start
-      WITH start, sa,
-           collect(DISTINCT {
+      WITH start, sa, connected WHERE connected IS NOT NULL
+      WITH DISTINCT start, sa, connected
+      LIMIT 200
+      WITH start, sa, collect({
              type: head(labels(connected)),
              discogsId: connected.discogsId,
              name: connected.name,
              title: connected.title
-           })[..200] AS nodes
+           }) AS nodes
       RETURN start.discogsId AS discogsId, start.title AS title, sa.name AS artist,
              coalesce(start.originalYear, start.pressingYear) AS pressingYear,
              start.format AS format, start.thumbUrl AS thumbUrl,

@@ -67,15 +67,16 @@ export async function searchGeneral(driver: Driver, q: string): Promise<SearchRe
       CALL db.index.fulltext.queryNodes("releaseArtistTrackSearch", $q) YIELD node, score
       WITH node, score, labels(node) AS nodeLabels
       OPTIONAL MATCH (node)<-[:HAS_TRACK]-(trackRelease:Release)
-      OPTIONAL MATCH (artistRelease:Release)-[:RELEASED_BY]->(node)
-        WHERE 'Artist' IN labels(node)
+        WHERE 'Track' IN labels(node)
+      OPTIONAL MATCH (node)-[:RELEASED_BY]->(releaseArtist:Artist)
+        WHERE 'Release' IN labels(node)
       RETURN nodeLabels, node, score,
              trackRelease.title AS trackReleaseTitle,
              trackRelease.discogsId AS trackReleaseDiscogsId,
-             artistRelease.title AS artistReleaseTitle
+             releaseArtist.name AS releaseArtistName
       ORDER BY score DESC
       LIMIT 50
-      `,
+`,
       { q },
     );
 
@@ -104,7 +105,7 @@ export async function searchGeneral(driver: Driver, q: string): Promise<SearchRe
             type: 'Release',
             title: toStr(props['title']) ?? '',
             discogsId: toInt(props['discogsId']) ?? 0,
-            artist: toStr(rec.get('artistReleaseTitle')),
+            artist: toStr(rec.get('releaseArtistName')),
             score,
           },
         ];
