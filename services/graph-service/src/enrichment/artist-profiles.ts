@@ -32,7 +32,15 @@ export async function enrichArtistProfiles(
 
   log.info('[artist-profiles] Starting artist profile enrichment');
 
-  const artists = await getUnenrichedArtists(driver);
+  let artists;
+  try {
+    artists = await getUnenrichedArtists(driver);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.error(`[artist-profiles] Failed to fetch unenriched artists: ${msg}`);
+    return { enriched: 0, skipped: 0, failed: 1, durationMs: Date.now() - startTime };
+  }
+
   log.info(`[artist-profiles] Found ${artists.length} artists without profile`);
 
   for (const artist of artists) {
@@ -42,15 +50,15 @@ export async function enrichArtistProfiles(
       const realName = profile.realname?.trim() || null;
       const profileText = profile.profile?.trim() || null;
 
-      if (realName === null && profileText === null) {
-        // Store explicit nulls so the node is not re-fetched on subsequent runs.
-        await setArtistProfile(driver, artist.discogsId, null, null);
-        skipped++;
-        continue;
-      }
-
+      // Always call setArtistProfile — it sets profileFetched = true as an
+      // idempotency marker regardless of whether profile data was present.
       await setArtistProfile(driver, artist.discogsId, realName, profileText);
-      enriched++;
+
+      if (realName === null && profileText === null) {
+        skipped++;
+      } else {
+        enriched++;
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error(`[artist-profiles] Failed for artist ${artist.discogsId}: ${msg}`);

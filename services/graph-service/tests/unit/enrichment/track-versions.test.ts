@@ -109,6 +109,26 @@ describe('enrichTrackVersions', () => {
     expect(summary.enriched).toBe(1);
   });
 
+  it('accepts a group when anchor matches a non-first other release', async () => {
+    // Anchor (releaseDiscogsId 10) does not share artist with 20, but does with 30.
+    // The overlap check should keep probing and find the match, not skip the group.
+    const group = makeTracks('find me', [
+      { elementId: 'r1', title: 'Find Me', releaseDiscogsId: 10 },
+      { elementId: 'r2', title: 'Find Me (Remix)', releaseDiscogsId: 20 },
+      { elementId: 'r3', title: 'Find Me (Live)', releaseDiscogsId: 30 },
+    ]);
+    mockGetVersionCandidates.mockResolvedValue([group]);
+    mockReleasesShareArtist
+      .mockResolvedValueOnce(false) // anchor 10 vs 20 — no overlap
+      .mockResolvedValueOnce(true); // anchor 10 vs 30 — overlap found
+
+    const summary = await enrichTrackVersions(fakeDriver);
+
+    expect(mockMergeVersionRelationships).toHaveBeenCalled();
+    expect(summary.enriched).toBe(2);
+    expect(summary.skipped).toBe(0);
+  });
+
   it('returns failed=1 when getVersionCandidates throws', async () => {
     mockGetVersionCandidates.mockRejectedValue(new Error('DB connection failed'));
 

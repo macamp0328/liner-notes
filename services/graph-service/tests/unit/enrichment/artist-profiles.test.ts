@@ -122,4 +122,15 @@ describe('enrichArtistProfiles', () => {
     expect(mockSetArtistProfile).toHaveBeenCalledWith(fakeDriver, 77, null, null);
     expect(summary.skipped).toBe(1);
   });
+
+  it('returns failed=1 when getUnenrichedArtists throws', async () => {
+    mockGetUnenrichedArtists.mockRejectedValue(new Error('Neo4j session failed'));
+    const client = makeClient();
+
+    const summary = await enrichArtistProfiles(client, fakeDriver);
+
+    expect(summary.failed).toBe(1);
+    expect(summary.enriched).toBe(0);
+    expect(client.getArtist).not.toHaveBeenCalled();
+  });
 });

@@ -55,10 +55,19 @@ export async function enrichTrackVersions(
         }
 
         // Verify that at least one pair of releases shares an artist.
-        // Check the first two distinct releases as a proxy — if they share an
-        // artist the group is credible; a full pairwise check is too expensive.
-        const [idA, idB] = releaseIds as [number, number];
-        const hasOverlap = await releasesShareArtist(driver, idA, idB);
+        // Use the first release as an anchor and check against all others —
+        // early-exit on first match. A full pairwise check is unnecessary:
+        // one confirmed overlap is enough to treat the group as credible.
+        // (Checking only the first two IDs is fragile because Set insertion
+        // order doesn't guarantee the most-likely overlap pair comes first.)
+        const [anchorId, ...otherIds] = releaseIds as [number, ...number[]];
+        let hasOverlap = false;
+        for (const otherId of otherIds) {
+          if (await releasesShareArtist(driver, anchorId, otherId)) {
+            hasOverlap = true;
+            break;
+          }
+        }
         if (!hasOverlap) {
           skipped++;
           continue;

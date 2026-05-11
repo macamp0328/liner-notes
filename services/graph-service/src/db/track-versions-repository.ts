@@ -69,27 +69,30 @@ export interface VersionPair {
 
 /**
  * Create IS_VERSION_OF relationships for a set of track pairs.
+ * Uses UNWIND to handle all pairs in one round-trip rather than looping.
  * MERGE is idempotent — re-runs update versionType in place.
  */
 export async function mergeVersionRelationships(
   driver: Driver,
   pairs: VersionPair[],
 ): Promise<void> {
+  if (pairs.length === 0) return;
   const session = driver.session();
   try {
-    for (const pair of pairs) {
-      await session.run(
-        `MATCH (from:Track) WHERE elementId(from) = $fromId
-         MATCH (to:Track)   WHERE elementId(to)   = $toId
-         MERGE (from)-[r:IS_VERSION_OF]->(to)
-         SET r.versionType = $versionType`,
-        {
-          fromId: pair.fromElementId,
-          toId: pair.toElementId,
-          versionType: pair.versionType,
-        },
-      );
-    }
+    await session.run(
+      `UNWIND $pairs AS pair
+       MATCH (from:Track) WHERE elementId(from) = pair.fromId
+       MATCH (to:Track)   WHERE elementId(to)   = pair.toId
+       MERGE (from)-[r:IS_VERSION_OF]->(to)
+       SET r.versionType = pair.versionType`,
+      {
+        pairs: pairs.map((p) => ({
+          fromId: p.fromElementId,
+          toId: p.toElementId,
+          versionType: p.versionType,
+        })),
+      },
+    );
   } finally {
     await session.close();
   }

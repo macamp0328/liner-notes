@@ -1,5 +1,7 @@
 import type { Driver } from 'neo4j-driver';
 
+type Neo4jInt = { toNumber(): number };
+
 /**
  * Roll up Genre names from every Release the Artist has released onto the
  * Artist node as a genres: String[] property.
@@ -15,7 +17,7 @@ export async function aggregateArtistGenres(driver: Driver): Promise<number> {
        RETURN count(a) AS updated`,
     );
     const record = result.records[0];
-    return record ? (record.get('updated') as number) : 0;
+    return record ? (record.get('updated') as Neo4jInt).toNumber() : 0;
   } finally {
     await session.close();
   }
@@ -36,7 +38,7 @@ export async function aggregateArtistStyles(driver: Driver): Promise<number> {
        RETURN count(a) AS updated`,
     );
     const record = result.records[0];
-    return record ? (record.get('updated') as number) : 0;
+    return record ? (record.get('updated') as Neo4jInt).toNumber() : 0;
   } finally {
     await session.close();
   }
