@@ -6,15 +6,20 @@ name: CI
 # Job dependency graph (arrows = "requires passing first"):
 #
 #   format ──┐
-#   lint ────┼──→ coverage (unit tests + 70% threshold) ──→ docker-build
+#   lint ────┼──→ tests-and-coverage (unit + integration, Neo4j, 70% threshold) ──→ docker-build
 #   typecheck ┤
-#             ├──→ integration-tests (Neo4j service container)
 #             └──→ schema-validation (Neo4j service container)
 #
 #   audit, secrets-scan, codeql, commitlint — independent, always run in parallel
 #
 # For agents: if format/lint/typecheck fail, all test jobs are skipped (fast-fail).
 # Fix static checks first, then re-push to re-trigger the full suite.
+#
+# Why unit + integration tests are combined in one job:
+#   The 70% coverage threshold applies to the full test suite. Unit tests alone only
+#   reach ~57% because route handlers and the ingestion pipeline are only exercised via
+#   Fastify inject() and a live Neo4j instance. Combining them means one Neo4j startup
+#   instead of two, and coverage is measured against the complete test run.
 
 on:
   pull_request:
@@ -88,33 +93,13 @@ jobs:
   # Only run after all three static checks pass (fast-fail prevents wasting Neo4j
   # container startup time on code that already has lint/type errors).
 
-  coverage:
-    name: Unit Tests & Coverage
-    # Runs unit tests only (tests/unit/) with coverage enforcement.
-    # Thresholds: 70% lines/functions/branches/statements, configured in vitest.config.ts.
-    # Integration tests are gated separately (they need a Neo4j container).
-    # Fix locally: pnpm --filter graph-service test:unit:coverage
-    needs: [format, lint, typecheck]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Run unit tests with coverage (70% threshold)
-        run: pnpm --filter graph-service test:unit:coverage
-
-  integration-tests:
-    name: Integration Tests
-    # Tests all API endpoints via Fastify's inject() and the ingestion pipeline
-    # against a live Neo4j 5 instance. Fixtures are in tests/fixtures/.
-    # Fix locally: start Neo4j via docker-compose, then pnpm --filter graph-service test:integration
+  tests-and-coverage:
+    name: Tests & Coverage
+    # Runs the full test suite (unit + integration) with coverage enforcement against a
+    # live Neo4j 5 instance. Thresholds: 70% lines/functions/branches/statements (vitest.config.ts).
+    # Unit tests alone only reach ~57% — route handlers and the ingestion pipeline are only
+    # exercised via Fastify inject() and a real DB, so both suites must run together.
+    # Fix locally: start Neo4j via docker-compose, then pnpm --filter graph-service test:coverage
     needs: [format, lint, typecheck]
     runs-on: ubuntu-latest
     services:
@@ -141,12 +126,12 @@ jobs:
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Run integration tests
+      - name: Run all tests with coverage (70% threshold)
         env:
           NEO4J_URI: bolt://localhost:7687
           NEO4J_USER: neo4j
           NEO4J_PASSWORD: test-password
-        run: pnpm --filter graph-service test:integration
+        run: pnpm --filter graph-service test:coverage
 
   schema-validation:
     name: Schema Validation
@@ -193,7 +178,7 @@ jobs:
     # Build context is the repo root (Dockerfile copies the workspace lockfile).
     # GitHub Actions cache (type=gha) stores BuildKit layers between runs.
     # Gated on coverage (not just lint/typecheck) so broken tests never reach a built image.
-    needs: [lint, typecheck, coverage]
+    needs: [lint, typecheck, tests-and-coverage]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
