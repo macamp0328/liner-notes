@@ -144,10 +144,10 @@ Each worktree is a fully independent working directory on its own branch. **Agen
 **Agent requirement — run before every commit:**
 
 ```bash
-pnpm prettier --check .                     # formatting must pass
-pnpm --filter graph-service lint            # ESLint must pass (zero warnings/errors)
-pnpm --filter graph-service typecheck       # TypeScript strict must pass (src + tests)
-pnpm --filter graph-service test:unit       # all unit tests must pass
+pnpm prettier --check .                          # formatting must pass
+pnpm --filter graph-service lint                 # ESLint must pass (zero warnings/errors)
+pnpm --filter graph-service typecheck            # TypeScript strict must pass (src + tests)
+pnpm --filter graph-service test:unit:coverage   # unit tests must pass AND meet 70% coverage threshold
 ```
 
 **CI is the last wall of defense, not the first.** Running only prettier/lint/typecheck and skipping unit tests before pushing is not acceptable. Any code change that touches production code — including schema files, utility functions, and configuration — must be followed by a local unit test run before committing. Discovering a broken test in CI means the agent was lazy: it caused unnecessary wait time and wasted a CI cycle. Fix it locally, then push. Every time.
@@ -170,20 +170,21 @@ No service talks to Neo4j directly except `graph-service`. `graph-service` is th
 
 All CI checks must pass before a PR is mergeable. The following jobs run on every PR and push to `main`:
 
-| Check             | Job name            | Tool                              | Requirement                                                      |
-| ----------------- | ------------------- | --------------------------------- | ---------------------------------------------------------------- |
-| Format check      | `format`            | Prettier                          | Zero formatting differences                                      |
-| Linting           | `lint`              | ESLint + `eslint-plugin-security` | Zero warnings or errors                                          |
-| Type checking     | `typecheck`         | TypeScript strict (src + tests)   | Zero errors                                                      |
-| Unit tests        | `unit-tests`        | Vitest                            | All unit tests pass                                              |
-| Coverage gate     | `coverage`          | Vitest + coverage-v8 (all tests)  | 70% lines/functions/branches/statements                          |
-| Integration tests | `integration-tests` | Vitest + Neo4j service container  | All integration tests pass                                       |
-| Schema validation | `schema-validation` | tsx + Neo4j service container     | Constraints + indexes apply idempotently                         |
-| Docker build      | `docker-build`      | Docker Buildx                     | Image builds successfully (gated on lint + typecheck + coverage) |
-| Security audit    | `audit`             | `pnpm audit`                      | No high or critical vulnerabilities                              |
-| Secrets scan      | `secrets-scan`      | TruffleHog                        | No credentials in committed code                                 |
-| CodeQL scan       | `codeql`            | GitHub CodeQL (security-extended) | No security alerts introduced                                    |
-| Commit lint       | `commitlint`        | wagoid/commitlint-github-action   | All commits follow Conventional Commits                          |
+| Check             | Job name            | Tool                                    | Requirement                                                            |
+| ----------------- | ------------------- | --------------------------------------- | ---------------------------------------------------------------------- |
+| Format check      | `format`            | Prettier                                | Zero formatting differences                                            |
+| Linting           | `lint`              | ESLint + `eslint-plugin-security`       | Zero warnings or errors                                                |
+| Type checking     | `typecheck`         | TypeScript strict (src + tests)         | Zero errors                                                            |
+| Unit tests + coverage | `coverage`      | Vitest + coverage-v8 (unit tests only)  | All unit tests pass; 70% lines/functions/branches/statements           |
+| Integration tests | `integration-tests` | Vitest + Neo4j service container        | All integration tests pass                                             |
+| Schema validation | `schema-validation` | tsx + Neo4j service container           | Constraints + indexes apply idempotently                               |
+| Docker build      | `docker-build`      | Docker Buildx (with GHA layer cache)    | Image builds successfully (gated on lint + typecheck + coverage)       |
+| Security audit    | `audit`             | `pnpm audit`                            | No high or critical vulnerabilities                                    |
+| Secrets scan      | `secrets-scan`      | TruffleHog                              | No credentials in committed code                                       |
+| CodeQL scan       | `codeql`            | GitHub CodeQL (security-extended)       | No security alerts introduced                                          |
+| Commit lint       | `commitlint`        | wagoid/commitlint-github-action         | All commits follow Conventional Commits                                |
+
+**Job dependency order (fast-fail):** `format`, `lint`, and `typecheck` run first in parallel. `coverage`, `integration-tests`, and `schema-validation` only start once all three static checks pass — this avoids spinning up Neo4j containers for code that already has lint errors. `docker-build` is gated on `coverage` in addition to `lint` and `typecheck`.
 
 ### Branch Protection (GitHub Settings)
 
@@ -194,8 +195,7 @@ The following branch protection rules are required on `main` — **configure the
   - `Format Check`
   - `Lint`
   - `Type Check`
-  - `Unit Tests`
-  - `Test Coverage`
+  - `Unit Tests & Coverage`
   - `Integration Tests`
   - `Schema Validation`
   - `Docker Build`
