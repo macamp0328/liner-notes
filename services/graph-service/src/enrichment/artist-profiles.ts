@@ -12,7 +12,9 @@ export interface ArtistProfilesEnrichmentSummary {
 
 /**
  * Enrich Artist nodes with realName and profile from the Discogs artist API.
- * Fetches GET /artists/{discogsId} for each Artist without a profile property.
+ * Fetches GET /artists/{discogsId} for each Artist where profileFetched is null
+ * (the idempotency marker set by setArtistProfile on every run, regardless of
+ * whether profile data was present).
  * Rate limiting is handled by DiscogsClient internally.
  * Per-artist errors are caught and counted — never crashes the caller.
  *

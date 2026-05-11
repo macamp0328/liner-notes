@@ -109,9 +109,8 @@ describe('enrichTrackVersions', () => {
     expect(summary.enriched).toBe(1);
   });
 
-  it('accepts a group when anchor matches a non-first other release', async () => {
-    // Anchor (releaseDiscogsId 10) does not share artist with 20, but does with 30.
-    // The overlap check should keep probing and find the match, not skip the group.
+  it('includes all releases when overlap is found across multiple pairs', async () => {
+    // Full pairwise: 10v20=false, 10v30=true, 20v30=true → all 3 in validated cluster.
     const group = makeTracks('find me', [
       { elementId: 'r1', title: 'Find Me', releaseDiscogsId: 10 },
       { elementId: 'r2', title: 'Find Me (Remix)', releaseDiscogsId: 20 },
@@ -119,13 +118,38 @@ describe('enrichTrackVersions', () => {
     ]);
     mockGetVersionCandidates.mockResolvedValue([group]);
     mockReleasesShareArtist
-      .mockResolvedValueOnce(false) // anchor 10 vs 20 — no overlap
-      .mockResolvedValueOnce(true); // anchor 10 vs 30 — overlap found
+      .mockResolvedValueOnce(false) // 10 vs 20 — no overlap
+      .mockResolvedValueOnce(true) // 10 vs 30 — overlap found (adds 10, 30)
+      .mockResolvedValueOnce(true); // 20 vs 30 — overlap found (adds 20)
 
     const summary = await enrichTrackVersions(fakeDriver);
 
     expect(mockMergeVersionRelationships).toHaveBeenCalled();
     expect(summary.enriched).toBe(2);
+    expect(summary.skipped).toBe(0);
+  });
+
+  it('excludes unrelated releases and uses validated cluster root', async () => {
+    // Release 10 is unrelated (no shared artist with 20 or 30); 20↔30 share an artist.
+    // Only tracks from releases 20 and 30 should be linked; root = release 20.
+    const group = makeTracks('cross artist', [
+      { elementId: 'r1', title: 'Cross Artist', releaseDiscogsId: 10 },
+      { elementId: 'r2', title: 'Cross Artist (Remix)', releaseDiscogsId: 20 },
+      { elementId: 'r3', title: 'Cross Artist (Live)', releaseDiscogsId: 30 },
+    ]);
+    mockGetVersionCandidates.mockResolvedValue([group]);
+    mockReleasesShareArtist
+      .mockResolvedValueOnce(false) // 10 vs 20 — no overlap
+      .mockResolvedValueOnce(false) // 10 vs 30 — no overlap
+      .mockResolvedValueOnce(true); // 20 vs 30 — overlap found
+
+    const summary = await enrichTrackVersions(fakeDriver);
+
+    expect(mockMergeVersionRelationships).toHaveBeenCalledWith(
+      fakeDriver,
+      expect.arrayContaining([expect.objectContaining({ fromElementId: 'r3', toElementId: 'r2' })]),
+    );
+    expect(summary.enriched).toBe(1);
     expect(summary.skipped).toBe(0);
   });
 

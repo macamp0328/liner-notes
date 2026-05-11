@@ -20,10 +20,13 @@ export interface TrackVersionsEnrichmentSummary {
  *
  * Algorithm:
  *   1. Fetch all groups of tracks sharing a normalizedTitle across releases.
- *   2. For each group, verify artist overlap between releases (skip groups with
- *      no shared artist — coincidental title matches across unrelated artists).
- *   3. Within each validated group, pick the track from the release with the
- *      lowest discogsId as the "root" and link all other tracks to it.
+ *   2. For each group, find every release pair that shares an artist (full
+ *      pairwise check). The validated cluster is the set of releases that
+ *      appear in at least one overlapping pair. Skip groups with no overlap.
+ *   3. Within the validated cluster, pick the track from the release with the
+ *      lowest discogsId as the "root" and link all other cluster tracks to it.
+ *      Tracks from releases outside the cluster are excluded — they may be
+ *      coincidental title matches from unrelated artists.
  *   4. Derive versionType from each variant's original title.
  *
  * Pure graph computation — no external API calls.
@@ -54,27 +57,31 @@ export async function enrichTrackVersions(
           continue;
         }
 
-        // Verify that at least one pair of releases shares an artist.
-        // Use the first release as an anchor and check against all others —
-        // early-exit on first match. A full pairwise check is unnecessary:
-        // one confirmed overlap is enough to treat the group as credible.
-        // (Checking only the first two IDs is fragile because Set insertion
-        // order doesn't guarantee the most-likely overlap pair comes first.)
-        const [anchorId, ...otherIds] = releaseIds as [number, ...number[]];
-        let hasOverlap = false;
-        for (const otherId of otherIds) {
-          if (await releasesShareArtist(driver, anchorId, otherId)) {
-            hasOverlap = true;
-            break;
+        // Build the validated cluster: all releases that participate in at
+        // least one artist-overlap pair. Full pairwise check ensures we don't
+        // miss pairs where the first release is unrelated to the others.
+        const validatedReleaseIds = new Set<number>();
+        for (let i = 0; i < releaseIds.length - 1; i++) {
+          for (let j = i + 1; j < releaseIds.length; j++) {
+            // eslint-disable-next-line security/detect-object-injection
+            const idI = releaseIds[i]!;
+            // eslint-disable-next-line security/detect-object-injection
+            const idJ = releaseIds[j]!;
+            if (await releasesShareArtist(driver, idI, idJ)) {
+              validatedReleaseIds.add(idI);
+              validatedReleaseIds.add(idJ);
+            }
           }
         }
-        if (!hasOverlap) {
+        if (validatedReleaseIds.size === 0) {
           skipped++;
           continue;
         }
 
-        // Sort tracks by releaseDiscogsId ascending — lowest id is treated as root.
-        const sorted = [...group.tracks].sort((a, b) => a.releaseDiscogsId - b.releaseDiscogsId);
+        // Filter to validated cluster only; root = lowest releaseDiscogsId.
+        const sorted = group.tracks
+          .filter((t) => validatedReleaseIds.has(t.releaseDiscogsId))
+          .sort((a, b) => a.releaseDiscogsId - b.releaseDiscogsId);
         const root = sorted[0]!;
         const variants = sorted.slice(1);
 

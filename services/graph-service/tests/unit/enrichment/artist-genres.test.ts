@@ -39,25 +39,27 @@ describe('enrichArtistGenres', () => {
     expect(mockAggregateArtistStyles).toHaveBeenCalledWith(fakeDriver);
   });
 
-  it('returns enriched = max(genresUpdated, stylesUpdated)', async () => {
+  it('returns genresEnriched and stylesEnriched separately', async () => {
     mockAggregateArtistGenres.mockResolvedValue(7);
     mockAggregateArtistStyles.mockResolvedValue(3);
 
     const summary = await enrichArtistGenres(fakeDriver);
 
-    expect(summary.enriched).toBe(7);
+    expect(summary.genresEnriched).toBe(7);
+    expect(summary.stylesEnriched).toBe(3);
     expect(summary.skipped).toBe(0);
     expect(summary.failed).toBe(0);
     expect(summary.durationMs).toBeGreaterThanOrEqual(0);
   });
 
-  it('returns enriched=0 when no artists have releases', async () => {
+  it('returns zero counts when no artists have releases', async () => {
     mockAggregateArtistGenres.mockResolvedValue(0);
     mockAggregateArtistStyles.mockResolvedValue(0);
 
     const summary = await enrichArtistGenres(fakeDriver);
 
-    expect(summary.enriched).toBe(0);
+    expect(summary.genresEnriched).toBe(0);
+    expect(summary.stylesEnriched).toBe(0);
     expect(summary.failed).toBe(0);
   });
 
@@ -67,6 +69,7 @@ describe('enrichArtistGenres', () => {
     const summary = await enrichArtistGenres(fakeDriver);
 
     expect(summary.failed).toBe(1);
-    expect(summary.enriched).toBe(0);
+    expect(summary.genresEnriched).toBe(0);
+    expect(summary.stylesEnriched).toBe(0);
   });
 });

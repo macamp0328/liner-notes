@@ -147,14 +147,15 @@ export async function runIngestion(
       `  Original year enrich: ${originalYearEnrichment.enriched}\n` +
       `  Original year skip:   ${originalYearEnrichment.skipped}\n` +
       `  Original year failed: ${originalYearEnrichment.failed}\n` +
-      `  Artist genres enrich: ${artistGenresEnrichment.enriched}\n` +
-      `  Artist genres failed: ${artistGenresEnrichment.failed}\n` +
-      `  Track versions enrich:${trackVersionsEnrichment.enriched}\n` +
-      `  Track versions skip:  ${trackVersionsEnrichment.skipped}\n` +
-      `  Track versions failed:${trackVersionsEnrichment.failed}\n` +
-      `  Artist profiles enrich:${artistProfilesEnrichment.enriched}\n` +
-      `  Artist profiles skip: ${artistProfilesEnrichment.skipped}\n` +
-      `  Artist profiles failed:${artistProfilesEnrichment.failed}\n` +
+      `  Artist genres (genres): ${artistGenresEnrichment.genresEnriched}\n` +
+      `  Artist genres (styles): ${artistGenresEnrichment.stylesEnriched}\n` +
+      `  Artist genres failed:  ${artistGenresEnrichment.failed}\n` +
+      `  Track versions enrich: ${trackVersionsEnrichment.enriched}\n` +
+      `  Track versions skip:   ${trackVersionsEnrichment.skipped}\n` +
+      `  Track versions failed: ${trackVersionsEnrichment.failed}\n` +
+      `  Artist profiles enrich: ${artistProfilesEnrichment.enriched}\n` +
+      `  Artist profiles skip:  ${artistProfilesEnrichment.skipped}\n` +
+      `  Artist profiles failed: ${artistProfilesEnrichment.failed}\n` +
       `  Duration:             ${minutes}m ${seconds}s\n` +
       (errors.length > 0
         ? `  Errors:\n${errors.map((e) => `    - ${e}`).join('\n')}`

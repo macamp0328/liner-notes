@@ -22,7 +22,8 @@ export interface VersionGroup {
 export async function getVersionCandidates(driver: Driver): Promise<VersionGroup[]> {
   const session = driver.session();
   try {
-    // Return flat rows — group in TypeScript to avoid APOC dependency.
+    // Cypher groups tracks by normalizedTitle via collect(); TypeScript filters
+    // groups that span only a single release (no cross-release version pairs).
     const result = await session.run(
       `MATCH (t:Track)
        WHERE t.normalizedTitle IS NOT NULL AND t.normalizedTitle <> ''

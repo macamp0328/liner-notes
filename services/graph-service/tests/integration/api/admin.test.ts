@@ -61,7 +61,13 @@ const completeSummary: IngestionSummary = {
   durationMs: 5000,
   lyricsEnrichment: { enriched: 8, skipped: 2, failed: 0, durationMs: 1000 },
   originalYearEnrichment: { enriched: 5, skipped: 2, failed: 0, durationMs: 500 },
-  artistGenresEnrichment: { enriched: 10, skipped: 0, failed: 0, durationMs: 200 },
+  artistGenresEnrichment: {
+    genresEnriched: 10,
+    stylesEnriched: 9,
+    skipped: 0,
+    failed: 0,
+    durationMs: 200,
+  },
   trackVersionsEnrichment: { enriched: 3, skipped: 1, failed: 0, durationMs: 100 },
   artistProfilesEnrichment: { enriched: 8, skipped: 2, failed: 0, durationMs: 8000 },
 };
