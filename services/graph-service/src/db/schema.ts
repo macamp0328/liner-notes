@@ -17,6 +17,8 @@ const statements = [
   'CREATE INDEX musician_name IF NOT EXISTS FOR (m:Musician) ON (m.name)',
   'CREATE INDEX studio_name IF NOT EXISTS FOR (s:Studio) ON (s.name)',
   'CREATE INDEX track_normalized_title IF NOT EXISTS FOR (t:Track) ON (t.normalizedTitle)',
+  'CREATE FULLTEXT INDEX releaseArtistTrackSearch IF NOT EXISTS FOR (n:Release|Artist|Track) ON EACH [n.title, n.name]',
+  'CREATE FULLTEXT INDEX lyricsSearch IF NOT EXISTS FOR (t:Track) ON EACH [t.lyrics]',
 ];
 
 export async function applySchema(driver: Driver): Promise<void> {

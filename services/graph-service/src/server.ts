@@ -5,6 +5,8 @@ import swaggerUi from '@fastify/swagger-ui';
 import { healthRoutes } from './api/health.js';
 import { adminRoutes } from './api/admin.js';
 import { collectionRoutes } from './api/collection.js';
+import { exploreRoutes } from './api/explore.js';
+import { searchRoutes } from './api/search.js';
 import { initDriver, closeDriver } from './db/client.js';
 import { applySchema } from './db/schema.js';
 import { hasReleases } from './db/ingestion-repository.js';
@@ -49,6 +51,8 @@ export async function buildDocsServer(): Promise<FastifyInstance> {
   await app.register(healthRoutes);
   await app.register(adminRoutes, { prefix: '/api/v1/admin' });
   await app.register(collectionRoutes);
+  await app.register(exploreRoutes);
+  await app.register(searchRoutes);
   return app;
 }
 
@@ -65,6 +69,8 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(healthRoutes);
   await app.register(adminRoutes, { prefix: '/api/v1/admin' });
   await app.register(collectionRoutes);
+  await app.register(exploreRoutes);
+  await app.register(searchRoutes);
 
   app.addHook('onReady', async () => {
     const uri = process.env['NEO4J_URI'];
