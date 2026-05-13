@@ -42,3 +42,6 @@ coverage/
 
 # Claude Code
 .claude/
+
+# pnpm local store (created when PNPM_STORE_DIR points inside the repo)
+.pnpm-store/
