@@ -1,0 +1,10 @@
+[tools]
+node      = "22.22.3"
+terraform = "1.15.3"
+kubectl   = "1.36.1"
+helm      = "3.20.2"
+gh        = "2.92.0"
+aws-cli   = "2.34.46"
+
+[tools."npm:pnpm"]
+version = "9.15.9"

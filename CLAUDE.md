@@ -14,8 +14,7 @@ liner-notes/
 ├── README.md
 ├── SECURITY.md
 ├── LICENSE
-├── .devcontainer/
-│   └── devcontainer.json        ← VS Code / Codespaces dev environment
+├── .mise.toml                   ← pins Node, pnpm, terraform, kubectl, helm, gh, aws-cli
 ├── .github/
 │   ├── dependabot.yml           ← automated dependency updates
 │   ├── pull_request_template.md ← PR checklist for agents
@@ -69,11 +68,14 @@ liner-notes/
 | Language        | TypeScript — strict mode                                                                                                                                                                                                                                            |
 | Runtime         | Node.js v22.x LTS                                                                                                                                                                                                                                                   |
 | Package manager | pnpm (workspaces)                                                                                                                                                                                                                                                   |
+| Tool manager    | mise — `.mise.toml` at repo root pins Node, pnpm, terraform, kubectl, helm, gh, and aws-cli. Run `mise install` once after cloning.                                                                                                                                 |
 | HTTP framework  | **Fastify**                                                                                                                                                                                                                                                         |
 | Test runner     | Vitest                                                                                                                                                                                                                                                              |
 | Linter          | ESLint with TypeScript plugin                                                                                                                                                                                                                                       |
 | Formatter       | Prettier                                                                                                                                                                                                                                                            |
 | Module system   | ESM — `"type": "module"` on all services, `module: NodeNext` + `moduleResolution: NodeNext` in tsconfig; `.js` extensions on **local/relative** imports are required and enforced by the TypeScript compiler (package imports like `from 'fastify'` are unaffected) |
+
+**Agent note:** Agents run on the Mac host, not in any container. All agent commands (`pnpm lint`, `pnpm test`, etc.) resolve to the host toolchain — the mise-pinned versions are what those commands use. Ensure `mise install` has been run and mise is activated in your shell (`eval "$(mise activate zsh)"`).
 
 **Why Fastify over Express:** Native TypeScript support, built-in JSON schema validation, `@fastify/swagger` + `@fastify/swagger-ui` for zero-friction OpenAPI docs (hard requirement), and a cleaner plugin architecture.
 
@@ -115,9 +117,11 @@ gh pr create --title "task/{n}: {description}" --body "..."
 **Parallel work with worktrees:**
 
 ```bash
-git worktree add ../liner-notes-task-2 task/2-discogs-exploration
-git worktree add ../liner-notes-task-3 task/3-neo4j-connection
+git worktree add .claude/worktrees/task-2-discogs-exploration task/2-discogs-exploration
+git worktree add .claude/worktrees/task-3-neo4j-connection task/3-neo4j-connection
 ```
+
+Worktrees live inside the repo under `.claude/worktrees/` — not as sibling directories (`../`). This keeps them within the repo root, which is reliable across all environments.
 
 Each worktree is a fully independent working directory on its own branch. **Agents own all git operations** — branch creation, commits, opening the PR. Miles only reviews and merges.
 

@@ -19,8 +19,9 @@ cd liner-notes
 cp .env.example .env.local
 # Edit .env.local — set DISCOGS_USERNAME, DISCOGS_TOKEN, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, ADMIN_TOKEN
 
-# 3. Install dependencies
-pnpm install
+# 3. Install tools and dependencies
+mise install  # installs Node, pnpm, and all other pinned tools
+pnpm install  # installs JS dependencies
 
 # 4. Start services
 docker-compose up
@@ -32,9 +33,8 @@ open http://localhost:3000/api/docs
 
 ## Requirements
 
-- Node.js v22.x (via nvm)
-- pnpm
-- Docker Desktop
+- [mise](https://mise.jdx.dev) — manages Node.js, pnpm, terraform, kubectl, helm, gh, and aws-cli at the versions pinned in `.mise.toml`. Install once with `brew install mise`, then `mise install` from the repo root.
+- Docker Desktop — for local Neo4j via `docker-compose up`
 - A [Discogs personal access token](https://www.discogs.com/settings/developers)
 - Neo4j — `docker-compose up` starts a local instance automatically. A [Neo4j Aura Free](https://console.neo4j.io) instance is only needed for production deployment.
 
