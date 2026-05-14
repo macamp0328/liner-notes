@@ -67,8 +67,9 @@
     },
     "/api/v1/admin/ingest": {
       "post": {
-        "summary": "Trigger full Discogs → Neo4j ingestion pipeline",
+        "summary": "Trigger the full Discogs → Neo4j ingestion pipeline",
         "tags": ["admin"],
+        "description": "Runs asynchronously — returns 202 immediately and processes in the background.\n\n**Steps run automatically:**\n1. Fetch & MERGE all releases from the Discogs collection\n2. Lyrics enrichment (LRCLIB primary, Genius fallback)\n3. Original year enrichment (from Discogs master API)\n4. Artist genres/styles aggregation (rolled up from releases)\n5. Track version deduplication (IS_VERSION_OF relationships)\n6. Artist profiles enrichment (realName + profile from Discogs artist API)\n\n**Not included — must be triggered separately:**\n- `POST /api/v1/admin/nationality/enrich` — nationality data from MusicBrainz + Wikidata",
         "security": [
           {
             "bearerAuth": []
@@ -185,6 +186,7 @@
       "get": {
         "summary": "Get the status of the current or last ingestion job",
         "tags": ["admin"],
+        "description": "Returns the job state for the ingestion triggered by `POST /api/v1/admin/ingest`. Status values: `idle` (never run), `running`, `complete`, `failed`. Does not reflect the status of standalone enrichment endpoints (`/api/v1/admin/lyrics/enrich`, `/api/v1/admin/nationality/enrich`).",
         "security": [
           {
             "bearerAuth": []
@@ -320,8 +322,9 @@
     },
     "/api/v1/admin/lyrics/clear-genius": {
       "post": {
-        "summary": "Null out all Genius-sourced lyrics so affected tracks are re-enriched on next run",
+        "summary": "Clear all Genius-sourced lyrics for re-enrichment",
         "tags": ["admin"],
+        "description": "Sets `lyrics` and `lyricsSource` to null on every Track node where `lyricsSource = \"genius\"`. Those tracks will be picked up on the next lyrics enrichment pass.\n\nUse this when Genius data quality is poor or after correcting the Genius token. After clearing, trigger re-enrichment via `POST /api/v1/admin/lyrics/enrich` or `POST /api/v1/admin/ingest`.",
         "security": [
           {
             "bearerAuth": []
@@ -405,8 +408,9 @@
     },
     "/api/v1/admin/lyrics/enrich": {
       "post": {
-        "summary": "Run lyrics enrichment for all tracks with null lyrics (LRCLIB first, Genius fallback). Blocks until complete.",
+        "summary": "Run lyrics enrichment standalone",
         "tags": ["admin"],
+        "description": "Enriches all Track nodes that have no lyrics yet (LRCLIB primary, Genius fallback). Blocks until complete.\n\n**This step also runs automatically as part of `POST /api/v1/admin/ingest`.** Use this endpoint to re-run lyrics enrichment in isolation — e.g. after clearing Genius lyrics via `POST /api/v1/admin/lyrics/clear-genius`, after adding new tracks, or when LRCLIB coverage improves.\n\nRequires `GENIUS_TOKEN` env var for the Genius fallback; LRCLIB works without any key.",
         "security": [
           {
             "bearerAuth": []
@@ -495,6 +499,212 @@
             }
           },
           "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/nationality/enrich": {
+      "post": {
+        "summary": "Enrich Artist and Musician nodes with nationality (ORIGIN_COUNTRY)",
+        "tags": ["admin"],
+        "description": "Looks up country of origin for every Artist and Musician node that has not yet been enriched, creating `ORIGIN_COUNTRY` relationships to `Country` nodes. Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n**Sources (queried in parallel per node):**\n- MusicBrainz: two-step lookup via Discogs URL → MBID → artist record. Falls back to `area.iso-3166-1-codes` when the `country` field is null.\n- Wikidata: SPARQL lookup via Discogs artist ID property (P1953 → P27 → P297).\n\n**Conflict resolution:** when sources disagree, Wikidata is preferred and the discrepancy is logged.\n\nFor musicians without a Discogs ID, MusicBrainz name search is used as a last resort (score ≥ 90 only).\n\nUses `nationalityFetched = true` as an idempotency marker — already-processed nodes are skipped. Run `POST /api/v1/admin/nationality/reset` first to re-process all nodes with updated source data.\n\nRequires `MUSICBRAINZ_USER_AGENT` env var.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["enriched", "skipped", "failed", "durationMs"],
+                      "properties": {
+                        "enriched": {
+                          "type": "integer"
+                        },
+                        "skipped": {
+                          "type": "integer"
+                        },
+                        "failed": {
+                          "type": "integer"
+                        },
+                        "durationMs": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/nationality/reset": {
+      "post": {
+        "summary": "Reset nationality enrichment markers for a full re-run",
+        "tags": ["admin"],
+        "description": "Removes the `nationalityFetched` property from all Artist and Musician nodes, causing the next `POST /api/v1/admin/nationality/enrich` call to re-process every node from scratch.\n\nUse this when:\n- You have added or updated enrichment sources (e.g. added Wikidata)\n- You want to correct stale data (e.g. a known wrong country from MusicBrainz)\n- You have new Artist or Musician nodes from a re-ingest\n\nThis endpoint is blocked while `POST /api/v1/admin/nationality/enrich` is running.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["reset"],
+                      "properties": {
+                        "reset": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -1136,11 +1346,959 @@
           }
         }
       }
+    },
+    "/api/v1/explore/musician/{name}": {
+      "get": {
+        "summary": "Releases featuring this musician, with instrument and role on each result",
+        "tags": ["explore"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "name",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["discogsId", "title"],
+                    "properties": {
+                      "discogsId": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "artist": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "pressingYear": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "format": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "thumbUrl": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "instrument": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "role": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/studio/{name}": {
+      "get": {
+        "summary": "Releases recorded at this studio",
+        "tags": ["explore"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "name",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["discogsId", "title"],
+                    "properties": {
+                      "discogsId": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "artist": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "pressingYear": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "format": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "thumbUrl": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/label/{name}": {
+      "get": {
+        "summary": "Releases on this label",
+        "tags": ["explore"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "name",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["discogsId", "title"],
+                    "properties": {
+                      "discogsId": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "artist": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "pressingYear": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "format": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "thumbUrl": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/genre/{name}": {
+      "get": {
+        "summary": "Releases in this genre",
+        "tags": ["explore"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "name",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["discogsId", "title"],
+                    "properties": {
+                      "discogsId": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "artist": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "pressingYear": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "format": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "thumbUrl": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/style/{name}": {
+      "get": {
+        "summary": "Releases in this style",
+        "tags": ["explore"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "name",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["discogsId", "title"],
+                    "properties": {
+                      "discogsId": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "artist": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "pressingYear": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "format": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "thumbUrl": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/country/{name}": {
+      "get": {
+        "summary": "Releases from this country",
+        "tags": ["explore"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "name",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["discogsId", "title"],
+                    "properties": {
+                      "discogsId": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "artist": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "pressingYear": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "format": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "thumbUrl": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/decade/{decade}": {
+      "get": {
+        "summary": "Releases from this decade — accepts 1970s format",
+        "tags": ["explore"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "decade",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["discogsId", "title"],
+                    "properties": {
+                      "discogsId": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "artist": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "pressingYear": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "format": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "thumbUrl": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/year/{year}": {
+      "get": {
+        "summary": "Releases from this exact year",
+        "tags": ["explore"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 9999
+            },
+            "in": "path",
+            "name": "year",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["discogsId", "title"],
+                    "properties": {
+                      "discogsId": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "artist": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "pressingYear": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "format": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "thumbUrl": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/connections/{discogsId}": {
+      "get": {
+        "summary": "Graph traversal from a release — returns nodes reachable within depth hops (max 3)",
+        "tags": ["explore"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3,
+              "default": 2
+            },
+            "in": "query",
+            "name": "depth",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer"
+            },
+            "in": "path",
+            "name": "discogsId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["seed", "nodes"],
+                  "properties": {
+                    "seed": {
+                      "type": "object",
+                      "required": ["discogsId", "title"],
+                      "properties": {
+                        "discogsId": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "artist": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "pressingYear": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "format": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "thumbUrl": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    },
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["type"],
+                        "properties": {
+                          "type": {
+                            "type": "string"
+                          },
+                          "discogsId": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "name": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "title": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/shared-musicians": {
+      "get": {
+        "summary": "Release pairs that share one or more session musicians",
+        "tags": ["explore"],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["releaseA", "releaseB", "sharedMusicians"],
+                    "properties": {
+                      "releaseA": {
+                        "type": "object",
+                        "required": ["discogsId", "title"],
+                        "properties": {
+                          "discogsId": {
+                            "type": "integer"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "releaseB": {
+                        "type": "object",
+                        "required": ["discogsId", "title"],
+                        "properties": {
+                          "discogsId": {
+                            "type": "integer"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "sharedMusicians": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": ["name"],
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "instrument": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/tracks/most-international": {
+      "get": {
+        "summary": "Tracks with the most distinct countries of origin among their credited musicians. Requires nationality enrichment to have been run.",
+        "tags": ["explore"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 10
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "trackTitle",
+                      "albumTitle",
+                      "releaseDiscogsId",
+                      "countryCount",
+                      "countries"
+                    ],
+                    "properties": {
+                      "trackTitle": {
+                        "type": "string"
+                      },
+                      "albumTitle": {
+                        "type": "string"
+                      },
+                      "releaseDiscogsId": {
+                        "type": "integer"
+                      },
+                      "countryCount": {
+                        "type": "integer"
+                      },
+                      "countries": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/search": {
+      "get": {
+        "summary": "Full-text search across releases, artists, and tracks — ranked by relevance",
+        "tags": ["search"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "q",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "required": ["type", "name", "discogsId", "score"],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": ["Artist"]
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "discogsId": {
+                            "type": "integer"
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "required": ["type", "title", "discogsId", "score"],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": ["Release"]
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "discogsId": {
+                            "type": "integer"
+                          },
+                          "artist": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "required": ["type", "title", "score"],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": ["Track"]
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "releaseTitle": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "releaseDiscogsId": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/search/lyrics": {
+      "get": {
+        "summary": "Full-text search within track lyrics — returns tracks with release context",
+        "tags": ["search"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "q",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["trackTitle", "score"],
+                    "properties": {
+                      "trackTitle": {
+                        "type": "string"
+                      },
+                      "releaseTitle": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "releaseDiscogsId": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "score": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "servers": [
     {
-      "url": "http://localhost:3000"
+      "url": "/"
     }
   ],
   "tags": [

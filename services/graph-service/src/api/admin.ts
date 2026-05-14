@@ -83,7 +83,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           '5. Track version deduplication (IS_VERSION_OF relationships)\n' +
           '6. Artist profiles enrichment (realName + profile from Discogs artist API)\n\n' +
           '**Not included — must be triggered separately:**\n' +
-          '- `POST /nationality/enrich` — nationality data from MusicBrainz + Wikidata',
+          '- `POST /api/v1/admin/nationality/enrich` — nationality data from MusicBrainz + Wikidata',
         security: [{ bearerAuth: [] }],
         response: {
           202: {
@@ -179,9 +179,9 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['admin'],
         summary: 'Get the status of the current or last ingestion job',
         description:
-          'Returns the job state for the ingestion triggered by `POST /ingest`. ' +
+          'Returns the job state for the ingestion triggered by `POST /api/v1/admin/ingest`. ' +
           'Status values: `idle` (never run), `running`, `complete`, `failed`. ' +
-          'Does not reflect the status of standalone enrichment endpoints (`/lyrics/enrich`, `/nationality/enrich`).',
+          'Does not reflect the status of standalone enrichment endpoints (`/api/v1/admin/lyrics/enrich`, `/api/v1/admin/nationality/enrich`).',
         security: [{ bearerAuth: [] }],
         response: {
           200: {
@@ -214,7 +214,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           'Sets `lyrics` and `lyricsSource` to null on every Track node where `lyricsSource = "genius"`. ' +
           'Those tracks will be picked up on the next lyrics enrichment pass.\n\n' +
           'Use this when Genius data quality is poor or after correcting the Genius token. ' +
-          'After clearing, trigger re-enrichment via `POST /lyrics/enrich` or `POST /ingest`.',
+          'After clearing, trigger re-enrichment via `POST /api/v1/admin/lyrics/enrich` or `POST /api/v1/admin/ingest`.',
         security: [{ bearerAuth: [] }],
         response: {
           200: {
@@ -252,9 +252,9 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         summary: 'Run lyrics enrichment standalone',
         description:
           'Enriches all Track nodes that have no lyrics yet (LRCLIB primary, Genius fallback). Blocks until complete.\n\n' +
-          '**This step also runs automatically as part of `POST /ingest`.** ' +
+          '**This step also runs automatically as part of `POST /api/v1/admin/ingest`.** ' +
           'Use this endpoint to re-run lyrics enrichment in isolation — e.g. after clearing Genius lyrics via ' +
-          '`POST /lyrics/clear-genius`, after adding new tracks, or when LRCLIB coverage improves.\n\n' +
+          '`POST /api/v1/admin/lyrics/clear-genius`, after adding new tracks, or when LRCLIB coverage improves.\n\n' +
           'Requires `GENIUS_TOKEN` env var for the Genius fallback; LRCLIB works without any key.',
         security: [{ bearerAuth: [] }],
         response: {
@@ -310,7 +310,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         description:
           'Looks up country of origin for every Artist and Musician node that has not yet been enriched, ' +
           'creating `ORIGIN_COUNTRY` relationships to `Country` nodes. Blocks until complete.\n\n' +
-          '**This step is NOT part of `POST /ingest` — it must be triggered manually.**\n\n' +
+          '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n' +
           '**Sources (queried in parallel per node):**\n' +
           '- MusicBrainz: two-step lookup via Discogs URL → MBID → artist record. ' +
           'Falls back to `area.iso-3166-1-codes` when the `country` field is null.\n' +
@@ -318,7 +318,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           '**Conflict resolution:** when sources disagree, Wikidata is preferred and the discrepancy is logged.\n\n' +
           'For musicians without a Discogs ID, MusicBrainz name search is used as a last resort (score ≥ 90 only).\n\n' +
           'Uses `nationalityFetched = true` as an idempotency marker — already-processed nodes are skipped. ' +
-          'Run `POST /nationality/reset` first to re-process all nodes with updated source data.\n\n' +
+          'Run `POST /api/v1/admin/nationality/reset` first to re-process all nodes with updated source data.\n\n' +
           'Requires `MUSICBRAINZ_USER_AGENT` env var.',
         security: [{ bearerAuth: [] }],
         response: {
@@ -392,12 +392,12 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         summary: 'Reset nationality enrichment markers for a full re-run',
         description:
           'Removes the `nationalityFetched` property from all Artist and Musician nodes, ' +
-          'causing the next `POST /nationality/enrich` call to re-process every node from scratch.\n\n' +
+          'causing the next `POST /api/v1/admin/nationality/enrich` call to re-process every node from scratch.\n\n' +
           'Use this when:\n' +
           '- You have added or updated enrichment sources (e.g. added Wikidata)\n' +
           '- You want to correct stale data (e.g. a known wrong country from MusicBrainz)\n' +
           '- You have new Artist or Musician nodes from a re-ingest\n\n' +
-          'This endpoint is blocked while `POST /nationality/enrich` is running.',
+          'This endpoint is blocked while `POST /api/v1/admin/nationality/enrich` is running.',
         security: [{ bearerAuth: [] }],
         response: {
           200: {
