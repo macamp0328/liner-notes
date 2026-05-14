@@ -108,15 +108,15 @@ Route handler (src/api/) → Repository (src/db/) → Neo4j driver (src/db/clien
 
 **Key source files:**
 
-| File | Purpose |
-|---|---|
-| `src/server.ts` | Fastify instance builder, plugin registration |
-| `src/db/schema.ts` | Idempotent constraint/index application on startup |
-| `src/ingestion/transforms.ts` | Pure parsing functions — no I/O, fully unit-testable |
-| `src/ingestion/discogs-client.ts` | Rate-limited Discogs HTTP client (60 req/min, 429 backoff) |
-| `src/ingestion/ingest.ts` | Pipeline orchestrator; auto-triggers on empty graph |
-| `src/db/ingestion-repository.ts` | All Cypher MERGE writes |
-| `src/enrichment/` | Post-ingest lyrics, originalYear, artist genre/profile pipelines |
+| File                              | Purpose                                                          |
+| --------------------------------- | ---------------------------------------------------------------- |
+| `src/server.ts`                   | Fastify instance builder, plugin registration                    |
+| `src/db/schema.ts`                | Idempotent constraint/index application on startup               |
+| `src/ingestion/transforms.ts`     | Pure parsing functions — no I/O, fully unit-testable             |
+| `src/ingestion/discogs-client.ts` | Rate-limited Discogs HTTP client (60 req/min, 429 backoff)       |
+| `src/ingestion/ingest.ts`         | Pipeline orchestrator; auto-triggers on empty graph              |
+| `src/db/ingestion-repository.ts`  | All Cypher MERGE writes                                          |
+| `src/enrichment/`                 | Post-ingest lyrics, originalYear, artist genre/profile pipelines |
 
 **Ingestion fires async** (`void runIngestion(...)`) — it does not block `onReady`, so the HTTP server starts immediately while ingestion runs in the background.
 
@@ -139,16 +139,16 @@ For the full graph schema (node labels, relationship types, constraints, API end
 
 ### 4.1 Runtime & Framework
 
-| Decision        | Value |
-| --------------- | ----- |
-| Language        | TypeScript — strict mode |
-| Runtime         | Node.js v22.x LTS |
-| Package manager | pnpm (workspaces) |
-| Tool manager    | mise — `.mise.toml` pins all toolchain versions. Run `mise install` once after cloning. |
-| HTTP framework  | Fastify |
-| Test runner     | Vitest |
-| Linter          | ESLint with TypeScript plugin + `eslint-plugin-security` |
-| Formatter       | Prettier |
+| Decision        | Value                                                                                                                                                |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Language        | TypeScript — strict mode                                                                                                                             |
+| Runtime         | Node.js v22.x LTS                                                                                                                                    |
+| Package manager | pnpm (workspaces)                                                                                                                                    |
+| Tool manager    | mise — `.mise.toml` pins all toolchain versions. Run `mise install` once after cloning.                                                              |
+| HTTP framework  | Fastify                                                                                                                                              |
+| Test runner     | Vitest                                                                                                                                               |
+| Linter          | ESLint with TypeScript plugin + `eslint-plugin-security`                                                                                             |
+| Formatter       | Prettier                                                                                                                                             |
 | Module system   | ESM — `"type": "module"` on all services, `module: NodeNext` + `moduleResolution: NodeNext`; `.js` extensions required on all local/relative imports |
 
 **Agent note:** Agents run on the Mac host, not in any container. Ensure `mise install` has been run and mise is activated (`eval "$(mise activate zsh)"`).
@@ -191,10 +191,10 @@ Agents own all git operations — branch creation, commits, opening the PR. Mile
 
 ### 4.3 Secrets Management
 
-| File                | Committed?         | Purpose |
-| ------------------- | ------------------ | ------- |
-| `.env.example`      | ✅ Yes             | Documents all variables, no values |
-| `.env.local`        | ❌ No (gitignored) | Local development values |
+| File                | Committed?         | Purpose                                 |
+| ------------------- | ------------------ | --------------------------------------- |
+| `.env.example`      | ✅ Yes             | Documents all variables, no values      |
+| `.env.local`        | ❌ No (gitignored) | Local development values                |
 | AWS Secrets Manager | N/A                | Production secrets at container startup |
 
 **Never commit real values. CI runs TruffleHog on every PR.**
@@ -211,12 +211,12 @@ Agents own all git operations — branch creation, commits, opening the PR. Mile
 
 Enforced by `vitest.config.ts`:
 
-| Metric     | Threshold |
-| ---------- | --------- |
-| Lines      | 70% |
-| Functions  | 70% |
+| Metric     | Threshold                                                                  |
+| ---------- | -------------------------------------------------------------------------- |
+| Lines      | 70%                                                                        |
+| Functions  | 70%                                                                        |
 | Branches   | 65% (vitest 4.x / vite 6.x counts more branch types than v8 in vitest 2.x) |
-| Statements | 70% |
+| Statements | 70%                                                                        |
 
 ---
 
@@ -234,18 +234,18 @@ No service talks to Neo4j directly except `graph-service`.
 
 **Job order (fast-fail):** `format`, `lint`, `typecheck` run first in parallel → `tests-and-coverage` + `schema-validation` → `docker-build`.
 
-| Check             | Tool | Requirement |
-| ----------------- | ---- | ----------- |
-| Format check      | Prettier | Zero differences |
-| Linting           | ESLint + security plugin | Zero warnings/errors |
-| Type checking     | TypeScript strict (src + tests) | Zero errors |
-| Tests & Coverage  | Vitest + coverage-v8 + Neo4j container | All tests pass; thresholds met |
-| Schema validation | tsx + Neo4j container | Constraints/indexes apply idempotently |
-| Docker build      | Docker Buildx | Image builds successfully |
-| Security audit    | `pnpm audit` | No high/critical vulnerabilities |
-| Secrets scan      | TruffleHog | No credentials in committed code |
-| CodeQL scan       | GitHub CodeQL (security-extended) | No security alerts |
-| Commit lint       | wagoid/commitlint-github-action | Conventional Commits |
+| Check             | Tool                                   | Requirement                            |
+| ----------------- | -------------------------------------- | -------------------------------------- |
+| Format check      | Prettier                               | Zero differences                       |
+| Linting           | ESLint + security plugin               | Zero warnings/errors                   |
+| Type checking     | TypeScript strict (src + tests)        | Zero errors                            |
+| Tests & Coverage  | Vitest + coverage-v8 + Neo4j container | All tests pass; thresholds met         |
+| Schema validation | tsx + Neo4j container                  | Constraints/indexes apply idempotently |
+| Docker build      | Docker Buildx                          | Image builds successfully              |
+| Security audit    | `pnpm audit`                           | No high/critical vulnerabilities       |
+| Secrets scan      | TruffleHog                             | No credentials in committed code       |
+| CodeQL scan       | GitHub CodeQL (security-extended)      | No security alerts                     |
+| Commit lint       | wagoid/commitlint-github-action        | Conventional Commits                   |
 
 ---
 
