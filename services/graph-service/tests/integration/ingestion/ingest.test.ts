@@ -45,11 +45,13 @@ vi.mock('../../../src/db/ingestion-repository.js', () => ({
 }));
 
 vi.mock('../../../src/ingestion/discogs-client.js', () => ({
-  DiscogsClient: vi.fn().mockImplementation(() => ({
-    getCollectionReleases: mockGetCollectionReleases,
-    getRelease: mockGetRelease,
-    getMaster: vi.fn().mockResolvedValue({ id: 1, title: 'Master', year: 2019 }),
-  })),
+  DiscogsClient: vi.fn(function () {
+    return {
+      getCollectionReleases: mockGetCollectionReleases,
+      getRelease: mockGetRelease,
+      getMaster: vi.fn().mockResolvedValue({ id: 1, title: 'Master', year: 2019 }),
+    };
+  }),
 }));
 
 vi.mock('../../../src/enrichment/lyrics.js', () => ({
