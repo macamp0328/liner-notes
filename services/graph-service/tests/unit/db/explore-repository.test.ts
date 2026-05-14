@@ -11,6 +11,7 @@ import {
   getReleasesByYear,
   getConnections,
   getSharedMusicians,
+  getMostPressedReleases,
 } from '../../../src/db/repositories/explore-repository.js';
 
 vi.mock('neo4j-driver', async (importOriginal) => {
@@ -399,5 +400,55 @@ describe('getSharedMusicians', () => {
     const driver = makeMockDriver(session);
     const results = await getSharedMusicians(driver);
     expect(results).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getMostPressedReleases
+// ---------------------------------------------------------------------------
+
+describe('getMostPressedReleases', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns mapped MostPressedRelease[] grouped by master', async () => {
+    const rec = makeRecord({
+      masterDiscogsId: makeNeo4jInt(100),
+      albumTitle: 'Hejira',
+      countryCount: makeNeo4jInt(15),
+      countries: ['US', 'GB', 'DE'],
+    });
+    const { session } = makeMockSession([makeResult([rec])]);
+    const driver = makeMockDriver(session);
+
+    const results = await getMostPressedReleases(driver, 10);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual({
+      masterDiscogsId: 100,
+      albumTitle: 'Hejira',
+      countryCount: 15,
+      countries: ['US', 'GB', 'DE'],
+    });
+  });
+
+  it('returns empty array when no masters have multi-country pressings', async () => {
+    const { session } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+
+    const results = await getMostPressedReleases(driver, 10);
+    expect(results).toHaveLength(0);
+  });
+
+  it('uses RELEASED_IN relationship and groups by master', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+
+    await getMostPressedReleases(driver, 5);
+
+    const query: string = runSpy.mock.calls[0]?.[0] ?? '';
+    expect(query).toContain('RELEASED_IN');
+    expect(query).toContain('Master');
   });
 });

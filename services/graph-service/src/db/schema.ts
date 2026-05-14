@@ -21,6 +21,8 @@ const statements = [
   'CREATE FULLTEXT INDEX lyricsSearch IF NOT EXISTS FOR (t:Track) ON EACH [t.lyrics]',
   'CREATE INDEX artist_nationality_fetched IF NOT EXISTS FOR (a:Artist) ON (a.nationalityFetched)',
   'CREATE INDEX musician_nationality_fetched IF NOT EXISTS FOR (m:Musician) ON (m.nationalityFetched)',
+  'CREATE CONSTRAINT master_discogs_id IF NOT EXISTS FOR (m:Master) REQUIRE m.discogsId IS UNIQUE',
+  'CREATE INDEX release_master_fetched IF NOT EXISTS FOR (r:Release) ON (r.masterFetched)',
 ];
 
 export async function applySchema(driver: Driver): Promise<void> {

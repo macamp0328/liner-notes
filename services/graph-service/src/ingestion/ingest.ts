@@ -4,8 +4,8 @@ import type { Logger } from './discogs-client.js';
 import { mergeReleaseGraph } from '../db/ingestion-repository.js';
 import { enrichLyrics } from '../enrichment/lyrics.js';
 import type { LyricsEnrichmentSummary } from '../enrichment/lyrics.js';
-import { enrichOriginalYear } from '../enrichment/original-year.js';
-import type { OriginalYearEnrichmentSummary } from '../enrichment/original-year.js';
+import { enrichMasterData } from '../enrichment/master-data.js';
+import type { MasterDataEnrichmentSummary } from '../enrichment/master-data.js';
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
 import type { ArtistGenresEnrichmentSummary } from '../enrichment/artist-genres.js';
 import { enrichTrackVersions } from '../enrichment/track-versions.js';
@@ -15,7 +15,7 @@ import type { ArtistProfilesEnrichmentSummary } from '../enrichment/artist-profi
 
 export type { Logger };
 export type { LyricsEnrichmentSummary };
-export type { OriginalYearEnrichmentSummary };
+export type { MasterDataEnrichmentSummary };
 export type { ArtistGenresEnrichmentSummary };
 export type { TrackVersionsEnrichmentSummary };
 export type { ArtistProfilesEnrichmentSummary };
@@ -32,7 +32,7 @@ export interface IngestionSummary {
   errors: string[];
   durationMs: number;
   lyricsEnrichment: LyricsEnrichmentSummary;
-  originalYearEnrichment: OriginalYearEnrichmentSummary;
+  masterDataEnrichment: MasterDataEnrichmentSummary;
   artistGenresEnrichment: ArtistGenresEnrichmentSummary;
   trackVersionsEnrichment: TrackVersionsEnrichmentSummary;
   artistProfilesEnrichment: ArtistProfilesEnrichmentSummary;
@@ -108,8 +108,8 @@ export async function runIngestion(
   // Step 3: Enrich tracks with lyrics (LRCLIB primary, Genius fallback)
   const lyricsEnrichment = await enrichLyrics(driver, log);
 
-  // Step 4: Enrich releases with originalYear from Discogs master API
-  const originalYearEnrichment = await enrichOriginalYear(client, driver, log);
+  // Step 4: Enrich releases with master data (originalYear + global pressing countries/formats)
+  const masterDataEnrichment = await enrichMasterData(client, driver, log);
 
   // Step 5: Aggregate genres/styles from Release nodes onto Artist nodes
   const artistGenresEnrichment = await enrichArtistGenres(driver, log);
@@ -131,7 +131,7 @@ export async function runIngestion(
     errors,
     durationMs,
     lyricsEnrichment,
-    originalYearEnrichment,
+    masterDataEnrichment,
     artistGenresEnrichment,
     trackVersionsEnrichment,
     artistProfilesEnrichment,
@@ -144,9 +144,9 @@ export async function runIngestion(
       `  Lyrics enriched:      ${lyricsEnrichment.enriched}\n` +
       `  Lyrics skipped:       ${lyricsEnrichment.skipped}\n` +
       `  Lyrics failed:        ${lyricsEnrichment.failed}\n` +
-      `  Original year enrich: ${originalYearEnrichment.enriched}\n` +
-      `  Original year skip:   ${originalYearEnrichment.skipped}\n` +
-      `  Original year failed: ${originalYearEnrichment.failed}\n` +
+      `  Master data enrich:   ${masterDataEnrichment.enriched}\n` +
+      `  Master data skip:     ${masterDataEnrichment.skipped}\n` +
+      `  Master data failed:   ${masterDataEnrichment.failed}\n` +
       `  Artist genres (genres): ${artistGenresEnrichment.genresEnriched}\n` +
       `  Artist genres (styles): ${artistGenresEnrichment.stylesEnriched}\n` +
       `  Artist genres failed:  ${artistGenresEnrichment.failed}\n` +

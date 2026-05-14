@@ -127,3 +127,21 @@ export interface DiscogsCollectionPage {
   };
   releases: DiscogsCollectionRelease[];
 }
+
+export interface DiscogsMasterVersion {
+  id: number;
+  country?: string;
+  major_formats: string[];
+  title: string;
+  released?: string;
+}
+
+export interface DiscogsMasterVersionsPage {
+  versions: DiscogsMasterVersion[];
+  pagination: {
+    page: number;
+    pages: number;
+    per_page: number;
+    items: number;
+  };
+}

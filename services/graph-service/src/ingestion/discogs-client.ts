@@ -2,6 +2,7 @@ import type {
   DiscogsArtistProfile,
   DiscogsCollectionPage,
   DiscogsMasterRelease,
+  DiscogsMasterVersionsPage,
   DiscogsRelease,
 } from './types.js';
 
@@ -61,6 +62,15 @@ export class DiscogsClient {
   async getMaster(masterDiscogsId: number): Promise<DiscogsMasterRelease> {
     const url = `${BASE_URL}/masters/${masterDiscogsId}`;
     return this.fetchWithBackoff<DiscogsMasterRelease>(url);
+  }
+
+  async getMasterVersions(
+    masterDiscogsId: number,
+    page = 1,
+    perPage = 100,
+  ): Promise<DiscogsMasterVersionsPage> {
+    const url = `${BASE_URL}/masters/${masterDiscogsId}/versions?page=${page}&per_page=${perPage}`;
+    return this.fetchWithBackoff<DiscogsMasterVersionsPage>(url);
   }
 
   async getArtist(artistId: number): Promise<DiscogsArtistProfile> {
