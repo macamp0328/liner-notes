@@ -11,6 +11,8 @@ import {
 } from '../ingestion/job-state.js';
 import { clearGeniusLyrics } from '../db/lyrics-repository.js';
 import { enrichLyrics } from '../enrichment/lyrics.js';
+import { buildMusicBrainzClientFromEnv } from '../ingestion/musicbrainz-client.js';
+import { enrichArtistNationality } from '../enrichment/artist-nationality.js';
 
 const errorShape = {
   type: 'object',
@@ -55,6 +57,7 @@ const jobStateShape = {
 } as const;
 
 let isEnriching = false;
+let isEnrichingNationality = false;
 
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
@@ -264,6 +267,72 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.send({ data: summary });
       } finally {
         isEnriching = false;
+      }
+    },
+  );
+
+  fastify.post<{
+    Reply:
+      | { data: { enriched: number; skipped: number; failed: number; durationMs: number } }
+      | { error: { code: string; message: string } };
+  }>(
+    '/nationality/enrich',
+    {
+      schema: {
+        tags: ['admin'],
+        summary:
+          'Enrich Artist and Musician nodes with ORIGIN_COUNTRY relationships sourced from MusicBrainz. Blocks until complete.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['enriched', 'skipped', 'failed', 'durationMs'],
+                properties: {
+                  enriched: { type: 'integer' },
+                  skipped: { type: 'integer' },
+                  failed: { type: 'integer' },
+                  durationMs: { type: 'integer' },
+                },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+          503: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (request, reply) => {
+      if (isEnrichingNationality) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message: 'Nationality enrichment already in progress',
+          },
+        });
+      }
+
+      const mbClient = buildMusicBrainzClientFromEnv(request.log);
+      if (!mbClient) {
+        return reply.code(503).send({
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'MUSICBRAINZ_USER_AGENT not configured',
+          },
+        });
+      }
+
+      isEnrichingNationality = true;
+      try {
+        const summary = await enrichArtistNationality(mbClient, getDriver(), request.log);
+        return reply.send({ data: summary });
+      } finally {
+        isEnrichingNationality = false;
       }
     },
   );

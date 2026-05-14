@@ -41,6 +41,14 @@ export interface SharedMusiciansResult {
   sharedMusicians: SharedMusician[];
 }
 
+export interface InternationalTrack {
+  trackTitle: string;
+  albumTitle: string;
+  releaseDiscogsId: number;
+  countryCount: number;
+  countries: string[];
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -343,6 +351,44 @@ export async function getConnections(
         title: toStr(n.title),
       }));
     return { seed, nodes };
+  } finally {
+    await session.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// getMostInternationalTracks
+// ---------------------------------------------------------------------------
+
+export async function getMostInternationalTracks(
+  driver: Driver,
+  limit: number,
+): Promise<InternationalTrack[]> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `
+      MATCH (r:Release)-[:HAS_TRACK]->(t:Track)
+      MATCH (m:Musician)-[co:CREDITED_ON]->(t)
+      MATCH (m)-[:ORIGIN_COUNTRY]->(c:Country)
+      WHERE co.roleCategory IN ['performer', 'composer']
+      WITH t, r, collect(DISTINCT c.name) AS countries
+      WHERE size(countries) > 1
+      RETURN t.title AS trackTitle, r.title AS albumTitle,
+             r.discogsId AS releaseDiscogsId,
+             size(countries) AS countryCount, countries
+      ORDER BY countryCount DESC, trackTitle
+      LIMIT $limit
+      `,
+      { limit: neo4j.int(limit) },
+    );
+    return result.records.map((rec) => ({
+      trackTitle: toStr(rec.get('trackTitle')) ?? '',
+      albumTitle: toStr(rec.get('albumTitle')) ?? '',
+      releaseDiscogsId: toInt(rec.get('releaseDiscogsId')) ?? 0,
+      countryCount: toInt(rec.get('countryCount')) ?? 0,
+      countries: (rec.get('countries') as string[]) ?? [],
+    }));
   } finally {
     await session.close();
   }
