@@ -23,6 +23,8 @@ export async function getUnenrichedArtistsForNationality(
 ): Promise<UnenrichedArtist[]> {
   const session = driver.session();
   try {
+    // IDs 194 and 355 are Discogs "Various Artists" placeholder nodes — not real people.
+    // Same exclusion applied in getUnenrichedArtists() in artist-profiles-repository.ts.
     const result = await session.run(
       `MATCH (a:Artist)
        WHERE a.discogsId IS NOT NULL

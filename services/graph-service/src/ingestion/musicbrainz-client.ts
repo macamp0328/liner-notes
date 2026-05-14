@@ -67,7 +67,9 @@ export class MusicBrainzClient {
       return null;
     }
 
-    const relation = urlResponse.relations.find((r) => r.artist?.id !== undefined);
+    const relation = urlResponse.relations.find(
+      (r) => r.type === 'discogs' && r.direction === 'backward' && r.artist?.id !== undefined,
+    );
     const mbid = relation?.artist?.id;
     if (!mbid) return null;
 
