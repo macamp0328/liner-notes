@@ -28,6 +28,11 @@ pnpm prettier --check .
 pnpm --filter graph-service lint
 pnpm --filter graph-service typecheck
 pnpm --filter graph-service test:unit
+# Commit message must follow Conventional Commits with a lowercase subject:
+#   type(scope)?: subject   ← subject must start with a lowercase letter
+#   Valid types: feat fix chore docs test refactor perf ci style build revert
+#   WRONG: "feat: OpenAPI docs"   RIGHT: "feat: openAPI docs"
+#   A commit-msg hook at .git/hooks/commit-msg enforces this automatically.
 
 # Fix formatting in place
 pnpm prettier --write .
