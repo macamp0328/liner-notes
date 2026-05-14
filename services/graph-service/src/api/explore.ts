@@ -479,10 +479,10 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
             type: 'array',
             items: {
               type: 'object',
-              required: ['albumTitle', 'releaseDiscogsId', 'countryCount', 'countries'],
+              required: ['albumTitle', 'masterDiscogsId', 'countryCount', 'countries'],
               properties: {
                 albumTitle: { type: 'string' },
-                releaseDiscogsId: { type: 'integer' },
+                masterDiscogsId: { type: 'integer' },
                 countryCount: { type: 'integer' },
                 countries: { type: 'array', items: { type: 'string' } },
               },

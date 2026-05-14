@@ -51,7 +51,7 @@ export interface InternationalTrack {
 
 export interface MostPressedRelease {
   albumTitle: string;
-  releaseDiscogsId: number;
+  masterDiscogsId: number;
   countryCount: number;
   countries: string[];
 }
@@ -413,13 +413,11 @@ export async function getMostPressedReleases(
   try {
     const result = await session.run(
       `
-      MATCH (r:Release)
-      WHERE r.masterDiscogsId IS NOT NULL
-      MATCH (m:Master {discogsId: r.masterDiscogsId})-[:RELEASED_IN]->(c:Country)
-      WITH r.title AS albumTitle, r.discogsId AS releaseDiscogsId,
+      MATCH (m:Master)-[:RELEASED_IN]->(c:Country)
+      WITH m.discogsId AS masterDiscogsId, m.title AS albumTitle,
            collect(DISTINCT c.name) AS countries
       WHERE size(countries) > 1
-      RETURN albumTitle, releaseDiscogsId, size(countries) AS countryCount, countries
+      RETURN masterDiscogsId, albumTitle, size(countries) AS countryCount, countries
       ORDER BY countryCount DESC, albumTitle
       LIMIT $limit
       `,
@@ -427,7 +425,7 @@ export async function getMostPressedReleases(
     );
     return result.records.map((rec) => ({
       albumTitle: toStr(rec.get('albumTitle')) ?? '',
-      releaseDiscogsId: toInt(rec.get('releaseDiscogsId')) ?? 0,
+      masterDiscogsId: toInt(rec.get('masterDiscogsId')) ?? 0,
       countryCount: toInt(rec.get('countryCount')) ?? 0,
       countries: (rec.get('countries') as string[]) ?? [],
     }));

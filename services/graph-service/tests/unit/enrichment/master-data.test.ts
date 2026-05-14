@@ -8,11 +8,13 @@ import { enrichMasterData } from '../../../src/enrichment/master-data.js';
 const mockGetUnenrichedMasters = vi.hoisted(() => vi.fn());
 const mockMergeMasterData = vi.hoisted(() => vi.fn());
 const mockSetMasterFetchedAndOriginalYear = vi.hoisted(() => vi.fn());
+const mockSetMasterFetched = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/db/master-data-repository.js', () => ({
   getUnenrichedMasters: mockGetUnenrichedMasters,
   mergeMasterData: mockMergeMasterData,
   setMasterFetchedAndOriginalYear: mockSetMasterFetchedAndOriginalYear,
+  setMasterFetched: mockSetMasterFetched,
 }));
 
 // ---------------------------------------------------------------------------
@@ -58,6 +60,7 @@ describe('enrichMasterData', () => {
     mockGetUnenrichedMasters.mockResolvedValue([]);
     mockMergeMasterData.mockResolvedValue(undefined);
     mockSetMasterFetchedAndOriginalYear.mockResolvedValue(undefined);
+    mockSetMasterFetched.mockResolvedValue(undefined);
   });
 
   it('returns zero counts when nothing to enrich', async () => {
@@ -88,7 +91,7 @@ describe('enrichMasterData', () => {
     expect(summary.failed).toBe(0);
   });
 
-  it('skips master with year=0 and sets originalYear=0 on releases', async () => {
+  it('skips master with year=0 and marks releases fetched without setting originalYear', async () => {
     mockGetUnenrichedMasters.mockResolvedValue([sampleMaster]);
     const client = makeClient({
       getMaster: vi.fn().mockResolvedValue({ id: 100, title: 'Unknown', year: 0 }),
@@ -97,7 +100,8 @@ describe('enrichMasterData', () => {
     const summary = await enrichMasterData(client, fakeDriver);
 
     expect(mockMergeMasterData).not.toHaveBeenCalled();
-    expect(mockSetMasterFetchedAndOriginalYear).toHaveBeenCalledWith(fakeDriver, [13570466], 0);
+    expect(mockSetMasterFetchedAndOriginalYear).not.toHaveBeenCalled();
+    expect(mockSetMasterFetched).toHaveBeenCalledWith(fakeDriver, [13570466]);
     expect(summary.skipped).toBe(1);
     expect(summary.enriched).toBe(0);
   });
@@ -190,7 +194,7 @@ describe('enrichMasterData', () => {
     expect(client.getMaster).not.toHaveBeenCalled();
   });
 
-  it('sets originalYear=0 on skipped masters (year <= 0)', async () => {
+  it('calls setMasterFetched (not setMasterFetchedAndOriginalYear) when year is negative', async () => {
     mockGetUnenrichedMasters.mockResolvedValue([sampleMaster]);
     const client = makeClient({
       getMaster: vi.fn().mockResolvedValue({ id: 100, title: 'Unknown', year: -1 }),
@@ -198,6 +202,28 @@ describe('enrichMasterData', () => {
 
     await enrichMasterData(client, fakeDriver);
 
-    expect(mockSetMasterFetchedAndOriginalYear).toHaveBeenCalledWith(fakeDriver, [13570466], 0);
+    expect(mockSetMasterFetchedAndOriginalYear).not.toHaveBeenCalled();
+    expect(mockSetMasterFetched).toHaveBeenCalledWith(fakeDriver, [13570466]);
+  });
+
+  it('skips versions with empty country and only stores non-empty countries', async () => {
+    mockGetUnenrichedMasters.mockResolvedValue([sampleMaster]);
+    const client = makeClient({
+      getMasterVersions: vi.fn().mockResolvedValue(
+        makeVersionsPage([
+          { id: 1, country: 'US', major_formats: ['Vinyl'] },
+          { id: 2, major_formats: ['CD'] },
+          { id: 3, country: '  ', major_formats: ['Vinyl'] },
+        ]),
+      ),
+    });
+
+    await enrichMasterData(client, fakeDriver);
+
+    const countriesWithFormats = mockMergeMasterData.mock.calls[0]?.[4] as Array<{
+      country: string;
+    }>;
+    expect(countriesWithFormats).toHaveLength(1);
+    expect(countriesWithFormats[0]?.country).toBe('US');
   });
 });

@@ -45,16 +45,16 @@ export async function mergeMasterData(
       { masterDiscogsId: neo4j.int(masterDiscogsId), title, year: neo4j.int(year) },
     );
 
-    for (const item of countriesWithFormats) {
+    if (countriesWithFormats.length > 0) {
       await session.run(
-        `MATCH (m:Master {discogsId: $masterDiscogsId})
-         MERGE (c:Country {name: $country})
+        `UNWIND $countriesWithFormats AS item
+         MATCH (m:Master {discogsId: $masterDiscogsId})
+         MERGE (c:Country {name: item.country})
          MERGE (m)-[rel:RELEASED_IN]->(c)
-         SET rel.formats = $formats`,
+         SET rel.formats = item.formats`,
         {
           masterDiscogsId: neo4j.int(masterDiscogsId),
-          country: item.country,
-          formats: item.formats,
+          countriesWithFormats,
         },
       );
     }
@@ -77,6 +77,21 @@ export async function setMasterFetchedAndOriginalYear(
         releaseIds: releaseIds.map((id) => neo4j.int(id)),
         originalYear: neo4j.int(originalYear),
       },
+    );
+  } finally {
+    await session.close();
+  }
+}
+
+// Used when originalYear is unknown (year=0 on master): marks releases as fetched
+// without overwriting originalYear so coalesce(r.originalYear, r.pressingYear) still works.
+export async function setMasterFetched(driver: Driver, releaseIds: number[]): Promise<void> {
+  const session = driver.session();
+  try {
+    await session.run(
+      `MATCH (r:Release) WHERE r.discogsId IN $releaseIds
+       SET r.masterFetched = true`,
+      { releaseIds: releaseIds.map((id) => neo4j.int(id)) },
     );
   } finally {
     await session.close();

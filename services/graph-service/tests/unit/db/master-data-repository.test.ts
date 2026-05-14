@@ -4,6 +4,7 @@ import {
   getUnenrichedMasters,
   mergeMasterData,
   setMasterFetchedAndOriginalYear,
+  setMasterFetched,
 } from '../../../src/db/master-data-repository.js';
 
 vi.mock('neo4j-driver', async (importOriginal) => {
@@ -109,7 +110,7 @@ describe('mergeMasterData', () => {
     vi.clearAllMocks();
   });
 
-  it('runs MERGE for Master node and a RELEASED_IN write for each country', async () => {
+  it('runs MERGE for Master node then UNWIND for country relationships', async () => {
     const { session, runSpy } = makeMockSession({ records: [] });
     const driver = makeMockDriver(session);
 
@@ -120,16 +121,28 @@ describe('mergeMasterData', () => {
 
     await mergeMasterData(driver, 100, 'Hejira', 1976, countriesWithFormats);
 
-    // 1 MERGE for Master + 2 RELEASED_IN writes = 3 total
-    expect(runSpy).toHaveBeenCalledTimes(3);
+    // 1 Master MERGE + 1 UNWIND for all countries = 2 total
+    expect(runSpy).toHaveBeenCalledTimes(2);
 
     const masterMergeQuery: string = runSpy.mock.calls[0]?.[0] ?? '';
     expect(masterMergeQuery).toContain('MERGE (m:Master');
     expect(masterMergeQuery).toContain('SET m.title');
 
     const relQuery: string = runSpy.mock.calls[1]?.[0] ?? '';
+    expect(relQuery).toContain('UNWIND');
     expect(relQuery).toContain('RELEASED_IN');
     expect(relQuery).toContain('SET rel.formats');
+  });
+
+  it('runs only the Master MERGE when countriesWithFormats is empty', async () => {
+    const { session, runSpy } = makeMockSession({ records: [] });
+    const driver = makeMockDriver(session);
+
+    await mergeMasterData(driver, 100, 'Hejira', 1976, []);
+
+    expect(runSpy).toHaveBeenCalledTimes(1);
+    const query: string = runSpy.mock.calls[0]?.[0] ?? '';
+    expect(query).toContain('MERGE (m:Master');
   });
 
   it('closes session even when run throws', async () => {
@@ -178,6 +191,42 @@ describe('setMasterFetchedAndOriginalYear', () => {
     const driver = makeMockDriver(session);
 
     await expect(setMasterFetchedAndOriginalYear(driver, [1], 1970)).rejects.toThrow('DB error');
+    expect(session.close).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setMasterFetched
+// ---------------------------------------------------------------------------
+
+describe('setMasterFetched', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('sets only masterFetched without touching originalYear', async () => {
+    const { session, runSpy } = makeMockSession({ records: [] });
+    const driver = makeMockDriver(session);
+
+    await setMasterFetched(driver, [13570466]);
+
+    const query: string = runSpy.mock.calls[0]?.[0] ?? '';
+    expect(query).toContain('masterFetched');
+    expect(query).not.toContain('originalYear');
+
+    const params = runSpy.mock.calls[0]?.[1] as Record<string, unknown>;
+    const releaseIds = params['releaseIds'] as Array<{ toNumber(): number }>;
+    expect(releaseIds.map((id) => id.toNumber())).toEqual([13570466]);
+  });
+
+  it('closes session even when run throws', async () => {
+    const session = {
+      run: vi.fn().mockRejectedValue(new Error('DB error')),
+      close: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Session;
+    const driver = makeMockDriver(session);
+
+    await expect(setMasterFetched(driver, [1])).rejects.toThrow('DB error');
     expect(session.close).toHaveBeenCalledOnce();
   });
 });

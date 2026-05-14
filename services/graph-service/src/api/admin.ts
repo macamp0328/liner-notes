@@ -80,7 +80,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           '**Steps run automatically:**\n' +
           '1. Fetch & MERGE all releases from the Discogs collection\n' +
           '2. Lyrics enrichment (LRCLIB primary, Genius fallback)\n' +
-          '3. Original year enrichment (from Discogs master API)\n' +
+          '3. Master data enrichment (originalYear + global pressing countries/formats via Discogs master API)\n' +
           '4. Artist genres/styles aggregation (rolled up from releases)\n' +
           '5. Track version deduplication (IS_VERSION_OF relationships)\n' +
           '6. Artist profiles enrichment (realName + profile from Discogs artist API)\n\n' +

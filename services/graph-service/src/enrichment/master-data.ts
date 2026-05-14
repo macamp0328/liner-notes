@@ -5,6 +5,7 @@ import {
   getUnenrichedMasters,
   mergeMasterData,
   setMasterFetchedAndOriginalYear,
+  setMasterFetched,
 } from '../db/master-data-repository.js';
 import type { CountryWithFormats } from '../db/master-data-repository.js';
 
@@ -46,7 +47,7 @@ export async function enrichMasterData(
       const year = masterRelease.year;
 
       if (!year || year <= 0) {
-        await setMasterFetchedAndOriginalYear(driver, master.releaseIds, 0);
+        await setMasterFetched(driver, master.releaseIds);
         skipped++;
         continue;
       }
