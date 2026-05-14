@@ -162,6 +162,6 @@ export function buildMusicBrainzClientFromEnv(logger?: Logger): MusicBrainzClien
   return new MusicBrainzClient({
     userAgent,
     delayMs: 1100,
-    logger,
+    ...(logger !== undefined ? { logger } : {}),
   });
 }

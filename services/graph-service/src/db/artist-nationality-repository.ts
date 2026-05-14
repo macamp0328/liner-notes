@@ -52,13 +52,10 @@ export async function getUnenrichedMusiciansForNationality(
        WHERE m.nationalityFetched IS NULL
        RETURN m.discogsId AS discogsId, m.name AS name`,
     );
-    return result.records.map((r) => {
-      const rawId = r.get('discogsId');
-      return {
-        discogsId: rawId !== null ? (rawId as Neo4jInt).toNumber() : null,
-        name: r.get('name') as string,
-      };
-    });
+    return result.records.map((r) => ({
+      discogsId: (r.get('discogsId') as Neo4jInt | null)?.toNumber() ?? null,
+      name: r.get('name') as string,
+    }));
   } finally {
     await session.close();
   }

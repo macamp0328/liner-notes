@@ -95,7 +95,10 @@ describe('enrichArtistNationality', () => {
 
   it('enriches a musician without discogsId via getCountryByName', async () => {
     mockGetUnenrichedMusicians.mockResolvedValue([{ discogsId: null, name: 'Jack DeJohnette' }]);
-    const client = makeMbClient(async () => null, async () => 'US');
+    const client = makeMbClient(
+      async () => null,
+      async () => 'US',
+    );
 
     await enrichArtistNationality(client, fakeDriver);
 

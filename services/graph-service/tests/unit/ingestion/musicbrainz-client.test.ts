@@ -131,7 +131,9 @@ describe('MusicBrainzClient', () => {
   describe('getCountryByName', () => {
     it('returns country when score is ≥ 90', async () => {
       fetchSpy.mockResolvedValueOnce(
-        makeOkResponse({ artists: [{ id: 'mbid', name: 'Miles Davis', score: 100, country: 'US' }] }),
+        makeOkResponse({
+          artists: [{ id: 'mbid', name: 'Miles Davis', score: 100, country: 'US' }],
+        }),
       );
 
       const result = await client.getCountryByName('Miles Davis');
