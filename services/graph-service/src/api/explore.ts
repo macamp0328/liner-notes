@@ -12,11 +12,13 @@ import {
   getConnections,
   getSharedMusicians,
   getMostInternationalTracks,
+  getMostPressedReleases,
   type ExploreRelease,
   type MusicianRelease,
   type ConnectionNode,
   type SharedMusiciansResult,
   type InternationalTrack,
+  type MostPressedRelease,
 } from '../db/repositories/explore-repository.js';
 
 // ---------------------------------------------------------------------------
@@ -451,6 +453,47 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply): Promise<InternationalTrack[] | ErrorReply> => {
       const limit = request.query.limit ?? 10;
       const results = await getMostInternationalTracks(getDriver(), limit);
+      return reply.send(results);
+    },
+  );
+
+  // GET /api/v1/explore/releases/most-pressed
+  fastify.get<{
+    Querystring: { limit?: number };
+    Reply: MostPressedRelease[] | ErrorReply;
+  }>(
+    '/api/v1/explore/releases/most-pressed',
+    {
+      schema: {
+        tags: ['explore'],
+        summary:
+          'Albums in this collection with the widest global pressing reach. Requires master data enrichment to have been run.',
+        querystring: {
+          type: 'object',
+          properties: {
+            limit: { type: 'integer', minimum: 1, maximum: 50, default: 10 },
+          },
+        },
+        response: {
+          200: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['albumTitle', 'releaseDiscogsId', 'countryCount', 'countries'],
+              properties: {
+                albumTitle: { type: 'string' },
+                releaseDiscogsId: { type: 'integer' },
+                countryCount: { type: 'integer' },
+                countries: { type: 'array', items: { type: 'string' } },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply): Promise<MostPressedRelease[] | ErrorReply> => {
+      const limit = request.query.limit ?? 10;
+      const results = await getMostPressedReleases(getDriver(), limit);
       return reply.send(results);
     },
   );

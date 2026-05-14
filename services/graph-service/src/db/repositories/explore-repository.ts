@@ -49,6 +49,13 @@ export interface InternationalTrack {
   countries: string[];
 }
 
+export interface MostPressedRelease {
+  albumTitle: string;
+  releaseDiscogsId: number;
+  countryCount: number;
+  countries: string[];
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -384,6 +391,41 @@ export async function getMostInternationalTracks(
     );
     return result.records.map((rec) => ({
       trackTitle: toStr(rec.get('trackTitle')) ?? '',
+      albumTitle: toStr(rec.get('albumTitle')) ?? '',
+      releaseDiscogsId: toInt(rec.get('releaseDiscogsId')) ?? 0,
+      countryCount: toInt(rec.get('countryCount')) ?? 0,
+      countries: (rec.get('countries') as string[]) ?? [],
+    }));
+  } finally {
+    await session.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// getMostPressedReleases
+// ---------------------------------------------------------------------------
+
+export async function getMostPressedReleases(
+  driver: Driver,
+  limit: number,
+): Promise<MostPressedRelease[]> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `
+      MATCH (r:Release)
+      WHERE r.masterDiscogsId IS NOT NULL
+      MATCH (m:Master {discogsId: r.masterDiscogsId})-[:RELEASED_IN]->(c:Country)
+      WITH r.title AS albumTitle, r.discogsId AS releaseDiscogsId,
+           collect(DISTINCT c.name) AS countries
+      WHERE size(countries) > 1
+      RETURN albumTitle, releaseDiscogsId, size(countries) AS countryCount, countries
+      ORDER BY countryCount DESC, albumTitle
+      LIMIT $limit
+      `,
+      { limit: neo4j.int(limit) },
+    );
+    return result.records.map((rec) => ({
       albumTitle: toStr(rec.get('albumTitle')) ?? '',
       releaseDiscogsId: toInt(rec.get('releaseDiscogsId')) ?? 0,
       countryCount: toInt(rec.get('countryCount')) ?? 0,
