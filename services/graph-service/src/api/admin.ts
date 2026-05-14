@@ -12,7 +12,9 @@ import {
 import { clearGeniusLyrics } from '../db/lyrics-repository.js';
 import { enrichLyrics } from '../enrichment/lyrics.js';
 import { buildMusicBrainzClientFromEnv } from '../ingestion/musicbrainz-client.js';
+import { buildWikidataClientFromEnv } from '../ingestion/wikidata-client.js';
 import { enrichArtistNationality } from '../enrichment/artist-nationality.js';
+import { resetNationalityEnrichment } from '../db/artist-nationality-repository.js';
 
 const errorShape = {
   type: 'object',
@@ -327,13 +329,63 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
+      const wdClient = buildWikidataClientFromEnv(request.log);
+
       isEnrichingNationality = true;
       try {
-        const summary = await enrichArtistNationality(mbClient, getDriver(), request.log);
+        const summary = await enrichArtistNationality(
+          mbClient,
+          getDriver(),
+          request.log,
+          wdClient ?? undefined,
+        );
         return reply.send({ data: summary });
       } finally {
         isEnrichingNationality = false;
       }
+    },
+  );
+
+  fastify.post<{
+    Reply: { data: { reset: number } } | { error: { code: string; message: string } };
+  }>(
+    '/nationality/reset',
+    {
+      schema: {
+        tags: ['admin'],
+        summary:
+          'Remove nationalityFetched marker from all Artist and Musician nodes so the next enrich run re-processes them. Use before re-running enrichment after adding new sources.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['reset'],
+                properties: { reset: { type: 'integer' } },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => {
+      if (isEnrichingNationality) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message:
+              'Nationality enrichment is currently running — wait for it to finish before resetting',
+          },
+        });
+      }
+      const reset = await resetNationalityEnrichment(getDriver());
+      return reply.send({ data: { reset } });
     },
   );
 }

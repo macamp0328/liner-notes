@@ -98,6 +98,38 @@ describe('MusicBrainzClient', () => {
       expect(result).toBeNull();
     });
 
+    it('falls back to area iso-3166-1-codes when country is null', async () => {
+      fetchSpy
+        .mockResolvedValueOnce(makeOkResponse(mbUrlResponse('mbid-area')))
+        .mockResolvedValueOnce(
+          makeOkResponse({
+            id: 'mbid-area',
+            name: 'Area Artist',
+            country: null,
+            area: { 'iso-3166-1-codes': ['SE'] },
+          }),
+        );
+
+      const result = await client.getCountryByDiscogsId(42);
+      expect(result).toBe('SE');
+    });
+
+    it('prefers country over area when both are present', async () => {
+      fetchSpy
+        .mockResolvedValueOnce(makeOkResponse(mbUrlResponse('mbid-both')))
+        .mockResolvedValueOnce(
+          makeOkResponse({
+            id: 'mbid-both',
+            name: 'Both Artist',
+            country: 'GB',
+            area: { 'iso-3166-1-codes': ['US'] },
+          }),
+        );
+
+      const result = await client.getCountryByDiscogsId(99);
+      expect(result).toBe('GB');
+    });
+
     it('trims whitespace from country code', async () => {
       fetchSpy
         .mockResolvedValueOnce(makeOkResponse(mbUrlResponse('mbid')))

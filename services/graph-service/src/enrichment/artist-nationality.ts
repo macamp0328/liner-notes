@@ -1,5 +1,6 @@
 import type { Driver } from 'neo4j-driver';
 import type { MusicBrainzClient } from '../ingestion/musicbrainz-client.js';
+import type { WikidataClient } from '../ingestion/wikidata-client.js';
 import type { Logger } from '../ingestion/discogs-client.js';
 import {
   getUnenrichedArtistsForNationality,
@@ -16,22 +17,57 @@ export interface ArtistNationalityEnrichmentSummary {
 }
 
 /**
- * Enrich Artist and Musician nodes with ORIGIN_COUNTRY relationships sourced from MusicBrainz.
+ * Resolve nationality from MusicBrainz and Wikidata in parallel.
  *
- * For Artist nodes: looks up by Discogs ID (two-step MusicBrainz URL → artist lookup).
- * For Musician nodes: looks up by Discogs ID when available; falls back to name search
+ * Strategy:
+ * - Fire both lookups concurrently (both index on Discogs ID, so identity is guaranteed).
+ * - If both agree → use the result.
+ * - If only one has data → use it.
+ * - If they disagree → prefer Wikidata (more consistently accurate for country of citizenship)
+ *   and log the discrepancy so it can be investigated.
+ * - If neither has data → return null (skip).
+ */
+async function resolveCountry(
+  mbClient: MusicBrainzClient,
+  wdClient: WikidataClient | null,
+  discogsId: number,
+  label: string,
+  log: Logger,
+): Promise<string | null> {
+  const [mbCountry, wdCountry] = await Promise.all([
+    mbClient.getCountryByDiscogsId(discogsId),
+    wdClient ? wdClient.getCountryByDiscogsId(discogsId) : Promise.resolve(null),
+  ]);
+
+  if (mbCountry !== null && wdCountry !== null && mbCountry !== wdCountry) {
+    log.warn(
+      `[artist-nationality] Source conflict for ${label} discogsId=${discogsId}: MB=${mbCountry} WD=${wdCountry} — using Wikidata`,
+    );
+    return wdCountry;
+  }
+
+  return mbCountry ?? wdCountry ?? null;
+}
+
+/**
+ * Enrich Artist and Musician nodes with ORIGIN_COUNTRY relationships.
+ * Sources: MusicBrainz (primary) + Wikidata (fallback and conflict resolution), queried in parallel.
+ *
+ * For Artist nodes: looks up by Discogs ID.
+ * For Musician nodes: looks up by Discogs ID when available; falls back to MusicBrainz name search
  * for musicians without a Discogs ID (lower confidence — only used when score ≥ 90).
  *
- * Sets nationalityFetched = true on every processed node regardless of whether a country
- * was found — same idempotency pattern as profileFetched on artist profiles.
+ * Sets nationalityFetched = true on every processed node regardless of outcome.
  * Per-node errors are caught and counted — never crashes the caller.
  */
 export async function enrichArtistNationality(
-  client: MusicBrainzClient,
+  mbClient: MusicBrainzClient,
   driver: Driver,
   logger?: Logger,
+  wdClient?: WikidataClient,
 ): Promise<ArtistNationalityEnrichmentSummary> {
   const log: Logger = logger ?? console;
+  const wd = wdClient ?? null;
   const startTime = Date.now();
   let enriched = 0;
   let skipped = 0;
@@ -53,7 +89,7 @@ export async function enrichArtistNationality(
 
   for (const artist of artists) {
     try {
-      const countryCode = await client.getCountryByDiscogsId(artist.discogsId);
+      const countryCode = await resolveCountry(mbClient, wd, artist.discogsId, 'Artist', log);
       await setArtistNationality(driver, artist.discogsId, countryCode);
       if (countryCode !== null) {
         enriched++;
@@ -88,9 +124,10 @@ export async function enrichArtistNationality(
       let countryCode: string | null = null;
 
       if (musician.discogsId !== null) {
-        countryCode = await client.getCountryByDiscogsId(musician.discogsId);
+        countryCode = await resolveCountry(mbClient, wd, musician.discogsId, 'Musician', log);
       } else {
-        countryCode = await client.getCountryByName(musician.name);
+        // No Discogs ID — name search is MB-only (Wikidata requires an ID to avoid false matches)
+        countryCode = await mbClient.getCountryByName(musician.name);
       }
 
       await setMusicianNationality(driver, musician, countryCode);

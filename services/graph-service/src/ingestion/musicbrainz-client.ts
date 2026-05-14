@@ -23,6 +23,9 @@ interface MbArtistResponse {
   id: string;
   name: string;
   country?: string;
+  area?: {
+    'iso-3166-1-codes'?: string[];
+  };
 }
 
 interface MbSearchResponse {
@@ -106,7 +109,7 @@ export class MusicBrainzClient {
       return null;
     }
 
-    return response.country?.trim() || null;
+    return response.country?.trim() || response.area?.['iso-3166-1-codes']?.[0]?.trim() || null;
   }
 
   private async fetchWithBackoff<T>(url: string): Promise<T> {

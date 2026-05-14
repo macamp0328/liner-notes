@@ -68,6 +68,10 @@ export async function getUnenrichedMusiciansForNationality(
  * When countryCode is non-null, merges a Country node and creates the relationship.
  * Always sets nationalityFetched = true as an idempotency marker regardless of
  * whether a country was found — same pattern as profileFetched on artist profiles.
+ *
+ * Deletes any existing ORIGIN_COUNTRY relationship before creating the new one so that
+ * re-runs with updated source data (e.g. after adding Wikidata) replace stale values
+ * rather than accumulating duplicates.
  */
 export async function setArtistNationality(
   driver: Driver,
@@ -79,6 +83,9 @@ export async function setArtistNationality(
     if (countryCode !== null) {
       await session.run(
         `MATCH (a:Artist {discogsId: $discogsId})
+         OPTIONAL MATCH (a)-[old:ORIGIN_COUNTRY]->()
+         DELETE old
+         WITH a
          MERGE (c:Country {name: $countryCode})
          MERGE (a)-[:ORIGIN_COUNTRY]->(c)
          SET a.nationalityFetched = true`,
@@ -100,6 +107,9 @@ export async function setArtistNationality(
  * Set the ORIGIN_COUNTRY relationship on a Musician node.
  * Identifies by discogsId when available; falls back to name-only match.
  * Always sets nationalityFetched = true.
+ *
+ * Deletes any existing ORIGIN_COUNTRY relationship before creating the new one
+ * so that re-runs replace stale values rather than accumulating duplicates.
  */
 export async function setMusicianNationality(
   driver: Driver,
@@ -116,6 +126,9 @@ export async function setMusicianNationality(
     if (countryCode !== null) {
       await session.run(
         `${matchClause}
+         OPTIONAL MATCH (m)-[old:ORIGIN_COUNTRY]->()
+         DELETE old
+         WITH m
          MERGE (c:Country {name: $countryCode})
          MERGE (m)-[:ORIGIN_COUNTRY]->(c)
          SET m.nationalityFetched = true`,
@@ -135,6 +148,25 @@ export async function setMusicianNationality(
         },
       );
     }
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Remove the nationalityFetched marker from all Artist and Musician nodes so the
+ * next enrichment run re-processes all of them. Used by the reset admin endpoint
+ * when switching enrichment sources or correcting stale data.
+ */
+export async function resetNationalityEnrichment(driver: Driver): Promise<number> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `MATCH (n) WHERE (n:Artist OR n:Musician) AND n.nationalityFetched IS NOT NULL
+       REMOVE n.nationalityFetched
+       RETURN count(n) AS reset`,
+    );
+    return (result.records[0]?.get('reset') as { toNumber(): number } | null)?.toNumber() ?? 0;
   } finally {
     await session.close();
   }
