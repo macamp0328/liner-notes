@@ -18,6 +18,27 @@ const start = async (): Promise<void> => {
     process.on('SIGINT', shutdown);
 
     await app.listen({ port, host: '0.0.0.0' });
+
+    if (process.env['NODE_ENV'] !== 'production') {
+      const w = 53;
+      const pad = (s: string): string => `║  ${s}${' '.repeat(Math.max(0, w - s.length - 2))}║`;
+      const lines = [
+        `╔${'═'.repeat(w)}╗`,
+        pad('liner-notes — dev environment'),
+        `╠${'═'.repeat(w)}╣`,
+        pad('Graph Service'),
+        pad(`  API root:    http://localhost:${port}`),
+        pad(`  Health:      http://localhost:${port}/api/v1/health`),
+        pad(`  Swagger UI:  http://localhost:${port}/api/docs`),
+        pad(`  OpenAPI JSON: http://localhost:${port}/api/docs/json`),
+        pad(''),
+        pad('Neo4j'),
+        pad('  Browser:     http://localhost:7474'),
+        pad('  Bolt:        bolt://localhost:7687'),
+        `╚${'═'.repeat(w)}╝`,
+      ];
+      process.stdout.write('\n' + lines.join('\n') + '\n\n');
+    }
   } catch (err) {
     console.error(err);
     // Attempt cleanup so the Neo4j driver and any other resources are closed

@@ -20,7 +20,7 @@ const OPENAPI_CONFIG = {
       description: 'Graph-driven vinyl record collection explorer',
       version: '1.0.0',
     },
-    servers: [{ url: 'http://localhost:3000' }],
+    servers: [{ url: '/' }],
     tags: [
       { name: 'ops', description: 'Health and admin operations' },
       { name: 'admin', description: 'Ingestion control and operational status' },
@@ -59,12 +59,13 @@ export async function buildDocsServer(): Promise<FastifyInstance> {
 export async function buildServer(): Promise<FastifyInstance> {
   const app = Fastify({ logger: true });
 
-  await app.register(swagger, OPENAPI_CONFIG);
-
-  await app.register(swaggerUi, {
-    routePrefix: '/api/docs',
-    uiConfig: { docExpansion: 'list' },
-  });
+  if (process.env['NODE_ENV'] !== 'production') {
+    await app.register(swagger, OPENAPI_CONFIG);
+    await app.register(swaggerUi, {
+      routePrefix: '/api/docs',
+      uiConfig: { docExpansion: 'list' },
+    });
+  }
 
   await app.register(healthRoutes);
   await app.register(adminRoutes, { prefix: '/api/v1/admin' });
