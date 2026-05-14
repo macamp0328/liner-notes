@@ -11,10 +11,12 @@ import {
   getReleasesByYear,
   getConnections,
   getSharedMusicians,
+  getMostInternationalTracks,
   type ExploreRelease,
   type MusicianRelease,
   type ConnectionNode,
   type SharedMusiciansResult,
+  type InternationalTrack,
 } from '../db/repositories/explore-repository.js';
 
 // ---------------------------------------------------------------------------
@@ -402,6 +404,54 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
     async (_request, reply): Promise<SharedMusiciansResult[]> => {
       const pairs = await getSharedMusicians(getDriver());
       return reply.send(pairs);
+    },
+  );
+
+  // GET /api/v1/explore/tracks/most-international
+  fastify.get<{
+    Querystring: { limit?: number };
+    Reply: InternationalTrack[] | ErrorReply;
+  }>(
+    '/api/v1/explore/tracks/most-international',
+    {
+      schema: {
+        tags: ['explore'],
+        summary:
+          'Tracks with the most distinct countries of origin among their credited musicians. Requires nationality enrichment to have been run.',
+        querystring: {
+          type: 'object',
+          properties: {
+            limit: { type: 'integer', minimum: 1, maximum: 50, default: 10 },
+          },
+        },
+        response: {
+          200: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: [
+                'trackTitle',
+                'albumTitle',
+                'releaseDiscogsId',
+                'countryCount',
+                'countries',
+              ],
+              properties: {
+                trackTitle: { type: 'string' },
+                albumTitle: { type: 'string' },
+                releaseDiscogsId: { type: 'integer' },
+                countryCount: { type: 'integer' },
+                countries: { type: 'array', items: { type: 'string' } },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply): Promise<InternationalTrack[] | ErrorReply> => {
+      const limit = request.query.limit ?? 10;
+      const results = await getMostInternationalTracks(getDriver(), limit);
+      return reply.send(results);
     },
   );
 }

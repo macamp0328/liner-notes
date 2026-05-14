@@ -1,0 +1,173 @@
+import type { Driver } from 'neo4j-driver';
+import neo4j from 'neo4j-driver';
+
+type Neo4jInt = { toNumber(): number };
+
+export interface UnenrichedArtist {
+  discogsId: number;
+}
+
+export interface UnenrichedMusician {
+  discogsId: number | null;
+  name: string;
+}
+
+/**
+ * Return Artist nodes that have not yet been enriched with nationality data.
+ * Uses nationalityFetched as an explicit idempotency marker — Neo4j removes null
+ * properties on SET, so checking nationalityFetched IS NULL reliably distinguishes
+ * "never attempted" from "attempted but country was not found".
+ */
+export async function getUnenrichedArtistsForNationality(
+  driver: Driver,
+): Promise<UnenrichedArtist[]> {
+  const session = driver.session();
+  try {
+    // IDs 194 and 355 are Discogs "Various Artists" placeholder nodes — not real people.
+    // Same exclusion applied in getUnenrichedArtists() in artist-profiles-repository.ts.
+    const result = await session.run(
+      `MATCH (a:Artist)
+       WHERE a.discogsId IS NOT NULL
+         AND a.nationalityFetched IS NULL
+         AND NOT a.discogsId IN [194, 355]
+       RETURN a.discogsId AS discogsId`,
+    );
+    return result.records.map((r) => ({
+      discogsId: (r.get('discogsId') as Neo4jInt).toNumber(),
+    }));
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Return Musician nodes that have not yet been enriched with nationality data.
+ * Returns both discogsId (when available) and name for lookup purposes.
+ */
+export async function getUnenrichedMusiciansForNationality(
+  driver: Driver,
+): Promise<UnenrichedMusician[]> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `MATCH (m:Musician)
+       WHERE m.nationalityFetched IS NULL
+       RETURN m.discogsId AS discogsId, m.name AS name`,
+    );
+    return result.records.map((r) => ({
+      discogsId: (r.get('discogsId') as Neo4jInt | null)?.toNumber() ?? null,
+      name: r.get('name') as string,
+    }));
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Set the ORIGIN_COUNTRY relationship on an Artist node identified by discogsId.
+ * When countryCode is non-null, merges a Country node and creates the relationship.
+ * Always sets nationalityFetched = true as an idempotency marker regardless of
+ * whether a country was found — same pattern as profileFetched on artist profiles.
+ *
+ * Deletes any existing ORIGIN_COUNTRY relationship before creating the new one so that
+ * re-runs with updated source data (e.g. after adding Wikidata) replace stale values
+ * rather than accumulating duplicates.
+ */
+export async function setArtistNationality(
+  driver: Driver,
+  discogsId: number,
+  countryCode: string | null,
+): Promise<void> {
+  const session = driver.session();
+  try {
+    if (countryCode !== null) {
+      await session.run(
+        `MATCH (a:Artist {discogsId: $discogsId})
+         OPTIONAL MATCH (a)-[old:ORIGIN_COUNTRY]->()
+         DELETE old
+         WITH a
+         MERGE (c:Country {name: $countryCode})
+         MERGE (a)-[:ORIGIN_COUNTRY]->(c)
+         SET a.nationalityFetched = true`,
+        { discogsId: neo4j.int(discogsId), countryCode },
+      );
+    } else {
+      await session.run(
+        `MATCH (a:Artist {discogsId: $discogsId})
+         SET a.nationalityFetched = true`,
+        { discogsId: neo4j.int(discogsId) },
+      );
+    }
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Set the ORIGIN_COUNTRY relationship on a Musician node.
+ * Identifies by discogsId when available; falls back to name-only match.
+ * Always sets nationalityFetched = true.
+ *
+ * Deletes any existing ORIGIN_COUNTRY relationship before creating the new one
+ * so that re-runs replace stale values rather than accumulating duplicates.
+ */
+export async function setMusicianNationality(
+  driver: Driver,
+  musician: UnenrichedMusician,
+  countryCode: string | null,
+): Promise<void> {
+  const session = driver.session();
+  try {
+    const matchClause =
+      musician.discogsId !== null
+        ? `MATCH (m:Musician {discogsId: $discogsId})`
+        : `MATCH (m:Musician {name: $name}) WHERE m.discogsId IS NULL`;
+
+    if (countryCode !== null) {
+      await session.run(
+        `${matchClause}
+         OPTIONAL MATCH (m)-[old:ORIGIN_COUNTRY]->()
+         DELETE old
+         WITH m
+         MERGE (c:Country {name: $countryCode})
+         MERGE (m)-[:ORIGIN_COUNTRY]->(c)
+         SET m.nationalityFetched = true`,
+        {
+          discogsId: musician.discogsId !== null ? neo4j.int(musician.discogsId) : null,
+          name: musician.name,
+          countryCode,
+        },
+      );
+    } else {
+      await session.run(
+        `${matchClause}
+         SET m.nationalityFetched = true`,
+        {
+          discogsId: musician.discogsId !== null ? neo4j.int(musician.discogsId) : null,
+          name: musician.name,
+        },
+      );
+    }
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Remove the nationalityFetched marker from all Artist and Musician nodes so the
+ * next enrichment run re-processes all of them. Used by the reset admin endpoint
+ * when switching enrichment sources or correcting stale data.
+ */
+export async function resetNationalityEnrichment(driver: Driver): Promise<number> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `MATCH (n) WHERE (n:Artist OR n:Musician) AND n.nationalityFetched IS NOT NULL
+       REMOVE n.nationalityFetched
+       RETURN count(n) AS reset`,
+    );
+    return (result.records[0]?.get('reset') as { toNumber(): number } | null)?.toNumber() ?? 0;
+  } finally {
+    await session.close();
+  }
+}
