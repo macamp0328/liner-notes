@@ -20,7 +20,7 @@ All commands run from the **repo root** unless noted.
 # Local dev (Neo4j + graph-service)
 docker-compose up
 
-# Dev server only (hot-reload, no Docker)
+# Dev server only (hot-reload) — requires Neo4j already running (see .env.example for NEO4J_URI/USER/PASSWORD)
 pnpm --filter graph-service dev
 
 # Pre-commit gate — run in this order before every commit
@@ -209,7 +209,7 @@ Agents own all git operations — branch creation, commits, opening the PR. Mile
 
 ### 4.5 Coverage Thresholds
 
-Enforced by `vitest.config.ts`:
+Enforced by `services/graph-service/vitest.config.ts`:
 
 | Metric     | Threshold                                                                  |
 | ---------- | -------------------------------------------------------------------------- |
@@ -232,7 +232,7 @@ No service talks to Neo4j directly except `graph-service`.
 
 ## CI Requirements
 
-**Job order (fast-fail):** `format`, `lint`, `typecheck` run first in parallel → `tests-and-coverage` + `schema-validation` → `docker-build`.
+**Fast-fail chain:** `format`, `lint`, `typecheck` run first in parallel → `tests-and-coverage` + `schema-validation` → `docker-build`. The following jobs run independently of this chain on every PR: `audit`, `secrets-scan`, `codeql`, `commitlint`.
 
 | Check             | Tool                                   | Requirement                            |
 | ----------------- | -------------------------------------- | -------------------------------------- |
