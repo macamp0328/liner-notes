@@ -70,6 +70,7 @@ const completeSummary: IngestionSummary = {
   },
   trackVersionsEnrichment: { enriched: 3, skipped: 1, failed: 0, durationMs: 100 },
   artistProfilesEnrichment: { enriched: 8, skipped: 2, failed: 0, durationMs: 8000 },
+  spotifyAudioFeaturesEnrichment: { enriched: 5, skipped: 3, failed: 0, durationMs: 2000 },
 };
 
 const idleState: JobState = {
