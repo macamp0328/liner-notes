@@ -24,8 +24,7 @@ docker-compose up
 pnpm --filter graph-service dev
 
 # Pre-commit gate — run in this order before every commit
-pnpm prettier --write .   # format in place first — NEVER skip this step
-pnpm prettier --check .   # verify zero diffs remain
+# (prettier runs automatically via husky + lint-staged on git commit)
 pnpm --filter graph-service lint
 pnpm --filter graph-service typecheck
 pnpm --filter graph-service test:unit
@@ -36,9 +35,8 @@ pnpm --filter graph-service test:unit
 #   Valid types: feat fix chore docs test refactor perf ci style build revert
 #   WRONG: "feat: OpenAPI docs" (O is uppercase — sentence-case)
 #   RIGHT:  "feat: openAPI docs" (starts lowercase; 'API' mid-word is fine)
-# Install local enforcement hooks (block bad commits before they reach CI):
+# Install the commit-msg hook (husky handles prettier automatically via pnpm install):
 #   cp scripts/hooks/commit-msg .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg
-#   cp scripts/hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 
 # Tests
 pnpm --filter graph-service test              # all tests
