@@ -94,9 +94,7 @@ export class WikidataClient {
       }
     }
 
-    this.log.warn(
-      `[wikidata-client] Exceeded max retries for discogsId=${discogsId} — skipping`,
-    );
+    this.log.warn(`[wikidata-client] Exceeded max retries for discogsId=${discogsId} — skipping`);
     return null;
   }
 
