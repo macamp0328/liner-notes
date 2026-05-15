@@ -5,6 +5,7 @@ type Neo4jInt = { toNumber(): number };
 
 export interface UnenrichedArtist {
   discogsId: number;
+  name: string;
 }
 
 export interface UnenrichedMusician {
@@ -30,10 +31,11 @@ export async function getUnenrichedArtistsForNationality(
        WHERE a.discogsId IS NOT NULL
          AND a.nationalityFetched IS NULL
          AND NOT a.discogsId IN [194, 355]
-       RETURN a.discogsId AS discogsId`,
+       RETURN a.discogsId AS discogsId, a.name AS name`,
     );
     return result.records.map((r) => ({
       discogsId: (r.get('discogsId') as Neo4jInt).toNumber(),
+      name: r.get('name') as string,
     }));
   } finally {
     await session.close();

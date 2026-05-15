@@ -74,14 +74,23 @@ export class WikidataClient {
   }
 
   /**
-   * Extract an English Wikipedia article title from a full URL and look up the country.
+   * Look up the country for an English Wikipedia URL by embedding the raw URL path
+   * segment directly into the SPARQL IRI — no decode/re-encode round-trip.
    * Non-English Wikipedia URLs return null without making a network call.
    */
   async getCountryByWikipediaUrl(url: string): Promise<string | null> {
     const match = /^https:\/\/en\.wikipedia\.org\/wiki\/(.+)$/.exec(url);
     if (!match?.[1]) return null;
-    const title = decodeURIComponent(match[1].replace(/_/g, ' '));
-    return this.getCountryByWikipediaTitle(title);
+    const rawPath = match[1];
+    const query = `
+      SELECT ?countryCode WHERE {
+        ?item schema:about <https://en.wikipedia.org/wiki/${rawPath}> .
+        ?item wdt:P27 ?country .
+        ?country wdt:P297 ?countryCode .
+      }
+      LIMIT 1
+    `;
+    return this.executeSparql(query, `wikipedia-url="${url}"`);
   }
 
   private async executeSparql(query: string, logLabel: string): Promise<string | null> {

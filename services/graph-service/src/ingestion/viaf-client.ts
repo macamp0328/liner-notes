@@ -12,47 +12,51 @@ export interface VIAFClientConfig {
 // MARC 21 country codes → ISO 3166-1 alpha-2.
 // VIAF returns codes with a trailing period (e.g. "fr.") — strip it before lookup.
 // Source: https://www.loc.gov/marc/countries/cou_home.html
+// IMPORTANT: several MARC codes are counterintuitive — comments note common mixups.
 const MARC_TO_ISO = new Map<string, string>([
-  ['xxu', 'US'],
-  ['xxk', 'GB'],
-  ['fr', 'FR'],
-  ['gw', 'DE'],
-  ['it', 'IT'],
-  ['be', 'BE'],
-  ['ne', 'NL'],
-  ['sw', 'SE'],
-  ['au', 'AU'],
-  ['ja', 'JP'],
-  ['ca', 'CA'],
-  ['ng', 'NG'],
-  ['sa', 'SN'],
-  ['sp', 'ES'],
-  ['po', 'PT'],
-  ['ru', 'RU'],
-  ['pl', 'PL'],
-  ['hu', 'HU'],
-  ['cz', 'CZ'],
-  ['fi', 'FI'],
-  ['dk', 'DK'],
-  ['no', 'NO'],
-  ['ic', 'IS'],
-  ['nz', 'NZ'],
-  ['ua', 'UA'],
-  ['gz', 'GR'],
-  ['tu', 'TR'],
-  ['is', 'IL'],
-  ['cc', 'CO'],
-  ['bl', 'BR'],
-  ['ag', 'AR'],
-  ['mx', 'MX'],
-  ['ku', 'KR'],
-  ['ch', 'CN'],
-  ['ia', 'IN'],
-  ['mj', 'MA'],
-  ['ao', 'AO'],
-  ['et', 'ET'],
-  ['gh', 'GH'],
-  ['sj', 'ZA'],
+  ['xxu', 'US'], // United States
+  ['xxk', 'GB'], // England / United Kingdom
+  ['xxc', 'CA'], // Canada
+  ['fr', 'FR'], // France
+  ['gw', 'DE'], // Germany (was West Germany; VIAF uses gw for unified Germany)
+  ['it', 'IT'], // Italy
+  ['be', 'BE'], // Belgium
+  ['ne', 'NL'], // Netherlands
+  ['sw', 'SE'], // Sweden
+  ['at', 'AU'], // Australia ('at' not 'au' — au = Austria)
+  ['au', 'AT'], // Austria  ('au' not 'at' — at = Australia)
+  ['ja', 'JP'], // Japan
+  ['ng', 'NG'], // Nigeria
+  ['sa', 'ZA'], // South Africa
+  ['sp', 'ES'], // Spain
+  ['po', 'PT'], // Portugal
+  ['ru', 'RU'], // Russia
+  ['pl', 'PL'], // Poland
+  ['hu', 'HU'], // Hungary
+  ['cz', 'CZ'], // Czech Republic
+  ['fi', 'FI'], // Finland
+  ['dk', 'DK'], // Denmark
+  ['no', 'NO'], // Norway
+  ['ic', 'IS'], // Iceland
+  ['nz', 'NZ'], // New Zealand
+  ['tu', 'TR'], // Turkey
+  ['is', 'IL'], // Israel
+  ['bl', 'BR'], // Brazil
+  ['ag', 'AR'], // Argentina
+  ['mx', 'MX'], // Mexico
+  ['ko', 'KR'], // Korea (South) ('ko' not 'ku' — ku = Kuwait)
+  ['ku', 'KW'], // Kuwait
+  ['cc', 'CN'], // China (PRC) ('cc' not 'ch' — ch = Taiwan)
+  ['ch', 'TW'], // Taiwan (Republic of China)
+  ['ck', 'CO'], // Colombia
+  ['gr', 'GR'], // Greece ('gr' not 'gz' — gz = Gaza Strip, no stable ISO code)
+  ['un', 'UA'], // Ukraine ('un' not 'ua' — ua = Egypt)
+  ['ii', 'IN'], // India ('ii' not 'ia' — ia = Iran)
+  ['ia', 'IR'], // Iran
+  ['mj', 'MA'], // Morocco
+  ['ao', 'AO'], // Angola
+  ['et', 'ET'], // Ethiopia
+  ['gh', 'GH'], // Ghana
 ]);
 
 const VIAF_SEARCH = 'https://viaf.org/viaf/search';
@@ -128,7 +132,10 @@ export class VIAFClient {
    * Retries on 429 and 503 with exponential backoff.
    */
   async getCountryByName(name: string): Promise<string | null> {
-    const encodedName = encodeURIComponent(`"${name}"`);
+    // Escape CQL meta-characters that are meaningful inside a quoted phrase
+    // (" and \ must be escaped; drop control characters that could break the query).
+    const safeName = name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const encodedName = encodeURIComponent(`"${safeName}"`);
     const url = `${VIAF_SEARCH}?query=local.names+all+${encodedName}&maximumRecords=5&httpAccept=application/json`;
 
     let attempt = 0;
@@ -164,7 +171,9 @@ export class VIAFClient {
         await this.sleep(this.delayMs);
 
         return this.extractCountry(name, data);
-      } catch {
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log.warn(`[viaf-client] Network error for "${name}" — ${msg}`);
         return null;
       }
     }

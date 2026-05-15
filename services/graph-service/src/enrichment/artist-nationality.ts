@@ -18,14 +18,13 @@ export interface ArtistNationalityEnrichmentSummary {
 }
 
 /**
- * Resolve nationality using up to four sources in priority order:
+ * Resolve nationality using three sources in priority order:
  *
  * 1. MusicBrainz + Wikidata by Discogs ID (parallel, high confidence)
  * 2. Wikidata via Wikipedia URL from Discogs artist page (high confidence when URL present)
- * 3. VIAF name search (last resort, lower confidence — only when Discogs ID is available
- *    to reduce false-positive risk for common names)
+ * 3. VIAF name search (last resort, lower confidence — requires a real name, not just an ID)
  *
- * Sources 1 run in parallel. Sources 2 and 3 are sequential fallbacks, only attempted
+ * Source 1 runs in parallel. Sources 2 and 3 are sequential fallbacks, only attempted
  * when the previous sources return null.
  *
  * Conflict resolution for source 1: when MB and WD disagree, Wikidata is preferred and
@@ -89,10 +88,10 @@ async function resolveCountry(
 /**
  * Enrich Artist and Musician nodes with ORIGIN_COUNTRY relationships.
  *
- * Sources tried in order (see resolveCountry for full details):
+ * Sources tried in order (see resolveCountry for details):
  * 1. MusicBrainz + Wikidata by Discogs ID (parallel)
  * 2. Wikidata via Wikipedia URL from Discogs artist page
- * 3. VIAF name search
+ * 3. VIAF name search (uses artist.name, so never queries with a bare numeric ID)
  *
  * For musicians without a Discogs ID, MusicBrainz name search is used instead
  * (lower confidence — only accepted when score ≥ 90). Sources 2 and 3 are skipped
@@ -140,7 +139,7 @@ export async function enrichArtistNationality(
         dc,
         viaf,
         artist.discogsId,
-        artist.discogsId.toString(),
+        artist.name,
         'Artist',
         log,
       );

@@ -237,13 +237,15 @@ describe('WikidataClient', () => {
       expect(fetchSpy).not.toHaveBeenCalled();
     });
 
-    it('decodes percent-encoded titles before SPARQL lookup', async () => {
-      fetchSpy.mockResolvedValueOnce(makeOkResponse(makeSparqlResponse('US')));
+    it('preserves percent-encoded characters in Wikipedia URL path directly in SPARQL IRI', async () => {
+      fetchSpy.mockResolvedValueOnce(makeOkResponse(makeSparqlResponse('IS')));
 
-      await client.getCountryByWikipediaUrl('https://en.wikipedia.org/wiki/Miles_Davis');
+      await client.getCountryByWikipediaUrl('https://en.wikipedia.org/wiki/Bj%C3%B6rk');
 
-      const url = fetchSpy.mock.calls[0]?.[0] as string;
-      expect(url).toContain('Miles_Davis');
+      // The raw path 'Bj%C3%B6rk' is embedded in the SPARQL query as-is, then the whole query
+      // is encodeURIComponent'd — so '%' becomes '%25', leaving 'Bj%25C3%25B6rk' in the fetch URL.
+      const rawUrl = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(rawUrl).toContain('Bj%25C3%25B6rk');
     });
   });
 });
