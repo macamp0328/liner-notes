@@ -84,23 +84,23 @@ Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At)
 
 ### Relationships
 
-| Relationship         | From → To                   | Properties                                                              |
-| -------------------- | --------------------------- | ----------------------------------------------------------------------- |
-| `RELEASED_BY`        | Release → Artist            | `role`                                                                  |
-| `CREDITED_ON`        | Musician → Release or Track | `role`, `displayRole`, `creditedAs`, `scope` (`"release"` or `"track"`) |
-| `PRODUCED_BY`        | Release → Producer          |                                                                         |
-| `ENGINEERED_BY`      | Release → Engineer          |                                                                         |
-| `ON_LABEL`           | Release → Label             | `catalogNumber`                                                         |
-| `IN_GENRE`           | Release → Genre             |                                                                         |
-| `IN_STYLE`           | Release → Style             |                                                                         |
-| `FROM_COUNTRY`       | Release → Country           |                                                                         |
-| `RECORDED_AT`        | Release → Studio            |                                                                         |
-| `HAS_TRACK`          | Release → Track             | `trackNumber`                                                           |
-| `PERFORMED_BY`       | Track → Artist              | `role`                                                                  |
-| `SAME_PERSON_AS`     | Musician → Artist           |                                                                         |
-| `MEMBER_OF`          | Artist → Artist             | `startYear`, `endYear`                                                  |
-| `SUBSIDIARY_OF`      | Label → Label               |                                                                         |
-| `VERSION_OF`         | Release → Release           |                                                                         |
+| Relationship     | From → To                   | Properties                                                              |
+| ---------------- | --------------------------- | ----------------------------------------------------------------------- |
+| `RELEASED_BY`    | Release → Artist            | `role`                                                                  |
+| `CREDITED_ON`    | Musician → Release or Track | `role`, `displayRole`, `creditedAs`, `scope` (`"release"` or `"track"`) |
+| `PRODUCED_BY`    | Release → Producer          |                                                                         |
+| `ENGINEERED_BY`  | Release → Engineer          |                                                                         |
+| `ON_LABEL`       | Release → Label             | `catalogNumber`                                                         |
+| `IN_GENRE`       | Release → Genre             |                                                                         |
+| `IN_STYLE`       | Release → Style             |                                                                         |
+| `FROM_COUNTRY`   | Release → Country           |                                                                         |
+| `RECORDED_AT`    | Release → Studio            |                                                                         |
+| `HAS_TRACK`      | Release → Track             | `trackNumber`                                                           |
+| `PERFORMED_BY`   | Track → Artist              | `role`                                                                  |
+| `SAME_PERSON_AS` | Musician → Artist           |                                                                         |
+| `MEMBER_OF`      | Artist → Artist             | `startYear`, `endYear`                                                  |
+| `SUBSIDIARY_OF`  | Label → Label               |                                                                         |
+| `VERSION_OF`     | Release → Release           |                                                                         |
 
 ### Constraints & Indexes
 
