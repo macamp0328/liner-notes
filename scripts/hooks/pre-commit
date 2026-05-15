@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Auto-format with Prettier before every commit — prevents CI format failures.
+# Install: cp scripts/hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+set -e
+# node_modules live at the main repo root; worktrees don't have their own copy.
+# Use the absolute prettier binary path so we can stay in the worktree for git add -u.
+REPO_ROOT="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
+PRETTIER="$REPO_ROOT/node_modules/.bin/prettier"
+"$PRETTIER" --write . --log-level warn
+git add -u
