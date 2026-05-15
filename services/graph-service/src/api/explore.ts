@@ -314,7 +314,7 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
       },
     },
     async (request, reply): Promise<ExploreRelease[] | ErrorReply> => {
-      if (!/^\d{4}s$/.test(request.params.decade)) {
+      if (!/^\d{3}0s$/.test(request.params.decade)) {
         return reply.code(400).send({
           error: { code: 'INVALID_DECADE', message: 'decade must be in the format 1970s' },
         });

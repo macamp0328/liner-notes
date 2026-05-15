@@ -128,14 +128,6 @@ describe('mergeReleaseGraph', () => {
     expect(calls.some(([q]) => q.includes('ON_LABEL'))).toBe(true);
   });
 
-  it('merges Decade and RECORDED_IN_DECADE relationship', async () => {
-    await mergeReleaseGraph(driver, release13570466 as unknown as DiscogsRelease);
-
-    const calls = (session.run as ReturnType<typeof vi.fn>).mock.calls as [string, unknown][];
-    expect(calls.some(([q]) => q.includes('MERGE (d:Decade'))).toBe(true);
-    expect(calls.some(([q]) => q.includes('RECORDED_IN_DECADE'))).toBe(true);
-  });
-
   it('merges Studio nodes for entity_type 23 and 27 companies', async () => {
     // release-13570466 has Bear Creek Studios as both Recorded At (23) and Mixed At (27)
     await mergeReleaseGraph(driver, release13570466 as unknown as DiscogsRelease);
@@ -252,34 +244,6 @@ describe('mergeReleaseGraph', () => {
     const releaseCall = calls.find(([q]) => q.includes('MERGE (r:Release'));
     expect(releaseCall).toBeDefined();
     expect(releaseCall![1]['pressingYear']).toBeNull();
-  });
-
-  it('does not MERGE RECORDED_IN_DECADE when release.year is 0', async () => {
-    const unknownYearRelease = {
-      ...(release9999992 as unknown as DiscogsRelease),
-      year: 0,
-    };
-    await mergeReleaseGraph(driver, unknownYearRelease);
-
-    const calls = (session.run as ReturnType<typeof vi.fn>).mock.calls as [string, unknown][];
-    // The DELETE cleanup query also references RECORDED_IN_DECADE — check that no MERGE is made
-    expect(calls.some(([q]) => q.includes('MERGE') && q.includes('RECORDED_IN_DECADE'))).toBe(
-      false,
-    );
-  });
-
-  it('deletes stale RECORDED_IN_DECADE relationships when release.year is 0', async () => {
-    const unknownYearRelease = {
-      ...(release9999992 as unknown as DiscogsRelease),
-      year: 0,
-    };
-    await mergeReleaseGraph(driver, unknownYearRelease);
-
-    const calls = (session.run as ReturnType<typeof vi.fn>).mock.calls as [string, unknown][];
-    const deleteCall = calls.find(
-      ([q]) => q.includes('DELETE') && q.includes('RECORDED_IN_DECADE'),
-    );
-    expect(deleteCall).toBeDefined();
   });
 
   // -------------------------------------------------------------------------

@@ -186,6 +186,13 @@ describe('explore routes', () => {
       const body = JSON.parse(response.payload) as { error: { code: string } };
       expect(body.error.code).toBe('INVALID_DECADE');
     });
+
+    it('returns 400 for non-decade-boundary year (e.g. 1975s)', async () => {
+      const response = await app.inject({ method: 'GET', url: '/api/v1/explore/decade/1975s' });
+      expect(response.statusCode).toBe(400);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('INVALID_DECADE');
+    });
   });
 
   // GET /api/v1/explore/year/:year

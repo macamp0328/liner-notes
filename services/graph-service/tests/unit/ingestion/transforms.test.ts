@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import {
-  deriveDecade,
   parseTrackNumber,
   parseDisplayRole,
   parseRoleCategory,
@@ -20,27 +19,6 @@ import type {
   DiscogsIdentifier,
   DiscogsTracklistEntry,
 } from '../../../src/ingestion/types.js';
-
-// ---------------------------------------------------------------------------
-// deriveDecade
-// ---------------------------------------------------------------------------
-describe('deriveDecade', () => {
-  it('derives the correct decade for mid-decade years', () => {
-    expect(deriveDecade(1972)).toBe('1970s');
-    expect(deriveDecade(1957)).toBe('1950s');
-    expect(deriveDecade(2023)).toBe('2020s');
-  });
-
-  it('handles exact decade boundary years', () => {
-    expect(deriveDecade(1980)).toBe('1980s');
-    expect(deriveDecade(2000)).toBe('2000s');
-    expect(deriveDecade(1990)).toBe('1990s');
-  });
-
-  it('handles the 2010s', () => {
-    expect(deriveDecade(2019)).toBe('2010s');
-  });
-});
 
 // ---------------------------------------------------------------------------
 // parseTrackNumber

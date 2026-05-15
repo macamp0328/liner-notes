@@ -75,7 +75,6 @@ const sampleReleaseFull: ReleaseFull = {
   genres: ['Rock'],
   styles: ['Indie Rock'],
   country: 'US',
-  decade: '2010s',
   studios: ['Bear Creek Studios'],
   tracks: [
     {

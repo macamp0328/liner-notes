@@ -200,7 +200,6 @@ describe('getReleaseById', () => {
       genres: ['Rock'],
       styles: ['Indie Rock'],
       country: 'US',
-      decade: '2010s',
       studios: ['Bear Creek Studios'],
       credits: [],
     });
@@ -242,7 +241,6 @@ describe('getReleaseById', () => {
     expect(release?.genres).toEqual(['Rock']);
     expect(release?.styles).toEqual(['Indie Rock']);
     expect(release?.country).toBe('US');
-    expect(release?.decade).toBe('2010s');
     expect(release?.studios).toEqual(['Bear Creek Studios']);
     expect(release?.tracks).toHaveLength(1);
     expect(release?.tracks[0]).toMatchObject({ position: 'A1', title: 'Contact' });
@@ -272,7 +270,6 @@ describe('getReleaseById', () => {
       genres: [null],
       styles: [null],
       country: null,
-      decade: null,
       studios: [null],
       credits: [{ name: null, role: null, displayRole: null, creditedAs: null }],
     });

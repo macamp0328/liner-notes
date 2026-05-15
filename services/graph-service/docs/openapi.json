@@ -69,7 +69,7 @@
       "post": {
         "summary": "Trigger the full Discogs → Neo4j ingestion pipeline",
         "tags": ["admin"],
-        "description": "Runs asynchronously — returns 202 immediately and processes in the background.\n\n**Steps run automatically:**\n1. Fetch & MERGE all releases from the Discogs collection\n2. Lyrics enrichment (LRCLIB primary, Genius fallback)\n3. Original year enrichment (from Discogs master API)\n4. Artist genres/styles aggregation (rolled up from releases)\n5. Track version deduplication (IS_VERSION_OF relationships)\n6. Artist profiles enrichment (realName + profile from Discogs artist API)\n\n**Not included — must be triggered separately:**\n- `POST /api/v1/admin/nationality/enrich` — nationality data from MusicBrainz + Wikidata",
+        "description": "Runs asynchronously — returns 202 immediately and processes in the background.\n\n**Steps run automatically:**\n1. Fetch & MERGE all releases from the Discogs collection\n2. Lyrics enrichment (LRCLIB primary, Genius fallback)\n3. Master data enrichment (originalYear + global pressing countries/formats via Discogs master API)\n4. Artist genres/styles aggregation (rolled up from releases)\n5. Track version deduplication (IS_VERSION_OF relationships)\n6. Artist profiles enrichment (realName + profile from Discogs artist API)\n\n**Not included — must be triggered separately:**\n- `POST /api/v1/admin/nationality/enrich` — nationality data from MusicBrainz + Wikidata",
         "security": [
           {
             "bearerAuth": []
@@ -732,6 +732,126 @@
         }
       }
     },
+    "/api/v1/admin/master-data/enrich": {
+      "post": {
+        "summary": "Enrich Master nodes with global pressing countries and formats",
+        "tags": ["admin"],
+        "description": "Enrich Master nodes with global pressing countries and formats from the Discogs versions API. Also fetches originalYear. **This step runs automatically as part of `POST /ingest`.** Use this endpoint to run it in isolation without a full re-ingest. Deduplicates by masterDiscogsId — releases sharing the same master trigger only one API call. Requires `DISCOGS_TOKEN` env var.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["enriched", "skipped", "failed", "durationMs"],
+                      "properties": {
+                        "enriched": {
+                          "type": "integer"
+                        },
+                        "skipped": {
+                          "type": "integer"
+                        },
+                        "failed": {
+                          "type": "integer"
+                        },
+                        "durationMs": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/releases": {
       "get": {
         "summary": "Paginated list of all releases in the collection",
@@ -978,10 +1098,6 @@
                           }
                         },
                         "country": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "decade": {
                           "type": "string",
                           "nullable": true
                         },
@@ -2079,6 +2195,58 @@
                         "type": "string"
                       },
                       "releaseDiscogsId": {
+                        "type": "integer"
+                      },
+                      "countryCount": {
+                        "type": "integer"
+                      },
+                      "countries": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/releases/most-pressed": {
+      "get": {
+        "summary": "Albums in this collection with the widest global pressing reach. Requires master data enrichment to have been run.",
+        "tags": ["explore"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 10
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["albumTitle", "masterDiscogsId", "countryCount", "countries"],
+                    "properties": {
+                      "albumTitle": {
+                        "type": "string"
+                      },
+                      "masterDiscogsId": {
                         "type": "integer"
                       },
                       "countryCount": {
