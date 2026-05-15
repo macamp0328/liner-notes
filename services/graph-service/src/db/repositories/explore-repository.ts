@@ -254,21 +254,22 @@ export async function getReleasesByDecade(
   driver: Driver,
   decade: string,
 ): Promise<ExploreRelease[]> {
-  const startYear = parseInt(decade.slice(0, 4), 10);
+  const startYear = neo4j.int(parseInt(decade.slice(0, 4), 10));
+  const endYear = neo4j.int(parseInt(decade.slice(0, 4), 10) + 10);
   const session = driver.session();
   try {
     const result = await session.run(
       `
       MATCH (r:Release)
       WHERE coalesce(r.originalYear, r.pressingYear) >= $startYear
-        AND coalesce(r.originalYear, r.pressingYear) < $startYear + 10
+        AND coalesce(r.originalYear, r.pressingYear) < $endYear
       OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
       RETURN r.discogsId AS discogsId, r.title AS title, a.name AS artist,
              coalesce(r.originalYear, r.pressingYear) AS pressingYear,
              r.format AS format, r.thumbUrl AS thumbUrl
       ORDER BY pressingYear
       `,
-      { startYear },
+      { startYear, endYear },
     );
     return result.records.map(mapExploreRelease);
   } finally {
