@@ -2,7 +2,7 @@ import type { Logger } from './discogs-client.js';
 
 export interface WikidataClientConfig {
   userAgent: string;
-  /** Milliseconds to sleep after every successful request. Keep at or below 1 req/sec. */
+  /** Milliseconds to sleep after every request (successful or skipped). Keep at or below 1 req/sec. */
   delayMs: number;
   /** Initial backoff ms on 429/502/503 retries. Defaults to 2000ms. Set to 0 in tests. */
   backoffBaseMs?: number;
@@ -66,10 +66,15 @@ export class WikidataClient {
         });
 
         if (response.status === 429 || response.status === 503 || response.status === 502) {
+          if (attempt >= MAX_RETRIES) break;
+          const retryAfterHeader = response.headers.get('Retry-After');
+          const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
+          const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
+          const waitMs = Math.max(backoffMs, retryAfterMs);
           this.log.warn(
-            `[wikidata-client] HTTP ${response.status} for discogsId=${discogsId} on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${backoffMs}ms`,
+            `[wikidata-client] HTTP ${response.status} for discogsId=${discogsId} on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${waitMs}ms`,
           );
-          await this.sleep(backoffMs);
+          await this.sleep(waitMs);
           backoffMs = Math.min(backoffMs * 2, 32_000);
           attempt++;
           continue;
@@ -79,7 +84,6 @@ export class WikidataClient {
           this.log.warn(
             `[wikidata-client] HTTP ${response.status} for discogsId=${discogsId} — skipping`,
           );
-          await this.sleep(this.delayMs);
           return null;
         }
 

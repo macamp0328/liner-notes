@@ -19,12 +19,15 @@ function makeOkResponse(body: unknown): Response {
   } as unknown as Response;
 }
 
-function makeErrorResponse(status: number): Response {
+function makeErrorResponse(status: number, headers?: Record<string, string>): Response {
   return {
     ok: false,
     status,
     statusText: 'Error',
     json: vi.fn().mockResolvedValue({}),
+    headers: {
+      get: (name: string) => headers?.[name] ?? null,
+    },
   } as unknown as Response;
 }
 
@@ -100,7 +103,7 @@ describe('WikidataClient', () => {
   });
 
   it('returns null after exhausting all retries on persistent 502', async () => {
-    // MAX_RETRIES=3 means 4 attempts total
+    // MAX_RETRIES=3: attempts 0,1,2 retry; attempt 3 breaks immediately without a 4th fetch
     fetchSpy
       .mockResolvedValueOnce(makeErrorResponse(502))
       .mockResolvedValueOnce(makeErrorResponse(502))
@@ -109,6 +112,26 @@ describe('WikidataClient', () => {
     const result = await client.getCountryByDiscogsId(1);
     expect(result).toBeNull();
     expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
+  it('honors Retry-After header on 429 when it exceeds backoff', async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.fn();
+    const clientWithLogger = new WikidataClient({
+      userAgent: 'liner-notes/test',
+      delayMs: 0,
+      backoffBaseMs: 0,
+      logger: { info: vi.fn(), warn: warnSpy, error: vi.fn() },
+    });
+    fetchSpy
+      .mockResolvedValueOnce(makeErrorResponse(429, { 'Retry-After': '5' }))
+      .mockResolvedValueOnce(makeOkResponse(makeSparqlResponse('BR')));
+    const resultPromise = clientWithLogger.getCountryByDiscogsId(1);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+    expect(result).toBe('BR');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('5000ms'));
+    vi.useRealTimers();
   });
 
   it('returns null on network error (does not throw)', async () => {
