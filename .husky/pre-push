@@ -1,0 +1,3 @@
+pnpm --filter graph-service lint
+pnpm --filter graph-service typecheck
+pnpm --filter graph-service test:unit

@@ -23,11 +23,11 @@ docker-compose up
 # Dev server only (hot-reload) — requires Neo4j already running (see .env.example for NEO4J_URI/USER/PASSWORD)
 pnpm --filter graph-service dev
 
-# Pre-commit gate — run in this order before every commit
-pnpm prettier --check .
-pnpm --filter graph-service lint
-pnpm --filter graph-service typecheck
-pnpm --filter graph-service test:unit
+# Hooks (auto-installed on pnpm install via husky):
+#   pre-commit  — prettier via lint-staged (runs on every commit, staged files only)
+#   pre-push    — lint + typecheck + test:unit (runs before every push)
+# Only commit-msg needs manual install:
+#   cp scripts/hooks/commit-msg .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg
 # Commit message must follow Conventional Commits.
 # CI rule: subject-case never [sentence-case, start-case, pascal-case, upper-case]
 # In practice: the subject must BEGIN with a lowercase letter; mid-word capitals are fine.
@@ -35,11 +35,6 @@ pnpm --filter graph-service test:unit
 #   Valid types: feat fix chore docs test refactor perf ci style build revert
 #   WRONG: "feat: OpenAPI docs" (O is uppercase — sentence-case)
 #   RIGHT:  "feat: openAPI docs" (starts lowercase; 'API' mid-word is fine)
-# Install the local enforcement hook (blocks bad commits before they reach CI):
-#   cp scripts/hooks/commit-msg .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg
-
-# Fix formatting in place
-pnpm prettier --write .
 
 # Tests
 pnpm --filter graph-service test              # all tests
