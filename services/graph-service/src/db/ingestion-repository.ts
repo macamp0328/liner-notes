@@ -12,7 +12,6 @@ import type {
   DiscogsTracklistEntry,
 } from '../ingestion/types.js';
 import {
-  deriveDecade,
   extractBarcode,
   extractStudios,
   extractThumbUrl,
@@ -59,16 +58,6 @@ export async function mergeReleaseGraph(driver: Driver, release: DiscogsRelease)
     if (release.country) {
       const normalizedCountries = normalizeCountry(release.country);
       await mergeCountry(session, release.id, normalizedCountries);
-    }
-    if (release.year > 0) {
-      await mergeDecade(session, release.id, release.year);
-    } else {
-      // Remove any stale RECORDED_IN_DECADE link created before the year-0 guard was added.
-      await session.run(
-        `MATCH (r:Release {discogsId: $discogsId})-[rel:RECORDED_IN_DECADE]->(:Decade)
-         DELETE rel`,
-        { discogsId: neo4j.int(release.id) },
-      );
     }
     await mergeStudios(session, release.id, release.companies ?? []);
     const tracks = filterTracks(release.tracklist);
@@ -234,17 +223,6 @@ async function mergeCountry(
       { name: country, releaseId: neo4j.int(releaseId) },
     );
   }
-}
-
-async function mergeDecade(session: Session, releaseId: number, year: number): Promise<void> {
-  const decade = deriveDecade(year);
-  await session.run(
-    `MERGE (d:Decade {name: $name})
-     WITH d
-     MATCH (r:Release {discogsId: $releaseId})
-     MERGE (r)-[:RECORDED_IN_DECADE]->(d)`,
-    { name: decade, releaseId: neo4j.int(releaseId) },
-  );
 }
 
 async function mergeStudios(

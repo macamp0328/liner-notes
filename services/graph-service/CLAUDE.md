@@ -75,13 +75,12 @@ Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At)
 | `Genre`    | `name` (unique)                                                                                                                      |
 | `Style`    | `name` (unique)                                                                                                                      |
 | `Country`  | `name` (unique)                                                                                                                      |
-| `Decade`   | `name` (unique) — e.g. `"1970s"`                                                                                                     |
 | `Studio`   | `name`, `location`                                                                                                                   |
 | `Musician` | `discogsId` (if available), `name`                                                                                                   |
 | `Producer` | `discogsId` (if available), `name`                                                                                                   |
 | `Engineer` | `discogsId` (if available), `name`                                                                                                   |
 
-> `pressingYear` is the year this specific pressing was manufactured (from Discogs `release.year`). `originalYear` is the year the album was first released anywhere, fetched from the Discogs master release endpoint and stored as a post-ingestion enrichment step. Queries that order or filter by release date should prefer `coalesce(r.originalYear, r.pressingYear)`. `pressingYear` is also used to derive the `RECORDED_IN_DECADE` relationship.
+> `pressingYear` is the year this specific pressing was manufactured (from Discogs `release.year`). `originalYear` is the year the album was first released anywhere, fetched from the Discogs master release endpoint and stored as a post-ingestion enrichment step. Queries that order or filter by release date should prefer `coalesce(r.originalYear, r.pressingYear)`.
 
 ### Relationships
 
@@ -95,7 +94,6 @@ Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At)
 | `IN_GENRE`           | Release → Genre             |                                                                         |
 | `IN_STYLE`           | Release → Style             |                                                                         |
 | `FROM_COUNTRY`       | Release → Country           |                                                                         |
-| `RECORDED_IN_DECADE` | Release → Decade            |                                                                         |
 | `RECORDED_AT`        | Release → Studio            |                                                                         |
 | `HAS_TRACK`          | Release → Track             | `trackNumber`                                                           |
 | `PERFORMED_BY`       | Track → Artist              | `role`                                                                  |
@@ -113,7 +111,6 @@ CREATE CONSTRAINT ON (l:Label) ASSERT l.discogsId IS UNIQUE;
 CREATE CONSTRAINT ON (g:Genre) ASSERT g.name IS UNIQUE;
 CREATE CONSTRAINT ON (s:Style) ASSERT s.name IS UNIQUE;
 CREATE CONSTRAINT ON (c:Country) ASSERT c.name IS UNIQUE;
-CREATE CONSTRAINT ON (d:Decade) ASSERT d.name IS UNIQUE;
 
 CALL db.index.fulltext.createNodeIndex("trackLyrics", ["Track"], ["lyrics", "title"]);
 
@@ -192,9 +189,8 @@ Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
 4. For each release:
    a. GET /releases/{release_id}
    b. Extract all entities
-   c. Derive Decade from year (e.g. 1972 → "1970s")
-   d. MERGE all nodes and relationships
-   e. Sleep DISCOGS_REQUEST_DELAY_MS
+   c. MERGE all nodes and relationships
+   d. Sleep DISCOGS_REQUEST_DELAY_MS
 5. Lyrics enrichment:
    a. For each Track without lyrics → query LRCLIB
    b. Fallback to Genius API if LRCLIB returns nothing

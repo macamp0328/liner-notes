@@ -136,7 +136,6 @@ const releaseFullSchema = {
     genres: { type: 'array', items: { type: 'string' } },
     styles: { type: 'array', items: { type: 'string' } },
     country: { type: 'string', nullable: true },
-    decade: { type: 'string', nullable: true },
     studios: { type: 'array', items: { type: 'string' } },
     tracks: { type: 'array', items: trackSchema },
     credits: {

@@ -8,7 +8,6 @@ const statements = [
   'CREATE CONSTRAINT genre_name IF NOT EXISTS FOR (g:Genre) REQUIRE g.name IS UNIQUE',
   'CREATE CONSTRAINT style_name IF NOT EXISTS FOR (s:Style) REQUIRE s.name IS UNIQUE',
   'CREATE CONSTRAINT country_name IF NOT EXISTS FOR (c:Country) REQUIRE c.name IS UNIQUE',
-  'CREATE CONSTRAINT decade_name IF NOT EXISTS FOR (d:Decade) REQUIRE d.name IS UNIQUE',
   'CREATE FULLTEXT INDEX trackLyrics IF NOT EXISTS FOR (t:Track) ON EACH [t.lyrics, t.title]',
   'CREATE INDEX release_pressing_year IF NOT EXISTS FOR (r:Release) ON (r.pressingYear)',
   // One-time migration: copy r.year → r.pressingYear for existing nodes created before the rename.
