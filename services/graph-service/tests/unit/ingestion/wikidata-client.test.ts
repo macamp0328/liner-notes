@@ -34,7 +34,7 @@ describe('WikidataClient', () => {
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis, 'fetch');
-    client = new WikidataClient({ userAgent: 'liner-notes/test', delayMs: 0 });
+    client = new WikidataClient({ userAgent: 'liner-notes/test', delayMs: 0, backoffBaseMs: 0 });
   });
 
   afterEach(() => {
@@ -65,16 +65,50 @@ describe('WikidataClient', () => {
     expect(result).toBe('US');
   });
 
-  it('returns null on 404', async () => {
+  it('returns null on 404 without retrying', async () => {
     fetchSpy.mockResolvedValueOnce(makeErrorResponse(404));
     const result = await client.getCountryByDiscogsId(1);
     expect(result).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('returns null on 429 (rate limit)', async () => {
-    fetchSpy.mockResolvedValueOnce(makeErrorResponse(429));
+  it('retries on 429 and succeeds on the next attempt', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(makeErrorResponse(429))
+      .mockResolvedValueOnce(makeOkResponse(makeSparqlResponse('FR')));
+    const result = await client.getCountryByDiscogsId(1);
+    expect(result).toBe('FR');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries on 502 and succeeds on the next attempt', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(makeErrorResponse(502))
+      .mockResolvedValueOnce(makeOkResponse(makeSparqlResponse('DE')));
+    const result = await client.getCountryByDiscogsId(1);
+    expect(result).toBe('DE');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries on 503 and succeeds on the next attempt', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(makeErrorResponse(503))
+      .mockResolvedValueOnce(makeOkResponse(makeSparqlResponse('JP')));
+    const result = await client.getCountryByDiscogsId(1);
+    expect(result).toBe('JP');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns null after exhausting all retries on persistent 502', async () => {
+    // MAX_RETRIES=3 means 4 attempts total
+    fetchSpy
+      .mockResolvedValueOnce(makeErrorResponse(502))
+      .mockResolvedValueOnce(makeErrorResponse(502))
+      .mockResolvedValueOnce(makeErrorResponse(502))
+      .mockResolvedValueOnce(makeErrorResponse(502));
     const result = await client.getCountryByDiscogsId(1);
     expect(result).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
   });
 
   it('returns null on network error (does not throw)', async () => {
