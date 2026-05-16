@@ -17,6 +17,8 @@ import { buildViafClientFromEnv } from '../ingestion/viaf-client.js';
 import { enrichArtistNationality } from '../enrichment/artist-nationality.js';
 import { resetNationalityEnrichment } from '../db/artist-nationality-repository.js';
 import { enrichMasterData } from '../enrichment/master-data.js';
+import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
+import { resetMbReleaseEventsEnrichment } from '../db/mb-release-events-repository.js';
 
 const errorShape = {
   type: 'object',
@@ -63,6 +65,7 @@ const jobStateShape = {
 let isEnriching = false;
 let isEnrichingNationality = false;
 let isEnrichingMasterData = false;
+let isEnrichingMbReleaseEvents = false;
 
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
@@ -515,6 +518,144 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       } finally {
         isEnrichingMasterData = false;
       }
+    },
+  );
+
+  fastify.post<{
+    Reply:
+      | {
+          data: {
+            mastersProcessed: number;
+            mastersSkipped: number;
+            mastersFailed: number;
+            eventsWritten: number;
+            durationMs: number;
+          };
+        }
+      | { error: { code: string; message: string } };
+  }>(
+    '/mb-release-events/enrich',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Enrich Master nodes with MusicBrainz release events (MB_RELEASED_IN)',
+        description:
+          'For each unenriched Master node, walks Discogs master ID → MusicBrainz release group → ' +
+          'all official releases → release events, writing `MB_RELEASED_IN` relationships to `Country` ' +
+          'nodes with ISO-3166-1 alpha-2 codes and release dates. Blocks until complete.\n\n' +
+          '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n' +
+          'Uses `mbReleaseEventsFetched = true` as an idempotency marker — already-processed Master nodes ' +
+          'are skipped. Run `POST /api/v1/admin/mb-release-events/reset` first to re-process all nodes.\n\n' +
+          'Events without a country code are skipped (only ISO-coded events can be linked to Country nodes). ' +
+          'Same country with different release IDs creates separate relationships, enabling `min(r.date)` ' +
+          'queries for first-release-per-country.\n\n' +
+          'Requires `MUSICBRAINZ_USER_AGENT` env var.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: [
+                  'mastersProcessed',
+                  'mastersSkipped',
+                  'mastersFailed',
+                  'eventsWritten',
+                  'durationMs',
+                ],
+                properties: {
+                  mastersProcessed: { type: 'integer' },
+                  mastersSkipped: { type: 'integer' },
+                  mastersFailed: { type: 'integer' },
+                  eventsWritten: { type: 'integer' },
+                  durationMs: { type: 'integer' },
+                },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+          503: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (request, reply) => {
+      if (isEnrichingMbReleaseEvents) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message: 'MusicBrainz release event enrichment already in progress',
+          },
+        });
+      }
+
+      const mbClient = buildMusicBrainzClientFromEnv(request.log);
+      if (!mbClient) {
+        return reply.code(503).send({
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'MUSICBRAINZ_USER_AGENT not configured',
+          },
+        });
+      }
+
+      isEnrichingMbReleaseEvents = true;
+      try {
+        const summary = await enrichMbReleaseEvents(mbClient, getDriver(), request.log);
+        return reply.send({ data: summary });
+      } finally {
+        isEnrichingMbReleaseEvents = false;
+      }
+    },
+  );
+
+  fastify.post<{
+    Reply: { data: { reset: number } } | { error: { code: string; message: string } };
+  }>(
+    '/mb-release-events/reset',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Reset MusicBrainz release event enrichment markers for a full re-run',
+        description:
+          'Removes the `mbReleaseEventsFetched` property from all Master nodes and deletes all ' +
+          '`MB_RELEASED_IN` relationships, causing the next ' +
+          '`POST /api/v1/admin/mb-release-events/enrich` call to re-process every master from scratch.\n\n' +
+          'This endpoint is blocked while enrichment is running.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['reset'],
+                properties: { reset: { type: 'integer' } },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => {
+      if (isEnrichingMbReleaseEvents) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message:
+              'MusicBrainz release event enrichment is currently running — wait for it to finish before resetting',
+          },
+        });
+      }
+      const reset = await resetMbReleaseEventsEnrichment(getDriver());
+      return reply.send({ data: { reset } });
     },
   );
 }

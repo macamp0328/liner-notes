@@ -203,6 +203,233 @@ describe('MusicBrainzClient', () => {
   });
 
   // -------------------------------------------------------------------------
+  // getReleaseGroupMbidByMasterDiscogsId
+  // -------------------------------------------------------------------------
+  describe('getReleaseGroupMbidByMasterDiscogsId', () => {
+    it('returns the release group MBID when a relation is found', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'url-uuid',
+          resource: 'https://www.discogs.com/master/1234',
+          relations: [
+            {
+              type: 'release group',
+              direction: 'backward',
+              'release-group': { id: 'rg-mbid-abc' },
+            },
+          ],
+        }),
+      );
+
+      const result = await client.getReleaseGroupMbidByMasterDiscogsId(1234);
+
+      expect(result).toBe('rg-mbid-abc');
+      const urlCall = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(urlCall).toContain('/url');
+      expect(urlCall).toContain(encodeURIComponent('https://www.discogs.com/master/1234'));
+      expect(urlCall).toContain('release-group-rels');
+    });
+
+    it('returns null when the master is not in MusicBrainz (404)', async () => {
+      fetchSpy.mockResolvedValueOnce(makeErrorResponse(404, 'Not Found'));
+      const result = await client.getReleaseGroupMbidByMasterDiscogsId(9999);
+      expect(result).toBeNull();
+    });
+
+    it('returns null when relations list has no release-group entry', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'url-uuid',
+          resource: 'https://www.discogs.com/master/1234',
+          relations: [
+            { type: 'artist', direction: 'backward', artist: { id: 'a1', name: 'Test' } },
+          ],
+        }),
+      );
+      const result = await client.getReleaseGroupMbidByMasterDiscogsId(1234);
+      expect(result).toBeNull();
+    });
+
+    it('returns null on network error', async () => {
+      fetchSpy.mockRejectedValueOnce(new Error('Network failure'));
+      const result = await client.getReleaseGroupMbidByMasterDiscogsId(1);
+      expect(result).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getReleaseEventsByReleaseGroupMbid
+  // -------------------------------------------------------------------------
+  describe('getReleaseEventsByReleaseGroupMbid', () => {
+    it('returns release events extracted from a single page', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          'release-count': 1,
+          releases: [
+            {
+              id: 'rel-001',
+              'release-events': [
+                { date: '1969-09-26', area: { 'iso-3166-1-codes': ['GB'] } },
+                { date: '1969-10-01', area: { 'iso-3166-1-codes': ['US'] } },
+              ],
+              media: [{ format: 'Vinyl' }],
+            },
+          ],
+        }),
+      );
+
+      const events = await client.getReleaseEventsByReleaseGroupMbid('rg-mbid');
+
+      expect(events).toHaveLength(2);
+      expect(events[0]).toEqual({
+        mbReleaseId: 'rel-001',
+        countryCode: 'GB',
+        date: '1969-09-26',
+        formats: ['Vinyl'],
+      });
+      expect(events[1]).toEqual({
+        mbReleaseId: 'rel-001',
+        countryCode: 'US',
+        date: '1969-10-01',
+        formats: ['Vinyl'],
+      });
+    });
+
+    it('paginates until all releases are collected', async () => {
+      fetchSpy
+        .mockResolvedValueOnce(
+          makeOkResponse({
+            'release-count': 2,
+            releases: [
+              {
+                id: 'rel-001',
+                'release-events': [{ date: '1969', area: { 'iso-3166-1-codes': ['GB'] } }],
+                media: [],
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          makeOkResponse({
+            'release-count': 2,
+            releases: [
+              {
+                id: 'rel-002',
+                'release-events': [{ date: '1970', area: { 'iso-3166-1-codes': ['US'] } }],
+                media: [],
+              },
+            ],
+          }),
+        );
+
+      const events = await client.getReleaseEventsByReleaseGroupMbid('rg-mbid');
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(events).toHaveLength(2);
+      expect(events[0]?.countryCode).toBe('GB');
+      expect(events[1]?.countryCode).toBe('US');
+    });
+
+    it('filters out events where both countryCode and date are null', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          'release-count': 1,
+          releases: [
+            {
+              id: 'rel-001',
+              'release-events': [
+                { date: null, area: null },
+                { date: '1987', area: { 'iso-3166-1-codes': ['GB'] } },
+              ],
+              media: [],
+            },
+          ],
+        }),
+      );
+
+      const events = await client.getReleaseEventsByReleaseGroupMbid('rg-mbid');
+
+      expect(events).toHaveLength(1);
+      expect(events[0]?.date).toBe('1987');
+    });
+
+    it('stores events with a date but no country code (countryCode null)', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          'release-count': 1,
+          releases: [
+            {
+              id: 'rel-001',
+              'release-events': [{ date: '2009', area: null }],
+              media: [],
+            },
+          ],
+        }),
+      );
+
+      const events = await client.getReleaseEventsByReleaseGroupMbid('rg-mbid');
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toEqual({
+        mbReleaseId: 'rel-001',
+        countryCode: null,
+        date: '2009',
+        formats: [],
+      });
+    });
+
+    it('deduplicates formats from media', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          'release-count': 1,
+          releases: [
+            {
+              id: 'rel-001',
+              'release-events': [{ date: '1969', area: { 'iso-3166-1-codes': ['US'] } }],
+              media: [{ format: 'Vinyl' }, { format: 'Vinyl' }, { format: 'CD' }],
+            },
+          ],
+        }),
+      );
+
+      const events = await client.getReleaseEventsByReleaseGroupMbid('rg-mbid');
+
+      expect(events[0]?.formats).toEqual(['Vinyl', 'CD']);
+    });
+
+    it('stores partial dates as strings without modification', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          'release-count': 1,
+          releases: [
+            {
+              id: 'rel-001',
+              'release-events': [{ date: '1969', area: { 'iso-3166-1-codes': ['GB'] } }],
+              media: [],
+            },
+          ],
+        }),
+      );
+
+      const events = await client.getReleaseEventsByReleaseGroupMbid('rg-mbid');
+
+      expect(events[0]?.date).toBe('1969');
+    });
+
+    it('returns empty array when release has no release-events', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          'release-count': 1,
+          releases: [{ id: 'rel-001', media: [] }],
+        }),
+      );
+
+      const events = await client.getReleaseEventsByReleaseGroupMbid('rg-mbid');
+      expect(events).toHaveLength(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // User-Agent header
   // -------------------------------------------------------------------------
   it('sends the configured User-Agent header on every request', async () => {
