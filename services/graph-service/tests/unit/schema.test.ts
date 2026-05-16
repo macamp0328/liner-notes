@@ -24,9 +24,9 @@ describe('applySchema', () => {
     } as unknown as Driver;
   });
 
-  it('opens and closes a fresh session for each of the 19 statements', async () => {
+  it('opens and closes a fresh session for each of the 22 statements', async () => {
     await applySchema(driver);
-    expect(sessions).toHaveLength(19);
+    expect(sessions).toHaveLength(22);
     for (const s of sessions) {
       expect(s.run).toHaveBeenCalledTimes(1);
       expect(s.close).toHaveBeenCalledTimes(1);
@@ -52,6 +52,14 @@ describe('applySchema', () => {
     const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
     expect(stmts.some((s) => s.includes('releaseArtistTrackSearch'))).toBe(true);
     expect(stmts.some((s) => s.includes('lyricsSearch'))).toBe(true);
+  });
+
+  it('creates the track MusicBrainz indexes', async () => {
+    await applySchema(driver);
+    const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
+    expect(stmts.some((s) => s.includes('track_recording_mbid'))).toBe(true);
+    expect(stmts.some((s) => s.includes('track_isrc'))).toBe(true);
+    expect(stmts.some((s) => s.includes('track_musicbrainz_fetched'))).toBe(true);
   });
 
   it('closes the session even when run() throws', async () => {

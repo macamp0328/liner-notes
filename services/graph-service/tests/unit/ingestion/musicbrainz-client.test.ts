@@ -442,6 +442,209 @@ describe('MusicBrainzClient', () => {
   });
 
   // -------------------------------------------------------------------------
+  // getReleaseMbidByDiscogsReleaseId
+  // -------------------------------------------------------------------------
+  describe('getReleaseMbidByDiscogsReleaseId', () => {
+    it('returns the release MBID when a discogs relation is found', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'url-uuid',
+          resource: 'https://www.discogs.com/release/567',
+          relations: [{ type: 'discogs', direction: 'backward', release: { id: 'rel-mbid-xyz' } }],
+        }),
+      );
+
+      const result = await client.getReleaseMbidByDiscogsReleaseId(567);
+
+      expect(result).toBe('rel-mbid-xyz');
+      const urlCall = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(urlCall).toContain('/url');
+      expect(urlCall).toContain(encodeURIComponent('https://www.discogs.com/release/567'));
+      expect(urlCall).toContain('release-rels');
+    });
+
+    it('returns null when the release is not in MusicBrainz (404)', async () => {
+      fetchSpy.mockResolvedValueOnce(makeErrorResponse(404, 'Not Found'));
+      const result = await client.getReleaseMbidByDiscogsReleaseId(9999);
+      expect(result).toBeNull();
+    });
+
+    it('returns null when relations list has no release entry', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'url-uuid',
+          resource: 'https://www.discogs.com/release/567',
+          relations: [{ type: 'artist', direction: 'backward', artist: { id: 'a1', name: 'X' } }],
+        }),
+      );
+      const result = await client.getReleaseMbidByDiscogsReleaseId(567);
+      expect(result).toBeNull();
+    });
+
+    it('throws on non-404 errors so the enricher can count them as failed', async () => {
+      fetchSpy.mockRejectedValueOnce(new Error('Network failure'));
+      await expect(client.getReleaseMbidByDiscogsReleaseId(1)).rejects.toThrow('Network failure');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getRecordingsByReleaseMbid
+  // -------------------------------------------------------------------------
+  describe('getRecordingsByReleaseMbid', () => {
+    it('flattens media into an ordinal-ordered tracklist', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rel-mbid',
+          media: [
+            {
+              tracks: [
+                {
+                  id: 't1',
+                  title: 'Side A Track',
+                  length: 215000,
+                  recording: { id: 'rec-1', title: 'Side A Track', isrcs: ['GBABC1234567'] },
+                },
+              ],
+            },
+            {
+              tracks: [
+                {
+                  id: 't2',
+                  title: 'Side B Track',
+                  length: 180000,
+                  recording: { id: 'rec-2', title: 'Side B Track', isrcs: [] },
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      const tracks = await client.getRecordingsByReleaseMbid('rel-mbid');
+
+      const endpoint = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(endpoint).toContain('/release/rel-mbid');
+      expect(endpoint).toContain('recordings');
+      expect(tracks).toEqual([
+        {
+          position: 1,
+          title: 'Side A Track',
+          lengthSeconds: 215,
+          recordingMbid: 'rec-1',
+          isrc: 'GBABC1234567',
+        },
+        {
+          position: 2,
+          title: 'Side B Track',
+          lengthSeconds: 180,
+          recordingMbid: 'rec-2',
+          isrc: null,
+        },
+      ]);
+    });
+
+    it('falls back to recording length when the track has none', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rel-mbid',
+          media: [
+            {
+              tracks: [
+                {
+                  id: 't1',
+                  title: 'Track',
+                  recording: { id: 'rec-1', title: 'Track', length: 200000 },
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      const tracks = await client.getRecordingsByReleaseMbid('rel-mbid');
+      expect(tracks[0]?.lengthSeconds).toBe(200);
+    });
+
+    it('returns lengthSeconds null when neither track nor recording has a length', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rel-mbid',
+          media: [
+            { tracks: [{ id: 't1', title: 'Track', recording: { id: 'rec-1', title: 'Track' } }] },
+          ],
+        }),
+      );
+
+      const tracks = await client.getRecordingsByReleaseMbid('rel-mbid');
+      expect(tracks[0]?.lengthSeconds).toBeNull();
+    });
+
+    it('returns an empty array when the release has no media', async () => {
+      fetchSpy.mockResolvedValueOnce(makeOkResponse({ id: 'rel-mbid' }));
+      const tracks = await client.getRecordingsByReleaseMbid('rel-mbid');
+      expect(tracks).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // searchRecording
+  // -------------------------------------------------------------------------
+  describe('searchRecording', () => {
+    it('returns a match when the top result scores at least 90', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          recordings: [{ id: 'rec-mbid', score: 100, title: 'Song', isrcs: ['USABC1234567'] }],
+        }),
+      );
+
+      const result = await client.searchRecording('Song', 'Artist', 200);
+
+      expect(result).toEqual({ recordingMbid: 'rec-mbid', isrc: 'USABC1234567' });
+      const query = decodeURIComponent(fetchSpy.mock.calls[0]?.[0] as string);
+      expect(query).toContain('recording:"Song"');
+      expect(query).toContain('artist:"Artist"');
+      expect(query).toContain('dur:[198000 TO 202000]');
+    });
+
+    it('omits the duration filter when duration is null', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({ recordings: [{ id: 'rec', score: 95, title: 'Song' }] }),
+      );
+
+      await client.searchRecording('Song', 'Artist', null);
+
+      const query = decodeURIComponent(fetchSpy.mock.calls[0]?.[0] as string);
+      expect(query).not.toContain('dur:');
+    });
+
+    it('returns null when the top result scores below 90', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({ recordings: [{ id: 'rec', score: 60, title: 'Song' }] }),
+      );
+      const result = await client.searchRecording('Song', 'Artist', null);
+      expect(result).toBeNull();
+    });
+
+    it('returns null when there are no recordings', async () => {
+      fetchSpy.mockResolvedValueOnce(makeOkResponse({ recordings: [] }));
+      const result = await client.searchRecording('Song', 'Artist', null);
+      expect(result).toBeNull();
+    });
+
+    it('returns null without a request when title or artist is empty', async () => {
+      const result = await client.searchRecording('   ', 'Artist', null);
+      expect(result).toBeNull();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('returns null (does not throw) on network error', async () => {
+      fetchSpy.mockRejectedValueOnce(new Error('timeout'));
+      const result = await client.searchRecording('Song', 'Artist', null);
+      expect(result).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // User-Agent header
   // -------------------------------------------------------------------------
   it('sends the configured User-Agent header on every request', async () => {

@@ -23,6 +23,9 @@ const statements = [
   'CREATE CONSTRAINT master_discogs_id IF NOT EXISTS FOR (m:Master) REQUIRE m.discogsId IS UNIQUE',
   'CREATE INDEX release_master_fetched IF NOT EXISTS FOR (r:Release) ON (r.masterFetched)',
   'CREATE INDEX master_mb_release_events_fetched IF NOT EXISTS FOR (m:Master) ON (m.mbReleaseEventsFetched)',
+  'CREATE INDEX track_recording_mbid IF NOT EXISTS FOR (t:Track) ON (t.recordingMbid)',
+  'CREATE INDEX track_isrc IF NOT EXISTS FOR (t:Track) ON (t.isrc)',
+  'CREATE INDEX track_musicbrainz_fetched IF NOT EXISTS FOR (t:Track) ON (t.musicBrainzFetched)',
 ];
 
 export async function applySchema(driver: Driver): Promise<void> {

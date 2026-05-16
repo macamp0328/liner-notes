@@ -7,6 +7,24 @@ export interface MbReleaseEvent {
   formats: string[];
 }
 
+/** A single track of a MusicBrainz release, carrying its recording MBID and ISRC. */
+export interface MbRecordingTrack {
+  /** 1-based ordinal position across the entire release tracklist (all media flattened). */
+  position: number;
+  title: string;
+  /** Track length in whole seconds; null when MusicBrainz has no length on file. */
+  lengthSeconds: number | null;
+  recordingMbid: string;
+  /** First registered ISRC for the recording; null when none is registered. */
+  isrc: string | null;
+}
+
+/** A MusicBrainz recording identified by the fallback recording search. */
+export interface MbRecordingMatch {
+  recordingMbid: string;
+  isrc: string | null;
+}
+
 export interface MusicBrainzClientConfig {
   userAgent: string;
   /** Milliseconds to sleep after every successful request. 1100ms keeps us safely under 1 req/sec. */
@@ -24,6 +42,34 @@ interface MbUrlResponse {
     direction: string;
     artist?: { id: string; name: string };
     'release-group'?: { id: string };
+    release?: { id: string };
+  }>;
+}
+
+interface MbReleaseWithRecordingsResponse {
+  id: string;
+  media?: Array<{
+    tracks?: Array<{
+      id: string;
+      title: string;
+      length?: number | null;
+      recording: {
+        id: string;
+        title: string;
+        length?: number | null;
+        isrcs?: string[];
+      };
+    }>;
+  }>;
+}
+
+interface MbRecordingSearchResponse {
+  recordings?: Array<{
+    id: string;
+    score: number;
+    title: string;
+    length?: number | null;
+    isrcs?: string[];
   }>;
 }
 
@@ -62,6 +108,19 @@ interface MbSearchResponse {
 const BASE_URL = 'https://musicbrainz.org/ws/2';
 const MAX_RETRIES = 3;
 const DEFAULT_BACKOFF_BASE_MS = 2_000;
+/** Minimum MusicBrainz search score to accept a fallback recording match. */
+const MIN_RECORDING_SEARCH_SCORE = 90;
+
+/** Convert a MusicBrainz millisecond length to whole seconds; null for missing or non-positive values. */
+function msToSeconds(ms: number | null | undefined): number | null {
+  if (ms === null || ms === undefined || ms <= 0) return null;
+  return Math.round(ms / 1_000);
+}
+
+/** Strip double quotes so a value can be embedded inside a Lucene phrase query. */
+function escapeLucenePhrase(value: string): string {
+  return value.replace(/"/g, ' ').trim();
+}
 
 export class MusicBrainzClient {
   private readonly userAgent: string;
@@ -140,6 +199,91 @@ export class MusicBrainzClient {
     }
 
     return events;
+  }
+
+  /**
+   * Resolve a Discogs release ID to a MusicBrainz release MBID via the Discogs URL relation.
+   * Returns null when the release is not linked in MusicBrainz.
+   */
+  async getReleaseMbidByDiscogsReleaseId(discogsReleaseId: number): Promise<string | null> {
+    const resource = `https://www.discogs.com/release/${discogsReleaseId}`;
+    const endpoint = `${BASE_URL}/url?resource=${encodeURIComponent(resource)}&inc=release-rels&fmt=json`;
+
+    let response: MbUrlResponse;
+    try {
+      response = await this.fetchWithBackoff<MbUrlResponse>(endpoint);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('not found (404)')) {
+        return null;
+      }
+      throw err;
+    }
+
+    const relation = response.relations.find(
+      (r) => r.type === 'discogs' && r.direction === 'backward' && r.release?.id !== undefined,
+    );
+    return relation?.release?.id ?? null;
+  }
+
+  /**
+   * Fetch the tracklist of a MusicBrainz release with recording MBIDs and ISRCs.
+   * Flattens all media into a single ordinal-ordered list. Returns an empty array
+   * when the release has no tracks.
+   */
+  async getRecordingsByReleaseMbid(mbReleaseId: string): Promise<MbRecordingTrack[]> {
+    const endpoint = `${BASE_URL}/release/${encodeURIComponent(mbReleaseId)}?inc=recordings+isrcs&fmt=json`;
+    const response = await this.fetchWithBackoff<MbReleaseWithRecordingsResponse>(endpoint);
+
+    const tracks: MbRecordingTrack[] = [];
+    let position = 0;
+    for (const medium of response.media ?? []) {
+      for (const track of medium.tracks ?? []) {
+        position++;
+        tracks.push({
+          position,
+          title: track.title,
+          lengthSeconds: msToSeconds(track.length ?? track.recording.length),
+          recordingMbid: track.recording.id,
+          isrc: track.recording.isrcs?.[0] ?? null,
+        });
+      }
+    }
+    return tracks;
+  }
+
+  /**
+   * Fallback path — search MusicBrainz directly for a recording by title and artist,
+   * optionally constrained by duration. Only returns a match when the top result
+   * scores at least MIN_RECORDING_SEARCH_SCORE. Returns null otherwise.
+   */
+  async searchRecording(
+    title: string,
+    artist: string,
+    durationSeconds: number | null,
+  ): Promise<MbRecordingMatch | null> {
+    const cleanTitle = escapeLucenePhrase(title);
+    const cleanArtist = escapeLucenePhrase(artist);
+    if (cleanTitle === '' || cleanArtist === '') return null;
+
+    let query = `recording:"${cleanTitle}" AND artist:"${cleanArtist}"`;
+    if (durationSeconds !== null) {
+      const lo = Math.max(0, durationSeconds * 1_000 - 2_000);
+      const hi = durationSeconds * 1_000 + 2_000;
+      query += ` AND dur:[${lo} TO ${hi}]`;
+    }
+
+    const endpoint = `${BASE_URL}/recording?query=${encodeURIComponent(query)}&limit=1&fmt=json`;
+
+    let response: MbRecordingSearchResponse;
+    try {
+      response = await this.fetchWithBackoff<MbRecordingSearchResponse>(endpoint);
+    } catch {
+      return null;
+    }
+
+    const top = response.recordings?.[0];
+    if (!top || top.score < MIN_RECORDING_SEARCH_SCORE) return null;
+    return { recordingMbid: top.id, isrc: top.isrcs?.[0] ?? null };
   }
 
   /**

@@ -19,6 +19,8 @@ import { resetNationalityEnrichment } from '../db/artist-nationality-repository.
 import { enrichMasterData } from '../enrichment/master-data.js';
 import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
 import { resetMbReleaseEventsEnrichment } from '../db/mb-release-events-repository.js';
+import { enrichTrackMusicBrainz } from '../enrichment/track-musicbrainz.js';
+import { resetTrackMusicBrainzEnrichment } from '../db/track-musicbrainz-repository.js';
 
 const errorShape = {
   type: 'object',
@@ -66,6 +68,7 @@ let isEnriching = false;
 let isEnrichingNationality = false;
 let isEnrichingMasterData = false;
 let isEnrichingMbReleaseEvents = false;
+let isEnrichingTrackMusicBrainz = false;
 
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
@@ -90,7 +93,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           '6. Artist profiles enrichment (realName + profile from Discogs artist API)\n\n' +
           '**Not included — must be triggered separately:**\n' +
           '- `POST /api/v1/admin/nationality/enrich` — nationality data from MusicBrainz + Wikidata\n' +
-          '- `POST /api/v1/admin/mb-release-events/enrich` — ISO-coded country + date release events from MusicBrainz',
+          '- `POST /api/v1/admin/mb-release-events/enrich` — ISO-coded country + date release events from MusicBrainz\n' +
+          '- `POST /api/v1/admin/track-musicbrainz/enrich` — recording MBID + ISRC on Track nodes from MusicBrainz',
         security: [{ bearerAuth: [] }],
         response: {
           202: {
@@ -661,6 +665,154 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.send({ data: { reset } });
       } finally {
         isEnrichingMbReleaseEvents = false;
+      }
+    },
+  );
+
+  fastify.post<{
+    Reply:
+      | {
+          data: {
+            releasesProcessed: number;
+            releasesSkipped: number;
+            releasesFailed: number;
+            tracksMatched: number;
+            tracksUnmatched: number;
+            durationMs: number;
+          };
+        }
+      | { error: { code: string; message: string } };
+  }>(
+    '/track-musicbrainz/enrich',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Enrich Track nodes with MusicBrainz recording MBID + ISRC',
+        description:
+          'For each Release with unenriched tracks, resolves the MusicBrainz release via the ' +
+          'Discogs URL relation, fetches its tracklist with recording IDs/ISRCs, and aligns it to ' +
+          'Track nodes by validated ordinal position. Tracks left unmatched fall back to a direct ' +
+          'recording search accepted only on a high MusicBrainz score. Blocks until complete.\n\n' +
+          '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n' +
+          'Writes `recordingMbid` and `isrc` (both nullable) onto Track nodes — the cross-database ' +
+          'identifiers downstream AcousticBrainz and Deezer enrichment depend on. Tracklist alignment ' +
+          'validates title similarity and duration proximity before writing; a mismatched track is ' +
+          'skipped rather than assigned a guessed MBID.\n\n' +
+          'Uses `musicBrainzFetched = true` as an idempotency marker — already-processed Track nodes ' +
+          'are skipped. Run `POST /api/v1/admin/track-musicbrainz/reset` first to re-process all tracks.\n\n' +
+          'Requires `MUSICBRAINZ_USER_AGENT` env var.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: [
+                  'releasesProcessed',
+                  'releasesSkipped',
+                  'releasesFailed',
+                  'tracksMatched',
+                  'tracksUnmatched',
+                  'durationMs',
+                ],
+                properties: {
+                  releasesProcessed: { type: 'integer' },
+                  releasesSkipped: { type: 'integer' },
+                  releasesFailed: { type: 'integer' },
+                  tracksMatched: { type: 'integer' },
+                  tracksUnmatched: { type: 'integer' },
+                  durationMs: { type: 'integer' },
+                },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+          503: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (request, reply) => {
+      if (isEnrichingTrackMusicBrainz) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message: 'MusicBrainz track enrichment already in progress',
+          },
+        });
+      }
+
+      const mbClient = buildMusicBrainzClientFromEnv(request.log);
+      if (!mbClient) {
+        return reply.code(503).send({
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'MUSICBRAINZ_USER_AGENT not configured',
+          },
+        });
+      }
+
+      isEnrichingTrackMusicBrainz = true;
+      try {
+        const summary = await enrichTrackMusicBrainz(mbClient, getDriver(), request.log);
+        return reply.send({ data: summary });
+      } finally {
+        isEnrichingTrackMusicBrainz = false;
+      }
+    },
+  );
+
+  fastify.post<{
+    Reply: { data: { reset: number } } | { error: { code: string; message: string } };
+  }>(
+    '/track-musicbrainz/reset',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Reset MusicBrainz track enrichment markers for a full re-run',
+        description:
+          'Removes the `musicBrainzFetched`, `recordingMbid`, and `isrc` properties from all ' +
+          'Track nodes, causing the next `POST /api/v1/admin/track-musicbrainz/enrich` call to ' +
+          're-process every track from scratch.\n\n' +
+          'This endpoint is blocked while enrichment is running.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['reset'],
+                properties: { reset: { type: 'integer' } },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => {
+      if (isEnrichingTrackMusicBrainz) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message:
+              'MusicBrainz track enrichment is currently running — wait for it to finish before resetting',
+          },
+        });
+      }
+      isEnrichingTrackMusicBrainz = true;
+      try {
+        const reset = await resetTrackMusicBrainzEnrichment(getDriver());
+        return reply.send({ data: { reset } });
+      } finally {
+        isEnrichingTrackMusicBrainz = false;
       }
     },
   );
