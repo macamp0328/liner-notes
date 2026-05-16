@@ -19,6 +19,8 @@ import { resetNationalityEnrichment } from '../db/artist-nationality-repository.
 import { enrichMasterData } from '../enrichment/master-data.js';
 import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
 import { resetMbReleaseEventsEnrichment } from '../db/mb-release-events-repository.js';
+import { enrichTrackMusicBrainz } from '../enrichment/track-musicbrainz.js';
+import { resetTrackMusicBrainzEnrichment } from '../db/track-musicbrainz-repository.js';
 
 const errorShape = {
   type: 'object',
@@ -62,10 +64,40 @@ const jobStateShape = {
   },
 } as const;
 
-let isEnriching = false;
-let isEnrichingNationality = false;
-let isEnrichingMasterData = false;
-let isEnrichingMbReleaseEvents = false;
+interface PipelineState<T> {
+  running: boolean;
+  startedAt: string | null;
+  completedAt: string | null;
+  durationMs: number | null;
+  lastResult: T | null;
+}
+
+function makePipelineState<T>(): PipelineState<T> {
+  return { running: false, startedAt: null, completedAt: null, durationMs: null, lastResult: null };
+}
+
+type EnrichSummary = { enriched: number; skipped: number; failed: number; durationMs: number };
+type MbReleaseEventsSummary = {
+  mastersProcessed: number;
+  mastersSkipped: number;
+  mastersFailed: number;
+  eventsWritten: number;
+  durationMs: number;
+};
+type TrackMusicBrainzSummary = {
+  releasesProcessed: number;
+  releasesSkipped: number;
+  releasesFailed: number;
+  tracksMatched: number;
+  tracksUnmatched: number;
+  durationMs: number;
+};
+
+const lyricsState = makePipelineState<EnrichSummary>();
+const nationalityState = makePipelineState<EnrichSummary>();
+const masterDataState = makePipelineState<EnrichSummary>();
+const mbReleaseEventsState = makePipelineState<MbReleaseEventsSummary>();
+const trackMusicBrainzState = makePipelineState<TrackMusicBrainzSummary>();
 
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
@@ -90,7 +122,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           '6. Artist profiles enrichment (realName + profile from Discogs artist API)\n\n' +
           '**Not included — must be triggered separately:**\n' +
           '- `POST /api/v1/admin/nationality/enrich` — nationality data from MusicBrainz + Wikidata\n' +
-          '- `POST /api/v1/admin/mb-release-events/enrich` — ISO-coded country + date release events from MusicBrainz',
+          '- `POST /api/v1/admin/mb-release-events/enrich` — ISO-coded country + date release events from MusicBrainz\n' +
+          '- `POST /api/v1/admin/track-musicbrainz/enrich` — recording MBID + ISRC on Track nodes from MusicBrainz',
         security: [{ bearerAuth: [] }],
         response: {
           202: {
@@ -289,17 +322,24 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: adminAuthHook,
     },
     async (request, reply) => {
-      if (isEnriching) {
+      if (lyricsState.running) {
         return reply.code(409).send({
           error: { code: 'ENRICHMENT_RUNNING', message: 'Lyrics enrichment already in progress' },
         });
       }
-      isEnriching = true;
+      lyricsState.running = true;
+      lyricsState.startedAt = new Date().toISOString();
+      lyricsState.completedAt = null;
+      lyricsState.durationMs = null;
+      lyricsState.lastResult = null;
       try {
         const summary = await enrichLyrics(getDriver(), request.log);
+        lyricsState.lastResult = summary;
+        lyricsState.completedAt = new Date().toISOString();
+        lyricsState.durationMs = summary.durationMs;
         return reply.send({ data: summary });
       } finally {
-        isEnriching = false;
+        lyricsState.running = false;
       }
     },
   );
@@ -361,7 +401,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: adminAuthHook,
     },
     async (request, reply) => {
-      if (isEnrichingNationality) {
+      if (nationalityState.running) {
         return reply.code(409).send({
           error: {
             code: 'ENRICHMENT_RUNNING',
@@ -384,7 +424,11 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       const discogsClient = buildDiscogsClientFromEnv(request.log);
       const viafClient = buildViafClientFromEnv(request.log);
 
-      isEnrichingNationality = true;
+      nationalityState.running = true;
+      nationalityState.startedAt = new Date().toISOString();
+      nationalityState.completedAt = null;
+      nationalityState.durationMs = null;
+      nationalityState.lastResult = null;
       try {
         const summary = await enrichArtistNationality(
           mbClient,
@@ -394,9 +438,12 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           discogsClient ?? undefined,
           viafClient ?? undefined,
         );
+        nationalityState.lastResult = summary;
+        nationalityState.completedAt = new Date().toISOString();
+        nationalityState.durationMs = summary.durationMs;
         return reply.send({ data: summary });
       } finally {
-        isEnrichingNationality = false;
+        nationalityState.running = false;
       }
     },
   );
@@ -437,7 +484,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: adminAuthHook,
     },
     async (_request, reply) => {
-      if (isEnrichingNationality) {
+      if (nationalityState.running) {
         return reply.code(409).send({
           error: {
             code: 'ENRICHMENT_RUNNING',
@@ -503,7 +550,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
-      if (isEnrichingMasterData) {
+      if (masterDataState.running) {
         return reply.code(409).send({
           error: {
             code: 'ENRICHMENT_RUNNING',
@@ -512,12 +559,19 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
-      isEnrichingMasterData = true;
+      masterDataState.running = true;
+      masterDataState.startedAt = new Date().toISOString();
+      masterDataState.completedAt = null;
+      masterDataState.durationMs = null;
+      masterDataState.lastResult = null;
       try {
         const summary = await enrichMasterData(discogsClient, getDriver(), request.log);
+        masterDataState.lastResult = summary;
+        masterDataState.completedAt = new Date().toISOString();
+        masterDataState.durationMs = summary.durationMs;
         return reply.send({ data: summary });
       } finally {
-        isEnrichingMasterData = false;
+        masterDataState.running = false;
       }
     },
   );
@@ -584,7 +638,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: adminAuthHook,
     },
     async (request, reply) => {
-      if (isEnrichingMbReleaseEvents) {
+      if (mbReleaseEventsState.running) {
         return reply.code(409).send({
           error: {
             code: 'ENRICHMENT_RUNNING',
@@ -603,12 +657,19 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
-      isEnrichingMbReleaseEvents = true;
+      mbReleaseEventsState.running = true;
+      mbReleaseEventsState.startedAt = new Date().toISOString();
+      mbReleaseEventsState.completedAt = null;
+      mbReleaseEventsState.durationMs = null;
+      mbReleaseEventsState.lastResult = null;
       try {
         const summary = await enrichMbReleaseEvents(mbClient, getDriver(), request.log);
+        mbReleaseEventsState.lastResult = summary;
+        mbReleaseEventsState.completedAt = new Date().toISOString();
+        mbReleaseEventsState.durationMs = summary.durationMs;
         return reply.send({ data: summary });
       } finally {
-        isEnrichingMbReleaseEvents = false;
+        mbReleaseEventsState.running = false;
       }
     },
   );
@@ -646,7 +707,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: adminAuthHook,
     },
     async (_request, reply) => {
-      if (isEnrichingMbReleaseEvents) {
+      if (mbReleaseEventsState.running) {
         return reply.code(409).send({
           error: {
             code: 'ENRICHMENT_RUNNING',
@@ -655,13 +716,301 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           },
         });
       }
-      isEnrichingMbReleaseEvents = true;
+      mbReleaseEventsState.running = true;
       try {
         const reset = await resetMbReleaseEventsEnrichment(getDriver());
         return reply.send({ data: { reset } });
       } finally {
-        isEnrichingMbReleaseEvents = false;
+        mbReleaseEventsState.running = false;
       }
     },
   );
+
+  fastify.post<{
+    Reply:
+      | {
+          data: {
+            releasesProcessed: number;
+            releasesSkipped: number;
+            releasesFailed: number;
+            tracksMatched: number;
+            tracksUnmatched: number;
+            durationMs: number;
+          };
+        }
+      | { error: { code: string; message: string } };
+  }>(
+    '/track-musicbrainz/enrich',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Enrich Track nodes with MusicBrainz recording MBID + ISRC',
+        description:
+          'For each Release with unenriched tracks, resolves the MusicBrainz release via the ' +
+          'Discogs URL relation, fetches its tracklist with recording IDs/ISRCs, and aligns it to ' +
+          'Track nodes by validated ordinal position. Tracks left unmatched fall back to a direct ' +
+          'recording search accepted only on a high MusicBrainz score. Blocks until complete.\n\n' +
+          '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n' +
+          'Writes `recordingMbid` and `isrc` (both nullable) onto Track nodes — the cross-database ' +
+          'identifiers downstream AcousticBrainz and Deezer enrichment depend on. Tracklist alignment ' +
+          'validates title similarity and duration proximity before writing; a mismatched track is ' +
+          'skipped rather than assigned a guessed MBID.\n\n' +
+          'Uses `musicBrainzFetched = true` as an idempotency marker — already-processed Track nodes ' +
+          'are skipped. Run `POST /api/v1/admin/track-musicbrainz/reset` first to re-process all tracks.\n\n' +
+          'Requires `MUSICBRAINZ_USER_AGENT` env var.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: [
+                  'releasesProcessed',
+                  'releasesSkipped',
+                  'releasesFailed',
+                  'tracksMatched',
+                  'tracksUnmatched',
+                  'durationMs',
+                ],
+                properties: {
+                  releasesProcessed: { type: 'integer' },
+                  releasesSkipped: { type: 'integer' },
+                  releasesFailed: { type: 'integer' },
+                  tracksMatched: { type: 'integer' },
+                  tracksUnmatched: { type: 'integer' },
+                  durationMs: { type: 'integer' },
+                },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+          503: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (request, reply) => {
+      if (trackMusicBrainzState.running) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message: 'MusicBrainz track enrichment already in progress',
+          },
+        });
+      }
+
+      const mbClient = buildMusicBrainzClientFromEnv(request.log);
+      if (!mbClient) {
+        return reply.code(503).send({
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'MUSICBRAINZ_USER_AGENT not configured',
+          },
+        });
+      }
+
+      trackMusicBrainzState.running = true;
+      trackMusicBrainzState.startedAt = new Date().toISOString();
+      trackMusicBrainzState.completedAt = null;
+      trackMusicBrainzState.durationMs = null;
+      trackMusicBrainzState.lastResult = null;
+      try {
+        const summary = await enrichTrackMusicBrainz(mbClient, getDriver(), request.log);
+        trackMusicBrainzState.lastResult = summary;
+        trackMusicBrainzState.completedAt = new Date().toISOString();
+        trackMusicBrainzState.durationMs = summary.durationMs;
+        return reply.send({ data: summary });
+      } finally {
+        trackMusicBrainzState.running = false;
+      }
+    },
+  );
+
+  fastify.post<{
+    Reply: { data: { reset: number } } | { error: { code: string; message: string } };
+  }>(
+    '/track-musicbrainz/reset',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Reset MusicBrainz track enrichment markers for a full re-run',
+        description:
+          'Removes the `musicBrainzFetched`, `recordingMbid`, and `isrc` properties from all ' +
+          'Track nodes, causing the next `POST /api/v1/admin/track-musicbrainz/enrich` call to ' +
+          're-process every track from scratch.\n\n' +
+          'This endpoint is blocked while enrichment is running.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['reset'],
+                properties: { reset: { type: 'integer' } },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => {
+      if (trackMusicBrainzState.running) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message:
+              'MusicBrainz track enrichment is currently running — wait for it to finish before resetting',
+          },
+        });
+      }
+      trackMusicBrainzState.running = true;
+      try {
+        const reset = await resetTrackMusicBrainzEnrichment(getDriver());
+        return reply.send({ data: { reset } });
+      } finally {
+        trackMusicBrainzState.running = false;
+      }
+    },
+  );
+
+  // ── Status endpoints ───────────────────────────────────────────────────────
+
+  const enrichStatusSchema = (summary: Record<string, unknown>): Record<string, unknown> => ({
+    type: 'object',
+    required: ['data'],
+    properties: {
+      data: {
+        type: 'object',
+        required: ['running', 'startedAt', 'completedAt', 'durationMs', 'lastResult'],
+        properties: {
+          running: { type: 'boolean' },
+          startedAt: { type: 'string', nullable: true },
+          completedAt: { type: 'string', nullable: true },
+          durationMs: { type: 'number', nullable: true },
+          lastResult: { ...summary, nullable: true },
+        },
+      },
+    },
+  });
+
+  const standardSummarySchema = {
+    type: 'object',
+    properties: {
+      enriched: { type: 'integer' },
+      skipped: { type: 'integer' },
+      failed: { type: 'integer' },
+      durationMs: { type: 'integer' },
+    },
+  };
+
+  fastify.get(
+    '/lyrics/status',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Status of the most recent lyrics enrichment run',
+        security: [{ bearerAuth: [] }],
+        response: { 200: enrichStatusSchema(standardSummarySchema), 401: errorShape },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => reply.send({ data: structuredClone(lyricsState) }),
+  );
+
+  fastify.get(
+    '/nationality/status',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Status of the most recent nationality enrichment run',
+        security: [{ bearerAuth: [] }],
+        response: { 200: enrichStatusSchema(standardSummarySchema), 401: errorShape },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => reply.send({ data: structuredClone(nationalityState) }),
+  );
+
+  fastify.get(
+    '/master-data/status',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Status of the most recent master data enrichment run',
+        security: [{ bearerAuth: [] }],
+        response: { 200: enrichStatusSchema(standardSummarySchema), 401: errorShape },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => reply.send({ data: structuredClone(masterDataState) }),
+  );
+
+  fastify.get(
+    '/mb-release-events/status',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Status of the most recent MusicBrainz release events enrichment run',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: enrichStatusSchema({
+            type: 'object',
+            properties: {
+              mastersProcessed: { type: 'integer' },
+              mastersSkipped: { type: 'integer' },
+              mastersFailed: { type: 'integer' },
+              eventsWritten: { type: 'integer' },
+              durationMs: { type: 'integer' },
+            },
+          }),
+          401: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => reply.send({ data: structuredClone(mbReleaseEventsState) }),
+  );
+
+  fastify.get(
+    '/track-musicbrainz/status',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Status of the most recent MusicBrainz track enrichment run',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: enrichStatusSchema({
+            type: 'object',
+            properties: {
+              releasesProcessed: { type: 'integer' },
+              releasesSkipped: { type: 'integer' },
+              releasesFailed: { type: 'integer' },
+              tracksMatched: { type: 'integer' },
+              tracksUnmatched: { type: 'integer' },
+              durationMs: { type: 'integer' },
+            },
+          }),
+          401: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => reply.send({ data: structuredClone(trackMusicBrainzState) }),
+  );
+}
+
+export function resetAllPipelineStates(): void {
+  Object.assign(lyricsState, makePipelineState<EnrichSummary>());
+  Object.assign(nationalityState, makePipelineState<EnrichSummary>());
+  Object.assign(masterDataState, makePipelineState<EnrichSummary>());
+  Object.assign(mbReleaseEventsState, makePipelineState<MbReleaseEventsSummary>());
+  Object.assign(trackMusicBrainzState, makePipelineState<TrackMusicBrainzSummary>());
 }
