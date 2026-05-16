@@ -206,14 +206,14 @@ describe('MusicBrainzClient', () => {
   // getReleaseGroupMbidByMasterDiscogsId
   // -------------------------------------------------------------------------
   describe('getReleaseGroupMbidByMasterDiscogsId', () => {
-    it('returns the release group MBID when a relation is found', async () => {
+    it('returns the release group MBID when a discogs relation is found', async () => {
       fetchSpy.mockResolvedValueOnce(
         makeOkResponse({
           id: 'url-uuid',
           resource: 'https://www.discogs.com/master/1234',
           relations: [
             {
-              type: 'release group',
+              type: 'discogs',
               direction: 'backward',
               'release-group': { id: 'rg-mbid-abc' },
             },
@@ -250,10 +250,22 @@ describe('MusicBrainzClient', () => {
       expect(result).toBeNull();
     });
 
-    it('returns null on network error', async () => {
+    it('throws on non-404 errors so the enricher can count them as failed', async () => {
       fetchSpy.mockRejectedValueOnce(new Error('Network failure'));
-      const result = await client.getReleaseGroupMbidByMasterDiscogsId(1);
-      expect(result).toBeNull();
+      await expect(client.getReleaseGroupMbidByMasterDiscogsId(1)).rejects.toThrow(
+        'Network failure',
+      );
+    });
+
+    it('throws when max retries are exceeded (non-404 failure)', async () => {
+      fetchSpy
+        .mockResolvedValueOnce(makeErrorResponse(503, 'Service Unavailable'))
+        .mockResolvedValueOnce(makeErrorResponse(503, 'Service Unavailable'))
+        .mockResolvedValueOnce(makeErrorResponse(503, 'Service Unavailable'))
+        .mockResolvedValueOnce(makeErrorResponse(503, 'Service Unavailable'));
+      await expect(client.getReleaseGroupMbidByMasterDiscogsId(1)).rejects.toThrow(
+        'exceeded max retries',
+      );
     });
   });
 

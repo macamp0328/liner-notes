@@ -89,7 +89,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           '5. Track version deduplication (IS_VERSION_OF relationships)\n' +
           '6. Artist profiles enrichment (realName + profile from Discogs artist API)\n\n' +
           '**Not included — must be triggered separately:**\n' +
-          '- `POST /api/v1/admin/nationality/enrich` — nationality data from MusicBrainz + Wikidata',
+          '- `POST /api/v1/admin/nationality/enrich` — nationality data from MusicBrainz + Wikidata\n' +
+          '- `POST /api/v1/admin/mb-release-events/enrich` — ISO-coded country + date release events from MusicBrainz',
         security: [{ bearerAuth: [] }],
         response: {
           202: {
@@ -654,8 +655,13 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           },
         });
       }
-      const reset = await resetMbReleaseEventsEnrichment(getDriver());
-      return reply.send({ data: { reset } });
+      isEnrichingMbReleaseEvents = true;
+      try {
+        const reset = await resetMbReleaseEventsEnrichment(getDriver());
+        return reply.send({ data: { reset } });
+      } finally {
+        isEnrichingMbReleaseEvents = false;
+      }
     },
   );
 }

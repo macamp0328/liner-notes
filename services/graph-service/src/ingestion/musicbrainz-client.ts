@@ -87,12 +87,16 @@ export class MusicBrainzClient {
     let response: MbUrlResponse;
     try {
       response = await this.fetchWithBackoff<MbUrlResponse>(endpoint);
-    } catch {
-      return null;
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('not found (404)')) {
+        return null;
+      }
+      throw err;
     }
 
     const relation = response.relations.find(
-      (r) => r.type === 'release group' && r.direction === 'backward' && r['release-group']?.id,
+      (r) =>
+        r.type === 'discogs' && r.direction === 'backward' && r['release-group']?.id !== undefined,
     );
     return relation?.['release-group']?.id ?? null;
   }
