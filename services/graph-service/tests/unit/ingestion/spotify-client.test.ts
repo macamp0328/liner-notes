@@ -124,6 +124,18 @@ describe('SpotifyClient', () => {
       expect(url).toContain(encodeURIComponent('artist:"Test Artist" track:"My Song"'));
     });
 
+    it('escapes backslashes and quotes in artist and title', async () => {
+      fetchSpy
+        .mockResolvedValueOnce(makeOkResponse(tokenResponse))
+        .mockResolvedValueOnce(makeOkResponse(searchResponse));
+
+      await client.searchTrack('AC\\DC', 'She\\"s Gone');
+
+      const url = fetchSpy.mock.calls[1]?.[0] as string;
+      // backslash → \\ and quote → \" so backslash-quote → \\"
+      expect(url).toContain(encodeURIComponent('artist:"AC\\\\DC" track:"She\\\\\\"s Gone"'));
+    });
+
     it('returns id and durationMs for each candidate', async () => {
       fetchSpy
         .mockResolvedValueOnce(makeOkResponse(tokenResponse))

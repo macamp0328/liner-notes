@@ -83,8 +83,8 @@ export class SpotifyClient {
   }
 
   async searchTrack(artistName: string, title: string): Promise<SpotifyTrackSearchResult[]> {
-    const safeArtist = artistName.replace(/"/g, '\\"');
-    const safeTitle = title.replace(/"/g, '\\"');
+    const safeArtist = artistName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const safeTitle = title.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const q = encodeURIComponent(`artist:"${safeArtist}" track:"${safeTitle}"`);
     const url = `${API_BASE}/search?q=${q}&type=track&limit=${SEARCH_LIMIT}`;
     const data = await this.fetchWithBackoff<SpotifySearchResponse>(url);
