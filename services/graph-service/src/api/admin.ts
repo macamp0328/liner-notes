@@ -329,6 +329,9 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       }
       lyricsState.running = true;
       lyricsState.startedAt = new Date().toISOString();
+      lyricsState.completedAt = null;
+      lyricsState.durationMs = null;
+      lyricsState.lastResult = null;
       try {
         const summary = await enrichLyrics(getDriver(), request.log);
         lyricsState.lastResult = summary;
@@ -423,6 +426,9 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
       nationalityState.running = true;
       nationalityState.startedAt = new Date().toISOString();
+      nationalityState.completedAt = null;
+      nationalityState.durationMs = null;
+      nationalityState.lastResult = null;
       try {
         const summary = await enrichArtistNationality(
           mbClient,
@@ -555,6 +561,9 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
       masterDataState.running = true;
       masterDataState.startedAt = new Date().toISOString();
+      masterDataState.completedAt = null;
+      masterDataState.durationMs = null;
+      masterDataState.lastResult = null;
       try {
         const summary = await enrichMasterData(discogsClient, getDriver(), request.log);
         masterDataState.lastResult = summary;
@@ -650,6 +659,9 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
       mbReleaseEventsState.running = true;
       mbReleaseEventsState.startedAt = new Date().toISOString();
+      mbReleaseEventsState.completedAt = null;
+      mbReleaseEventsState.durationMs = null;
+      mbReleaseEventsState.lastResult = null;
       try {
         const summary = await enrichMbReleaseEvents(mbClient, getDriver(), request.log);
         mbReleaseEventsState.lastResult = summary;
@@ -704,8 +716,13 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           },
         });
       }
-      const reset = await resetMbReleaseEventsEnrichment(getDriver());
-      return reply.send({ data: { reset } });
+      mbReleaseEventsState.running = true;
+      try {
+        const reset = await resetMbReleaseEventsEnrichment(getDriver());
+        return reply.send({ data: { reset } });
+      } finally {
+        mbReleaseEventsState.running = false;
+      }
     },
   );
 
@@ -797,6 +814,9 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
       trackMusicBrainzState.running = true;
       trackMusicBrainzState.startedAt = new Date().toISOString();
+      trackMusicBrainzState.completedAt = null;
+      trackMusicBrainzState.durationMs = null;
+      trackMusicBrainzState.lastResult = null;
       try {
         const summary = await enrichTrackMusicBrainz(mbClient, getDriver(), request.log);
         trackMusicBrainzState.lastResult = summary;
@@ -851,8 +871,13 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           },
         });
       }
-      const reset = await resetTrackMusicBrainzEnrichment(getDriver());
-      return reply.send({ data: { reset } });
+      trackMusicBrainzState.running = true;
+      try {
+        const reset = await resetTrackMusicBrainzEnrichment(getDriver());
+        return reply.send({ data: { reset } });
+      } finally {
+        trackMusicBrainzState.running = false;
+      }
     },
   );
 
@@ -897,7 +922,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       },
       preHandler: adminAuthHook,
     },
-    async (_request, reply) => reply.send({ data: lyricsState }),
+    async (_request, reply) => reply.send({ data: structuredClone(lyricsState) }),
   );
 
   fastify.get(
@@ -911,7 +936,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       },
       preHandler: adminAuthHook,
     },
-    async (_request, reply) => reply.send({ data: nationalityState }),
+    async (_request, reply) => reply.send({ data: structuredClone(nationalityState) }),
   );
 
   fastify.get(
@@ -925,7 +950,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       },
       preHandler: adminAuthHook,
     },
-    async (_request, reply) => reply.send({ data: masterDataState }),
+    async (_request, reply) => reply.send({ data: structuredClone(masterDataState) }),
   );
 
   fastify.get(
@@ -951,7 +976,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       },
       preHandler: adminAuthHook,
     },
-    async (_request, reply) => reply.send({ data: mbReleaseEventsState }),
+    async (_request, reply) => reply.send({ data: structuredClone(mbReleaseEventsState) }),
   );
 
   fastify.get(
@@ -978,6 +1003,14 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       },
       preHandler: adminAuthHook,
     },
-    async (_request, reply) => reply.send({ data: trackMusicBrainzState }),
+    async (_request, reply) => reply.send({ data: structuredClone(trackMusicBrainzState) }),
   );
+}
+
+export function resetAllPipelineStates(): void {
+  Object.assign(lyricsState, makePipelineState<EnrichSummary>());
+  Object.assign(nationalityState, makePipelineState<EnrichSummary>());
+  Object.assign(masterDataState, makePipelineState<EnrichSummary>());
+  Object.assign(mbReleaseEventsState, makePipelineState<MbReleaseEventsSummary>());
+  Object.assign(trackMusicBrainzState, makePipelineState<TrackMusicBrainzSummary>());
 }

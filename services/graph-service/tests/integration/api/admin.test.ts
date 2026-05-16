@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../../../src/server.js';
+import { resetAllPipelineStates } from '../../../src/api/admin.js';
 import type { IngestionSummary } from '../../../src/ingestion/ingest.js';
 import type { JobState } from '../../../src/ingestion/job-state.js';
 
@@ -122,6 +123,7 @@ describe('Admin API', () => {
     mockStartJob.mockReturnValue('test-job-id');
     mockClearGeniusLyrics.mockResolvedValue(460);
     mockEnrichLyrics.mockResolvedValue({ enriched: 10, skipped: 5, failed: 0, durationMs: 3000 });
+    resetAllPipelineStates();
     app = await buildServer();
     await app.ready();
   });
