@@ -49,8 +49,9 @@ export async function getTracksForMusicBrainzEnrichment(
          durationSeconds: t.durationSeconds
        }) AS tracks
        OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
+       WITH r, tracks, a ORDER BY a.name
        RETURN r.discogsId AS releaseDiscogsId,
-              collect(DISTINCT a.name) AS artistNames,
+              [x IN collect(DISTINCT a.name) WHERE x IS NOT NULL | x] AS artistNames,
               tracks`,
     );
 

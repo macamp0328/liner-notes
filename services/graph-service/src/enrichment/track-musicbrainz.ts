@@ -25,8 +25,9 @@ const TITLE_SIMILARITY_THRESHOLD = 0.85;
 const DURATION_TOLERANCE_SECONDS = 5;
 
 /**
- * Normalize a title for comparison: strip diacritics, lowercase, and drop every
- * character that is not a letter or digit. "Café (Take 2)" → "cafetake2".
+ * Normalize a title for comparison: strip diacritics via NFKD, lowercase, and drop every
+ * character that is not an ASCII letter or digit. "Café (Take 2)" → "cafetake2".
+ * Non-Latin scripts normalize to an empty string (which scores 0 in titleSimilarity).
  */
 export function normalizeForMatch(value: string): string {
   return value
