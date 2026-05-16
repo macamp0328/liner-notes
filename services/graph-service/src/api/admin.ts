@@ -64,11 +64,40 @@ const jobStateShape = {
   },
 } as const;
 
-let isEnriching = false;
-let isEnrichingNationality = false;
-let isEnrichingMasterData = false;
-let isEnrichingMbReleaseEvents = false;
-let isEnrichingTrackMusicBrainz = false;
+interface PipelineState<T> {
+  running: boolean;
+  startedAt: string | null;
+  completedAt: string | null;
+  durationMs: number | null;
+  lastResult: T | null;
+}
+
+function makePipelineState<T>(): PipelineState<T> {
+  return { running: false, startedAt: null, completedAt: null, durationMs: null, lastResult: null };
+}
+
+type EnrichSummary = { enriched: number; skipped: number; failed: number; durationMs: number };
+type MbReleaseEventsSummary = {
+  mastersProcessed: number;
+  mastersSkipped: number;
+  mastersFailed: number;
+  eventsWritten: number;
+  durationMs: number;
+};
+type TrackMusicBrainzSummary = {
+  releasesProcessed: number;
+  releasesSkipped: number;
+  releasesFailed: number;
+  tracksMatched: number;
+  tracksUnmatched: number;
+  durationMs: number;
+};
+
+const lyricsState = makePipelineState<EnrichSummary>();
+const nationalityState = makePipelineState<EnrichSummary>();
+const masterDataState = makePipelineState<EnrichSummary>();
+const mbReleaseEventsState = makePipelineState<MbReleaseEventsSummary>();
+const trackMusicBrainzState = makePipelineState<TrackMusicBrainzSummary>();
 
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
@@ -293,17 +322,21 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: adminAuthHook,
     },
     async (request, reply) => {
-      if (isEnriching) {
+      if (lyricsState.running) {
         return reply.code(409).send({
           error: { code: 'ENRICHMENT_RUNNING', message: 'Lyrics enrichment already in progress' },
         });
       }
-      isEnriching = true;
+      lyricsState.running = true;
+      lyricsState.startedAt = new Date().toISOString();
       try {
         const summary = await enrichLyrics(getDriver(), request.log);
+        lyricsState.lastResult = summary;
+        lyricsState.completedAt = new Date().toISOString();
+        lyricsState.durationMs = summary.durationMs;
         return reply.send({ data: summary });
       } finally {
-        isEnriching = false;
+        lyricsState.running = false;
       }
     },
   );
@@ -365,7 +398,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: adminAuthHook,
     },
     async (request, reply) => {
-      if (isEnrichingNationality) {
+      if (nationalityState.running) {
         return reply.code(409).send({
           error: {
             code: 'ENRICHMENT_RUNNING',
@@ -388,7 +421,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       const discogsClient = buildDiscogsClientFromEnv(request.log);
       const viafClient = buildViafClientFromEnv(request.log);
 
-      isEnrichingNationality = true;
+      nationalityState.running = true;
+      nationalityState.startedAt = new Date().toISOString();
       try {
         const summary = await enrichArtistNationality(
           mbClient,
@@ -398,9 +432,12 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           discogsClient ?? undefined,
           viafClient ?? undefined,
         );
+        nationalityState.lastResult = summary;
+        nationalityState.completedAt = new Date().toISOString();
+        nationalityState.durationMs = summary.durationMs;
         return reply.send({ data: summary });
       } finally {
-        isEnrichingNationality = false;
+        nationalityState.running = false;
       }
     },
   );
@@ -441,7 +478,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: adminAuthHook,
     },
     async (_request, reply) => {
-      if (isEnrichingNationality) {
+      if (nationalityState.running) {
         return reply.code(409).send({
           error: {
             code: 'ENRICHMENT_RUNNING',
@@ -507,7 +544,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
-      if (isEnrichingMasterData) {
+      if (masterDataState.running) {
         return reply.code(409).send({
           error: {
             code: 'ENRICHMENT_RUNNING',
@@ -516,12 +553,16 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
-      isEnrichingMasterData = true;
+      masterDataState.running = true;
+      masterDataState.startedAt = new Date().toISOString();
       try {
         const summary = await enrichMasterData(discogsClient, getDriver(), request.log);
+        masterDataState.lastResult = summary;
+        masterDataState.completedAt = new Date().toISOString();
+        masterDataState.durationMs = summary.durationMs;
         return reply.send({ data: summary });
       } finally {
-        isEnrichingMasterData = false;
+        masterDataState.running = false;
       }
     },
   );
@@ -588,7 +629,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: adminAuthHook,
     },
     async (request, reply) => {
-      if (isEnrichingMbReleaseEvents) {
+      if (mbReleaseEventsState.running) {
         return reply.code(409).send({
           error: {
             code: 'ENRICHMENT_RUNNING',
@@ -607,12 +648,16 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
-      isEnrichingMbReleaseEvents = true;
+      mbReleaseEventsState.running = true;
+      mbReleaseEventsState.startedAt = new Date().toISOString();
       try {
         const summary = await enrichMbReleaseEvents(mbClient, getDriver(), request.log);
+        mbReleaseEventsState.lastResult = summary;
+        mbReleaseEventsState.completedAt = new Date().toISOString();
+        mbReleaseEventsState.durationMs = summary.durationMs;
         return reply.send({ data: summary });
       } finally {
-        isEnrichingMbReleaseEvents = false;
+        mbReleaseEventsState.running = false;
       }
     },
   );
@@ -650,7 +695,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: adminAuthHook,
     },
     async (_request, reply) => {
-      if (isEnrichingMbReleaseEvents) {
+      if (mbReleaseEventsState.running) {
         return reply.code(409).send({
           error: {
             code: 'ENRICHMENT_RUNNING',
@@ -659,13 +704,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           },
         });
       }
-      isEnrichingMbReleaseEvents = true;
-      try {
-        const reset = await resetMbReleaseEventsEnrichment(getDriver());
-        return reply.send({ data: { reset } });
-      } finally {
-        isEnrichingMbReleaseEvents = false;
-      }
+      const reset = await resetMbReleaseEventsEnrichment(getDriver());
+      return reply.send({ data: { reset } });
     },
   );
 
@@ -736,7 +776,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: adminAuthHook,
     },
     async (request, reply) => {
-      if (isEnrichingTrackMusicBrainz) {
+      if (trackMusicBrainzState.running) {
         return reply.code(409).send({
           error: {
             code: 'ENRICHMENT_RUNNING',
@@ -755,12 +795,16 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
-      isEnrichingTrackMusicBrainz = true;
+      trackMusicBrainzState.running = true;
+      trackMusicBrainzState.startedAt = new Date().toISOString();
       try {
         const summary = await enrichTrackMusicBrainz(mbClient, getDriver(), request.log);
+        trackMusicBrainzState.lastResult = summary;
+        trackMusicBrainzState.completedAt = new Date().toISOString();
+        trackMusicBrainzState.durationMs = summary.durationMs;
         return reply.send({ data: summary });
       } finally {
-        isEnrichingTrackMusicBrainz = false;
+        trackMusicBrainzState.running = false;
       }
     },
   );
@@ -798,7 +842,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: adminAuthHook,
     },
     async (_request, reply) => {
-      if (isEnrichingTrackMusicBrainz) {
+      if (trackMusicBrainzState.running) {
         return reply.code(409).send({
           error: {
             code: 'ENRICHMENT_RUNNING',
@@ -807,13 +851,133 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           },
         });
       }
-      isEnrichingTrackMusicBrainz = true;
-      try {
-        const reset = await resetTrackMusicBrainzEnrichment(getDriver());
-        return reply.send({ data: { reset } });
-      } finally {
-        isEnrichingTrackMusicBrainz = false;
-      }
+      const reset = await resetTrackMusicBrainzEnrichment(getDriver());
+      return reply.send({ data: { reset } });
     },
+  );
+
+  // ── Status endpoints ───────────────────────────────────────────────────────
+
+  const enrichStatusSchema = (summary: Record<string, unknown>): Record<string, unknown> => ({
+    type: 'object',
+    required: ['data'],
+    properties: {
+      data: {
+        type: 'object',
+        required: ['running', 'startedAt', 'completedAt', 'durationMs', 'lastResult'],
+        properties: {
+          running: { type: 'boolean' },
+          startedAt: { type: 'string', nullable: true },
+          completedAt: { type: 'string', nullable: true },
+          durationMs: { type: 'number', nullable: true },
+          lastResult: { ...summary, nullable: true },
+        },
+      },
+    },
+  });
+
+  const standardSummarySchema = {
+    type: 'object',
+    properties: {
+      enriched: { type: 'integer' },
+      skipped: { type: 'integer' },
+      failed: { type: 'integer' },
+      durationMs: { type: 'integer' },
+    },
+  };
+
+  fastify.get(
+    '/lyrics/status',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Status of the most recent lyrics enrichment run',
+        security: [{ bearerAuth: [] }],
+        response: { 200: enrichStatusSchema(standardSummarySchema), 401: errorShape },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => reply.send({ data: lyricsState }),
+  );
+
+  fastify.get(
+    '/nationality/status',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Status of the most recent nationality enrichment run',
+        security: [{ bearerAuth: [] }],
+        response: { 200: enrichStatusSchema(standardSummarySchema), 401: errorShape },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => reply.send({ data: nationalityState }),
+  );
+
+  fastify.get(
+    '/master-data/status',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Status of the most recent master data enrichment run',
+        security: [{ bearerAuth: [] }],
+        response: { 200: enrichStatusSchema(standardSummarySchema), 401: errorShape },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => reply.send({ data: masterDataState }),
+  );
+
+  fastify.get(
+    '/mb-release-events/status',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Status of the most recent MusicBrainz release events enrichment run',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: enrichStatusSchema({
+            type: 'object',
+            properties: {
+              mastersProcessed: { type: 'integer' },
+              mastersSkipped: { type: 'integer' },
+              mastersFailed: { type: 'integer' },
+              eventsWritten: { type: 'integer' },
+              durationMs: { type: 'integer' },
+            },
+          }),
+          401: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => reply.send({ data: mbReleaseEventsState }),
+  );
+
+  fastify.get(
+    '/track-musicbrainz/status',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Status of the most recent MusicBrainz track enrichment run',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: enrichStatusSchema({
+            type: 'object',
+            properties: {
+              releasesProcessed: { type: 'integer' },
+              releasesSkipped: { type: 'integer' },
+              releasesFailed: { type: 'integer' },
+              tracksMatched: { type: 'integer' },
+              tracksUnmatched: { type: 'integer' },
+              durationMs: { type: 'integer' },
+            },
+          }),
+          401: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => reply.send({ data: trackMusicBrainzState }),
   );
 }

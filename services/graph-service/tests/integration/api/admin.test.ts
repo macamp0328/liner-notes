@@ -287,6 +287,31 @@ describe('Admin API', () => {
     });
   });
 
+  // ── GET /lyrics/status ───────────────────────────────────────────────────
+  describe('GET /api/v1/admin/lyrics/status', () => {
+    it('returns 200 with running:false and null lastResult before any run', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/lyrics/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { running: boolean; lastResult: unknown };
+      };
+      expect(body.data.running).toBe(false);
+      expect(body.data.lastResult).toBeNull();
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/lyrics/status',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
   // ── POST /lyrics/enrich ───────────────────────────────────────────────────
   describe('POST /api/v1/admin/lyrics/enrich', () => {
     it('returns 200 with enrichment summary when called with valid token', async () => {
@@ -341,6 +366,26 @@ describe('Admin API', () => {
       expect(body.error.code).toBe('SERVICE_UNAVAILABLE');
     });
 
+    it('returns 200 with lastResult populated after a successful run', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/lyrics/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { running: boolean; lastResult: { enriched: number } };
+      };
+      expect(body.data.running).toBe(false);
+      expect(body.data.lastResult).not.toBeNull();
+      expect(body.data.lastResult?.enriched).toBe(10);
+    });
+
     it('returns 409 when enrichment is already in progress', async () => {
       // First call is slow so the second arrives while it's still running
       mockEnrichLyrics.mockImplementationOnce(
@@ -369,6 +414,106 @@ describe('Admin API', () => {
       const body409 = r1.statusCode === 409 ? r1 : r2;
       const parsed = JSON.parse(body409.payload) as { error: { code: string } };
       expect(parsed.error.code).toBe('ENRICHMENT_RUNNING');
+    });
+  });
+
+  // ── GET /nationality/status ───────────────────────────────────────────────
+  describe('GET /api/v1/admin/nationality/status', () => {
+    it('returns 200 with running:false and null lastResult before any run', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/nationality/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { running: boolean; lastResult: unknown };
+      };
+      expect(body.data.running).toBe(false);
+      expect(body.data.lastResult).toBeNull();
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/nationality/status',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── GET /master-data/status ───────────────────────────────────────────────
+  describe('GET /api/v1/admin/master-data/status', () => {
+    it('returns 200 with running:false and null lastResult before any run', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/master-data/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { running: boolean; lastResult: unknown };
+      };
+      expect(body.data.running).toBe(false);
+      expect(body.data.lastResult).toBeNull();
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/master-data/status',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── GET /mb-release-events/status ────────────────────────────────────────
+  describe('GET /api/v1/admin/mb-release-events/status', () => {
+    it('returns 200 with running:false and null lastResult before any run', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/mb-release-events/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { running: boolean; lastResult: unknown };
+      };
+      expect(body.data.running).toBe(false);
+      expect(body.data.lastResult).toBeNull();
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/mb-release-events/status',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── GET /track-musicbrainz/status ────────────────────────────────────────
+  describe('GET /api/v1/admin/track-musicbrainz/status', () => {
+    it('returns 200 with running:false and null lastResult before any run', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/track-musicbrainz/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { running: boolean; lastResult: unknown };
+      };
+      expect(body.data.running).toBe(false);
+      expect(body.data.lastResult).toBeNull();
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/track-musicbrainz/status',
+      });
+      expect(response.statusCode).toBe(401);
     });
   });
 });
