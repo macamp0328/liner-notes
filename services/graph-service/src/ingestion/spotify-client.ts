@@ -16,22 +16,6 @@ export interface SpotifyTrackSearchResult {
   durationMs: number;
 }
 
-export interface SpotifyAudioFeatures {
-  id: string;
-  timeSignature: number;
-  tempo: number;
-  key: number;
-  mode: number;
-  loudness: number;
-  energy: number;
-  valence: number;
-  danceability: number;
-  acousticness: number;
-  instrumentalness: number;
-  liveness: number;
-  speechiness: number;
-}
-
 interface SpotifyTokenResponse {
   access_token: string;
   expires_in: number;
@@ -44,24 +28,6 @@ interface SpotifySearchResponse {
       duration_ms: number;
     }>;
   };
-}
-
-interface SpotifyAudioFeaturesResponse {
-  audio_features: Array<{
-    id: string;
-    time_signature: number;
-    tempo: number;
-    key: number;
-    mode: number;
-    loudness: number;
-    energy: number;
-    valence: number;
-    danceability: number;
-    acousticness: number;
-    instrumentalness: number;
-    liveness: number;
-    speechiness: number;
-  } | null>;
 }
 
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
@@ -126,31 +92,6 @@ export class SpotifyClient {
       id: item.id,
       durationMs: item.duration_ms,
     }));
-  }
-
-  async getAudioFeaturesBatch(ids: string[]): Promise<Map<string, SpotifyAudioFeatures>> {
-    const url = `${API_BASE}/audio-features?ids=${ids.join(',')}`;
-    const data = await this.fetchWithBackoff<SpotifyAudioFeaturesResponse>(url);
-    const result = new Map<string, SpotifyAudioFeatures>();
-    for (const item of data.audio_features) {
-      if (item === null) continue;
-      result.set(item.id, {
-        id: item.id,
-        timeSignature: item.time_signature,
-        tempo: item.tempo,
-        key: item.key,
-        mode: item.mode,
-        loudness: item.loudness,
-        energy: item.energy,
-        valence: item.valence,
-        danceability: item.danceability,
-        acousticness: item.acousticness,
-        instrumentalness: item.instrumentalness,
-        liveness: item.liveness,
-        speechiness: item.speechiness,
-      });
-    }
-    return result;
   }
 
   private async fetchWithBackoff<T>(url: string): Promise<T> {

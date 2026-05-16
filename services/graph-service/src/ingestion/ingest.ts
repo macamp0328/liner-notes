@@ -12,8 +12,8 @@ import { enrichTrackVersions } from '../enrichment/track-versions.js';
 import type { TrackVersionsEnrichmentSummary } from '../enrichment/track-versions.js';
 import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
 import type { ArtistProfilesEnrichmentSummary } from '../enrichment/artist-profiles.js';
-import { enrichSpotifyAudioFeatures } from '../enrichment/spotify-audio-features.js';
-import type { SpotifyAudioFeaturesEnrichmentSummary } from '../enrichment/spotify-audio-features.js';
+import { enrichSpotifyIds } from '../enrichment/spotify-audio-features.js';
+import type { SpotifyEnrichmentSummary } from '../enrichment/spotify-audio-features.js';
 import { buildSpotifyClientFromEnv } from './spotify-client.js';
 
 export type { Logger };
@@ -22,7 +22,7 @@ export type { MasterDataEnrichmentSummary };
 export type { ArtistGenresEnrichmentSummary };
 export type { TrackVersionsEnrichmentSummary };
 export type { ArtistProfilesEnrichmentSummary };
-export type { SpotifyAudioFeaturesEnrichmentSummary };
+export type { SpotifyEnrichmentSummary };
 
 export interface IngestionConfig {
   username: string;
@@ -40,7 +40,7 @@ export interface IngestionSummary {
   artistGenresEnrichment: ArtistGenresEnrichmentSummary;
   trackVersionsEnrichment: TrackVersionsEnrichmentSummary;
   artistProfilesEnrichment: ArtistProfilesEnrichmentSummary;
-  spotifyAudioFeaturesEnrichment: SpotifyAudioFeaturesEnrichmentSummary;
+  spotifyEnrichment: SpotifyEnrichmentSummary;
 }
 
 const PER_PAGE = 50;
@@ -125,16 +125,16 @@ export async function runIngestion(
   // Step 7: Enrich Artist nodes with realName + profile from Discogs artist API
   const artistProfilesEnrichment = await enrichArtistProfiles(client, driver, log);
 
-  // Step 8: Enrich Track nodes with Spotify audio features (tempo, key, energy, etc.)
+  // Step 8: Link Track nodes to Spotify (stores spotifyId + match confidence)
   const spotifyClient = buildSpotifyClientFromEnv(log);
-  let spotifyAudioFeaturesEnrichment: SpotifyAudioFeaturesEnrichmentSummary;
+  let spotifyEnrichment: SpotifyEnrichmentSummary;
   if (spotifyClient) {
-    spotifyAudioFeaturesEnrichment = await enrichSpotifyAudioFeatures(spotifyClient, driver, log);
+    spotifyEnrichment = await enrichSpotifyIds(spotifyClient, driver, log);
   } else {
     log.warn(
-      '[ingest] SPOTIFY_CLIENT_ID/SPOTIFY_CLIENT_SECRET not set — skipping audio features enrichment',
+      '[ingest] SPOTIFY_CLIENT_ID/SPOTIFY_CLIENT_SECRET not set — skipping Spotify ID enrichment',
     );
-    spotifyAudioFeaturesEnrichment = { enriched: 0, skipped: 0, failed: 0, durationMs: 0 };
+    spotifyEnrichment = { enriched: 0, skipped: 0, failed: 0, durationMs: 0 };
   }
 
   const durationMs = Date.now() - startTime;
@@ -152,7 +152,7 @@ export async function runIngestion(
     artistGenresEnrichment,
     trackVersionsEnrichment,
     artistProfilesEnrichment,
-    spotifyAudioFeaturesEnrichment,
+    spotifyEnrichment,
   };
 
   log.info(
@@ -174,9 +174,9 @@ export async function runIngestion(
       `  Artist profiles enrich: ${artistProfilesEnrichment.enriched}\n` +
       `  Artist profiles skip:  ${artistProfilesEnrichment.skipped}\n` +
       `  Artist profiles failed: ${artistProfilesEnrichment.failed}\n` +
-      `  Spotify audio enrich:  ${spotifyAudioFeaturesEnrichment.enriched}\n` +
-      `  Spotify audio skip:    ${spotifyAudioFeaturesEnrichment.skipped}\n` +
-      `  Spotify audio failed:  ${spotifyAudioFeaturesEnrichment.failed}\n` +
+      `  Spotify ID enriched:   ${spotifyEnrichment.enriched}\n` +
+      `  Spotify ID skipped:    ${spotifyEnrichment.skipped}\n` +
+      `  Spotify ID failed:     ${spotifyEnrichment.failed}\n` +
       `  Duration:             ${minutes}m ${seconds}s\n` +
       (errors.length > 0
         ? `  Errors:\n${errors.map((e) => `    - ${e}`).join('\n')}`

@@ -16,23 +16,6 @@ export interface SpotifyTrackCandidate {
   durationSeconds: number;
 }
 
-export interface TrackAudioFeatures {
-  id: string;
-  spotifyMatchConfidence: 'high' | 'medium';
-  timeSignature: number;
-  tempo: number;
-  key: number;
-  mode: number;
-  loudness: number;
-  energy: number;
-  valence: number;
-  danceability: number;
-  acousticness: number;
-  instrumentalness: number;
-  liveness: number;
-  speechiness: number;
-}
-
 /**
  * Query Track nodes that have a known duration but no Spotify audio features yet.
  * Excludes tracks without durationSeconds — duration proximity is required for match confirmation.
@@ -67,50 +50,27 @@ export async function getTracksForSpotifyEnrichment(
 }
 
 /**
- * Store Spotify audio features on a Track node.
+ * Store the Spotify track ID and match confidence on a Track node.
  * Track is identified by its release (discogsId) and position within that release.
  */
-export async function setTrackAudioFeatures(
+export async function setTrackSpotifyId(
   driver: Driver,
   releaseDiscogsId: number,
   position: string,
-  features: TrackAudioFeatures,
+  spotifyId: string,
+  confidence: 'high' | 'medium',
 ): Promise<void> {
   const session = driver.session();
   try {
     await session.run(
       `MATCH (r:Release {discogsId: $releaseDiscogsId})-[:HAS_TRACK]->(t:Track {position: $position})
        SET t.spotifyId = $spotifyId,
-           t.spotifyMatchConfidence = $spotifyMatchConfidence,
-           t.timeSignature = $timeSignature,
-           t.tempo = $tempo,
-           t.key = $key,
-           t.mode = $mode,
-           t.loudness = $loudness,
-           t.energy = $energy,
-           t.valence = $valence,
-           t.danceability = $danceability,
-           t.acousticness = $acousticness,
-           t.instrumentalness = $instrumentalness,
-           t.liveness = $liveness,
-           t.speechiness = $speechiness`,
+           t.spotifyMatchConfidence = $spotifyMatchConfidence`,
       {
         releaseDiscogsId: neo4j.int(releaseDiscogsId),
         position,
-        spotifyId: features.id,
-        spotifyMatchConfidence: features.spotifyMatchConfidence,
-        timeSignature: neo4j.int(features.timeSignature),
-        tempo: features.tempo,
-        key: neo4j.int(features.key),
-        mode: neo4j.int(features.mode),
-        loudness: features.loudness,
-        energy: features.energy,
-        valence: features.valence,
-        danceability: features.danceability,
-        acousticness: features.acousticness,
-        instrumentalness: features.instrumentalness,
-        liveness: features.liveness,
-        speechiness: features.speechiness,
+        spotifyId,
+        spotifyMatchConfidence: confidence,
       },
     );
   } finally {

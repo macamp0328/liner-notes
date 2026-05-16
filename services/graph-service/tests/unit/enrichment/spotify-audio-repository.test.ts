@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Driver, Session, Result, Record as Neo4jRecord } from 'neo4j-driver';
 import {
   getTracksForSpotifyEnrichment,
-  setTrackAudioFeatures,
+  setTrackSpotifyId,
 } from '../../../src/db/spotify-audio-repository.js';
 
 vi.mock('neo4j-driver', async (importOriginal) => {
@@ -41,23 +41,6 @@ function makeNeo4jRecord(fields: Record<string, unknown>): Neo4jRecord {
   } as unknown as Neo4jRecord;
 }
 
-const sampleFeatures = {
-  id: 'spotify-id-1',
-  spotifyMatchConfidence: 'high' as const,
-  timeSignature: 4,
-  tempo: 120.5,
-  key: 5,
-  mode: 1,
-  loudness: -8.5,
-  energy: 0.75,
-  valence: 0.6,
-  danceability: 0.7,
-  acousticness: 0.1,
-  instrumentalness: 0.05,
-  liveness: 0.12,
-  speechiness: 0.04,
-};
-
 // ---------------------------------------------------------------------------
 // getTracksForSpotifyEnrichment
 // ---------------------------------------------------------------------------
@@ -88,6 +71,23 @@ describe('getTracksForSpotifyEnrichment', () => {
       durationSeconds: 200,
       artistName: 'Test Artist',
     });
+  });
+
+  it('handles native JS numbers from Neo4j (not just Integer objects)', async () => {
+    const record = makeNeo4jRecord({
+      title: 'Plain Number Track',
+      position: 'B2',
+      releaseDiscogsId: 99999,
+      durationSeconds: 180,
+      artistName: null,
+    });
+    const result = { records: [record] } as unknown as Result;
+    const { session } = makeMockSession(result);
+    const driver = makeMockDriver(session);
+
+    const tracks = await getTracksForSpotifyEnrichment(driver);
+    expect(tracks[0]?.releaseDiscogsId).toBe(99999);
+    expect(tracks[0]?.durationSeconds).toBe(180);
   });
 
   it('returns null artistName when no artist is linked', async () => {
@@ -140,16 +140,16 @@ describe('getTracksForSpotifyEnrichment', () => {
 });
 
 // ---------------------------------------------------------------------------
-// setTrackAudioFeatures
+// setTrackSpotifyId
 // ---------------------------------------------------------------------------
-describe('setTrackAudioFeatures', () => {
+describe('setTrackSpotifyId', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('sends a SET query targeting the correct Release and Track', async () => {
     const { session, runSpy } = makeMockSession();
     const driver = makeMockDriver(session);
 
-    await setTrackAudioFeatures(driver, 12345, 'A1', sampleFeatures);
+    await setTrackSpotifyId(driver, 12345, 'A1', 'spotify-id-1', 'high');
 
     expect(runSpy).toHaveBeenCalledOnce();
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
@@ -160,23 +160,28 @@ describe('setTrackAudioFeatures', () => {
     expect(params['position']).toBe('A1');
     expect(params['spotifyId']).toBe('spotify-id-1');
     expect(params['spotifyMatchConfidence']).toBe('high');
-    expect(params['tempo']).toBe(120.5);
-    expect(params['loudness']).toBe(-8.5);
   });
 
-  it('wraps integer fields in neo4j.int()', async () => {
+  it('wraps releaseDiscogsId in neo4j.int()', async () => {
     const { session, runSpy } = makeMockSession();
     const driver = makeMockDriver(session);
 
-    await setTrackAudioFeatures(driver, 12345, 'A1', sampleFeatures);
+    await setTrackSpotifyId(driver, 12345, 'A1', 'spotify-id-1', 'medium');
 
     const [, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     const id = params['releaseDiscogsId'] as { toNumber(): number };
     expect(typeof id.toNumber).toBe('function');
     expect(id.toNumber()).toBe(12345);
+  });
 
-    const ts = params['timeSignature'] as { toNumber(): number };
-    expect(ts.toNumber()).toBe(4);
+  it('stores medium confidence correctly', async () => {
+    const { session, runSpy } = makeMockSession();
+    const driver = makeMockDriver(session);
+
+    await setTrackSpotifyId(driver, 1, 'B2', 'some-id', 'medium');
+
+    const [, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(params['spotifyMatchConfidence']).toBe('medium');
   });
 
   it('closes the session even when run throws', async () => {
@@ -184,9 +189,7 @@ describe('setTrackAudioFeatures', () => {
     (session.run as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('write error'));
     const driver = makeMockDriver(session);
 
-    await expect(setTrackAudioFeatures(driver, 1, 'A1', sampleFeatures)).rejects.toThrow(
-      'write error',
-    );
+    await expect(setTrackSpotifyId(driver, 1, 'A1', 'id', 'high')).rejects.toThrow('write error');
     expect(session.close).toHaveBeenCalledOnce();
   });
 });

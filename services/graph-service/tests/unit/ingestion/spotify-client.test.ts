@@ -35,27 +35,6 @@ const searchResponse = {
   },
 };
 
-const audioFeaturesResponse = {
-  audio_features: [
-    {
-      id: 'track-id-1',
-      time_signature: 4,
-      tempo: 120.5,
-      key: 5,
-      mode: 1,
-      loudness: -8.5,
-      energy: 0.75,
-      valence: 0.6,
-      danceability: 0.7,
-      acousticness: 0.1,
-      instrumentalness: 0.05,
-      liveness: 0.12,
-      speechiness: 0.04,
-    },
-    null, // Spotify may return null for tracks without analysis
-  ],
-};
-
 describe('SpotifyClient', () => {
   let fetchSpy: MockInstance<typeof fetch>;
   let client: SpotifyClient;
@@ -166,51 +145,6 @@ describe('SpotifyClient', () => {
 
       const headers = fetchSpy.mock.calls[1]?.[1]?.headers as Record<string, string>;
       expect(headers['Authorization']).toBe('Bearer test-access-token');
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // getAudioFeaturesBatch
-  // ---------------------------------------------------------------------------
-  describe('getAudioFeaturesBatch', () => {
-    it('calls the audio-features endpoint with comma-joined IDs', async () => {
-      fetchSpy
-        .mockResolvedValueOnce(makeOkResponse(tokenResponse))
-        .mockResolvedValueOnce(makeOkResponse(audioFeaturesResponse));
-
-      await client.getAudioFeaturesBatch(['track-id-1', 'track-id-2']);
-
-      const url = fetchSpy.mock.calls[1]?.[0] as string;
-      expect(url).toContain('/audio-features');
-      expect(url).toContain('ids=track-id-1,track-id-2');
-    });
-
-    it('returns a Map keyed by spotifyId with camelCase fields', async () => {
-      fetchSpy
-        .mockResolvedValueOnce(makeOkResponse(tokenResponse))
-        .mockResolvedValueOnce(makeOkResponse(audioFeaturesResponse));
-
-      const result = await client.getAudioFeaturesBatch(['track-id-1']);
-
-      expect(result.size).toBe(1);
-      const features = result.get('track-id-1');
-      expect(features?.timeSignature).toBe(4);
-      expect(features?.tempo).toBe(120.5);
-      expect(features?.key).toBe(5);
-      expect(features?.mode).toBe(1);
-      expect(features?.loudness).toBe(-8.5);
-    });
-
-    it('omits null entries from the returned Map', async () => {
-      fetchSpy
-        .mockResolvedValueOnce(makeOkResponse(tokenResponse))
-        .mockResolvedValueOnce(makeOkResponse(audioFeaturesResponse));
-
-      const result = await client.getAudioFeaturesBatch(['track-id-1', 'track-id-2']);
-
-      // audioFeaturesResponse has one real entry and one null
-      expect(result.size).toBe(1);
-      expect(result.has('track-id-1')).toBe(true);
     });
   });
 
