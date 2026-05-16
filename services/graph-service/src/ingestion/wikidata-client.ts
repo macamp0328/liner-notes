@@ -50,7 +50,50 @@ export class WikidataClient {
       }
       LIMIT 1
     `;
+    return this.executeSparql(query, `discogsId=${discogsId}`);
+  }
 
+  /**
+   * Look up an artist's country by their English Wikipedia article title.
+   * Uses Wikidata's schema:about triple to find the Wikidata item for the Wikipedia article,
+   * then resolves P27 (country of citizenship) → P297 (ISO 3166-1 alpha-2 code).
+   *
+   * This covers artists who have a Wikipedia page but whose Discogs ID (P1953) isn't in Wikidata.
+   */
+  async getCountryByWikipediaTitle(articleTitle: string): Promise<string | null> {
+    const encodedTitle = encodeURIComponent(articleTitle.replace(/ /g, '_'));
+    const query = `
+      SELECT ?countryCode WHERE {
+        ?item schema:about <https://en.wikipedia.org/wiki/${encodedTitle}> .
+        ?item wdt:P27 ?country .
+        ?country wdt:P297 ?countryCode .
+      }
+      LIMIT 1
+    `;
+    return this.executeSparql(query, `wikipedia="${articleTitle}"`);
+  }
+
+  /**
+   * Look up the country for an English Wikipedia URL by embedding the raw URL path
+   * segment directly into the SPARQL IRI — no decode/re-encode round-trip.
+   * Non-English Wikipedia URLs return null without making a network call.
+   */
+  async getCountryByWikipediaUrl(url: string): Promise<string | null> {
+    const match = /^https:\/\/en\.wikipedia\.org\/wiki\/(.+)$/.exec(url);
+    if (!match?.[1]) return null;
+    const rawPath = match[1];
+    const query = `
+      SELECT ?countryCode WHERE {
+        ?item schema:about <https://en.wikipedia.org/wiki/${rawPath}> .
+        ?item wdt:P27 ?country .
+        ?country wdt:P297 ?countryCode .
+      }
+      LIMIT 1
+    `;
+    return this.executeSparql(query, `wikipedia-url="${url}"`);
+  }
+
+  private async executeSparql(query: string, logLabel: string): Promise<string | null> {
     const url = `${SPARQL_ENDPOINT}?query=${encodeURIComponent(query)}&format=json`;
 
     let attempt = 0;
@@ -72,7 +115,7 @@ export class WikidataClient {
           const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
           const waitMs = Math.max(backoffMs, retryAfterMs);
           this.log.warn(
-            `[wikidata-client] HTTP ${response.status} for discogsId=${discogsId} on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${waitMs}ms`,
+            `[wikidata-client] HTTP ${response.status} for ${logLabel} on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${waitMs}ms`,
           );
           await this.sleep(waitMs);
           backoffMs = Math.min(backoffMs * 2, 32_000);
@@ -81,9 +124,7 @@ export class WikidataClient {
         }
 
         if (!response.ok) {
-          this.log.warn(
-            `[wikidata-client] HTTP ${response.status} for discogsId=${discogsId} — skipping`,
-          );
+          this.log.warn(`[wikidata-client] HTTP ${response.status} for ${logLabel} — skipping`);
           return null;
         }
 
@@ -98,7 +139,7 @@ export class WikidataClient {
       }
     }
 
-    this.log.warn(`[wikidata-client] Exceeded max retries for discogsId=${discogsId} — skipping`);
+    this.log.warn(`[wikidata-client] Exceeded max retries for ${logLabel} — skipping`);
     return null;
   }
 

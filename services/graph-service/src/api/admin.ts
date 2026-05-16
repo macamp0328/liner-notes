@@ -13,6 +13,7 @@ import { clearGeniusLyrics } from '../db/lyrics-repository.js';
 import { enrichLyrics } from '../enrichment/lyrics.js';
 import { buildMusicBrainzClientFromEnv } from '../ingestion/musicbrainz-client.js';
 import { buildWikidataClientFromEnv } from '../ingestion/wikidata-client.js';
+import { buildViafClientFromEnv } from '../ingestion/viaf-client.js';
 import { enrichArtistNationality } from '../enrichment/artist-nationality.js';
 import { resetNationalityEnrichment } from '../db/artist-nationality-repository.js';
 import { enrichMasterData } from '../enrichment/master-data.js';
@@ -313,12 +314,20 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           'Looks up country of origin for every Artist and Musician node that has not yet been enriched, ' +
           'creating `ORIGIN_COUNTRY` relationships to `Country` nodes. Blocks until complete.\n\n' +
           '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n' +
-          '**Sources (queried in parallel per node):**\n' +
-          '- MusicBrainz: two-step lookup via Discogs URL → MBID → artist record. ' +
-          'Falls back to `area.iso-3166-1-codes` when the `country` field is null.\n' +
-          '- Wikidata: SPARQL lookup via Discogs artist ID property (P1953 → P27 → P297).\n\n' +
-          '**Conflict resolution:** when sources disagree, Wikidata is preferred and the discrepancy is logged.\n\n' +
-          'For musicians without a Discogs ID, MusicBrainz name search is used as a last resort (score ≥ 90 only).\n\n' +
+          '**Sources (tried in order per node):**\n' +
+          '1. MusicBrainz + Wikidata by Discogs ID (parallel). ' +
+          'MusicBrainz uses a two-step lookup via Discogs URL → MBID → artist record. ' +
+          'Wikidata uses SPARQL via P1953 → P27 → P297.\n' +
+          '2. Wikidata via Wikipedia URL: fetches the Discogs artist page, extracts any English ' +
+          'Wikipedia URLs from `urls[]`, and queries Wikidata via `schema:about` triple. ' +
+          'Covers artists whose Discogs ID is not in Wikidata but who have a Wikipedia article. ' +
+          'Requires `DISCOGS_TOKEN`.\n' +
+          '3. VIAF name search: queries the Virtual International Authority File by artist name. ' +
+          'Strong coverage of classical/orchestral musicians. Validates nameType, name match, ' +
+          'and nationality agreement before accepting. Requires `MUSICBRAINZ_USER_AGENT`.\n\n' +
+          '**Conflict resolution:** when MB and WD disagree on source 1, Wikidata is preferred and the discrepancy is logged.\n\n' +
+          'For musicians without a Discogs ID, MusicBrainz name search is used instead ' +
+          '(score ≥ 90 only). Sources 2 and 3 are skipped for these musicians.\n\n' +
           'Uses `nationalityFetched = true` as an idempotency marker — already-processed nodes are skipped. ' +
           'Run `POST /api/v1/admin/nationality/reset` first to re-process all nodes with updated source data.\n\n' +
           'Requires `MUSICBRAINZ_USER_AGENT` env var.',
@@ -368,6 +377,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const wdClient = buildWikidataClientFromEnv(request.log);
+      const discogsClient = buildDiscogsClientFromEnv(request.log);
+      const viafClient = buildViafClientFromEnv(request.log);
 
       isEnrichingNationality = true;
       try {
@@ -376,6 +387,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           getDriver(),
           request.log,
           wdClient ?? undefined,
+          discogsClient ?? undefined,
+          viafClient ?? undefined,
         );
         return reply.send({ data: summary });
       } finally {

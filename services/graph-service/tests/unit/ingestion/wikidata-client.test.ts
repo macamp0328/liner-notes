@@ -153,4 +153,99 @@ describe('WikidataClient', () => {
     const headers = fetchSpy.mock.calls[0]?.[1]?.headers as Record<string, string>;
     expect(headers['Accept']).toBe('application/sparql-results+json');
   });
+
+  // ---------------------------------------------------------------------------
+  // getCountryByWikipediaTitle / getCountryByWikipediaUrl
+  // ---------------------------------------------------------------------------
+
+  describe('getCountryByWikipediaTitle', () => {
+    it('returns ISO code when Wikipedia article resolves via Wikidata', async () => {
+      fetchSpy.mockResolvedValueOnce(makeOkResponse(makeSparqlResponse('IT')));
+
+      const result = await client.getCountryByWikipediaTitle('Pino Palladino');
+
+      expect(result).toBe('IT');
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const url = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(url).toContain('query.wikidata.org/sparql');
+      expect(url).toContain('Pino_Palladino');
+      expect(url).toContain('schema%3Aabout');
+    });
+
+    it('returns null on empty SPARQL bindings', async () => {
+      fetchSpy.mockResolvedValueOnce(makeOkResponse(makeSparqlResponse()));
+      const result = await client.getCountryByWikipediaTitle('Unknown Artist');
+      expect(result).toBeNull();
+    });
+
+    it('retries on 429 and succeeds', async () => {
+      fetchSpy
+        .mockResolvedValueOnce(makeErrorResponse(429))
+        .mockResolvedValueOnce(makeOkResponse(makeSparqlResponse('SE')));
+      const result = await client.getCountryByWikipediaTitle('ABBA');
+      expect(result).toBe('SE');
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('retries on 502 and succeeds', async () => {
+      fetchSpy
+        .mockResolvedValueOnce(makeErrorResponse(502))
+        .mockResolvedValueOnce(makeOkResponse(makeSparqlResponse('NO')));
+      const result = await client.getCountryByWikipediaTitle('Jan Garbarek');
+      expect(result).toBe('NO');
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('returns null on network error', async () => {
+      fetchSpy.mockRejectedValueOnce(new Error('network failure'));
+      const result = await client.getCountryByWikipediaTitle('Some Artist');
+      expect(result).toBeNull();
+    });
+
+    it('encodes spaces as underscores in the SPARQL URL', async () => {
+      fetchSpy.mockResolvedValueOnce(makeOkResponse(makeSparqlResponse('GB')));
+      await client.getCountryByWikipediaTitle('John Paul Jones');
+      const url = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(url).toContain('John_Paul_Jones');
+      expect(url).not.toContain('John Paul Jones');
+    });
+  });
+
+  describe('getCountryByWikipediaUrl', () => {
+    it('parses English Wikipedia URL and returns country', async () => {
+      fetchSpy.mockResolvedValueOnce(makeOkResponse(makeSparqlResponse('GB')));
+
+      const result = await client.getCountryByWikipediaUrl(
+        'https://en.wikipedia.org/wiki/Pino_Palladino',
+      );
+
+      expect(result).toBe('GB');
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns null for non-English Wikipedia URLs without making a network call', async () => {
+      const result = await client.getCountryByWikipediaUrl(
+        'https://fr.wikipedia.org/wiki/Miles_Davis',
+      );
+      expect(result).toBeNull();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('returns null for non-Wikipedia URLs without making a network call', async () => {
+      const result = await client.getCountryByWikipediaUrl('https://www.discogs.com/artist/12345');
+      expect(result).toBeNull();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('preserves percent-encoded characters in Wikipedia URL path directly in SPARQL IRI', async () => {
+      fetchSpy.mockResolvedValueOnce(makeOkResponse(makeSparqlResponse('IS')));
+
+      await client.getCountryByWikipediaUrl('https://en.wikipedia.org/wiki/Bj%C3%B6rk');
+
+      // The raw path 'Bj%C3%B6rk' is embedded in the SPARQL query as-is, then the whole query
+      // is encodeURIComponent'd — so '%' becomes '%25', leaving 'Bj%25C3%25B6rk' in the fetch URL.
+      const rawUrl = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(rawUrl).toContain('Bj%25C3%25B6rk');
+    });
+  });
 });
