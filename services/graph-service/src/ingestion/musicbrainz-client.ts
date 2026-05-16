@@ -1,5 +1,12 @@
 import type { Logger } from './discogs-client.js';
 
+export interface MbReleaseEvent {
+  mbReleaseId: string;
+  countryCode: string | null;
+  date: string | null;
+  formats: string[];
+}
+
 export interface MusicBrainzClientConfig {
   userAgent: string;
   /** Milliseconds to sleep after every successful request. 1100ms keeps us safely under 1 req/sec. */
@@ -16,6 +23,21 @@ interface MbUrlResponse {
     type: string;
     direction: string;
     artist?: { id: string; name: string };
+    'release-group'?: { id: string };
+  }>;
+}
+
+interface MbReleaseListResponse {
+  'release-count': number;
+  releases: Array<{
+    id: string;
+    'release-events'?: Array<{
+      date?: string;
+      area?: {
+        'iso-3166-1-codes'?: string[];
+      };
+    }>;
+    media?: Array<{ format?: string }>;
   }>;
 }
 
@@ -52,6 +74,72 @@ export class MusicBrainzClient {
     this.delayMs = config.delayMs;
     this.backoffBaseMs = config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
     this.log = config.logger ?? console;
+  }
+
+  /**
+   * Resolve a Discogs master ID to a MusicBrainz release group MBID.
+   * Returns null when the master is not linked in MusicBrainz.
+   */
+  async getReleaseGroupMbidByMasterDiscogsId(masterDiscogsId: number): Promise<string | null> {
+    const resource = `https://www.discogs.com/master/${masterDiscogsId}`;
+    const endpoint = `${BASE_URL}/url?resource=${encodeURIComponent(resource)}&inc=release-group-rels&fmt=json`;
+
+    let response: MbUrlResponse;
+    try {
+      response = await this.fetchWithBackoff<MbUrlResponse>(endpoint);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('not found (404)')) {
+        return null;
+      }
+      throw err;
+    }
+
+    const relation = response.relations.find(
+      (r) =>
+        r.type === 'discogs' && r.direction === 'backward' && r['release-group']?.id !== undefined,
+    );
+    return relation?.['release-group']?.id ?? null;
+  }
+
+  /**
+   * Fetch all official release events for a MusicBrainz release group MBID.
+   * Paginates until all releases are collected. Filters events where both countryCode and date are null.
+   */
+  async getReleaseEventsByReleaseGroupMbid(mbid: string): Promise<MbReleaseEvent[]> {
+    const events: MbReleaseEvent[] = [];
+    const limit = 100;
+    let offset = 0;
+    let totalCount = Infinity;
+
+    while (offset < totalCount) {
+      const endpoint =
+        `${BASE_URL}/release?release-group=${encodeURIComponent(mbid)}` +
+        `&status=official&inc=release-events&fmt=json&limit=${limit}&offset=${offset}`;
+
+      const page = await this.fetchWithBackoff<MbReleaseListResponse>(endpoint);
+      totalCount = page['release-count'];
+      const releases = page.releases ?? [];
+
+      for (const release of releases) {
+        const formats = [
+          ...new Set((release.media ?? []).map((m) => m.format).filter((f): f is string => !!f)),
+        ];
+
+        for (const event of release['release-events'] ?? []) {
+          const countryCode = event.area?.['iso-3166-1-codes']?.[0] ?? null;
+          const date = event.date?.trim() || null;
+
+          if (countryCode === null && date === null) continue;
+
+          events.push({ mbReleaseId: release.id, countryCode, date, formats });
+        }
+      }
+
+      offset += releases.length;
+      if (releases.length === 0) break;
+    }
+
+    return events;
   }
 
   /**
