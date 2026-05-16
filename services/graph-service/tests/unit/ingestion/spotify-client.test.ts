@@ -142,7 +142,7 @@ describe('SpotifyClient', () => {
       const url = fetchSpy.mock.calls[1]?.[0] as string;
       expect(url).toContain('/search');
       expect(url).toContain('type=track');
-      expect(url).toContain(encodeURIComponent('Test Artist My Song'));
+      expect(url).toContain(encodeURIComponent('artist:"Test Artist" track:"My Song"'));
     });
 
     it('returns id and durationMs for each candidate', async () => {

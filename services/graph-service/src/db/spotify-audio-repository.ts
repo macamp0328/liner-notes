@@ -1,6 +1,13 @@
 import type { Driver } from 'neo4j-driver';
 import neo4j from 'neo4j-driver';
 
+function toNum(v: unknown): number {
+  if (typeof (v as { toNumber?: () => number }).toNumber === 'function') {
+    return (v as { toNumber: () => number }).toNumber();
+  }
+  return v as number;
+}
+
 export interface SpotifyTrackCandidate {
   title: string;
   position: string;
@@ -46,13 +53,11 @@ export async function getTracksForSpotifyEnrichment(
               artistName`,
     );
     return result.records.map((record) => {
-      const rawId = record.get('releaseDiscogsId') as { toNumber(): number };
-      const rawDuration = record.get('durationSeconds') as { toNumber(): number };
       return {
         title: record.get('title') as string,
         position: record.get('position') as string,
-        releaseDiscogsId: rawId.toNumber(),
-        durationSeconds: rawDuration.toNumber(),
+        releaseDiscogsId: toNum(record.get('releaseDiscogsId')),
+        durationSeconds: toNum(record.get('durationSeconds')),
         artistName: record.get('artistName') as string | null,
       };
     });
