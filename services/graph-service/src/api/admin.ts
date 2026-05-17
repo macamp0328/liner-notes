@@ -24,6 +24,9 @@ import { resetTrackMusicBrainzEnrichment } from '../db/track-musicbrainz-reposit
 import { buildAcousticBrainzClientFromEnv } from '../ingestion/acousticbrainz-client.js';
 import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
 import { resetTrackAcousticBrainzEnrichment } from '../db/track-acousticbrainz-repository.js';
+import { buildDeezerClientFromEnv } from '../ingestion/deezer-client.js';
+import { enrichTrackDeezer } from '../enrichment/track-deezer.js';
+import { resetTrackDeezerEnrichment } from '../db/track-deezer-repository.js';
 
 const errorShape = {
   type: 'object',
@@ -101,6 +104,12 @@ type TrackAcousticBrainzSummary = {
   tracksFailed: number;
   durationMs: number;
 };
+type TrackDeezerSummary = {
+  tracksProcessed: number;
+  tracksSkipped: number;
+  tracksFailed: number;
+  durationMs: number;
+};
 
 const lyricsState = makePipelineState<EnrichSummary>();
 const nationalityState = makePipelineState<EnrichSummary>();
@@ -108,6 +117,7 @@ const masterDataState = makePipelineState<EnrichSummary>();
 const mbReleaseEventsState = makePipelineState<MbReleaseEventsSummary>();
 const trackMusicBrainzState = makePipelineState<TrackMusicBrainzSummary>();
 const trackAcousticBrainzState = makePipelineState<TrackAcousticBrainzSummary>();
+const trackDeezerState = makePipelineState<TrackDeezerSummary>();
 
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
@@ -134,7 +144,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           '- `POST /api/v1/admin/nationality/enrich` — nationality data from MusicBrainz + Wikidata\n' +
           '- `POST /api/v1/admin/mb-release-events/enrich` — ISO-coded country + date release events from MusicBrainz\n' +
           '- `POST /api/v1/admin/track-musicbrainz/enrich` — recording MBID + ISRC on Track nodes from MusicBrainz\n' +
-          '- `POST /api/v1/admin/track-acousticbrainz/enrich` — tempo/key/loudness audio features on Track nodes from AcousticBrainz',
+          '- `POST /api/v1/admin/track-acousticbrainz/enrich` — tempo/key/loudness audio features on Track nodes from AcousticBrainz\n' +
+          '- `POST /api/v1/admin/track-deezer/enrich` — BPM + loudness on Track nodes from Deezer (ISRC lookup)',
         security: [{ bearerAuth: [] }],
         response: {
           202: {
@@ -1032,6 +1043,141 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     },
   );
 
+  fastify.post<{
+    Reply:
+      | {
+          data: {
+            tracksProcessed: number;
+            tracksSkipped: number;
+            tracksFailed: number;
+            durationMs: number;
+          };
+        }
+      | { error: { code: string; message: string } };
+  }>(
+    '/track-deezer/enrich',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Enrich Track nodes with Deezer BPM and loudness',
+        description:
+          'For each Track that carries an `isrc` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), ' +
+          'looks the ISRC up against the free Deezer public API and writes `deezerBpm` and ' +
+          '`deezerGain` (a loudness figure) onto the Track node. Blocks until complete.\n\n' +
+          '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, ' +
+          'and only after track-musicbrainz enrichment has populated `isrc`.**\n\n' +
+          'Deezer is an independent, ISRC-keyed source. `deezerBpm`/`deezerGain` are stored under ' +
+          'distinct property names rather than overwriting the AcousticBrainz `tempo`/`loudnessDb` ' +
+          'fields, so the source stays traceable and the two BPM figures can be compared. Deezer ' +
+          'returns `0` for unknown values — those are stored as null.\n\n' +
+          'All fields are nullable and best-effort. Uses `deezerFetched = true` as an idempotency ' +
+          'marker; already-processed Track nodes are skipped. Run ' +
+          '`POST /api/v1/admin/track-deezer/reset` first to re-process all tracks.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['tracksProcessed', 'tracksSkipped', 'tracksFailed', 'durationMs'],
+                properties: {
+                  tracksProcessed: { type: 'integer' },
+                  tracksSkipped: { type: 'integer' },
+                  tracksFailed: { type: 'integer' },
+                  durationMs: { type: 'integer' },
+                },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (request, reply) => {
+      if (trackDeezerState.running) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message: 'Deezer track enrichment already in progress',
+          },
+        });
+      }
+
+      const deezerClient = buildDeezerClientFromEnv(request.log);
+
+      trackDeezerState.running = true;
+      trackDeezerState.startedAt = new Date().toISOString();
+      trackDeezerState.completedAt = null;
+      trackDeezerState.durationMs = null;
+      trackDeezerState.lastResult = null;
+      try {
+        const summary = await enrichTrackDeezer(deezerClient, getDriver(), request.log);
+        trackDeezerState.lastResult = summary;
+        trackDeezerState.completedAt = new Date().toISOString();
+        trackDeezerState.durationMs = summary.durationMs;
+        return reply.send({ data: summary });
+      } finally {
+        trackDeezerState.running = false;
+      }
+    },
+  );
+
+  fastify.post<{
+    Reply: { data: { reset: number } } | { error: { code: string; message: string } };
+  }>(
+    '/track-deezer/reset',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Reset Deezer track enrichment markers for a full re-run',
+        description:
+          'Removes the `deezerFetched` marker and the `deezerBpm` and `deezerGain` properties ' +
+          'from all Track nodes, causing the next `POST /api/v1/admin/track-deezer/enrich` call ' +
+          'to re-process every track from scratch.\n\n' +
+          'This endpoint is blocked while enrichment is running.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['reset'],
+                properties: { reset: { type: 'integer' } },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => {
+      if (trackDeezerState.running) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message:
+              'Deezer track enrichment is currently running — wait for it to finish before resetting',
+          },
+        });
+      }
+      trackDeezerState.running = true;
+      try {
+        const reset = await resetTrackDeezerEnrichment(getDriver());
+        return reply.send({ data: { reset } });
+      } finally {
+        trackDeezerState.running = false;
+      }
+    },
+  );
+
   // ── Status endpoints ───────────────────────────────────────────────────────
 
   const enrichStatusSchema = (summary: Record<string, unknown>): Record<string, unknown> => ({
@@ -1181,6 +1327,31 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (_request, reply) => reply.send({ data: structuredClone(trackAcousticBrainzState) }),
   );
+
+  fastify.get(
+    '/track-deezer/status',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Status of the most recent Deezer track enrichment run',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: enrichStatusSchema({
+            type: 'object',
+            properties: {
+              tracksProcessed: { type: 'integer' },
+              tracksSkipped: { type: 'integer' },
+              tracksFailed: { type: 'integer' },
+              durationMs: { type: 'integer' },
+            },
+          }),
+          401: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => reply.send({ data: structuredClone(trackDeezerState) }),
+  );
 }
 
 export function resetAllPipelineStates(): void {
@@ -1190,4 +1361,5 @@ export function resetAllPipelineStates(): void {
   Object.assign(mbReleaseEventsState, makePipelineState<MbReleaseEventsSummary>());
   Object.assign(trackMusicBrainzState, makePipelineState<TrackMusicBrainzSummary>());
   Object.assign(trackAcousticBrainzState, makePipelineState<TrackAcousticBrainzSummary>());
+  Object.assign(trackDeezerState, makePipelineState<TrackDeezerSummary>());
 }

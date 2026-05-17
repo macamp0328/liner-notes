@@ -24,9 +24,9 @@ describe('applySchema', () => {
     } as unknown as Driver;
   });
 
-  it('opens and closes a fresh session for each of the 25 statements', async () => {
+  it('opens and closes a fresh session for each of the 26 statements', async () => {
     await applySchema(driver);
-    expect(sessions).toHaveLength(25);
+    expect(sessions).toHaveLength(26);
     for (const s of sessions) {
       expect(s.run).toHaveBeenCalledTimes(1);
       expect(s.close).toHaveBeenCalledTimes(1);
@@ -68,6 +68,12 @@ describe('applySchema', () => {
     expect(stmts.some((s) => s.includes('track_acousticbrainz_fetched'))).toBe(true);
     expect(stmts.some((s) => s.includes('track_tempo'))).toBe(true);
     expect(stmts.some((s) => s.includes('track_musical_scale'))).toBe(true);
+  });
+
+  it('creates the track Deezer index', async () => {
+    await applySchema(driver);
+    const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
+    expect(stmts.some((s) => s.includes('track_deezer_fetched'))).toBe(true);
   });
 
   it('closes the session even when run() throws', async () => {

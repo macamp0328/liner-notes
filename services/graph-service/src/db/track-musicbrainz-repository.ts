@@ -111,8 +111,11 @@ export async function setTrackMusicBrainzIds(
 }
 
 /**
- * Remove all MusicBrainz enrichment from Track nodes: clears musicBrainzFetched,
- * recordingMbid, and isrc so the next enrichment run reprocesses every track.
+ * Remove all MusicBrainz enrichment from Track nodes and cascade to every downstream
+ * enrichment that depends on it: AcousticBrainz (keyed by recordingMbid) and Deezer
+ * (keyed by isrc). Clearing all three together ensures the next enrichment run
+ * reprocesses from scratch without any stale markers or features.
+ *
  * Returns the number of tracks reset.
  */
 export async function resetTrackMusicBrainzEnrichment(driver: Driver): Promise<number> {
@@ -122,7 +125,8 @@ export async function resetTrackMusicBrainzEnrichment(driver: Driver): Promise<n
       `MATCH (t:Track) WHERE t.musicBrainzFetched IS NOT NULL
        REMOVE t.musicBrainzFetched, t.recordingMbid, t.isrc,
               t.acousticBrainzFetched, t.tempo, t.musicalKey, t.musicalScale,
-              t.loudnessDb, t.dynamicComplexity, t.danceabilityEstimate, t.voiceInstrumental
+              t.loudnessDb, t.dynamicComplexity, t.danceabilityEstimate, t.voiceInstrumental,
+              t.deezerFetched, t.deezerBpm, t.deezerGain
        RETURN count(t) AS reset`,
     );
     return (result.records[0]?.get('reset') as Neo4jInt | undefined)?.toNumber() ?? 0;
