@@ -43,15 +43,10 @@ export class DeezerClient {
   async getTrackByIsrc(isrc: string): Promise<DeezerTrackData | null> {
     const url = `${BASE_URL}/track/isrc:${encodeURIComponent(isrc)}`;
 
-    let response: DeezerTrackResponse;
-    try {
-      response = await this.fetchWithBackoff<DeezerTrackResponse>(url);
-    } catch (err) {
-      if (err instanceof Error && err.message.includes('not found (404)')) {
-        return null;
-      }
-      throw err;
-    }
+    const response = await this.fetchWithBackoff<DeezerTrackResponse>(url);
+
+    // null means 404 — ISRC not in Deezer catalog
+    if (response === null) return null;
 
     // Deezer returns a 200 with an error object for unknown ISRCs in some cases
     if (response.error !== undefined || response.id === undefined) {
@@ -65,7 +60,7 @@ export class DeezerClient {
     return { bpm, gain };
   }
 
-  private async fetchWithBackoff<T>(url: string): Promise<T> {
+  private async fetchWithBackoff<T>(url: string): Promise<T | null> {
     let attempt = 0;
     let currentDelay = this.backoffBaseMs;
 
@@ -89,7 +84,7 @@ export class DeezerClient {
       }
 
       if (response.status === 404) {
-        throw new Error(`Deezer: not found (404) for ${url}`);
+        return null;
       }
 
       if (!response.ok) {

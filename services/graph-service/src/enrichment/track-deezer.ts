@@ -56,7 +56,6 @@ export async function enrichTrackDeezer(
   log.info(`[track-deezer] Found ${tracks.length} tracks with ISRCs to enrich`);
 
   const results: TrackDeezerResult[] = [];
-  const failedElementIds = new Set<string>();
 
   let i = 0;
   for (const track of tracks) {
@@ -82,18 +81,21 @@ export async function enrichTrackDeezer(
       const msg = err instanceof Error ? err.message : String(err);
       log.error(`[track-deezer] Failed for ISRC ${track.isrc}: ${msg}`);
       tracksFailed++;
-      failedElementIds.add(track.elementId);
     }
   }
 
-  // Write all successfully processed tracks (exclude failed ones — they retry next run)
-  const toWrite = results.filter((r) => !failedElementIds.has(r.elementId));
-  if (toWrite.length > 0) {
+  // Failed tracks are not in results — they are not marked fetched and will retry next run
+  if (results.length > 0) {
     try {
-      await setTrackDeezerData(driver, toWrite);
+      await setTrackDeezerData(driver, results);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error(`[track-deezer] Failed to write enrichment results: ${msg}`);
+      // Write failed — no deezerFetched markers were set; report counts accurately
+      tracksFailed += results.length;
+      tracksEnriched = 0;
+      tracksSkipped = 0;
+      tracksProcessed = 0;
     }
   }
 

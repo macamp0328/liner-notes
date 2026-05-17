@@ -134,14 +134,16 @@ describe('enrichTrackDeezer', () => {
     ]);
   });
 
-  it('logs an error and does not throw when the write to the repository fails', async () => {
+  it('logs an error and reflects write failure in summary counts', async () => {
     mockGetTracks.mockResolvedValue([{ elementId: 'e1', isrc: 'USUM71900001' }]);
     mockSetData.mockRejectedValue(new Error('write timeout'));
     const client = makeDeezerClient(async () => ({ bpm: 128.5, gain: -6.2 }));
 
     await expect(enrichTrackDeezer(client, fakeDriver, silentLogger)).resolves.toMatchObject({
-      tracksEnriched: 1,
-      tracksFailed: 0,
+      tracksEnriched: 0,
+      tracksSkipped: 0,
+      tracksProcessed: 0,
+      tracksFailed: 1,
     });
     expect(silentLogger.error).toHaveBeenCalledWith(
       expect.stringContaining('Failed to write enrichment results'),
