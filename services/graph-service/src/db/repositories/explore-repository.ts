@@ -74,6 +74,12 @@ function toStr(val: unknown): string | null {
   return String(val);
 }
 
+function toFloat(val: unknown): number | null {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'number' && Number.isFinite(val)) return val;
+  return null;
+}
+
 function mapExploreRelease(record: { get: (key: string) => unknown }): ExploreRelease {
   return {
     discogsId: toInt(record.get('discogsId')) ?? 0,
@@ -477,6 +483,100 @@ export async function getSharedMusicians(driver: Driver): Promise<SharedMusician
         })),
       };
     });
+  } finally {
+    await session.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// getTracksByAudioFeatures
+// ---------------------------------------------------------------------------
+
+export interface AudioFeatureTrack {
+  trackTitle: string;
+  releaseTitle: string;
+  releaseDiscogsId: number;
+  tempo: number | null;
+  musicalKey: string | null;
+  musicalScale: string | null;
+  loudnessDb: number | null;
+  danceabilityEstimate: number | null;
+  voiceInstrumental: string | null;
+  deezerBpm: number | null;
+  deezerGain: number | null;
+}
+
+export interface AudioFeatureFilters {
+  minTempo?: number;
+  maxTempo?: number;
+  key?: string;
+  scale?: string;
+  voiceInstrumental?: string;
+  minDanceability?: number;
+}
+
+export async function getTracksByAudioFeatures(
+  driver: Driver,
+  filters: AudioFeatureFilters,
+  limit: number,
+): Promise<AudioFeatureTrack[]> {
+  const conditions: string[] = ['(t.tempo IS NOT NULL OR t.deezerBpm IS NOT NULL)'];
+  const params: Record<string, unknown> = { limit: neo4j.int(limit) };
+
+  if (filters.minTempo !== undefined) {
+    conditions.push('(t.tempo >= $minTempo OR t.deezerBpm >= $minTempo)');
+    params['minTempo'] = filters.minTempo;
+  }
+  if (filters.maxTempo !== undefined) {
+    conditions.push('(t.tempo <= $maxTempo OR t.deezerBpm <= $maxTempo)');
+    params['maxTempo'] = filters.maxTempo;
+  }
+  if (filters.key !== undefined) {
+    conditions.push('t.musicalKey = $key');
+    params['key'] = filters.key;
+  }
+  if (filters.scale !== undefined) {
+    conditions.push('t.musicalScale = $scale');
+    params['scale'] = filters.scale;
+  }
+  if (filters.voiceInstrumental !== undefined) {
+    conditions.push('t.voiceInstrumental = $voiceInstrumental');
+    params['voiceInstrumental'] = filters.voiceInstrumental;
+  }
+  if (filters.minDanceability !== undefined) {
+    conditions.push('t.danceabilityEstimate >= $minDanceability');
+    params['minDanceability'] = filters.minDanceability;
+  }
+
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `MATCH (r:Release)-[:HAS_TRACK]->(t:Track)
+       WHERE ${conditions.join(' AND ')}
+       RETURN t.title AS trackTitle, r.title AS releaseTitle,
+              r.discogsId AS releaseDiscogsId,
+              t.tempo AS tempo, t.musicalKey AS musicalKey,
+              t.musicalScale AS musicalScale, t.loudnessDb AS loudnessDb,
+              t.danceabilityEstimate AS danceabilityEstimate,
+              t.voiceInstrumental AS voiceInstrumental,
+              t.deezerBpm AS deezerBpm, t.deezerGain AS deezerGain
+       ORDER BY coalesce(t.tempo, t.deezerBpm) ASC, trackTitle
+       LIMIT $limit`,
+      params,
+    );
+    return result.records.map((rec) => ({
+      trackTitle: toStr(rec.get('trackTitle')) ?? '',
+      releaseTitle: toStr(rec.get('releaseTitle')) ?? '',
+      releaseDiscogsId: toInt(rec.get('releaseDiscogsId')) ?? 0,
+      tempo: toFloat(rec.get('tempo')),
+      musicalKey: toStr(rec.get('musicalKey')),
+      musicalScale: toStr(rec.get('musicalScale')),
+      loudnessDb: toFloat(rec.get('loudnessDb')),
+      danceabilityEstimate: toFloat(rec.get('danceabilityEstimate')),
+      voiceInstrumental: toStr(rec.get('voiceInstrumental')),
+      deezerBpm: toFloat(rec.get('deezerBpm')),
+      deezerGain: toFloat(rec.get('deezerGain')),
+    }));
   } finally {
     await session.close();
   }

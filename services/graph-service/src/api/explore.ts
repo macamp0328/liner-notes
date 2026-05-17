@@ -13,12 +13,15 @@ import {
   getSharedMusicians,
   getMostInternationalTracks,
   getMostPressedReleases,
+  getTracksByAudioFeatures,
   type ExploreRelease,
   type MusicianRelease,
   type ConnectionNode,
   type SharedMusiciansResult,
   type InternationalTrack,
   type MostPressedRelease,
+  type AudioFeatureFilters,
+  type AudioFeatureTrack,
 } from '../db/repositories/explore-repository.js';
 
 // ---------------------------------------------------------------------------
@@ -494,6 +497,100 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply): Promise<MostPressedRelease[] | ErrorReply> => {
       const limit = request.query.limit ?? 10;
       const results = await getMostPressedReleases(getDriver(), limit);
+      return reply.send(results);
+    },
+  );
+
+  // ---------------------------------------------------------------------------
+  // GET /explore/tracks/by-audio-features
+  // ---------------------------------------------------------------------------
+
+  const audioFeatureTrackSchema = {
+    type: 'object',
+    required: ['trackTitle', 'releaseTitle', 'releaseDiscogsId'],
+    properties: {
+      trackTitle: { type: 'string' },
+      releaseTitle: { type: 'string' },
+      releaseDiscogsId: { type: 'integer' },
+      tempo: { type: 'number', nullable: true },
+      musicalKey: { type: 'string', nullable: true },
+      musicalScale: { type: 'string', nullable: true },
+      loudnessDb: { type: 'number', nullable: true },
+      danceabilityEstimate: { type: 'number', nullable: true },
+      voiceInstrumental: { type: 'string', nullable: true },
+      deezerBpm: { type: 'number', nullable: true },
+      deezerGain: { type: 'number', nullable: true },
+    },
+  } as const;
+
+  fastify.get<{
+    Querystring: {
+      minTempo?: number;
+      maxTempo?: number;
+      key?: string;
+      scale?: string;
+      voiceInstrumental?: string;
+      minDanceability?: number;
+      limit?: number;
+    };
+    Reply: AudioFeatureTrack[];
+  }>(
+    '/tracks/by-audio-features',
+    {
+      schema: {
+        tags: ['explore'],
+        summary: 'Find tracks by audio features',
+        description:
+          'Filter Track nodes by audio properties (tempo, musical key, scale, danceability, ' +
+          'vocal/instrumental classifier). Returns tracks that have at least one audio feature ' +
+          'populated (via AcousticBrainz or Deezer enrichment). All filter params are optional — ' +
+          'omitting all returns up to `limit` enriched tracks ordered by tempo.\n\n' +
+          '`minTempo`/`maxTempo` match against both `tempo` (AcousticBrainz) and `deezerBpm` ' +
+          'so tracks with data from either source are included.',
+        querystring: {
+          type: 'object',
+          properties: {
+            minTempo: { type: 'number' },
+            maxTempo: { type: 'number' },
+            key: { type: 'string', description: 'Tonic, e.g. "C" or "A#"' },
+            scale: {
+              type: 'string',
+              enum: ['major', 'minor'],
+              description: 'Musical scale',
+            },
+            voiceInstrumental: {
+              type: 'string',
+              enum: ['voice', 'instrumental'],
+              description: 'AcousticBrainz voice/instrumental classifier result',
+            },
+            minDanceability: {
+              type: 'number',
+              minimum: 0,
+              maximum: 1,
+              description: 'Minimum danceability probability (0–1)',
+            },
+            limit: { type: 'integer', minimum: 1, maximum: 200, default: 20 },
+          },
+        },
+        response: {
+          200: {
+            type: 'array',
+            items: audioFeatureTrackSchema,
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { minTempo, maxTempo, key, scale, voiceInstrumental, minDanceability, limit } =
+        request.query;
+      const filters: AudioFeatureFilters = {};
+      if (minTempo !== undefined) filters.minTempo = minTempo;
+      if (maxTempo !== undefined) filters.maxTempo = maxTempo;
+      if (key !== undefined) filters.key = key;
+      if (scale !== undefined) filters.scale = scale;
+      if (voiceInstrumental !== undefined) filters.voiceInstrumental = voiceInstrumental;
+      if (minDanceability !== undefined) filters.minDanceability = minDanceability;
+      const results = await getTracksByAudioFeatures(getDriver(), filters, limit ?? 20);
       return reply.send(results);
     },
   );
