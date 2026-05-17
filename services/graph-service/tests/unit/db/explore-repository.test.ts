@@ -513,6 +513,17 @@ describe('getTracksByAudioFeatures', () => {
     expect(params['maxTempo']).toBe(130);
   });
 
+  it('uses a combined per-source AND condition when both minTempo and maxTempo are provided', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+
+    await getTracksByAudioFeatures(driver, { minTempo: 90, maxTempo: 120 }, 10);
+
+    const query: string = runSpy.mock.calls[0]?.[0] ?? '';
+    expect(query).toContain('t.tempo >= $minTempo AND t.tempo <= $maxTempo');
+    expect(query).toContain('t.deezerBpm >= $minTempo AND t.deezerBpm <= $maxTempo');
+  });
+
   it('passes key, scale, voiceInstrumental, and minDanceability filters', async () => {
     const { session, runSpy } = makeMockSession([makeResult([])]);
     const driver = makeMockDriver(session);

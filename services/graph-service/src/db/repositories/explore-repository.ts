@@ -523,11 +523,17 @@ export async function getTracksByAudioFeatures(
   const conditions: string[] = ['(t.tempo IS NOT NULL OR t.deezerBpm IS NOT NULL)'];
   const params: Record<string, unknown> = { limit: neo4j.int(limit) };
 
-  if (filters.minTempo !== undefined) {
+  if (filters.minTempo !== undefined && filters.maxTempo !== undefined) {
+    // Both bounds: at least one source must be fully within the range.
+    conditions.push(
+      '((t.tempo >= $minTempo AND t.tempo <= $maxTempo) OR (t.deezerBpm >= $minTempo AND t.deezerBpm <= $maxTempo))',
+    );
+    params['minTempo'] = filters.minTempo;
+    params['maxTempo'] = filters.maxTempo;
+  } else if (filters.minTempo !== undefined) {
     conditions.push('(t.tempo >= $minTempo OR t.deezerBpm >= $minTempo)');
     params['minTempo'] = filters.minTempo;
-  }
-  if (filters.maxTempo !== undefined) {
+  } else if (filters.maxTempo !== undefined) {
     conditions.push('(t.tempo <= $maxTempo OR t.deezerBpm <= $maxTempo)');
     params['maxTempo'] = filters.maxTempo;
   }
