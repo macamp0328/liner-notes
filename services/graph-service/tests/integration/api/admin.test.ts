@@ -39,6 +39,20 @@ vi.mock('../../../src/ingestion/ingest.js', () => ({
   buildDiscogsClientFromEnv: vi.fn().mockReturnValue({ getCollectionReleases: vi.fn() }),
 }));
 
+const mockEnrichTrackAcousticBrainz = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/enrichment/track-acousticbrainz.js', () => ({
+  enrichTrackAcousticBrainz: mockEnrichTrackAcousticBrainz,
+}));
+
+const mockResetTrackAcousticBrainzEnrichment = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/db/track-acousticbrainz-repository.js', () => ({
+  resetTrackAcousticBrainzEnrichment: mockResetTrackAcousticBrainzEnrichment,
+}));
+
+vi.mock('../../../src/ingestion/acousticbrainz-client.js', () => ({
+  buildAcousticBrainzClientFromEnv: vi.fn().mockReturnValue({}),
+}));
+
 // job-state is mocked so integration tests don't share singleton state
 const mockGetJobState = vi.hoisted(() => vi.fn());
 const mockStartJob = vi.hoisted(() => vi.fn().mockReturnValue('test-job-id'));
@@ -123,6 +137,13 @@ describe('Admin API', () => {
     mockStartJob.mockReturnValue('test-job-id');
     mockClearGeniusLyrics.mockResolvedValue(460);
     mockEnrichLyrics.mockResolvedValue({ enriched: 10, skipped: 5, failed: 0, durationMs: 3000 });
+    mockEnrichTrackAcousticBrainz.mockResolvedValue({
+      tracksProcessed: 5,
+      tracksSkipped: 2,
+      tracksFailed: 0,
+      durationMs: 1200,
+    });
+    mockResetTrackAcousticBrainzEnrichment.mockResolvedValue(7);
     resetAllPipelineStates();
     app = await buildServer();
     await app.ready();
@@ -514,6 +535,115 @@ describe('Admin API', () => {
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/admin/track-musicbrainz/status',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── POST /track-acousticbrainz/enrich ────────────────────────────────────
+  describe('POST /api/v1/admin/track-acousticbrainz/enrich', () => {
+    it('returns 200 with enrichment summary on success', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/track-acousticbrainz/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { tracksProcessed: number; tracksSkipped: number; tracksFailed: number };
+      };
+      expect(body.data.tracksProcessed).toBe(5);
+      expect(body.data.tracksSkipped).toBe(2);
+      expect(body.data.tracksFailed).toBe(0);
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/track-acousticbrainz/enrich',
+      });
+      expect(response.statusCode).toBe(401);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('UNAUTHORIZED');
+    });
+
+    it('returns 409 when enrichment is already in progress', async () => {
+      mockEnrichTrackAcousticBrainz.mockImplementationOnce(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(
+              () =>
+                resolve({ tracksProcessed: 0, tracksSkipped: 0, tracksFailed: 0, durationMs: 0 }),
+              100,
+            ),
+          ),
+      );
+
+      const [r1, r2] = await Promise.all([
+        app.inject({
+          method: 'POST',
+          url: '/api/v1/admin/track-acousticbrainz/enrich',
+          headers: { authorization: `Bearer ${VALID_TOKEN}` },
+        }),
+        app.inject({
+          method: 'POST',
+          url: '/api/v1/admin/track-acousticbrainz/enrich',
+          headers: { authorization: `Bearer ${VALID_TOKEN}` },
+        }),
+      ]);
+
+      const codes = [r1.statusCode, r2.statusCode].sort((a, b) => a - b);
+      expect(codes).toEqual([200, 409]);
+      const body409 = r1.statusCode === 409 ? r1 : r2;
+      const parsed = JSON.parse(body409.payload) as { error: { code: string } };
+      expect(parsed.error.code).toBe('ENRICHMENT_RUNNING');
+    });
+  });
+
+  // ── POST /track-acousticbrainz/reset ─────────────────────────────────────
+  describe('POST /api/v1/admin/track-acousticbrainz/reset', () => {
+    it('returns 200 with count of reset tracks', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/track-acousticbrainz/reset',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as { data: { reset: number } };
+      expect(body.data.reset).toBe(7);
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/track-acousticbrainz/reset',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── GET /track-acousticbrainz/status ─────────────────────────────────────
+  describe('GET /api/v1/admin/track-acousticbrainz/status', () => {
+    it('returns 200 with running:false and null lastResult before any run', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/track-acousticbrainz/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { running: boolean; lastResult: unknown };
+      };
+      expect(body.data.running).toBe(false);
+      expect(body.data.lastResult).toBeNull();
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/track-acousticbrainz/status',
       });
       expect(response.statusCode).toBe(401);
     });

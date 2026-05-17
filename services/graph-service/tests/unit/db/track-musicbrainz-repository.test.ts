@@ -152,6 +152,7 @@ describe('resetTrackMusicBrainzEnrichment', () => {
     expect(reset).toBe(42);
     const [query] = runSpy.mock.calls[0] as [string];
     expect(query).toContain('REMOVE t.musicBrainzFetched, t.recordingMbid, t.isrc');
+    expect(query).toContain('t.acousticBrainzFetched, t.tempo, t.musicalKey');
   });
 
   it('returns 0 when the query yields no records', async () => {

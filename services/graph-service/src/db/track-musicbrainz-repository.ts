@@ -120,7 +120,9 @@ export async function resetTrackMusicBrainzEnrichment(driver: Driver): Promise<n
   try {
     const result = await session.run(
       `MATCH (t:Track) WHERE t.musicBrainzFetched IS NOT NULL
-       REMOVE t.musicBrainzFetched, t.recordingMbid, t.isrc
+       REMOVE t.musicBrainzFetched, t.recordingMbid, t.isrc,
+              t.acousticBrainzFetched, t.tempo, t.musicalKey, t.musicalScale,
+              t.loudnessDb, t.dynamicComplexity, t.danceabilityEstimate, t.voiceInstrumental
        RETURN count(t) AS reset`,
     );
     return (result.records[0]?.get('reset') as Neo4jInt | undefined)?.toNumber() ?? 0;
