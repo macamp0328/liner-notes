@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Driver, Session, Result, Record as Neo4jRecord } from 'neo4j-driver';
-import { getUnenrichedTracks, setTrackLyrics } from '../../../src/db/lyrics-repository.js';
+import {
+  getUnenrichedTracks,
+  setTrackLyrics,
+  clearGeniusLyrics,
+} from '../../../src/db/lyrics-repository.js';
 
 // ---------------------------------------------------------------------------
 // Mock neo4j-driver — test that the right Cypher is sent, not that Neo4j
@@ -168,5 +172,28 @@ describe('setTrackLyrics', () => {
 
     await expect(setTrackLyrics(driver, 1, 'A1', 'lyrics', 'lrclib')).rejects.toThrow('DB error');
     expect(session.close).toHaveBeenCalledOnce();
+  });
+});
+
+describe('clearGeniusLyrics', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the count of cleared tracks', async () => {
+    const int = (n: number) => ({ toNumber: () => n });
+    const record = {
+      get: vi.fn().mockImplementation((key: string) => (key === 'cleared' ? int(3) : null)),
+    };
+    const { session } = makeMockSession({ records: [record] } as unknown as Result);
+
+    const count = await clearGeniusLyrics(makeMockDriver(session));
+    expect(count).toBe(3);
+  });
+
+  it('returns 0 when no tracks were cleared', async () => {
+    const { session } = makeMockSession({ records: [] } as unknown as Result);
+    const count = await clearGeniusLyrics(makeMockDriver(session));
+    expect(count).toBe(0);
   });
 });

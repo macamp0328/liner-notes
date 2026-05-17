@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
-import { VIAFClient } from '../../../src/ingestion/viaf-client.js';
+import { VIAFClient, buildViafClientFromEnv } from '../../../src/ingestion/viaf-client.js';
 
 function makeViafResponse(overrides?: {
   nameType?: string;
@@ -289,5 +289,32 @@ describe('VIAFClient', () => {
     const result = await client.getCountryByName('Solo Entry Artist');
 
     expect(result).toBe('IT');
+  });
+});
+
+describe('buildViafClientFromEnv', () => {
+  const originalEnv = process.env['MUSICBRAINZ_USER_AGENT'];
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env['MUSICBRAINZ_USER_AGENT'];
+    } else {
+      process.env['MUSICBRAINZ_USER_AGENT'] = originalEnv;
+    }
+  });
+
+  it('returns null when MUSICBRAINZ_USER_AGENT is not set', () => {
+    delete process.env['MUSICBRAINZ_USER_AGENT'];
+    expect(buildViafClientFromEnv()).toBeNull();
+  });
+
+  it('returns a VIAFClient when MUSICBRAINZ_USER_AGENT is set', () => {
+    process.env['MUSICBRAINZ_USER_AGENT'] = 'test-agent/1.0';
+    expect(buildViafClientFromEnv()).toBeInstanceOf(VIAFClient);
+  });
+
+  it('returns a VIAFClient when a logger is supplied', () => {
+    process.env['MUSICBRAINZ_USER_AGENT'] = 'test-agent/1.0';
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    expect(buildViafClientFromEnv(logger)).toBeInstanceOf(VIAFClient);
   });
 });

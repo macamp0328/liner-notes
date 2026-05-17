@@ -71,6 +71,13 @@ const completeSummary: IngestionSummary = {
   },
   trackVersionsEnrichment: { enriched: 3, skipped: 1, failed: 0, durationMs: 100 },
   artistProfilesEnrichment: { enriched: 8, skipped: 2, failed: 0, durationMs: 8000 },
+  trackDeezerEnrichment: {
+    tracksProcessed: 5,
+    tracksEnriched: 4,
+    tracksSkipped: 1,
+    tracksFailed: 0,
+    durationMs: 600,
+  },
 };
 
 const idleState: JobState = {

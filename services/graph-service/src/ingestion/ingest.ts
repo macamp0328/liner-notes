@@ -12,6 +12,9 @@ import { enrichTrackVersions } from '../enrichment/track-versions.js';
 import type { TrackVersionsEnrichmentSummary } from '../enrichment/track-versions.js';
 import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
 import type { ArtistProfilesEnrichmentSummary } from '../enrichment/artist-profiles.js';
+import { enrichTrackDeezer } from '../enrichment/track-deezer.js';
+import type { TrackDeezerEnrichmentSummary } from '../enrichment/track-deezer.js';
+import { buildDeezerClientFromEnv } from './deezer-client.js';
 
 export type { Logger };
 export type { LyricsEnrichmentSummary };
@@ -19,6 +22,7 @@ export type { MasterDataEnrichmentSummary };
 export type { ArtistGenresEnrichmentSummary };
 export type { TrackVersionsEnrichmentSummary };
 export type { ArtistProfilesEnrichmentSummary };
+export type { TrackDeezerEnrichmentSummary };
 
 export interface IngestionConfig {
   username: string;
@@ -36,6 +40,7 @@ export interface IngestionSummary {
   artistGenresEnrichment: ArtistGenresEnrichmentSummary;
   trackVersionsEnrichment: TrackVersionsEnrichmentSummary;
   artistProfilesEnrichment: ArtistProfilesEnrichmentSummary;
+  trackDeezerEnrichment: TrackDeezerEnrichmentSummary;
 }
 
 const PER_PAGE = 50;
@@ -120,6 +125,10 @@ export async function runIngestion(
   // Step 7: Enrich Artist nodes with realName + profile from Discogs artist API
   const artistProfilesEnrichment = await enrichArtistProfiles(client, driver, log);
 
+  // Step 8: Enrich Track nodes with BPM and loudness from Deezer (ISRC-keyed gap-filler)
+  const deezerClient = buildDeezerClientFromEnv(log);
+  const trackDeezerEnrichment = await enrichTrackDeezer(deezerClient, driver, log);
+
   const durationMs = Date.now() - startTime;
   const durationSec = Math.round(durationMs / 1000);
   const minutes = Math.floor(durationSec / 60);
@@ -135,6 +144,7 @@ export async function runIngestion(
     artistGenresEnrichment,
     trackVersionsEnrichment,
     artistProfilesEnrichment,
+    trackDeezerEnrichment,
   };
 
   log.info(
@@ -156,6 +166,9 @@ export async function runIngestion(
       `  Artist profiles enrich: ${artistProfilesEnrichment.enriched}\n` +
       `  Artist profiles skip:  ${artistProfilesEnrichment.skipped}\n` +
       `  Artist profiles failed: ${artistProfilesEnrichment.failed}\n` +
+      `  Deezer enriched:      ${trackDeezerEnrichment.tracksEnriched}\n` +
+      `  Deezer skipped:       ${trackDeezerEnrichment.tracksSkipped}\n` +
+      `  Deezer failed:        ${trackDeezerEnrichment.tracksFailed}\n` +
       `  Duration:             ${minutes}m ${seconds}s\n` +
       (errors.length > 0
         ? `  Errors:\n${errors.map((e) => `    - ${e}`).join('\n')}`

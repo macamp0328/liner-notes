@@ -26,6 +26,7 @@ const statements = [
   'CREATE INDEX track_recording_mbid IF NOT EXISTS FOR (t:Track) ON (t.recordingMbid)',
   'CREATE INDEX track_isrc IF NOT EXISTS FOR (t:Track) ON (t.isrc)',
   'CREATE INDEX track_musicbrainz_fetched IF NOT EXISTS FOR (t:Track) ON (t.musicBrainzFetched)',
+  'CREATE INDEX track_deezer_fetched IF NOT EXISTS FOR (t:Track) ON (t.deezerFetched)',
 ];
 
 export async function applySchema(driver: Driver): Promise<void> {

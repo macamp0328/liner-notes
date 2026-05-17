@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
-import { MusicBrainzClient } from '../../../src/ingestion/musicbrainz-client.js';
+import {
+  MusicBrainzClient,
+  buildMusicBrainzClientFromEnv,
+} from '../../../src/ingestion/musicbrainz-client.js';
 
 function makeOkResponse(body: unknown): Response {
   return {
@@ -658,5 +661,26 @@ describe('MusicBrainzClient', () => {
       const headers = call[1]?.headers as Record<string, string>;
       expect(headers['User-Agent']).toBe('liner-notes/test');
     }
+  });
+});
+
+describe('buildMusicBrainzClientFromEnv', () => {
+  const originalEnv = process.env['MUSICBRAINZ_USER_AGENT'];
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env['MUSICBRAINZ_USER_AGENT'];
+    } else {
+      process.env['MUSICBRAINZ_USER_AGENT'] = originalEnv;
+    }
+  });
+
+  it('returns null when MUSICBRAINZ_USER_AGENT is not set', () => {
+    delete process.env['MUSICBRAINZ_USER_AGENT'];
+    expect(buildMusicBrainzClientFromEnv()).toBeNull();
+  });
+
+  it('returns a MusicBrainzClient when MUSICBRAINZ_USER_AGENT is set', () => {
+    process.env['MUSICBRAINZ_USER_AGENT'] = 'test-agent/1.0';
+    expect(buildMusicBrainzClientFromEnv()).toBeInstanceOf(MusicBrainzClient);
   });
 });

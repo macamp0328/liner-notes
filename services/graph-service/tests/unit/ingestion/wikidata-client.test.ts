@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
-import { WikidataClient } from '../../../src/ingestion/wikidata-client.js';
+import {
+  WikidataClient,
+  buildWikidataClientFromEnv,
+} from '../../../src/ingestion/wikidata-client.js';
 
 function makeSparqlResponse(countryCode?: string): unknown {
   return {
@@ -247,5 +250,39 @@ describe('WikidataClient', () => {
       const rawUrl = fetchSpy.mock.calls[0]?.[0] as string;
       expect(rawUrl).toContain('Bj%25C3%25B6rk');
     });
+  });
+});
+
+describe('buildWikidataClientFromEnv', () => {
+  const originalMb = process.env['MUSICBRAINZ_USER_AGENT'];
+  const originalDiscogs = process.env['DISCOGS_USER_AGENT'];
+  afterEach(() => {
+    if (originalMb === undefined) {
+      delete process.env['MUSICBRAINZ_USER_AGENT'];
+    } else {
+      process.env['MUSICBRAINZ_USER_AGENT'] = originalMb;
+    }
+    if (originalDiscogs === undefined) {
+      delete process.env['DISCOGS_USER_AGENT'];
+    } else {
+      process.env['DISCOGS_USER_AGENT'] = originalDiscogs;
+    }
+  });
+
+  it('returns null when neither env var is set', () => {
+    delete process.env['MUSICBRAINZ_USER_AGENT'];
+    delete process.env['DISCOGS_USER_AGENT'];
+    expect(buildWikidataClientFromEnv()).toBeNull();
+  });
+
+  it('returns a WikidataClient when MUSICBRAINZ_USER_AGENT is set', () => {
+    process.env['MUSICBRAINZ_USER_AGENT'] = 'test-agent/1.0';
+    expect(buildWikidataClientFromEnv()).toBeInstanceOf(WikidataClient);
+  });
+
+  it('returns a WikidataClient when a logger is supplied', () => {
+    process.env['MUSICBRAINZ_USER_AGENT'] = 'test-agent/1.0';
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    expect(buildWikidataClientFromEnv(logger)).toBeInstanceOf(WikidataClient);
   });
 });
