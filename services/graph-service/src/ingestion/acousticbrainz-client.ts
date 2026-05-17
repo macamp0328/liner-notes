@@ -157,8 +157,9 @@ export class AcousticBrainzClient {
         const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
         const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
         const waitMs = Math.max(currentDelay, retryAfterMs);
+        const reason = response.status === 429 ? 'Rate limited' : 'Service unavailable';
         this.log.warn(
-          `[acousticbrainz-client] Rate limited (${response.status}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${waitMs}ms`,
+          `[acousticbrainz-client] ${reason} (${response.status}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${waitMs}ms`,
         );
         await this.sleep(waitMs);
         currentDelay = Math.min(currentDelay * 2, MAX_BACKOFF_MS);

@@ -69,7 +69,7 @@
       "post": {
         "summary": "Trigger the full Discogs → Neo4j ingestion pipeline",
         "tags": ["admin"],
-        "description": "Runs asynchronously — returns 202 immediately and processes in the background.\n\n**Steps run automatically:**\n1. Fetch & MERGE all releases from the Discogs collection\n2. Lyrics enrichment (LRCLIB primary, Genius fallback)\n3. Master data enrichment (originalYear + global pressing countries/formats via Discogs master API)\n4. Artist genres/styles aggregation (rolled up from releases)\n5. Track version deduplication (IS_VERSION_OF relationships)\n6. Artist profiles enrichment (realName + profile from Discogs artist API)\n\n**Not included — must be triggered separately:**\n- `POST /api/v1/admin/nationality/enrich` — nationality data from MusicBrainz + Wikidata",
+        "description": "Runs asynchronously — returns 202 immediately and processes in the background.\n\n**Steps run automatically:**\n1. Fetch & MERGE all releases from the Discogs collection\n2. Lyrics enrichment (LRCLIB primary, Genius fallback)\n3. Master data enrichment (originalYear + global pressing countries/formats via Discogs master API)\n4. Artist genres/styles aggregation (rolled up from releases)\n5. Track version deduplication (IS_VERSION_OF relationships)\n6. Artist profiles enrichment (realName + profile from Discogs artist API)\n\n**Not included — must be triggered separately:**\n- `POST /api/v1/admin/nationality/enrich` — nationality data from MusicBrainz + Wikidata\n- `POST /api/v1/admin/mb-release-events/enrich` — ISO-coded country + date release events from MusicBrainz\n- `POST /api/v1/admin/track-musicbrainz/enrich` — recording MBID + ISRC on Track nodes from MusicBrainz\n- `POST /api/v1/admin/track-acousticbrainz/enrich` — tempo/key/loudness audio features on Track nodes from AcousticBrainz\n- `POST /api/v1/admin/track-deezer/enrich` — BPM + loudness on Track nodes from Deezer (ISRC lookup)",
         "security": [
           {
             "bearerAuth": []
@@ -530,7 +530,7 @@
       "post": {
         "summary": "Enrich Artist and Musician nodes with nationality (ORIGIN_COUNTRY)",
         "tags": ["admin"],
-        "description": "Looks up country of origin for every Artist and Musician node that has not yet been enriched, creating `ORIGIN_COUNTRY` relationships to `Country` nodes. Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n**Sources (queried in parallel per node):**\n- MusicBrainz: two-step lookup via Discogs URL → MBID → artist record. Falls back to `area.iso-3166-1-codes` when the `country` field is null.\n- Wikidata: SPARQL lookup via Discogs artist ID property (P1953 → P27 → P297).\n\n**Conflict resolution:** when sources disagree, Wikidata is preferred and the discrepancy is logged.\n\nFor musicians without a Discogs ID, MusicBrainz name search is used as a last resort (score ≥ 90 only).\n\nUses `nationalityFetched = true` as an idempotency marker — already-processed nodes are skipped. Run `POST /api/v1/admin/nationality/reset` first to re-process all nodes with updated source data.\n\nRequires `MUSICBRAINZ_USER_AGENT` env var.",
+        "description": "Looks up country of origin for every Artist and Musician node that has not yet been enriched, creating `ORIGIN_COUNTRY` relationships to `Country` nodes. Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n**Sources (tried in order per node):**\n1. MusicBrainz + Wikidata by Discogs ID (parallel). MusicBrainz uses a two-step lookup via Discogs URL → MBID → artist record. Wikidata uses SPARQL via P1953 → P27 → P297.\n2. Wikidata via Wikipedia URL: fetches the Discogs artist page, extracts any English Wikipedia URLs from `urls[]`, and queries Wikidata via `schema:about` triple. Covers artists whose Discogs ID is not in Wikidata but who have a Wikipedia article. Requires `DISCOGS_TOKEN`.\n3. VIAF name search: queries the Virtual International Authority File by artist name. Strong coverage of classical/orchestral musicians. Validates nameType, name match, and nationality agreement before accepting. Requires `MUSICBRAINZ_USER_AGENT`.\n\n**Conflict resolution:** when MB and WD disagree on source 1, Wikidata is preferred and the discrepancy is logged.\n\nFor musicians without a Discogs ID, MusicBrainz name search is used instead (score ≥ 90 only). Sources 2 and 3 are skipped for these musicians.\n\nUses `nationalityFetched = true` as an idempotency marker — already-processed nodes are skipped. Run `POST /api/v1/admin/nationality/reset` first to re-process all nodes with updated source data.\n\nRequires `MUSICBRAINZ_USER_AGENT` env var.",
         "security": [
           {
             "bearerAuth": []
@@ -825,6 +825,1493 @@
             }
           },
           "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/mb-release-events/enrich": {
+      "post": {
+        "summary": "Enrich Master nodes with MusicBrainz release events (MB_RELEASED_IN)",
+        "tags": ["admin"],
+        "description": "For each unenriched Master node, walks Discogs master ID → MusicBrainz release group → all official releases → release events, writing `MB_RELEASED_IN` relationships to `Country` nodes with ISO-3166-1 alpha-2 codes and release dates. Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\nUses `mbReleaseEventsFetched = true` as an idempotency marker — already-processed Master nodes are skipped. Run `POST /api/v1/admin/mb-release-events/reset` first to re-process all nodes.\n\nEvents without a country code are skipped (only ISO-coded events can be linked to Country nodes). Same country with different release IDs creates separate relationships, enabling `min(r.date)` queries for first-release-per-country.\n\nRequires `MUSICBRAINZ_USER_AGENT` env var.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "mastersProcessed",
+                        "mastersSkipped",
+                        "mastersFailed",
+                        "eventsWritten",
+                        "durationMs"
+                      ],
+                      "properties": {
+                        "mastersProcessed": {
+                          "type": "integer"
+                        },
+                        "mastersSkipped": {
+                          "type": "integer"
+                        },
+                        "mastersFailed": {
+                          "type": "integer"
+                        },
+                        "eventsWritten": {
+                          "type": "integer"
+                        },
+                        "durationMs": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/mb-release-events/reset": {
+      "post": {
+        "summary": "Reset MusicBrainz release event enrichment markers for a full re-run",
+        "tags": ["admin"],
+        "description": "Removes the `mbReleaseEventsFetched` property from all Master nodes and deletes all `MB_RELEASED_IN` relationships, causing the next `POST /api/v1/admin/mb-release-events/enrich` call to re-process every master from scratch.\n\nThis endpoint is blocked while enrichment is running.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["reset"],
+                      "properties": {
+                        "reset": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-musicbrainz/enrich": {
+      "post": {
+        "summary": "Enrich Track nodes with MusicBrainz recording MBID + ISRC",
+        "tags": ["admin"],
+        "description": "For each Release with unenriched tracks, resolves the MusicBrainz release via the Discogs URL relation, fetches its tracklist with recording IDs/ISRCs, and aligns it to Track nodes by validated ordinal position. Tracks left unmatched fall back to a direct recording search accepted only on a high MusicBrainz score. Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\nWrites `recordingMbid` and `isrc` (both nullable) onto Track nodes — the cross-database identifiers downstream AcousticBrainz and Deezer enrichment depend on. Tracklist alignment validates title similarity and duration proximity before writing; a mismatched track is skipped rather than assigned a guessed MBID.\n\nUses `musicBrainzFetched = true` as an idempotency marker — already-processed Track nodes are skipped. Run `POST /api/v1/admin/track-musicbrainz/reset` first to re-process all tracks.\n\nRequires `MUSICBRAINZ_USER_AGENT` env var.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "releasesProcessed",
+                        "releasesSkipped",
+                        "releasesFailed",
+                        "tracksMatched",
+                        "tracksUnmatched",
+                        "durationMs"
+                      ],
+                      "properties": {
+                        "releasesProcessed": {
+                          "type": "integer"
+                        },
+                        "releasesSkipped": {
+                          "type": "integer"
+                        },
+                        "releasesFailed": {
+                          "type": "integer"
+                        },
+                        "tracksMatched": {
+                          "type": "integer"
+                        },
+                        "tracksUnmatched": {
+                          "type": "integer"
+                        },
+                        "durationMs": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-musicbrainz/reset": {
+      "post": {
+        "summary": "Reset MusicBrainz track enrichment markers for a full re-run",
+        "tags": ["admin"],
+        "description": "Removes MusicBrainz fields (`musicBrainzFetched`, `recordingMbid`, `isrc`) from all Track nodes, causing the next `POST /api/v1/admin/track-musicbrainz/enrich` call to re-process every track from scratch.\n\n**Cascade:** because AcousticBrainz enrichment depends on `recordingMbid` and Deezer enrichment depends on `isrc`, this reset also clears all AcousticBrainz fields (`acousticBrainzFetched`, `tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, `dynamicComplexity`, `danceabilityEstimate`, `voiceInstrumental`) and all Deezer fields (`deezerFetched`, `deezerBpm`, `deezerGain`) from the same nodes.\n\nThis endpoint is blocked while enrichment is running.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["reset"],
+                      "properties": {
+                        "reset": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-acousticbrainz/enrich": {
+      "post": {
+        "summary": "Enrich Track nodes with AcousticBrainz audio features",
+        "tags": ["admin"],
+        "description": "For each Track that carries a `recordingMbid` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), fetches Essentia acoustic analysis from AcousticBrainz in bulk and writes audio-feature properties onto the Track node. Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, and only after track-musicbrainz enrichment has populated `recordingMbid`.**\n\n**Physically measured (trustworthy):** `tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, `dynamicComplexity`.\n\n**Model-estimated:** `danceabilityEstimate`, `voiceInstrumental` are AcousticBrainz classifier outputs — a different model from Spotify/Echo Nest. They are this project’s own estimates and must never be presented as Spotify-equivalent values. No time signature is provided: AcousticBrainz does not expose a reliable categorical time signature.\n\nAll fields are nullable and best-effort — AcousticBrainz coverage is crowd-sourced and frozen at 2022. Uses `acousticBrainzFetched = true` as an idempotency marker; already-processed Track nodes are skipped. Run `POST /api/v1/admin/track-acousticbrainz/reset` first to re-process all tracks.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "tracksProcessed",
+                        "tracksSkipped",
+                        "tracksFailed",
+                        "durationMs"
+                      ],
+                      "properties": {
+                        "tracksProcessed": {
+                          "type": "integer"
+                        },
+                        "tracksSkipped": {
+                          "type": "integer"
+                        },
+                        "tracksFailed": {
+                          "type": "integer"
+                        },
+                        "durationMs": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-acousticbrainz/reset": {
+      "post": {
+        "summary": "Reset AcousticBrainz track enrichment markers for a full re-run",
+        "tags": ["admin"],
+        "description": "Removes the `acousticBrainzFetched` marker and every audio-feature property (`tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, `dynamicComplexity`, `danceabilityEstimate`, `voiceInstrumental`) from all Track nodes, causing the next `POST /api/v1/admin/track-acousticbrainz/enrich` call to re-process every track from scratch.\n\nThis endpoint is blocked while enrichment is running.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["reset"],
+                      "properties": {
+                        "reset": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-deezer/enrich": {
+      "post": {
+        "summary": "Enrich Track nodes with Deezer BPM and loudness",
+        "tags": ["admin"],
+        "description": "For each Track that carries an `isrc` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), looks the ISRC up against the free Deezer public API and writes `deezerBpm` and `deezerGain` (a loudness figure) onto the Track node. Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, and only after track-musicbrainz enrichment has populated `isrc`.**\n\nDeezer is an independent, ISRC-keyed source. `deezerBpm`/`deezerGain` are stored under distinct property names rather than overwriting the AcousticBrainz `tempo`/`loudnessDb` fields, so the source stays traceable and the two BPM figures can be compared. Deezer returns `0` for unknown values — those are stored as null.\n\nAll fields are nullable and best-effort. Uses `deezerFetched = true` as an idempotency marker; already-processed Track nodes are skipped. Run `POST /api/v1/admin/track-deezer/reset` first to re-process all tracks.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "tracksProcessed",
+                        "tracksSkipped",
+                        "tracksFailed",
+                        "durationMs"
+                      ],
+                      "properties": {
+                        "tracksProcessed": {
+                          "type": "integer"
+                        },
+                        "tracksSkipped": {
+                          "type": "integer"
+                        },
+                        "tracksFailed": {
+                          "type": "integer"
+                        },
+                        "durationMs": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-deezer/reset": {
+      "post": {
+        "summary": "Reset Deezer track enrichment markers for a full re-run",
+        "tags": ["admin"],
+        "description": "Removes the `deezerFetched` marker and the `deezerBpm` and `deezerGain` properties from all Track nodes, causing the next `POST /api/v1/admin/track-deezer/enrich` call to re-process every track from scratch.\n\nThis endpoint is blocked while enrichment is running.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["reset"],
+                      "properties": {
+                        "reset": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/lyrics/status": {
+      "get": {
+        "summary": "Status of the most recent lyrics enrichment run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "enriched": {
+                              "type": "integer"
+                            },
+                            "skipped": {
+                              "type": "integer"
+                            },
+                            "failed": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/nationality/status": {
+      "get": {
+        "summary": "Status of the most recent nationality enrichment run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "enriched": {
+                              "type": "integer"
+                            },
+                            "skipped": {
+                              "type": "integer"
+                            },
+                            "failed": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/master-data/status": {
+      "get": {
+        "summary": "Status of the most recent master data enrichment run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "enriched": {
+                              "type": "integer"
+                            },
+                            "skipped": {
+                              "type": "integer"
+                            },
+                            "failed": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/mb-release-events/status": {
+      "get": {
+        "summary": "Status of the most recent MusicBrainz release events enrichment run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "mastersProcessed": {
+                              "type": "integer"
+                            },
+                            "mastersSkipped": {
+                              "type": "integer"
+                            },
+                            "mastersFailed": {
+                              "type": "integer"
+                            },
+                            "eventsWritten": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-musicbrainz/status": {
+      "get": {
+        "summary": "Status of the most recent MusicBrainz track enrichment run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "releasesProcessed": {
+                              "type": "integer"
+                            },
+                            "releasesSkipped": {
+                              "type": "integer"
+                            },
+                            "releasesFailed": {
+                              "type": "integer"
+                            },
+                            "tracksMatched": {
+                              "type": "integer"
+                            },
+                            "tracksUnmatched": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-acousticbrainz/status": {
+      "get": {
+        "summary": "Status of the most recent AcousticBrainz track enrichment run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "tracksProcessed": {
+                              "type": "integer"
+                            },
+                            "tracksSkipped": {
+                              "type": "integer"
+                            },
+                            "tracksFailed": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-deezer/status": {
+      "get": {
+        "summary": "Status of the most recent Deezer track enrichment run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "tracksProcessed": {
+                              "type": "integer"
+                            },
+                            "tracksSkipped": {
+                              "type": "integer"
+                            },
+                            "tracksFailed": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
             "description": "Default Response",
             "content": {
               "application/json": {

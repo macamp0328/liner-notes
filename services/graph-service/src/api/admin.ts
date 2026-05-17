@@ -860,9 +860,14 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['admin'],
         summary: 'Reset MusicBrainz track enrichment markers for a full re-run',
         description:
-          'Removes the `musicBrainzFetched`, `recordingMbid`, and `isrc` properties from all ' +
+          'Removes MusicBrainz fields (`musicBrainzFetched`, `recordingMbid`, `isrc`) from all ' +
           'Track nodes, causing the next `POST /api/v1/admin/track-musicbrainz/enrich` call to ' +
           're-process every track from scratch.\n\n' +
+          '**Cascade:** because AcousticBrainz enrichment depends on `recordingMbid` and Deezer ' +
+          'enrichment depends on `isrc`, this reset also clears all AcousticBrainz fields ' +
+          '(`acousticBrainzFetched`, `tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, ' +
+          '`dynamicComplexity`, `danceabilityEstimate`, `voiceInstrumental`) and all Deezer fields ' +
+          '(`deezerFetched`, `deezerBpm`, `deezerGain`) from the same nodes.\n\n' +
           'This endpoint is blocked while enrichment is running.',
         security: [{ bearerAuth: [] }],
         response: {
