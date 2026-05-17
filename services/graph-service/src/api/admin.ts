@@ -21,6 +21,9 @@ import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
 import { resetMbReleaseEventsEnrichment } from '../db/mb-release-events-repository.js';
 import { enrichTrackMusicBrainz } from '../enrichment/track-musicbrainz.js';
 import { resetTrackMusicBrainzEnrichment } from '../db/track-musicbrainz-repository.js';
+import { buildAcousticBrainzClientFromEnv } from '../ingestion/acousticbrainz-client.js';
+import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
+import { resetTrackAcousticBrainzEnrichment } from '../db/track-acousticbrainz-repository.js';
 
 const errorShape = {
   type: 'object',
@@ -92,12 +95,19 @@ type TrackMusicBrainzSummary = {
   tracksUnmatched: number;
   durationMs: number;
 };
+type TrackAcousticBrainzSummary = {
+  tracksProcessed: number;
+  tracksSkipped: number;
+  tracksFailed: number;
+  durationMs: number;
+};
 
 const lyricsState = makePipelineState<EnrichSummary>();
 const nationalityState = makePipelineState<EnrichSummary>();
 const masterDataState = makePipelineState<EnrichSummary>();
 const mbReleaseEventsState = makePipelineState<MbReleaseEventsSummary>();
 const trackMusicBrainzState = makePipelineState<TrackMusicBrainzSummary>();
+const trackAcousticBrainzState = makePipelineState<TrackAcousticBrainzSummary>();
 
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
@@ -123,7 +133,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           '**Not included — must be triggered separately:**\n' +
           '- `POST /api/v1/admin/nationality/enrich` — nationality data from MusicBrainz + Wikidata\n' +
           '- `POST /api/v1/admin/mb-release-events/enrich` — ISO-coded country + date release events from MusicBrainz\n' +
-          '- `POST /api/v1/admin/track-musicbrainz/enrich` — recording MBID + ISRC on Track nodes from MusicBrainz',
+          '- `POST /api/v1/admin/track-musicbrainz/enrich` — recording MBID + ISRC on Track nodes from MusicBrainz\n' +
+          '- `POST /api/v1/admin/track-acousticbrainz/enrich` — tempo/key/loudness audio features on Track nodes from AcousticBrainz',
         security: [{ bearerAuth: [] }],
         response: {
           202: {
@@ -881,6 +892,146 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     },
   );
 
+  fastify.post<{
+    Reply:
+      | {
+          data: {
+            tracksProcessed: number;
+            tracksSkipped: number;
+            tracksFailed: number;
+            durationMs: number;
+          };
+        }
+      | { error: { code: string; message: string } };
+  }>(
+    '/track-acousticbrainz/enrich',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Enrich Track nodes with AcousticBrainz audio features',
+        description:
+          'For each Track that carries a `recordingMbid` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), ' +
+          'fetches Essentia acoustic analysis from AcousticBrainz in bulk and writes audio-feature ' +
+          'properties onto the Track node. Blocks until complete.\n\n' +
+          '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, ' +
+          'and only after track-musicbrainz enrichment has populated `recordingMbid`.**\n\n' +
+          '**Physically measured (trustworthy):** `tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, ' +
+          '`dynamicComplexity`.\n\n' +
+          '**Model-estimated:** `danceabilityEstimate`, `voiceInstrumental` are AcousticBrainz ' +
+          'classifier outputs — a different model from Spotify/Echo Nest. They are this project’s ' +
+          'own estimates and must never be presented as Spotify-equivalent values. No time signature ' +
+          'is provided: AcousticBrainz does not expose a reliable categorical time signature.\n\n' +
+          'All fields are nullable and best-effort — AcousticBrainz coverage is crowd-sourced and ' +
+          'frozen at 2022. Uses `acousticBrainzFetched = true` as an idempotency marker; ' +
+          'already-processed Track nodes are skipped. Run `POST /api/v1/admin/track-acousticbrainz/reset` ' +
+          'first to re-process all tracks.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['tracksProcessed', 'tracksSkipped', 'tracksFailed', 'durationMs'],
+                properties: {
+                  tracksProcessed: { type: 'integer' },
+                  tracksSkipped: { type: 'integer' },
+                  tracksFailed: { type: 'integer' },
+                  durationMs: { type: 'integer' },
+                },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (request, reply) => {
+      if (trackAcousticBrainzState.running) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message: 'AcousticBrainz track enrichment already in progress',
+          },
+        });
+      }
+
+      const abClient = buildAcousticBrainzClientFromEnv(request.log);
+
+      trackAcousticBrainzState.running = true;
+      trackAcousticBrainzState.startedAt = new Date().toISOString();
+      trackAcousticBrainzState.completedAt = null;
+      trackAcousticBrainzState.durationMs = null;
+      trackAcousticBrainzState.lastResult = null;
+      try {
+        const summary = await enrichTrackAcousticBrainz(abClient, getDriver(), request.log);
+        trackAcousticBrainzState.lastResult = summary;
+        trackAcousticBrainzState.completedAt = new Date().toISOString();
+        trackAcousticBrainzState.durationMs = summary.durationMs;
+        return reply.send({ data: summary });
+      } finally {
+        trackAcousticBrainzState.running = false;
+      }
+    },
+  );
+
+  fastify.post<{
+    Reply: { data: { reset: number } } | { error: { code: string; message: string } };
+  }>(
+    '/track-acousticbrainz/reset',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Reset AcousticBrainz track enrichment markers for a full re-run',
+        description:
+          'Removes the `acousticBrainzFetched` marker and every audio-feature property ' +
+          '(`tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, `dynamicComplexity`, ' +
+          '`danceabilityEstimate`, `voiceInstrumental`) from all Track nodes, causing the next ' +
+          '`POST /api/v1/admin/track-acousticbrainz/enrich` call to re-process every track from ' +
+          'scratch.\n\n' +
+          'This endpoint is blocked while enrichment is running.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['reset'],
+                properties: { reset: { type: 'integer' } },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => {
+      if (trackAcousticBrainzState.running) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message:
+              'AcousticBrainz track enrichment is currently running — wait for it to finish before resetting',
+          },
+        });
+      }
+      trackAcousticBrainzState.running = true;
+      try {
+        const reset = await resetTrackAcousticBrainzEnrichment(getDriver());
+        return reply.send({ data: { reset } });
+      } finally {
+        trackAcousticBrainzState.running = false;
+      }
+    },
+  );
+
   // ── Status endpoints ───────────────────────────────────────────────────────
 
   const enrichStatusSchema = (summary: Record<string, unknown>): Record<string, unknown> => ({
@@ -1005,6 +1156,31 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (_request, reply) => reply.send({ data: structuredClone(trackMusicBrainzState) }),
   );
+
+  fastify.get(
+    '/track-acousticbrainz/status',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Status of the most recent AcousticBrainz track enrichment run',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: enrichStatusSchema({
+            type: 'object',
+            properties: {
+              tracksProcessed: { type: 'integer' },
+              tracksSkipped: { type: 'integer' },
+              tracksFailed: { type: 'integer' },
+              durationMs: { type: 'integer' },
+            },
+          }),
+          401: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => reply.send({ data: structuredClone(trackAcousticBrainzState) }),
+  );
 }
 
 export function resetAllPipelineStates(): void {
@@ -1013,4 +1189,5 @@ export function resetAllPipelineStates(): void {
   Object.assign(masterDataState, makePipelineState<EnrichSummary>());
   Object.assign(mbReleaseEventsState, makePipelineState<MbReleaseEventsSummary>());
   Object.assign(trackMusicBrainzState, makePipelineState<TrackMusicBrainzSummary>());
+  Object.assign(trackAcousticBrainzState, makePipelineState<TrackAcousticBrainzSummary>());
 }

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Driver, Session, Result, Record as Neo4jRecord } from 'neo4j-driver';
-import { getUnenrichedTracks, setTrackLyrics } from '../../../src/db/lyrics-repository.js';
+import {
+  getUnenrichedTracks,
+  setTrackLyrics,
+  clearGeniusLyrics,
+} from '../../../src/db/lyrics-repository.js';
 
 // ---------------------------------------------------------------------------
 // Mock neo4j-driver — test that the right Cypher is sent, not that Neo4j
@@ -126,6 +130,39 @@ describe('getUnenrichedTracks', () => {
 // ---------------------------------------------------------------------------
 // setTrackLyrics
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// clearGeniusLyrics
+// ---------------------------------------------------------------------------
+describe('clearGeniusLyrics', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the count of cleared tracks', async () => {
+    const record = makeNeo4jRecord({ cleared: { toNumber: () => 7, low: 7, high: 0 } });
+    const { session, runSpy } = makeMockSession({ records: [record] } as unknown as Result);
+    const count = await clearGeniusLyrics(makeMockDriver(session));
+
+    expect(count).toBe(7);
+    const [query] = runSpy.mock.calls[0] as [string];
+    expect(query).toContain("lyricsSource = 'genius'");
+    expect(query).toContain('SET t.lyrics = null');
+  });
+
+  it('returns 0 when no records are returned', async () => {
+    const { session } = makeMockSession({ records: [] } as unknown as Result);
+    const count = await clearGeniusLyrics(makeMockDriver(session));
+    expect(count).toBe(0);
+  });
+
+  it('handles a plain-number response (non-Neo4j integer)', async () => {
+    const record = makeNeo4jRecord({ cleared: 3 });
+    const { session } = makeMockSession({ records: [record] } as unknown as Result);
+    const count = await clearGeniusLyrics(makeMockDriver(session));
+    expect(count).toBe(3);
+  });
+});
+
 describe('setTrackLyrics', () => {
   beforeEach(() => {
     vi.clearAllMocks();

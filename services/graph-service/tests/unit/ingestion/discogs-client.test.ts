@@ -112,6 +112,54 @@ describe('DiscogsClient', () => {
   });
 
   // -------------------------------------------------------------------------
+  // getMaster
+  // -------------------------------------------------------------------------
+  describe('getMaster', () => {
+    it('calls the correct master URL and returns parsed data', async () => {
+      const fakeData = { id: 4242, title: 'Kind of Blue' };
+      fetchSpy.mockResolvedValueOnce(makeOkResponse(fakeData));
+
+      const result = await client.getMaster(4242);
+
+      expect(result).toEqual(fakeData);
+      expect(fetchSpy.mock.calls[0]?.[0]).toContain('/masters/4242');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getMasterVersions
+  // -------------------------------------------------------------------------
+  describe('getMasterVersions', () => {
+    it('calls the correct versions URL with default page/perPage', async () => {
+      const fakeData = { versions: [], pagination: {} };
+      fetchSpy.mockResolvedValueOnce(makeOkResponse(fakeData));
+
+      const result = await client.getMasterVersions(4242);
+
+      expect(result).toEqual(fakeData);
+      const url = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(url).toContain('/masters/4242/versions');
+      expect(url).toContain('page=1');
+      expect(url).toContain('per_page=100');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getArtist
+  // -------------------------------------------------------------------------
+  describe('getArtist', () => {
+    it('calls the correct artist URL and returns parsed data', async () => {
+      const fakeData = { id: 123, name: 'Miles Davis' };
+      fetchSpy.mockResolvedValueOnce(makeOkResponse(fakeData));
+
+      const result = await client.getArtist(123);
+
+      expect(result).toEqual(fakeData);
+      expect(fetchSpy.mock.calls[0]?.[0]).toContain('/artists/123');
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Error handling
   // -------------------------------------------------------------------------
   describe('error handling', () => {
