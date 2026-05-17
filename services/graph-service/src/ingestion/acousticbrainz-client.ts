@@ -62,9 +62,9 @@ const MAX_BACKOFF_MS = 32_000;
 /** AcousticBrainz caps a single bulk request at 25 recording MBIDs. */
 export const MAX_RECORDING_IDS_PER_CALL = 25;
 
-/** Return the value when it is a finite number, otherwise null. */
+/** Return the value when it is a finite non-zero number, otherwise null. */
 function toNumberOrNull(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  return typeof value === 'number' && Number.isFinite(value) && value !== 0 ? value : null;
 }
 
 /** Return the value when it is a non-empty trimmed string, otherwise null. */

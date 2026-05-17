@@ -502,7 +502,7 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   // ---------------------------------------------------------------------------
-  // GET /explore/tracks/by-audio-features
+  // GET /api/v1/explore/tracks/by-audio-features
   // ---------------------------------------------------------------------------
 
   const audioFeatureTrackSchema = {
@@ -535,7 +535,7 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
     };
     Reply: AudioFeatureTrack[];
   }>(
-    '/tracks/by-audio-features',
+    '/api/v1/explore/tracks/by-audio-features',
     {
       schema: {
         tags: ['explore'],
