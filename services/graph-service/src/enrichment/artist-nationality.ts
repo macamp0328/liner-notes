@@ -6,11 +6,16 @@ import type { VIAFClient } from '../ingestion/viaf-client.js';
 import {
   getUnenrichedArtistsForNationality,
   getUnenrichedMusiciansForNationality,
+  getUnenrichedProducersForNationality,
+  getUnenrichedEngineersForNationality,
   setArtistNationality,
   setMusicianNationality,
+  setProducerNationality,
+  setEngineerNationality,
 } from '../db/artist-nationality-repository.js';
+import type { UnenrichedMusician } from '../db/artist-nationality-repository.js';
 
-export interface ArtistNationalityEnrichmentSummary {
+export interface NationalityEnrichmentSummary {
   enriched: number;
   skipped: number;
   failed: number;
@@ -49,7 +54,7 @@ async function resolveCountry(
 
     if (mbCountry !== null && wdCountry !== null && mbCountry !== wdCountry) {
       log.warn(
-        `[artist-nationality] Source conflict for ${label} discogsId=${discogsId}: MB=${mbCountry} WD=${wdCountry} — using Wikidata`,
+        `[artist-nationality] Source conflict for ${label} "${name}" discogsId=${discogsId}: MB=${mbCountry} WD=${wdCountry} — using Wikidata`,
       );
       return wdCountry;
     }
@@ -71,7 +76,7 @@ async function resolveCountry(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         log.warn(
-          `[artist-nationality] Wikipedia→WD lookup failed for ${label} discogsId=${discogsId}: ${msg}`,
+          `[artist-nationality] Wikipedia→WD lookup failed for ${label} "${name}" discogsId=${discogsId}: ${msg}`,
         );
       }
     }
@@ -86,28 +91,46 @@ async function resolveCountry(
 }
 
 /**
- * Enrich Artist and Musician nodes with ORIGIN_COUNTRY relationships.
+ * Resolve nationality for a person node that has no Discogs ID.
+ * Tries MusicBrainz name search first, then VIAF name search as a fallback.
+ * Wikidata is skipped — it requires an ID to avoid false matches.
+ */
+async function resolveCountryByName(
+  mbClient: MusicBrainzClient,
+  viafClient: VIAFClient | null,
+  name: string,
+): Promise<string | null> {
+  const mbCountry = await mbClient.getCountryByName(name);
+  if (mbCountry !== null) return mbCountry;
+  if (viafClient !== null) return viafClient.getCountryByName(name);
+  return null;
+}
+
+/**
+ * Enrich Artist, Musician, Producer, and Engineer nodes with ORIGIN_COUNTRY relationships.
  *
- * Sources tried in order (see resolveCountry for details):
+ * For nodes with a Discogs ID, sources are tried in order:
  * 1. MusicBrainz + Wikidata by Discogs ID (parallel)
  * 2. Wikidata via Wikipedia URL from Discogs artist page
- * 3. VIAF name search (uses artist.name, so never queries with a bare numeric ID)
+ * 3. VIAF name search
  *
- * For musicians without a Discogs ID, MusicBrainz name search is used instead
- * (lower confidence — only accepted when score ≥ 90). Sources 2 and 3 are skipped
- * for these musicians.
+ * For nodes without a Discogs ID:
+ * 1. MusicBrainz name search (score ≥ 90)
+ * 2. VIAF name search
  *
- * Sets nationalityFetched = true on every processed node regardless of outcome.
- * Per-node errors are caught and counted — never crashes the caller.
+ * Sets nationalityFetched = true on every node where a result (country code or null)
+ * is successfully determined. Nodes that throw an exception are counted as failed and
+ * are NOT marked as fetched, so the next enrichment run will retry them.
+ * Per-node errors are caught and never crash the caller.
  */
-export async function enrichArtistNationality(
+export async function enrichNationality(
   mbClient: MusicBrainzClient,
   driver: Driver,
   logger?: Logger,
   wdClient?: WikidataClient,
   discogsClient?: DiscogsClient,
   viafClient?: VIAFClient,
-): Promise<ArtistNationalityEnrichmentSummary> {
+): Promise<NationalityEnrichmentSummary> {
   const log: Logger = logger ?? console;
   const wd = wdClient ?? null;
   const dc = discogsClient ?? null;
@@ -156,55 +179,75 @@ export async function enrichArtistNationality(
     }
   }
 
-  // Enrich Musician nodes
-  let musicians;
-  try {
-    musicians = await getUnenrichedMusiciansForNationality(driver);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error(`[artist-nationality] Failed to fetch unenriched musicians: ${msg}`);
-    const durationMs = Date.now() - startTime;
-    log.info(
-      `[artist-nationality] Partial complete (artists done, musicians failed): enriched=${enriched}, skipped=${skipped}, failed=${failed + 1}, duration=${durationMs}ms`,
-    );
-    return { enriched, skipped, failed: failed + 1, durationMs };
-  }
+  // Enrich Musician, Producer, and Engineer nodes with identical logic
+  const personGroups: Array<{
+    label: string;
+    fetch: () => Promise<UnenrichedMusician[]>;
+    save: (driver: Driver, person: UnenrichedMusician, code: string | null) => Promise<void>;
+  }> = [
+    {
+      label: 'musicians',
+      fetch: () => getUnenrichedMusiciansForNationality(driver),
+      save: setMusicianNationality,
+    },
+    {
+      label: 'producers',
+      fetch: () => getUnenrichedProducersForNationality(driver),
+      save: setProducerNationality,
+    },
+    {
+      label: 'engineers',
+      fetch: () => getUnenrichedEngineersForNationality(driver),
+      save: setEngineerNationality,
+    },
+  ];
 
-  log.info(`[artist-nationality] Found ${musicians.length} musicians without nationality`);
-
-  for (const musician of musicians) {
+  for (const { label, fetch, save } of personGroups) {
+    let people;
     try {
-      let countryCode: string | null = null;
-
-      if (musician.discogsId !== null) {
-        countryCode = await resolveCountry(
-          mbClient,
-          wd,
-          dc,
-          viaf,
-          musician.discogsId,
-          musician.name,
-          'Musician',
-          log,
-        );
-      } else {
-        // No Discogs ID — name search is MB-only (Wikidata requires an ID to avoid false matches)
-        countryCode = await mbClient.getCountryByName(musician.name);
-      }
-
-      await setMusicianNationality(driver, musician, countryCode);
-
-      if (countryCode !== null) {
-        enriched++;
-      } else {
-        skipped++;
-      }
+      people = await fetch();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log.error(
-        `[artist-nationality] Failed for musician "${musician.name}" (discogsId=${musician.discogsId ?? 'none'}): ${msg}`,
-      );
+      log.error(`[artist-nationality] Failed to fetch unenriched ${label}: ${msg}`);
       failed++;
+      continue;
+    }
+
+    log.info(`[artist-nationality] Found ${people.length} ${label} without nationality`);
+
+    for (const person of people) {
+      try {
+        let countryCode: string | null = null;
+
+        if (person.discogsId !== null) {
+          countryCode = await resolveCountry(
+            mbClient,
+            wd,
+            dc,
+            viaf,
+            person.discogsId,
+            person.name,
+            label.slice(0, -1), // "musicians" → "musician" for log label
+            log,
+          );
+        } else {
+          countryCode = await resolveCountryByName(mbClient, viaf, person.name);
+        }
+
+        await save(driver, person, countryCode);
+
+        if (countryCode !== null) {
+          enriched++;
+        } else {
+          skipped++;
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.error(
+          `[artist-nationality] Failed for ${label.slice(0, -1)} "${person.name}" (discogsId=${person.discogsId ?? 'none'}): ${msg}`,
+        );
+        failed++;
+      }
     }
   }
 

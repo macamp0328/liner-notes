@@ -40,6 +40,7 @@ function makeOkResponse(body: unknown): Response {
     ok: true,
     status: 200,
     statusText: 'OK',
+    headers: { get: () => null },
     json: vi.fn().mockResolvedValue(body),
   } as unknown as Response;
 }
@@ -53,6 +54,18 @@ function makeErrorResponse(status: number, headers?: Record<string, string>): Re
     headers: {
       get: (name: string) => headers?.[name] ?? null,
     },
+  } as unknown as Response;
+}
+
+function makeHtmlResponse(status: number): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: status === 200 ? 'OK' : 'Error',
+    headers: {
+      get: (name: string) => (name === 'content-type' ? 'text/html; charset=utf-8' : null),
+    },
+    json: vi.fn().mockRejectedValue(new SyntaxError('Unexpected token')),
   } as unknown as Response;
 }
 
@@ -289,6 +302,108 @@ describe('VIAFClient', () => {
     const result = await client.getCountryByName('Solo Entry Artist');
 
     expect(result).toBe('IT');
+  });
+
+  it('retries on 403 (soft bot block) and succeeds', async () => {
+    fetchSpy.mockResolvedValueOnce(makeErrorResponse(403)).mockResolvedValueOnce(
+      makeOkResponse(
+        makeViafResponse({
+          preferredName: 'Tab',
+          nationalities: [{ text: 'xxu' }],
+        }),
+      ),
+    );
+
+    const result = await client.getCountryByName('Tab');
+
+    expect(result).toBe('US');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns null after exhausting all retries on persistent 403', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(makeErrorResponse(403))
+      .mockResolvedValueOnce(makeErrorResponse(403))
+      .mockResolvedValueOnce(makeErrorResponse(403))
+      .mockResolvedValueOnce(makeErrorResponse(403));
+
+    const warnSpy = vi.fn();
+    const clientWithLogger = new VIAFClient({
+      userAgent: 'liner-notes/test',
+      delayMs: 0,
+      backoffBaseMs: 0,
+      logger: { info: vi.fn(), warn: warnSpy, error: vi.fn() },
+    });
+
+    const result = await clientWithLogger.getCountryByName('Tab');
+
+    expect(result).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Exceeded max retries'));
+  });
+
+  it('logs "bot block" in the retry warning for 403', async () => {
+    const warnSpy = vi.fn();
+    const clientWithLogger = new VIAFClient({
+      userAgent: 'liner-notes/test',
+      delayMs: 0,
+      backoffBaseMs: 0,
+      logger: { info: vi.fn(), warn: warnSpy, error: vi.fn() },
+    });
+    fetchSpy
+      .mockResolvedValueOnce(makeErrorResponse(403))
+      .mockResolvedValueOnce(makeOkResponse(makeEmptyViafResponse()));
+
+    await clientWithLogger.getCountryByName('Tab');
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('bot block'));
+  });
+
+  it('retries on HTML response (200 OK with text/html body) and succeeds on retry', async () => {
+    fetchSpy.mockResolvedValueOnce(makeHtmlResponse(200)).mockResolvedValueOnce(
+      makeOkResponse(
+        makeViafResponse({
+          preferredName: 'Budapest String Quartet',
+          nationalities: [{ text: 'hu' }],
+        }),
+      ),
+    );
+
+    const result = await client.getCountryByName('Budapest String Quartet');
+
+    expect(result).toBe('HU');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns null after exhausting retries on persistent HTML responses', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(makeHtmlResponse(200))
+      .mockResolvedValueOnce(makeHtmlResponse(200))
+      .mockResolvedValueOnce(makeHtmlResponse(200))
+      .mockResolvedValueOnce(makeHtmlResponse(200));
+
+    const result = await client.getCountryByName('Budapest String Quartet');
+
+    expect(result).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
+  it('logs an HTML-specific warning message for HTML responses', async () => {
+    const warnSpy = vi.fn();
+    const clientWithLogger = new VIAFClient({
+      userAgent: 'liner-notes/test',
+      delayMs: 0,
+      backoffBaseMs: 0,
+      logger: { info: vi.fn(), warn: warnSpy, error: vi.fn() },
+    });
+    fetchSpy
+      .mockResolvedValueOnce(makeHtmlResponse(200))
+      .mockResolvedValueOnce(makeOkResponse(makeEmptyViafResponse()));
+
+    await clientWithLogger.getCountryByName('Vulfmon');
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('HTML response'));
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('Network error'));
   });
 });
 

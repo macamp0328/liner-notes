@@ -38,7 +38,8 @@ export class WikidataClient {
    * Uses Wikidata property P1953 (Discogs artist ID) → P27 (country of citizenship) → P297 (ISO code).
    * Returns null when the artist is not in Wikidata or has no country of citizenship set.
    *
-   * Retries on 429, 503, and 502 (transient Bad Gateway from Blazegraph) with exponential backoff.
+   * Retries on 429, 503, 502 (transient Bad Gateway from Blazegraph), and text/html responses
+   * (Wikidata sometimes serves HTML maintenance pages with a 200 OK) with exponential backoff.
    */
   async getCountryByDiscogsId(discogsId: number): Promise<string | null> {
     // P1953 = Discogs artist ID, P27 = country of citizenship, P297 = ISO 3166-1 alpha-2 code
@@ -128,13 +129,27 @@ export class WikidataClient {
           return null;
         }
 
+        const contentType = response.headers.get('content-type') ?? '';
+        if (contentType.includes('text/html')) {
+          if (attempt >= MAX_RETRIES) break;
+          this.log.warn(
+            `[wikidata-client] HTML response (status ${response.status}) for ${logLabel} on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${backoffMs}ms`,
+          );
+          await this.sleep(backoffMs);
+          backoffMs = Math.min(backoffMs * 2, 32_000);
+          attempt++;
+          continue;
+        }
+
         const data = (await response.json()) as SparqlResponse;
         await this.sleep(this.delayMs);
 
         const binding = data.results.bindings[0];
         const code = binding?.['countryCode']?.value?.trim();
         return code ?? null;
-      } catch {
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log.warn(`[wikidata-client] Network error for ${logLabel} — ${msg}`);
         return null;
       }
     }
