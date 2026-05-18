@@ -12,6 +12,7 @@ import {
   getConnections,
   getSharedMusicians,
   getMostPressedReleases,
+  getTracksByAudioFeatures,
 } from '../../../src/db/repositories/explore-repository.js';
 
 vi.mock('neo4j-driver', async (importOriginal) => {
@@ -450,5 +451,125 @@ describe('getMostPressedReleases', () => {
     const query: string = runSpy.mock.calls[0]?.[0] ?? '';
     expect(query).toContain('RELEASED_IN');
     expect(query).toContain('Master');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getTracksByAudioFeatures
+// ---------------------------------------------------------------------------
+
+describe('getTracksByAudioFeatures', () => {
+  it('returns mapped AudioFeatureTrack[] for a single result', async () => {
+    const rec = makeRecord({
+      trackTitle: 'Birdland',
+      releaseTitle: 'Heavy Weather',
+      releaseDiscogsId: makeNeo4jInt(12345),
+      tempo: 132.7,
+      musicalKey: 'C',
+      musicalScale: 'major',
+      loudnessDb: -12.3,
+      danceabilityEstimate: 0.78,
+      voiceInstrumental: 'instrumental',
+      deezerBpm: 130.0,
+      deezerGain: -8.5,
+    });
+    const { session } = makeMockSession([makeResult([rec])]);
+    const driver = makeMockDriver(session);
+
+    const results = await getTracksByAudioFeatures(driver, {}, 20);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual({
+      trackTitle: 'Birdland',
+      releaseTitle: 'Heavy Weather',
+      releaseDiscogsId: 12345,
+      tempo: 132.7,
+      musicalKey: 'C',
+      musicalScale: 'major',
+      loudnessDb: -12.3,
+      danceabilityEstimate: 0.78,
+      voiceInstrumental: 'instrumental',
+      deezerBpm: 130.0,
+      deezerGain: -8.5,
+    });
+  });
+
+  it('returns empty array when no tracks match', async () => {
+    const { session } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+
+    const results = await getTracksByAudioFeatures(driver, {}, 20);
+    expect(results).toHaveLength(0);
+  });
+
+  it('passes minTempo and maxTempo to the query params', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+
+    await getTracksByAudioFeatures(driver, { minTempo: 100, maxTempo: 130 }, 10);
+
+    const params = runSpy.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(params['minTempo']).toBe(100);
+    expect(params['maxTempo']).toBe(130);
+  });
+
+  it('uses a combined per-source AND condition when both minTempo and maxTempo are provided', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+
+    await getTracksByAudioFeatures(driver, { minTempo: 90, maxTempo: 120 }, 10);
+
+    const query: string = runSpy.mock.calls[0]?.[0] ?? '';
+    expect(query).toContain('t.tempo >= $minTempo AND t.tempo <= $maxTempo');
+    expect(query).toContain('t.deezerBpm >= $minTempo AND t.deezerBpm <= $maxTempo');
+  });
+
+  it('passes key, scale, voiceInstrumental, and minDanceability filters', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+
+    await getTracksByAudioFeatures(
+      driver,
+      { key: 'A', scale: 'minor', voiceInstrumental: 'voice', minDanceability: 0.6 },
+      10,
+    );
+
+    const params = runSpy.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(params['key']).toBe('A');
+    expect(params['scale']).toBe('minor');
+    expect(params['voiceInstrumental']).toBe('voice');
+    expect(params['minDanceability']).toBe(0.6);
+  });
+
+  it('handles null audio feature fields gracefully', async () => {
+    const rec = makeRecord({
+      trackTitle: 'Mystery Track',
+      releaseTitle: 'Unknown Album',
+      releaseDiscogsId: makeNeo4jInt(99),
+      tempo: null,
+      musicalKey: null,
+      musicalScale: null,
+      loudnessDb: null,
+      danceabilityEstimate: null,
+      voiceInstrumental: null,
+      deezerBpm: 98.0,
+      deezerGain: null,
+    });
+    const { session } = makeMockSession([makeResult([rec])]);
+    const driver = makeMockDriver(session);
+
+    const results = await getTracksByAudioFeatures(driver, {}, 20);
+
+    expect(results[0]?.tempo).toBeNull();
+    expect(results[0]?.deezerBpm).toBe(98.0);
+  });
+
+  it('closes the session after the query', async () => {
+    const { session } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+
+    await getTracksByAudioFeatures(driver, {}, 10);
+
+    expect(session.close).toHaveBeenCalledTimes(1);
   });
 });

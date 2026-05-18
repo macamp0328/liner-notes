@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
-import { VIAFClient } from '../../../src/ingestion/viaf-client.js';
+import { VIAFClient, buildViafClientFromEnv } from '../../../src/ingestion/viaf-client.js';
 
 function makeViafResponse(overrides?: {
   nameType?: string;
@@ -289,5 +289,27 @@ describe('VIAFClient', () => {
     const result = await client.getCountryByName('Solo Entry Artist');
 
     expect(result).toBe('IT');
+  });
+});
+
+describe('buildViafClientFromEnv', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it('returns null when MUSICBRAINZ_USER_AGENT is not set', () => {
+    delete process.env['MUSICBRAINZ_USER_AGENT'];
+    expect(buildViafClientFromEnv()).toBeNull();
+  });
+
+  it('returns a VIAFClient when MUSICBRAINZ_USER_AGENT is set', () => {
+    process.env['MUSICBRAINZ_USER_AGENT'] = 'liner-notes/test';
+    expect(buildViafClientFromEnv()).toBeInstanceOf(VIAFClient);
   });
 });

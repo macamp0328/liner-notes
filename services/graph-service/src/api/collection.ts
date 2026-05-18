@@ -77,6 +77,14 @@ const trackSchema = {
         },
       },
     },
+    tempo: { type: 'number', nullable: true },
+    musicalKey: { type: 'string', nullable: true },
+    musicalScale: { type: 'string', nullable: true },
+    loudnessDb: { type: 'number', nullable: true },
+    danceabilityEstimate: { type: 'number', nullable: true },
+    voiceInstrumental: { type: 'string', nullable: true },
+    deezerBpm: { type: 'number', nullable: true },
+    deezerGain: { type: 'number', nullable: true },
   },
 } as const;
 

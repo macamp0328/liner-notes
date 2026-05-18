@@ -28,6 +28,14 @@ export interface Track {
   lyrics: string | null;
   lyricsSource: string | null;
   musicians: TrackCredit[];
+  tempo: number | null;
+  musicalKey: string | null;
+  musicalScale: string | null;
+  loudnessDb: number | null;
+  danceabilityEstimate: number | null;
+  voiceInstrumental: string | null;
+  deezerBpm: number | null;
+  deezerGain: number | null;
 }
 
 export interface ReleaseArtist {
@@ -132,7 +140,11 @@ function toStr(v: unknown): string | null {
 
 function toFloat(v: unknown): number | null {
   if (v === null || v === undefined) return null;
-  return v as number;
+  if (typeof (v as { toNumber?: () => number }).toNumber === 'function') {
+    return (v as { toNumber: () => number }).toNumber();
+  }
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -288,7 +300,11 @@ OPTIONAL MATCH (m:Musician)-[co:CREDITED_ON]->(t)
 WITH t, ht.trackNumber AS trackNumber, collect({name: m.name, role: co.role,
      displayRole: co.displayRole, creditedAs: co.creditedAs}) AS musicians
 RETURN t.position AS position, t.title AS title, t.duration AS duration,
-       t.lyrics AS lyrics, t.lyricsSource AS lyricsSource, musicians
+       t.lyrics AS lyrics, t.lyricsSource AS lyricsSource, musicians,
+       t.tempo AS tempo, t.musicalKey AS musicalKey, t.musicalScale AS musicalScale,
+       t.loudnessDb AS loudnessDb, t.danceabilityEstimate AS danceabilityEstimate,
+       t.voiceInstrumental AS voiceInstrumental, t.deezerBpm AS deezerBpm,
+       t.deezerGain AS deezerGain
 ORDER BY trackNumber ASC`,
       { discogsId: neo4j.int(discogsId) },
     );
@@ -310,6 +326,14 @@ ORDER BY trackNumber ASC`,
         lyrics: toStr(tr.get('lyrics') as unknown),
         lyricsSource: toStr(tr.get('lyricsSource') as unknown),
         musicians,
+        tempo: toFloat(tr.get('tempo') as unknown),
+        musicalKey: toStr(tr.get('musicalKey') as unknown),
+        musicalScale: toStr(tr.get('musicalScale') as unknown),
+        loudnessDb: toFloat(tr.get('loudnessDb') as unknown),
+        danceabilityEstimate: toFloat(tr.get('danceabilityEstimate') as unknown),
+        voiceInstrumental: toStr(tr.get('voiceInstrumental') as unknown),
+        deezerBpm: toFloat(tr.get('deezerBpm') as unknown),
+        deezerGain: toFloat(tr.get('deezerGain') as unknown),
       };
     });
 
