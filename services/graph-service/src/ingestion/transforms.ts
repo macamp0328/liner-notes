@@ -12,13 +12,22 @@ const INSTRUMENTAL_PATTERNS =
   /\b(instrumental|reprise|overture|intro|interlude|outro|theme|prelude|coda)\b/i;
 
 /**
- * Parse a track number from a Discogs position string.
- * Extracts the trailing numeric segment: "A1" → 1, "B3" → 3, "10" → 10.
- * Returns 0 when no numeric portion is found.
+ * Parse a Discogs position string into a sortable (prefix, num) key.
+ *
+ * The prefix is the side/disc segment, the num is the trailing track number:
+ * "A1" → {prefix:"A", num:1}; "B12" → {prefix:"B", num:12};
+ * "2-3" → {prefix:"2-", num:3}; "5" → {prefix:"", num:5}; "A" → {prefix:"A", num:0}.
+ *
+ * Sorting by (prefix asc, num asc) reconstructs album order: vinyl sides A<B<C<D,
+ * multi-disc CDs "1-"<"2-", plain CDs share the empty prefix. This is needed because
+ * the numeric portion alone restarts at 1 on every vinyl side and is not release-unique.
  */
-export function parseTrackNumber(position: string): number {
+export function parsePosition(position: string): { prefix: string; num: number } {
   const numStr = /(\d+)$/.exec(position)?.[1];
-  return numStr !== undefined ? parseInt(numStr, 10) : 0;
+  const num = numStr !== undefined ? parseInt(numStr, 10) : 0;
+  const prefix =
+    numStr !== undefined ? position.slice(0, position.length - numStr.length) : position;
+  return { prefix, num };
 }
 
 /**

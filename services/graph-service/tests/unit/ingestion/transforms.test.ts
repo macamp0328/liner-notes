@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  parseTrackNumber,
+  parsePosition,
   parseDisplayRole,
   parseRoleCategory,
   filterTracks,
@@ -21,29 +21,38 @@ import type {
 } from '../../../src/ingestion/types.js';
 
 // ---------------------------------------------------------------------------
-// parseTrackNumber
+// parsePosition
 // ---------------------------------------------------------------------------
-describe('parseTrackNumber', () => {
-  it('parses the trailing digit from side-prefixed positions', () => {
-    expect(parseTrackNumber('A1')).toBe(1);
-    expect(parseTrackNumber('A2')).toBe(2);
-    expect(parseTrackNumber('B1')).toBe(1);
-    expect(parseTrackNumber('B3')).toBe(3);
+describe('parsePosition', () => {
+  it('splits side-prefixed vinyl positions into prefix and number', () => {
+    expect(parsePosition('A1')).toEqual({ prefix: 'A', num: 1 });
+    expect(parsePosition('B3')).toEqual({ prefix: 'B', num: 3 });
+    expect(parsePosition('B12')).toEqual({ prefix: 'B', num: 12 });
   });
 
-  it('parses multi-digit track numbers', () => {
-    expect(parseTrackNumber('C12')).toBe(12);
-    expect(parseTrackNumber('A10')).toBe(10);
+  it('splits multi-disc positions into a disc prefix and number', () => {
+    expect(parsePosition('2-3')).toEqual({ prefix: '2-', num: 3 });
+    expect(parsePosition('1-10')).toEqual({ prefix: '1-', num: 10 });
   });
 
-  it('parses numeric-only positions', () => {
-    expect(parseTrackNumber('10')).toBe(10);
-    expect(parseTrackNumber('1')).toBe(1);
+  it('treats numeric-only positions as an empty prefix', () => {
+    expect(parsePosition('5')).toEqual({ prefix: '', num: 5 });
+    expect(parsePosition('10')).toEqual({ prefix: '', num: 10 });
   });
 
-  it('returns 0 when no numeric portion is found', () => {
-    expect(parseTrackNumber('')).toBe(0);
-    expect(parseTrackNumber('A')).toBe(0);
+  it('handles positions with no numeric portion', () => {
+    expect(parsePosition('A')).toEqual({ prefix: 'A', num: 0 });
+    expect(parsePosition('')).toEqual({ prefix: '', num: 0 });
+  });
+
+  it('sorts into album order: sides in sequence, numbers within a side', () => {
+    const positions = ['B1', 'A2', 'A1', 'B2', 'A10'];
+    const sorted = [...positions].sort((a, b) => {
+      const pa = parsePosition(a);
+      const pb = parsePosition(b);
+      return pa.prefix.localeCompare(pb.prefix) || pa.num - pb.num;
+    });
+    expect(sorted).toEqual(['A1', 'A2', 'A10', 'B1', 'B2']);
   });
 });
 

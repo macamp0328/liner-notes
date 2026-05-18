@@ -48,8 +48,8 @@ describe('getTracksForMusicBrainzEnrichment', () => {
       releaseDiscogsId: int(567),
       artistNames: ['Miles Davis'],
       tracks: [
-        { elementId: 'n1', title: 'So What', trackNumber: int(1), durationSeconds: int(545) },
-        { elementId: 'n2', title: 'Blue in Green', trackNumber: int(2), durationSeconds: null },
+        { elementId: 'n1', title: 'So What', position: 'A1', durationSeconds: int(545) },
+        { elementId: 'n2', title: 'Blue in Green', position: 'A2', durationSeconds: null },
       ],
     });
     const { session } = makeMockSession({ records: [record] } as unknown as Result);
@@ -60,8 +60,8 @@ describe('getTracksForMusicBrainzEnrichment', () => {
         releaseDiscogsId: 567,
         artistNames: ['Miles Davis'],
         tracks: [
-          { elementId: 'n1', title: 'So What', trackNumber: 1, durationSeconds: 545 },
-          { elementId: 'n2', title: 'Blue in Green', trackNumber: 2, durationSeconds: null },
+          { elementId: 'n1', title: 'So What', position: 'A1', durationSeconds: 545 },
+          { elementId: 'n2', title: 'Blue in Green', position: 'A2', durationSeconds: null },
         ],
       },
     ]);

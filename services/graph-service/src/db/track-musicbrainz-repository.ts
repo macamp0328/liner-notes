@@ -6,8 +6,8 @@ type Neo4jInt = { toNumber(): number };
 export interface TrackForMusicBrainz {
   elementId: string;
   title: string;
-  /** Ordinal track number within the release (from the HAS_TRACK relationship). */
-  trackNumber: number;
+  /** Discogs position string (e.g. "A1", "B3", "2-5"); used to sort into album order. */
+  position: string;
   /** Track length in whole seconds; null when Discogs had no duration. */
   durationSeconds: number | null;
 }
@@ -45,7 +45,7 @@ export async function getTracksForMusicBrainzEnrichment(
        WITH r, collect({
          elementId: elementId(t),
          title: t.title,
-         trackNumber: ht.trackNumber,
+         position: t.position,
          durationSeconds: t.durationSeconds
        }) AS tracks
        OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
@@ -59,14 +59,14 @@ export async function getTracksForMusicBrainzEnrichment(
       const rawTracks = record.get('tracks') as Array<{
         elementId: string;
         title: string;
-        trackNumber: Neo4jInt;
+        position: string;
         durationSeconds: Neo4jInt | null;
       }>;
 
       const tracks: TrackForMusicBrainz[] = rawTracks.map((t) => ({
         elementId: t.elementId,
         title: t.title,
-        trackNumber: t.trackNumber.toNumber(),
+        position: t.position,
         durationSeconds: t.durationSeconds === null ? null : t.durationSeconds.toNumber(),
       }));
 
