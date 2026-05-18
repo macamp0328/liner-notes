@@ -38,7 +38,8 @@ export class WikidataClient {
    * Uses Wikidata property P1953 (Discogs artist ID) → P27 (country of citizenship) → P297 (ISO code).
    * Returns null when the artist is not in Wikidata or has no country of citizenship set.
    *
-   * Retries on 429, 503, and 502 (transient Bad Gateway from Blazegraph) with exponential backoff.
+   * Retries on 429, 503, 502 (transient Bad Gateway from Blazegraph), and text/html responses
+   * (Wikidata sometimes serves HTML maintenance pages with a 200 OK) with exponential backoff.
    */
   async getCountryByDiscogsId(discogsId: number): Promise<string | null> {
     // P1953 = Discogs artist ID, P27 = country of citizenship, P297 = ISO 3166-1 alpha-2 code

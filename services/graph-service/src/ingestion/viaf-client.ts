@@ -129,7 +129,9 @@ export class VIAFClient {
    * - All nationality entries must resolve to the same ISO code; disagreement → null
    * - MARC codes not in the mapping table → null
    *
-   * Retries on 429 and 503 with exponential backoff.
+   * Retries on 429, 503, and 403 (VIAF uses 403 as a soft bot-detection block) with
+   * exponential backoff. Also retries when the response body is text/html — VIAF sometimes
+   * serves HTML maintenance pages with a 200 OK status.
    */
   async getCountryByName(name: string): Promise<string | null> {
     // Escape CQL meta-characters that are meaningful inside a quoted phrase
