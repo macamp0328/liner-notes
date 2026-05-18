@@ -147,14 +147,15 @@ export class VIAFClient {
           headers: { 'User-Agent': this.userAgent },
         });
 
-        if (response.status === 429 || response.status === 503) {
+        if (response.status === 429 || response.status === 503 || response.status === 403) {
           if (attempt >= MAX_RETRIES) break;
           const retryAfterHeader = response.headers.get('Retry-After');
           const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
           const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
           const waitMs = Math.max(backoffMs, retryAfterMs);
+          const label = response.status === 403 ? 'bot block' : 'rate limit/unavailable';
           this.log.warn(
-            `[viaf-client] HTTP ${response.status} for "${name}" on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${waitMs}ms`,
+            `[viaf-client] HTTP ${response.status} (${label}) for "${name}" on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${waitMs}ms`,
           );
           await this.sleep(waitMs);
           backoffMs = Math.min(backoffMs * 2, 32_000);
@@ -165,6 +166,18 @@ export class VIAFClient {
         if (!response.ok) {
           this.log.warn(`[viaf-client] HTTP ${response.status} for "${name}" — skipping`);
           return null;
+        }
+
+        const contentType = response.headers.get('content-type') ?? '';
+        if (contentType.includes('text/html')) {
+          if (attempt >= MAX_RETRIES) break;
+          this.log.warn(
+            `[viaf-client] HTML response (status ${response.status}) for "${name}" on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${backoffMs}ms`,
+          );
+          await this.sleep(backoffMs);
+          backoffMs = Math.min(backoffMs * 2, 32_000);
+          attempt++;
+          continue;
         }
 
         const data = (await response.json()) as ViafSearchResponse;

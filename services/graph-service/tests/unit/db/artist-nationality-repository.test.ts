@@ -1,0 +1,304 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Driver, Session, Record as Neo4jRecord } from 'neo4j-driver';
+import {
+  getUnenrichedArtistsForNationality,
+  getUnenrichedMusiciansForNationality,
+  getUnenrichedProducersForNationality,
+  getUnenrichedEngineersForNationality,
+  setArtistNationality,
+  setMusicianNationality,
+  setProducerNationality,
+  setEngineerNationality,
+  resetNationalityEnrichment,
+} from '../../../src/db/artist-nationality-repository.js';
+
+vi.mock('neo4j-driver', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('neo4j-driver')>();
+  return {
+    ...actual,
+    default: {
+      ...actual.default,
+      int: (n: number) => ({ toNumber: () => n, low: n, high: 0 }),
+    },
+  };
+});
+
+function makeMockSession(runResult: unknown = { records: [] }): {
+  session: Session;
+  runSpy: ReturnType<typeof vi.fn>;
+} {
+  const runSpy = vi.fn().mockResolvedValue(runResult);
+  const session = {
+    run: runSpy,
+    close: vi.fn().mockResolvedValue(undefined),
+  } as unknown as Session;
+  return { session, runSpy };
+}
+
+function makeMockDriver(session: Session): Driver {
+  return { session: vi.fn().mockReturnValue(session) } as unknown as Driver;
+}
+
+function makeRecord(fields: Record<string, unknown>): Neo4jRecord {
+  return {
+    get: vi.fn().mockImplementation((key: string) => fields[key]),
+  } as unknown as Neo4jRecord;
+}
+
+function makeNeo4jInt(n: number) {
+  return { toNumber: () => n, low: n, high: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// getUnenrichedArtistsForNationality
+// ---------------------------------------------------------------------------
+describe('getUnenrichedArtistsForNationality', () => {
+  it('returns mapped artists from query results', async () => {
+    const record = makeRecord({ discogsId: makeNeo4jInt(42), name: 'Miles Davis' });
+    const { session } = makeMockSession({ records: [record] });
+    const driver = makeMockDriver(session);
+
+    const result = await getUnenrichedArtistsForNationality(driver);
+
+    expect(result).toEqual([{ discogsId: 42, name: 'Miles Davis' }]);
+    expect(session.close).toHaveBeenCalled();
+  });
+
+  it('returns empty array when no unenriched artists', async () => {
+    const { session } = makeMockSession({ records: [] });
+    const driver = makeMockDriver(session);
+
+    const result = await getUnenrichedArtistsForNationality(driver);
+
+    expect(result).toEqual([]);
+  });
+
+  it('closes session even when query throws', async () => {
+    const runSpy = vi.fn().mockRejectedValue(new Error('DB error'));
+    const session = {
+      run: runSpy,
+      close: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Session;
+    const driver = makeMockDriver(session);
+
+    await expect(getUnenrichedArtistsForNationality(driver)).rejects.toThrow('DB error');
+    expect(session.close).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getUnenrichedMusiciansForNationality
+// ---------------------------------------------------------------------------
+describe('getUnenrichedMusiciansForNationality', () => {
+  it('returns musician with discogsId', async () => {
+    const record = makeRecord({ discogsId: makeNeo4jInt(10), name: 'Ron Carter' });
+    const { session } = makeMockSession({ records: [record] });
+
+    const result = await getUnenrichedMusiciansForNationality(makeMockDriver(session));
+
+    expect(result).toEqual([{ discogsId: 10, name: 'Ron Carter' }]);
+  });
+
+  it('returns musician with null discogsId', async () => {
+    const record = makeRecord({ discogsId: null, name: 'Session Player' });
+    const { session } = makeMockSession({ records: [record] });
+
+    const result = await getUnenrichedMusiciansForNationality(makeMockDriver(session));
+
+    expect(result).toEqual([{ discogsId: null, name: 'Session Player' }]);
+  });
+
+  it('queries the Musician label', async () => {
+    const { session, runSpy } = makeMockSession({ records: [] });
+
+    await getUnenrichedMusiciansForNationality(makeMockDriver(session));
+
+    expect(runSpy.mock.calls[0]?.[0]).toContain('Musician');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getUnenrichedProducersForNationality
+// ---------------------------------------------------------------------------
+describe('getUnenrichedProducersForNationality', () => {
+  it('returns producer with discogsId', async () => {
+    const record = makeRecord({ discogsId: makeNeo4jInt(50), name: 'Rick Rubin' });
+    const { session } = makeMockSession({ records: [record] });
+
+    const result = await getUnenrichedProducersForNationality(makeMockDriver(session));
+
+    expect(result).toEqual([{ discogsId: 50, name: 'Rick Rubin' }]);
+  });
+
+  it('queries the Producer label', async () => {
+    const { session, runSpy } = makeMockSession({ records: [] });
+
+    await getUnenrichedProducersForNationality(makeMockDriver(session));
+
+    expect(runSpy.mock.calls[0]?.[0]).toContain('Producer');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getUnenrichedEngineersForNationality
+// ---------------------------------------------------------------------------
+describe('getUnenrichedEngineersForNationality', () => {
+  it('returns engineer with discogsId', async () => {
+    const record = makeRecord({ discogsId: makeNeo4jInt(60), name: 'Rudy Van Gelder' });
+    const { session } = makeMockSession({ records: [record] });
+
+    const result = await getUnenrichedEngineersForNationality(makeMockDriver(session));
+
+    expect(result).toEqual([{ discogsId: 60, name: 'Rudy Van Gelder' }]);
+  });
+
+  it('queries the Engineer label', async () => {
+    const { session, runSpy } = makeMockSession({ records: [] });
+
+    await getUnenrichedEngineersForNationality(makeMockDriver(session));
+
+    expect(runSpy.mock.calls[0]?.[0]).toContain('Engineer');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setArtistNationality
+// ---------------------------------------------------------------------------
+describe('setArtistNationality', () => {
+  it('merges ORIGIN_COUNTRY when countryCode is provided', async () => {
+    const { session, runSpy } = makeMockSession();
+    await setArtistNationality(makeMockDriver(session), 42, 'US');
+
+    expect(runSpy).toHaveBeenCalledTimes(1);
+    expect(runSpy.mock.calls[0]?.[0]).toContain('MERGE (c:Country');
+    expect(runSpy.mock.calls[0]?.[1]).toMatchObject({ countryCode: 'US' });
+    expect(session.close).toHaveBeenCalled();
+  });
+
+  it('only sets nationalityFetched when countryCode is null', async () => {
+    const { session, runSpy } = makeMockSession();
+    await setArtistNationality(makeMockDriver(session), 42, null);
+
+    expect(runSpy).toHaveBeenCalledTimes(1);
+    expect(runSpy.mock.calls[0]?.[0]).not.toContain('MERGE (c:Country');
+    expect(runSpy.mock.calls[0]?.[0]).toContain('nationalityFetched = true');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setMusicianNationality
+// ---------------------------------------------------------------------------
+describe('setMusicianNationality', () => {
+  it('matches by discogsId when present', async () => {
+    const { session, runSpy } = makeMockSession();
+    await setMusicianNationality(
+      makeMockDriver(session),
+      { discogsId: 10, name: 'Ron Carter' },
+      'US',
+    );
+
+    expect(runSpy.mock.calls[0]?.[0]).toContain('discogsId: $discogsId');
+  });
+
+  it('matches by name when discogsId is null', async () => {
+    const { session, runSpy } = makeMockSession();
+    await setMusicianNationality(makeMockDriver(session), { discogsId: null, name: 'Anon' }, 'FR');
+
+    expect(runSpy.mock.calls[0]?.[0]).toContain('name: $name');
+    expect(runSpy.mock.calls[0]?.[0]).toContain('m.discogsId IS NULL');
+  });
+
+  it('sets null country without merging Country node', async () => {
+    const { session, runSpy } = makeMockSession();
+    await setMusicianNationality(makeMockDriver(session), { discogsId: 10, name: 'Someone' }, null);
+
+    expect(runSpy.mock.calls[0]?.[0]).not.toContain('MERGE (c:Country');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setProducerNationality
+// ---------------------------------------------------------------------------
+describe('setProducerNationality', () => {
+  it('merges ORIGIN_COUNTRY when countryCode is provided', async () => {
+    const { session, runSpy } = makeMockSession();
+    await setProducerNationality(
+      makeMockDriver(session),
+      { discogsId: 50, name: 'Rick Rubin' },
+      'US',
+    );
+
+    expect(runSpy.mock.calls[0]?.[0]).toContain('MERGE (c:Country');
+    expect(runSpy.mock.calls[0]?.[0]).toContain('Producer');
+  });
+
+  it('matches by name when discogsId is null', async () => {
+    const { session, runSpy } = makeMockSession();
+    await setProducerNationality(
+      makeMockDriver(session),
+      { discogsId: null, name: 'Joe Meek' },
+      null,
+    );
+
+    expect(runSpy.mock.calls[0]?.[0]).toContain('m.discogsId IS NULL');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setEngineerNationality
+// ---------------------------------------------------------------------------
+describe('setEngineerNationality', () => {
+  it('merges ORIGIN_COUNTRY when countryCode is provided', async () => {
+    const { session, runSpy } = makeMockSession();
+    await setEngineerNationality(
+      makeMockDriver(session),
+      { discogsId: 60, name: 'Rudy Van Gelder' },
+      'US',
+    );
+
+    expect(runSpy.mock.calls[0]?.[0]).toContain('MERGE (c:Country');
+    expect(runSpy.mock.calls[0]?.[0]).toContain('Engineer');
+  });
+
+  it('matches by name when discogsId is null', async () => {
+    const { session, runSpy } = makeMockSession();
+    await setEngineerNationality(
+      makeMockDriver(session),
+      { discogsId: null, name: 'Tom Dowd' },
+      null,
+    );
+
+    expect(runSpy.mock.calls[0]?.[0]).toContain('m.discogsId IS NULL');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resetNationalityEnrichment
+// ---------------------------------------------------------------------------
+describe('resetNationalityEnrichment', () => {
+  it('returns the count of reset nodes', async () => {
+    const record = makeRecord({ reset: makeNeo4jInt(12) });
+    const { session } = makeMockSession({ records: [record] });
+
+    const count = await resetNationalityEnrichment(makeMockDriver(session));
+
+    expect(count).toBe(12);
+  });
+
+  it('returns 0 when no records are returned', async () => {
+    const { session } = makeMockSession({ records: [] });
+
+    const count = await resetNationalityEnrichment(makeMockDriver(session));
+
+    expect(count).toBe(0);
+  });
+
+  it('includes Producer and Engineer in the reset query', async () => {
+    const { session, runSpy } = makeMockSession({ records: [] });
+
+    await resetNationalityEnrichment(makeMockDriver(session));
+
+    expect(runSpy.mock.calls[0]?.[0]).toContain('n:Producer');
+    expect(runSpy.mock.calls[0]?.[0]).toContain('n:Engineer');
+  });
+});

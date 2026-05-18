@@ -18,6 +18,7 @@ function makeOkResponse(body: unknown): Response {
     ok: true,
     status: 200,
     statusText: 'OK',
+    headers: { get: () => null },
     json: vi.fn().mockResolvedValue(body),
   } as unknown as Response;
 }
@@ -31,6 +32,18 @@ function makeErrorResponse(status: number, headers?: Record<string, string>): Re
     headers: {
       get: (name: string) => headers?.[name] ?? null,
     },
+  } as unknown as Response;
+}
+
+function makeHtmlResponse(status: number): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: status === 200 ? 'OK' : 'Error',
+    headers: {
+      get: (name: string) => (name === 'content-type' ? 'text/html; charset=utf-8' : null),
+    },
+    json: vi.fn().mockRejectedValue(new SyntaxError('Unexpected token')),
   } as unknown as Response;
 }
 
@@ -137,10 +150,46 @@ describe('WikidataClient', () => {
     vi.useRealTimers();
   });
 
+  it('retries on HTML response and succeeds', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(makeHtmlResponse(200))
+      .mockResolvedValueOnce(makeOkResponse(makeSparqlResponse('GB')));
+    const result = await client.getCountryByDiscogsId(1);
+    expect(result).toBe('GB');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns null after exhausting retries on persistent HTML responses', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(makeHtmlResponse(200))
+      .mockResolvedValueOnce(makeHtmlResponse(200))
+      .mockResolvedValueOnce(makeHtmlResponse(200))
+      .mockResolvedValueOnce(makeHtmlResponse(200));
+    const result = await client.getCountryByDiscogsId(1);
+    expect(result).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
   it('returns null on network error (does not throw)', async () => {
     fetchSpy.mockRejectedValueOnce(new Error('network failure'));
     const result = await client.getCountryByDiscogsId(1);
     expect(result).toBeNull();
+  });
+
+  it('logs a warning on network error', async () => {
+    const warnSpy = vi.fn();
+    const clientWithLogger = new WikidataClient({
+      userAgent: 'liner-notes/test',
+      delayMs: 0,
+      backoffBaseMs: 0,
+      logger: { info: vi.fn(), warn: warnSpy, error: vi.fn() },
+    });
+    fetchSpy.mockRejectedValueOnce(new Error('connection refused'));
+
+    await clientWithLogger.getCountryByDiscogsId(1);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Network error'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('connection refused'));
   });
 
   it('sends the configured User-Agent header', async () => {

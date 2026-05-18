@@ -128,13 +128,27 @@ export class WikidataClient {
           return null;
         }
 
+        const contentType = response.headers.get('content-type') ?? '';
+        if (contentType.includes('text/html')) {
+          if (attempt >= MAX_RETRIES) break;
+          this.log.warn(
+            `[wikidata-client] HTML response (status ${response.status}) for ${logLabel} on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${backoffMs}ms`,
+          );
+          await this.sleep(backoffMs);
+          backoffMs = Math.min(backoffMs * 2, 32_000);
+          attempt++;
+          continue;
+        }
+
         const data = (await response.json()) as SparqlResponse;
         await this.sleep(this.delayMs);
 
         const binding = data.results.bindings[0];
         const code = binding?.['countryCode']?.value?.trim();
         return code ?? null;
-      } catch {
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log.warn(`[wikidata-client] Network error for ${logLabel} — ${msg}`);
         return null;
       }
     }

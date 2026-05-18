@@ -1,20 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Driver } from 'neo4j-driver';
-import { enrichArtistNationality } from '../../../src/enrichment/artist-nationality.js';
+import { enrichNationality } from '../../../src/enrichment/artist-nationality.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks
 // ---------------------------------------------------------------------------
 const mockGetUnenrichedArtists = vi.hoisted(() => vi.fn());
 const mockGetUnenrichedMusicians = vi.hoisted(() => vi.fn());
+const mockGetUnenrichedProducers = vi.hoisted(() => vi.fn());
+const mockGetUnenrichedEngineers = vi.hoisted(() => vi.fn());
 const mockSetArtistNationality = vi.hoisted(() => vi.fn());
 const mockSetMusicianNationality = vi.hoisted(() => vi.fn());
+const mockSetProducerNationality = vi.hoisted(() => vi.fn());
+const mockSetEngineerNationality = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/db/artist-nationality-repository.js', () => ({
   getUnenrichedArtistsForNationality: mockGetUnenrichedArtists,
   getUnenrichedMusiciansForNationality: mockGetUnenrichedMusicians,
+  getUnenrichedProducersForNationality: mockGetUnenrichedProducers,
+  getUnenrichedEngineersForNationality: mockGetUnenrichedEngineers,
   setArtistNationality: mockSetArtistNationality,
   setMusicianNationality: mockSetMusicianNationality,
+  setProducerNationality: mockSetProducerNationality,
+  setEngineerNationality: mockSetEngineerNationality,
 }));
 
 // ---------------------------------------------------------------------------
@@ -60,18 +68,22 @@ function makeViafClient(byName: (name: string) => Promise<string | null> = async
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('enrichArtistNationality', () => {
+describe('enrichNationality', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetUnenrichedArtists.mockResolvedValue([]);
     mockGetUnenrichedMusicians.mockResolvedValue([]);
+    mockGetUnenrichedProducers.mockResolvedValue([]);
+    mockGetUnenrichedEngineers.mockResolvedValue([]);
     mockSetArtistNationality.mockResolvedValue(undefined);
     mockSetMusicianNationality.mockResolvedValue(undefined);
+    mockSetProducerNationality.mockResolvedValue(undefined);
+    mockSetEngineerNationality.mockResolvedValue(undefined);
   });
 
   it('returns zero counts when nothing needs enrichment', async () => {
     const client = makeMbClient();
-    const summary = await enrichArtistNationality(client, fakeDriver);
+    const summary = await enrichNationality(client, fakeDriver);
 
     expect(summary.enriched).toBe(0);
     expect(summary.skipped).toBe(0);
@@ -83,7 +95,7 @@ describe('enrichArtistNationality', () => {
     mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 1 }]);
     const client = makeMbClient(async () => 'US');
 
-    const summary = await enrichArtistNationality(client, fakeDriver);
+    const summary = await enrichNationality(client, fakeDriver);
 
     expect(client.getCountryByDiscogsId).toHaveBeenCalledWith(1);
     expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 1, 'US');
@@ -95,7 +107,7 @@ describe('enrichArtistNationality', () => {
     mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 2 }]);
     const client = makeMbClient(async () => null);
 
-    const summary = await enrichArtistNationality(client, fakeDriver);
+    const summary = await enrichNationality(client, fakeDriver);
 
     expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 2, null);
     expect(summary.skipped).toBe(1);
@@ -106,7 +118,7 @@ describe('enrichArtistNationality', () => {
     mockGetUnenrichedMusicians.mockResolvedValue([{ discogsId: 10, name: 'Ron Carter' }]);
     const client = makeMbClient(async () => 'US');
 
-    await enrichArtistNationality(client, fakeDriver);
+    await enrichNationality(client, fakeDriver);
 
     expect(client.getCountryByDiscogsId).toHaveBeenCalledWith(10);
     expect(client.getCountryByName).not.toHaveBeenCalled();
@@ -117,7 +129,7 @@ describe('enrichArtistNationality', () => {
     );
   });
 
-  it('enriches a musician without discogsId via getCountryByName (MB only, not Wikidata)', async () => {
+  it('enriches a musician without discogsId via MB name search then VIAF fallback', async () => {
     mockGetUnenrichedMusicians.mockResolvedValue([{ discogsId: null, name: 'Jack DeJohnette' }]);
     const client = makeMbClient(
       async () => null,
@@ -125,7 +137,7 @@ describe('enrichArtistNationality', () => {
     );
     const wd = makeWdClient(async () => 'CA');
 
-    await enrichArtistNationality(client, fakeDriver, undefined, wd);
+    await enrichNationality(client, fakeDriver, undefined, wd);
 
     expect(client.getCountryByDiscogsId).not.toHaveBeenCalled();
     expect(client.getCountryByName).toHaveBeenCalledWith('Jack DeJohnette');
@@ -148,7 +160,7 @@ describe('enrichArtistNationality', () => {
       getCountryByName: vi.fn(),
     } as unknown as import('../../../src/ingestion/musicbrainz-client.js').MusicBrainzClient;
 
-    const summary = await enrichArtistNationality(client, fakeDriver);
+    const summary = await enrichNationality(client, fakeDriver);
 
     expect(summary.failed).toBe(1);
     expect(summary.enriched).toBe(1);
@@ -160,7 +172,7 @@ describe('enrichArtistNationality', () => {
     mockGetUnenrichedArtists.mockRejectedValue(new Error('DB connection lost'));
     const client = makeMbClient();
 
-    const summary = await enrichArtistNationality(client, fakeDriver);
+    const summary = await enrichNationality(client, fakeDriver);
 
     expect(summary.failed).toBe(1);
     expect(summary.enriched).toBe(0);
@@ -170,12 +182,174 @@ describe('enrichArtistNationality', () => {
   it('is idempotent — second call enriches zero because repo returns empty', async () => {
     const client = makeMbClient();
 
-    const first = await enrichArtistNationality(client, fakeDriver);
-    const second = await enrichArtistNationality(client, fakeDriver);
+    const first = await enrichNationality(client, fakeDriver);
+    const second = await enrichNationality(client, fakeDriver);
 
     expect(first.enriched).toBe(0);
     expect(second.enriched).toBe(0);
     expect(mockSetArtistNationality).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Producer and Engineer nodes
+  // ---------------------------------------------------------------------------
+
+  describe('Producer and Engineer enrichment', () => {
+    it('enriches a producer with a discogsId', async () => {
+      mockGetUnenrichedProducers.mockResolvedValue([{ discogsId: 50, name: 'Rick Rubin' }]);
+      const client = makeMbClient(async () => 'US');
+
+      const summary = await enrichNationality(client, fakeDriver);
+
+      expect(client.getCountryByDiscogsId).toHaveBeenCalledWith(50);
+      expect(mockSetProducerNationality).toHaveBeenCalledWith(
+        fakeDriver,
+        { discogsId: 50, name: 'Rick Rubin' },
+        'US',
+      );
+      expect(summary.enriched).toBe(1);
+    });
+
+    it('enriches a producer without discogsId via MB then VIAF', async () => {
+      mockGetUnenrichedProducers.mockResolvedValue([{ discogsId: null, name: 'Joe Meek' }]);
+      const client = makeMbClient(
+        async () => null,
+        async () => null,
+      );
+      const viaf = makeViafClient(async () => 'GB');
+
+      await enrichNationality(client, fakeDriver, undefined, undefined, undefined, viaf);
+
+      expect(client.getCountryByName).toHaveBeenCalledWith('Joe Meek');
+      expect(viaf.getCountryByName).toHaveBeenCalledWith('Joe Meek');
+      expect(mockSetProducerNationality).toHaveBeenCalledWith(
+        fakeDriver,
+        { discogsId: null, name: 'Joe Meek' },
+        'GB',
+      );
+    });
+
+    it('enriches an engineer with a discogsId', async () => {
+      mockGetUnenrichedEngineers.mockResolvedValue([{ discogsId: 60, name: 'Rudy Van Gelder' }]);
+      const client = makeMbClient(async () => 'US');
+
+      const summary = await enrichNationality(client, fakeDriver);
+
+      expect(client.getCountryByDiscogsId).toHaveBeenCalledWith(60);
+      expect(mockSetEngineerNationality).toHaveBeenCalledWith(
+        fakeDriver,
+        { discogsId: 60, name: 'Rudy Van Gelder' },
+        'US',
+      );
+      expect(summary.enriched).toBe(1);
+    });
+
+    it('enriches an engineer without discogsId via MB then VIAF', async () => {
+      mockGetUnenrichedEngineers.mockResolvedValue([{ discogsId: null, name: 'Tom Dowd' }]);
+      const client = makeMbClient(
+        async () => null,
+        async () => 'US',
+      );
+
+      const summary = await enrichNationality(client, fakeDriver);
+
+      expect(client.getCountryByName).toHaveBeenCalledWith('Tom Dowd');
+      expect(mockSetEngineerNationality).toHaveBeenCalledWith(
+        fakeDriver,
+        { discogsId: null, name: 'Tom Dowd' },
+        'US',
+      );
+      expect(summary.enriched).toBe(1);
+    });
+
+    it('continues enriching other groups when one group fetch fails', async () => {
+      mockGetUnenrichedMusicians.mockRejectedValue(new Error('DB timeout'));
+      mockGetUnenrichedProducers.mockResolvedValue([{ discogsId: 50, name: 'Rick Rubin' }]);
+      const client = makeMbClient(async () => 'US');
+
+      const summary = await enrichNationality(client, fakeDriver);
+
+      expect(summary.failed).toBe(1);
+      expect(summary.enriched).toBe(1);
+      expect(mockSetProducerNationality).toHaveBeenCalledWith(fakeDriver, expect.anything(), 'US');
+    });
+
+    it('aggregates counts across all four node types', async () => {
+      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 1, name: 'Artist A' }]);
+      mockGetUnenrichedMusicians.mockResolvedValue([{ discogsId: 2, name: 'Musician B' }]);
+      mockGetUnenrichedProducers.mockResolvedValue([{ discogsId: 3, name: 'Producer C' }]);
+      mockGetUnenrichedEngineers.mockResolvedValue([{ discogsId: 4, name: 'Engineer D' }]);
+      const client = makeMbClient(async () => 'FR');
+
+      const summary = await enrichNationality(client, fakeDriver);
+
+      expect(summary.enriched).toBe(4);
+      expect(summary.skipped).toBe(0);
+      expect(summary.failed).toBe(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // No-Discogs-ID VIAF fallback
+  // ---------------------------------------------------------------------------
+
+  describe('VIAF fallback for no-Discogs-ID nodes', () => {
+    it('calls VIAF after MB name search for a musician without discogsId', async () => {
+      mockGetUnenrichedMusicians.mockResolvedValue([{ discogsId: null, name: 'No ID Musician' }]);
+      const client = makeMbClient(
+        async () => null,
+        async () => null,
+      );
+      const viaf = makeViafClient(async () => 'FR');
+
+      await enrichNationality(client, fakeDriver, undefined, undefined, undefined, viaf);
+
+      expect(client.getCountryByName).toHaveBeenCalledWith('No ID Musician');
+      expect(viaf.getCountryByName).toHaveBeenCalledWith('No ID Musician');
+      expect(mockSetMusicianNationality).toHaveBeenCalledWith(
+        fakeDriver,
+        { discogsId: null, name: 'No ID Musician' },
+        'FR',
+      );
+    });
+
+    it('does not call VIAF when MB name search already found a result for no-ID musician', async () => {
+      mockGetUnenrichedMusicians.mockResolvedValue([
+        { discogsId: null, name: 'No ID Musician Found by MB' },
+      ]);
+      const client = makeMbClient(
+        async () => null,
+        async () => 'DE',
+      );
+      const viaf = makeViafClient(async () => 'FR');
+
+      await enrichNationality(client, fakeDriver, undefined, undefined, undefined, viaf);
+
+      expect(client.getCountryByName).toHaveBeenCalled();
+      expect(viaf.getCountryByName).not.toHaveBeenCalled();
+      expect(mockSetMusicianNationality).toHaveBeenCalledWith(
+        fakeDriver,
+        expect.objectContaining({ discogsId: null }),
+        'DE',
+      );
+    });
+
+    it('skips VIAF when viafClient is not provided for no-ID musician', async () => {
+      mockGetUnenrichedMusicians.mockResolvedValue([{ discogsId: null, name: 'No ID Musician' }]);
+      const client = makeMbClient(
+        async () => null,
+        async () => null,
+      );
+
+      const summary = await enrichNationality(client, fakeDriver);
+
+      expect(summary.skipped).toBe(1);
+      expect(mockSetMusicianNationality).toHaveBeenCalledWith(
+        fakeDriver,
+        { discogsId: null, name: 'No ID Musician' },
+        null,
+      );
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -184,54 +358,55 @@ describe('enrichArtistNationality', () => {
 
   describe('Wikidata fallback and conflict resolution', () => {
     it('uses Wikidata country when MusicBrainz returns null', async () => {
-      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 5 }]);
+      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 5, name: 'Test Artist' }]);
       const mb = makeMbClient(async () => null);
       const wd = makeWdClient(async () => 'JP');
 
-      const summary = await enrichArtistNationality(mb, fakeDriver, undefined, wd);
+      const summary = await enrichNationality(mb, fakeDriver, undefined, wd);
 
       expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 5, 'JP');
       expect(summary.enriched).toBe(1);
     });
 
     it('uses MusicBrainz country when both agree', async () => {
-      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 6 }]);
+      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 6, name: 'Test Artist' }]);
       const mb = makeMbClient(async () => 'GB');
       const wd = makeWdClient(async () => 'GB');
 
-      await enrichArtistNationality(mb, fakeDriver, undefined, wd);
+      await enrichNationality(mb, fakeDriver, undefined, wd);
 
       expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 6, 'GB');
     });
 
-    it('prefers Wikidata when sources conflict', async () => {
-      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 7 }]);
+    it('prefers Wikidata when sources conflict and includes artist name in log', async () => {
+      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 7, name: 'Miles Davis' }]);
       const mb = makeMbClient(async () => 'US');
       const wd = makeWdClient(async () => 'GB');
       const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-      await enrichArtistNationality(mb, fakeDriver, logger, wd);
+      await enrichNationality(mb, fakeDriver, logger, wd);
 
       expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 7, 'GB');
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('MB=US WD=GB'));
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('"Miles Davis"'));
     });
 
     it('skips when both MB and Wikidata return null', async () => {
-      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 8 }]);
+      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 8, name: 'Test Artist' }]);
       const mb = makeMbClient(async () => null);
       const wd = makeWdClient(async () => null);
 
-      const summary = await enrichArtistNationality(mb, fakeDriver, undefined, wd);
+      const summary = await enrichNationality(mb, fakeDriver, undefined, wd);
 
       expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 8, null);
       expect(summary.skipped).toBe(1);
     });
 
     it('works without Wikidata client (backward compatible)', async () => {
-      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 9 }]);
+      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 9, name: 'Test Artist' }]);
       const mb = makeMbClient(async () => 'FR');
 
-      const summary = await enrichArtistNationality(mb, fakeDriver);
+      const summary = await enrichNationality(mb, fakeDriver);
 
       expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 9, 'FR');
       expect(summary.enriched).toBe(1);
@@ -244,7 +419,7 @@ describe('enrichArtistNationality', () => {
 
   describe('Source 2 — Wikidata via Wikipedia URL', () => {
     it('uses Wikipedia URL fallback when MB+WD by Discogs ID both return null', async () => {
-      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 20 }]);
+      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 20, name: 'Pino Palladino' }]);
       const mb = makeMbClient(async () => null);
       const wd = makeWdClient(
         async () => null,
@@ -254,7 +429,7 @@ describe('enrichArtistNationality', () => {
         urls: ['https://en.wikipedia.org/wiki/Pino_Palladino'],
       }));
 
-      const summary = await enrichArtistNationality(mb, fakeDriver, undefined, wd, dc);
+      const summary = await enrichNationality(mb, fakeDriver, undefined, wd, dc);
 
       expect(dc.getArtist).toHaveBeenCalledWith(20);
       expect(wd.getCountryByWikipediaUrl).toHaveBeenCalledWith(
@@ -265,23 +440,23 @@ describe('enrichArtistNationality', () => {
     });
 
     it('does not call Discogs when source 1 already found a result', async () => {
-      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 21 }]);
+      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 21, name: 'Test Artist' }]);
       const mb = makeMbClient(async () => 'GB');
       const wd = makeWdClient(async () => null);
       const dc = makeDiscogsClient();
 
-      await enrichArtistNationality(mb, fakeDriver, undefined, wd, dc);
+      await enrichNationality(mb, fakeDriver, undefined, wd, dc);
 
       expect(dc.getArtist).not.toHaveBeenCalled();
       expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 21, 'GB');
     });
 
     it('skips Wikipedia fallback when no discogsClient is provided', async () => {
-      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 22 }]);
+      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 22, name: 'Test Artist' }]);
       const mb = makeMbClient(async () => null);
       const wd = makeWdClient(async () => null);
 
-      const summary = await enrichArtistNationality(mb, fakeDriver, undefined, wd);
+      const summary = await enrichNationality(mb, fakeDriver, undefined, wd);
 
       expect(wd.getCountryByWikipediaUrl).not.toHaveBeenCalled();
       expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 22, null);
@@ -289,19 +464,19 @@ describe('enrichArtistNationality', () => {
     });
 
     it('skips Wikipedia fallback when artist has no Wikipedia URLs', async () => {
-      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 23 }]);
+      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 23, name: 'Test Artist' }]);
       const mb = makeMbClient(async () => null);
       const wd = makeWdClient(async () => null);
       const dc = makeDiscogsClient(async () => ({ urls: ['https://www.allmusic.com/artist/xyz'] }));
 
-      const summary = await enrichArtistNationality(mb, fakeDriver, undefined, wd, dc);
+      const summary = await enrichNationality(mb, fakeDriver, undefined, wd, dc);
 
       expect(wd.getCountryByWikipediaUrl).not.toHaveBeenCalled();
       expect(summary.skipped).toBe(1);
     });
 
     it('uses the first Wikipedia URL that returns a non-null result', async () => {
-      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 24 }]);
+      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 24, name: 'Test Artist' }]);
       const mb = makeMbClient(async () => null);
       const wd = makeWdClient(
         async () => null,
@@ -314,14 +489,14 @@ describe('enrichArtistNationality', () => {
         ],
       }));
 
-      await enrichArtistNationality(mb, fakeDriver, undefined, wd, dc);
+      await enrichNationality(mb, fakeDriver, undefined, wd, dc);
 
       expect(wd.getCountryByWikipediaUrl).toHaveBeenCalledTimes(2);
       expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 24, 'SE');
     });
 
     it('proceeds to VIAF when Wikipedia lookup also returns null', async () => {
-      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 25 }]);
+      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 25, name: 'Some Artist' }]);
       const mb = makeMbClient(async () => null);
       const wd = makeWdClient(
         async () => null,
@@ -332,7 +507,7 @@ describe('enrichArtistNationality', () => {
       }));
       const viaf = makeViafClient(async () => 'NO');
 
-      await enrichArtistNationality(mb, fakeDriver, undefined, wd, dc, viaf);
+      await enrichNationality(mb, fakeDriver, undefined, wd, dc, viaf);
 
       expect(wd.getCountryByWikipediaUrl).toHaveBeenCalled();
       expect(viaf.getCountryByName).toHaveBeenCalled();
@@ -341,7 +516,7 @@ describe('enrichArtistNationality', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Source 3: VIAF name search
+  // Source 3: VIAF name search (with Discogs ID — last resort)
   // ---------------------------------------------------------------------------
 
   describe('Source 3 — VIAF name search', () => {
@@ -352,7 +527,7 @@ describe('enrichArtistNationality', () => {
       const dc = makeDiscogsClient(async () => ({ urls: [] }));
       const viaf = makeViafClient(async () => 'NO');
 
-      const summary = await enrichArtistNationality(mb, fakeDriver, undefined, wd, dc, viaf);
+      const summary = await enrichNationality(mb, fakeDriver, undefined, wd, dc, viaf);
 
       expect(viaf.getCountryByName).toHaveBeenCalledWith('Jan Garbarek');
       expect(mockSetMusicianNationality).toHaveBeenCalledWith(
@@ -368,7 +543,7 @@ describe('enrichArtistNationality', () => {
       const mb = makeMbClient(async () => 'US');
       const viaf = makeViafClient(async () => 'CA');
 
-      await enrichArtistNationality(mb, fakeDriver, undefined, undefined, undefined, viaf);
+      await enrichNationality(mb, fakeDriver, undefined, undefined, undefined, viaf);
 
       expect(viaf.getCountryByName).not.toHaveBeenCalled();
       expect(mockSetMusicianNationality).toHaveBeenCalledWith(
@@ -382,7 +557,7 @@ describe('enrichArtistNationality', () => {
       mockGetUnenrichedMusicians.mockResolvedValue([{ discogsId: 32, name: 'Someone' }]);
       const mb = makeMbClient(async () => null);
 
-      const summary = await enrichArtistNationality(mb, fakeDriver);
+      const summary = await enrichNationality(mb, fakeDriver);
 
       expect(summary.skipped).toBe(1);
       expect(mockSetMusicianNationality).toHaveBeenCalledWith(
@@ -398,24 +573,10 @@ describe('enrichArtistNationality', () => {
       const dc = makeDiscogsClient(async () => ({ urls: [] }));
       const viaf = makeViafClient(async () => null);
 
-      const summary = await enrichArtistNationality(mb, fakeDriver, undefined, undefined, dc, viaf);
+      const summary = await enrichNationality(mb, fakeDriver, undefined, undefined, dc, viaf);
 
       expect(viaf.getCountryByName).toHaveBeenCalledWith('Unknown Person');
       expect(summary.skipped).toBe(1);
-    });
-
-    it('skips VIAF for musicians without a Discogs ID (handled by MB name search instead)', async () => {
-      mockGetUnenrichedMusicians.mockResolvedValue([{ discogsId: null, name: 'No ID Musician' }]);
-      const mb = makeMbClient(
-        async () => null,
-        async () => null,
-      );
-      const viaf = makeViafClient(async () => 'FR');
-
-      await enrichArtistNationality(mb, fakeDriver, undefined, undefined, undefined, viaf);
-
-      expect(viaf.getCountryByName).not.toHaveBeenCalled();
-      expect(mb.getCountryByName).toHaveBeenCalledWith('No ID Musician');
     });
   });
 });
