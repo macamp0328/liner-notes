@@ -14,7 +14,7 @@ import { enrichLyrics } from '../enrichment/lyrics.js';
 import { buildMusicBrainzClientFromEnv } from '../ingestion/musicbrainz-client.js';
 import { buildWikidataClientFromEnv } from '../ingestion/wikidata-client.js';
 import { buildViafClientFromEnv } from '../ingestion/viaf-client.js';
-import { enrichArtistNationality } from '../enrichment/artist-nationality.js';
+import { enrichNationality } from '../enrichment/artist-nationality.js';
 import { resetNationalityEnrichment } from '../db/artist-nationality-repository.js';
 import { enrichMasterData } from '../enrichment/master-data.js';
 import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
@@ -452,7 +452,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       nationalityState.durationMs = null;
       nationalityState.lastResult = null;
       try {
-        const summary = await enrichArtistNationality(
+        const summary = await enrichNationality(
           mbClient,
           getDriver(),
           request.log,

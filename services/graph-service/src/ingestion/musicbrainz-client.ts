@@ -361,8 +361,9 @@ export class MusicBrainzClient {
         const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
         const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
         const waitMs = Math.max(currentDelay, retryAfterMs);
+        const label = response.status === 429 ? 'Rate limited' : 'Service unavailable';
         this.log.warn(
-          `[musicbrainz-client] Rate limited (${response.status}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${waitMs}ms`,
+          `[musicbrainz-client] ${label} (${response.status}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${waitMs}ms`,
         );
         await this.sleep(waitMs);
         currentDelay = Math.min(currentDelay * 2, 32_000);
@@ -377,6 +378,13 @@ export class MusicBrainzClient {
       if (!response.ok) {
         throw new Error(
           `MusicBrainz API error ${response.status} ${response.statusText} for ${url}`,
+        );
+      }
+
+      const contentType = response.headers.get('content-type') ?? '';
+      if (contentType.includes('text/html')) {
+        throw new Error(
+          `MusicBrainz: received HTML response (status ${response.status}) for ${url}`,
         );
       }
 
