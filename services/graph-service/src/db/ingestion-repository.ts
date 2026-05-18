@@ -22,7 +22,6 @@ import {
   parseDisplayRole,
   parseRoleCategory,
   parseDurationSeconds,
-  parseTrackNumber,
 } from '../ingestion/transforms.js';
 
 const VARIOUS_ARTISTS_IDS = [194, 355];
@@ -247,7 +246,9 @@ async function mergeTracks(
   releaseId: number,
   tracks: DiscogsTracklistEntry[],
 ): Promise<void> {
-  for (const track of tracks) {
+  // `tracks` is already filterTracks-filtered (real "track" entries only) and Discogs
+  // returns it in album order, so the array index is the release-global track ordinal.
+  for (const [index, track] of tracks.entries()) {
     // Track MERGE key: (position + releaseDiscogsId) — no unique constraint on Track,
     // so we store releaseDiscogsId as a property to uniquely identify tracks across releases.
     const duration = track.duration === '' ? null : track.duration;
@@ -264,7 +265,8 @@ async function mergeTracks(
                      t.durationSeconds = $durationSeconds, t.isInstrumental = $isInstrumental
        WITH t
        MATCH (r:Release {discogsId: $releaseDiscogsId})
-       MERGE (r)-[:HAS_TRACK {trackNumber: $trackNumber}]->(t)`,
+       MERGE (r)-[ht:HAS_TRACK]->(t)
+       SET ht.trackNumber = $trackNumber`,
       {
         position: track.position,
         releaseDiscogsId: neo4j.int(releaseId),
@@ -273,7 +275,7 @@ async function mergeTracks(
         duration,
         durationSeconds: durationSeconds != null ? neo4j.int(durationSeconds) : null,
         isInstrumental: instrumental,
-        trackNumber: neo4j.int(parseTrackNumber(track.position)),
+        trackNumber: neo4j.int(index + 1),
       },
     );
   }

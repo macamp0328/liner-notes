@@ -159,11 +159,11 @@ describe('isValidMatch', () => {
 // ---------------------------------------------------------------------------
 describe('alignTracklist', () => {
   const nodes: TrackForMusicBrainz[] = [
-    { elementId: 'n2', title: 'Second', trackNumber: 2, durationSeconds: 200 },
-    { elementId: 'n1', title: 'First', trackNumber: 1, durationSeconds: 100 },
+    { elementId: 'n2', title: 'Second', position: 'A2', durationSeconds: 200 },
+    { elementId: 'n1', title: 'First', position: 'A1', durationSeconds: 100 },
   ];
 
-  it('aligns nodes sorted by trackNumber against the MB tracklist', () => {
+  it('aligns nodes sorted by parsed position against the MB tracklist', () => {
     const mb = [
       mbTrack({ position: 1, title: 'First', lengthSeconds: 100, recordingMbid: 'r1' }),
       mbTrack({
@@ -178,6 +178,29 @@ describe('alignTracklist', () => {
     expect(alignTracklist(nodes, mb)).toEqual([
       { elementId: 'n1', recordingMbid: 'r1', isrc: null },
       { elementId: 'n2', recordingMbid: 'r2', isrc: 'I2' },
+    ]);
+  });
+
+  it('orders multi-side vinyl by side then track number, not by trailing digit', () => {
+    // Supplied scrambled; B-side tracks repeat the A-side numbers (1, 2).
+    const multiSide: TrackForMusicBrainz[] = [
+      { elementId: 'b1', title: 'Bee One', position: 'B1', durationSeconds: 100 },
+      { elementId: 'a2', title: 'Ay Two', position: 'A2', durationSeconds: 100 },
+      { elementId: 'b2', title: 'Bee Two', position: 'B2', durationSeconds: 100 },
+      { elementId: 'a1', title: 'Ay One', position: 'A1', durationSeconds: 100 },
+    ];
+    const mb = [
+      mbTrack({ position: 1, title: 'Ay One', lengthSeconds: 100, recordingMbid: 'r-a1' }),
+      mbTrack({ position: 2, title: 'Ay Two', lengthSeconds: 100, recordingMbid: 'r-a2' }),
+      mbTrack({ position: 3, title: 'Bee One', lengthSeconds: 100, recordingMbid: 'r-b1' }),
+      mbTrack({ position: 4, title: 'Bee Two', lengthSeconds: 100, recordingMbid: 'r-b2' }),
+    ];
+
+    expect(alignTracklist(multiSide, mb)).toEqual([
+      { elementId: 'a1', recordingMbid: 'r-a1', isrc: null },
+      { elementId: 'a2', recordingMbid: 'r-a2', isrc: null },
+      { elementId: 'b1', recordingMbid: 'r-b1', isrc: null },
+      { elementId: 'b2', recordingMbid: 'r-b2', isrc: null },
     ]);
   });
 
@@ -231,8 +254,8 @@ describe('enrichTrackMusicBrainz', () => {
         releaseDiscogsId: 567,
         artistNames: ['Miles Davis'],
         tracks: [
-          { elementId: 'n1', title: 'So What', trackNumber: 1, durationSeconds: 545 },
-          { elementId: 'n2', title: 'Freddie Freeloader', trackNumber: 2, durationSeconds: 586 },
+          { elementId: 'n1', title: 'So What', position: 'A1', durationSeconds: 545 },
+          { elementId: 'n2', title: 'Freddie Freeloader', position: 'A2', durationSeconds: 586 },
         ],
       },
     ]);
@@ -267,7 +290,7 @@ describe('enrichTrackMusicBrainz', () => {
       {
         releaseDiscogsId: 567,
         artistNames: ['Miles Davis'],
-        tracks: [{ elementId: 'n1', title: 'So What', trackNumber: 1, durationSeconds: 545 }],
+        tracks: [{ elementId: 'n1', title: 'So What', position: 'A1', durationSeconds: 545 }],
       },
     ]);
     const client = makeMbClient({
@@ -291,7 +314,7 @@ describe('enrichTrackMusicBrainz', () => {
       {
         releaseDiscogsId: 567,
         artistNames: ['Unknown'],
-        tracks: [{ elementId: 'n1', title: 'Obscure', trackNumber: 1, durationSeconds: 100 }],
+        tracks: [{ elementId: 'n1', title: 'Obscure', position: 'A1', durationSeconds: 100 }],
       },
     ]);
     const client = makeMbClient({ getReleaseMbid: async () => null });
@@ -311,7 +334,7 @@ describe('enrichTrackMusicBrainz', () => {
       {
         releaseDiscogsId: 567,
         artistNames: [],
-        tracks: [{ elementId: 'n1', title: 'Track', trackNumber: 1, durationSeconds: 100 }],
+        tracks: [{ elementId: 'n1', title: 'Track', position: 'A1', durationSeconds: 100 }],
       },
     ]);
     const client = makeMbClient({ getReleaseMbid: async () => null });
@@ -326,7 +349,7 @@ describe('enrichTrackMusicBrainz', () => {
       {
         releaseDiscogsId: 567,
         artistNames: ['X'],
-        tracks: [{ elementId: 'n1', title: 'Track', trackNumber: 1, durationSeconds: 100 }],
+        tracks: [{ elementId: 'n1', title: 'Track', position: 'A1', durationSeconds: 100 }],
       },
     ]);
     const client = makeMbClient({
@@ -347,12 +370,12 @@ describe('enrichTrackMusicBrainz', () => {
       {
         releaseDiscogsId: 1,
         artistNames: ['X'],
-        tracks: [{ elementId: 'n1', title: 'A', trackNumber: 1, durationSeconds: 100 }],
+        tracks: [{ elementId: 'n1', title: 'A', position: 'A1', durationSeconds: 100 }],
       },
       {
         releaseDiscogsId: 2,
         artistNames: ['Y'],
-        tracks: [{ elementId: 'n2', title: 'B', trackNumber: 1, durationSeconds: 200 }],
+        tracks: [{ elementId: 'n2', title: 'B', position: 'A1', durationSeconds: 200 }],
       },
     ]);
     const client = makeMbClient({

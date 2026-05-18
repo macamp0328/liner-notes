@@ -1,6 +1,7 @@
 import type { Driver } from 'neo4j-driver';
 import type { MusicBrainzClient, MbRecordingTrack } from '../ingestion/musicbrainz-client.js';
 import type { Logger } from '../ingestion/discogs-client.js';
+import { parsePosition } from '../ingestion/transforms.js';
 import {
   getTracksForMusicBrainzEnrichment,
   setTrackMusicBrainzIds,
@@ -102,12 +103,21 @@ export function isValidMatch(
  * Align a release's Track nodes to a MusicBrainz tracklist by ordinal position,
  * validating every pair. Only validated pairs are returned — unmatched or
  * mismatched tracks are silently dropped rather than assigned a guessed MBID.
+ *
+ * Nodes are sorted into album order by their parsed Discogs position (side/disc
+ * prefix, then track number) rather than a stored ordinal — the numeric portion of
+ * a vinyl position restarts at 1 on every side and is not release-unique.
  */
 export function alignTracklist(
   nodes: TrackForMusicBrainz[],
   mbTracks: MbRecordingTrack[],
 ): TrackMusicBrainzResult[] {
-  const ordered = [...nodes].sort((a, b) => a.trackNumber - b.trackNumber);
+  const numericCollator = new Intl.Collator(undefined, { numeric: true });
+  const ordered = [...nodes].sort((a, b) => {
+    const pa = parsePosition(a.position);
+    const pb = parsePosition(b.position);
+    return numericCollator.compare(pa.prefix, pb.prefix) || pa.num - pb.num;
+  });
   const matches: TrackMusicBrainzResult[] = [];
   const mbIterator = mbTracks[Symbol.iterator]();
 
