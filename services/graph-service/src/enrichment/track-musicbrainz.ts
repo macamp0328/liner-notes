@@ -112,10 +112,11 @@ export function alignTracklist(
   nodes: TrackForMusicBrainz[],
   mbTracks: MbRecordingTrack[],
 ): TrackMusicBrainzResult[] {
+  const numericCollator = new Intl.Collator(undefined, { numeric: true });
   const ordered = [...nodes].sort((a, b) => {
     const pa = parsePosition(a.position);
     const pb = parsePosition(b.position);
-    return pa.prefix.localeCompare(pb.prefix) || pa.num - pb.num;
+    return numericCollator.compare(pa.prefix, pb.prefix) || pa.num - pb.num;
   });
   const matches: TrackMusicBrainzResult[] = [];
   const mbIterator = mbTracks[Symbol.iterator]();

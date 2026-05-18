@@ -18,9 +18,11 @@ const INSTRUMENTAL_PATTERNS =
  * "A1" → {prefix:"A", num:1}; "B12" → {prefix:"B", num:12};
  * "2-3" → {prefix:"2-", num:3}; "5" → {prefix:"", num:5}; "A" → {prefix:"A", num:0}.
  *
- * Sorting by (prefix asc, num asc) reconstructs album order: vinyl sides A<B<C<D,
- * multi-disc CDs "1-"<"2-", plain CDs share the empty prefix. This is needed because
- * the numeric portion alone restarts at 1 on every vinyl side and is not release-unique.
+ * Sorting by (prefix asc, num asc) with a numeric-aware collator reconstructs album
+ * order: vinyl sides A<B<C<D, multi-disc CDs "1-"<"2-"<"10-", plain CDs share the empty
+ * prefix. The numeric portion alone restarts at 1 on every vinyl side and is not
+ * release-unique; prefix string comparison must be numeric-aware so disc 10 sorts after
+ * disc 2, not before it.
  */
 export function parsePosition(position: string): { prefix: string; num: number } {
   const numStr = /(\d+)$/.exec(position)?.[1];
