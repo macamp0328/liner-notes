@@ -140,7 +140,11 @@ function toStr(v: unknown): string | null {
 
 function toFloat(v: unknown): number | null {
   if (v === null || v === undefined) return null;
-  return v as number;
+  if (typeof (v as { toNumber?: () => number }).toNumber === 'function') {
+    return (v as { toNumber: () => number }).toNumber();
+  }
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  return null;
 }
 
 // ---------------------------------------------------------------------------

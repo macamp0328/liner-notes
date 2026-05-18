@@ -76,6 +76,9 @@ function toStr(val: unknown): string | null {
 
 function toFloat(val: unknown): number | null {
   if (val === null || val === undefined) return null;
+  if (typeof (val as { toNumber?: () => number }).toNumber === 'function') {
+    return (val as { toNumber: () => number }).toNumber();
+  }
   if (typeof val === 'number' && Number.isFinite(val)) return val;
   return null;
 }
