@@ -174,6 +174,18 @@ describe('Discogs ingestion pipeline', () => {
     expect(mockMergeReleaseGraph).not.toHaveBeenCalled();
   });
 
+  it('does not check the graph or ingest when autoIngest is disabled', async () => {
+    mockHasReleases.mockResolvedValue(false);
+    app = await buildServer({ autoIngest: false });
+    await app.ready();
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(mockHasReleases).not.toHaveBeenCalled();
+    expect(mockGetCollectionReleases).not.toHaveBeenCalled();
+    expect(mockMergeReleaseGraph).not.toHaveBeenCalled();
+  });
+
   // -------------------------------------------------------------------------
   // Pipeline correctness (via runIngestion directly)
   // -------------------------------------------------------------------------
