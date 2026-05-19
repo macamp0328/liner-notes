@@ -1,0 +1,128 @@
+{
+  "id": 7000002,
+  "title": "Speak No Evil",
+  "year": 1965,
+  "country": "US",
+  "released": "1965-01-14",
+  "notes": "Recorded at Van Gelder Studio, Englewood Cliffs, NJ.",
+  "uri": "https://www.discogs.com/release/7000002",
+  "resource_url": "https://api.discogs.com/releases/7000002",
+  "master_id": 800002,
+  "genres": ["Jazz"],
+  "styles": ["Hard Bop", "Post Bop"],
+  "formats": [{ "name": "Vinyl", "qty": "1", "descriptions": ["LP", "Album"] }],
+  "artists": [
+    {
+      "name": "Wayne Shorter",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 400002,
+      "resource_url": "https://api.discogs.com/artists/400002"
+    }
+  ],
+  "extraartists": [
+    {
+      "name": "Ron Carter",
+      "anv": "",
+      "join": "",
+      "role": "Bass",
+      "tracks": "",
+      "id": 500001,
+      "resource_url": "https://api.discogs.com/artists/500001"
+    },
+    {
+      "name": "Herbie Hancock",
+      "anv": "",
+      "join": "",
+      "role": "Piano",
+      "tracks": "",
+      "id": 400001,
+      "resource_url": "https://api.discogs.com/artists/400001"
+    },
+    {
+      "name": "Elvin Jones",
+      "anv": "",
+      "join": "",
+      "role": "Drums",
+      "tracks": "",
+      "id": 500006,
+      "resource_url": "https://api.discogs.com/artists/500006"
+    },
+    {
+      "name": "Lee Morgan",
+      "anv": "",
+      "join": "",
+      "role": "Trumpet",
+      "tracks": "",
+      "id": 500007,
+      "resource_url": "https://api.discogs.com/artists/500007"
+    }
+  ],
+  "labels": [
+    {
+      "name": "Blue Note Records",
+      "catno": "BLP 4194",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 200001,
+      "resource_url": "https://api.discogs.com/labels/200001"
+    }
+  ],
+  "tracklist": [
+    {
+      "position": "A1",
+      "type_": "track",
+      "title": "Witch Hunt",
+      "duration": "6:11",
+      "extraartists": [
+        {
+          "name": "Ron Carter",
+          "anv": "",
+          "join": "",
+          "role": "Bass",
+          "tracks": "",
+          "id": 500001,
+          "resource_url": "https://api.discogs.com/artists/500001"
+        }
+      ]
+    },
+    {
+      "position": "A2",
+      "type_": "track",
+      "title": "Fee-Fi-Fo-Fum",
+      "duration": "5:54",
+      "extraartists": []
+    },
+    {
+      "position": "B1",
+      "type_": "track",
+      "title": "Speak No Evil",
+      "duration": "6:08",
+      "extraartists": []
+    }
+  ],
+  "companies": [
+    {
+      "name": "Van Gelder Studio",
+      "catno": "",
+      "entity_type": "23",
+      "entity_type_name": "Recorded At",
+      "id": 100001,
+      "resource_url": "https://api.discogs.com/labels/100001"
+    }
+  ],
+  "images": [
+    {
+      "type": "primary",
+      "uri": "https://img.discogs.com/7000002-primary.jpg",
+      "uri150": "https://img.discogs.com/7000002-primary-150.jpg",
+      "resource_url": "https://api.discogs.com/images/7000002",
+      "width": 600,
+      "height": 600
+    }
+  ],
+  "identifiers": [{ "type": "Barcode", "value": "042282415134" }],
+  "community": { "have": 3210, "want": 892, "rating": { "count": 445, "average": 4.68 } }
+}

@@ -56,7 +56,17 @@ export async function buildDocsServer(): Promise<FastifyInstance> {
   return app;
 }
 
-export async function buildServer(): Promise<FastifyInstance> {
+export interface BuildServerOptions {
+  /**
+   * When false, the onReady hook still connects to Neo4j and applies the schema
+   * but skips the empty-graph auto-ingestion check. Integration tests set this
+   * so seeding is fully controlled by the fixture loader. Defaults to true.
+   */
+  autoIngest?: boolean;
+}
+
+export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
+  const autoIngest = options.autoIngest ?? true;
   const app = Fastify({ logger: true });
 
   if (process.env['NODE_ENV'] !== 'production') {
@@ -91,6 +101,11 @@ export async function buildServer(): Promise<FastifyInstance> {
     app.log.info('Neo4j connected');
     await applySchema(driver);
     app.log.info('Neo4j schema applied');
+
+    if (!autoIngest) {
+      app.log.info('Auto-ingestion disabled — skipping empty-graph check');
+      return;
+    }
 
     // Auto-trigger ingestion when the graph is empty (first run).
     // Fire-and-forget: do NOT await — ingestion takes ~4 min for 200 releases

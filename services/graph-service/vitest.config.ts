@@ -2,6 +2,9 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    // Driver-free suite only. Real-Neo4j integration tests live in tests/integration/**
+    // and run via vitest.integration.config.ts so a bare `vitest run` never needs a DB.
+    include: ['tests/unit/**/*.test.ts', 'tests/route/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],

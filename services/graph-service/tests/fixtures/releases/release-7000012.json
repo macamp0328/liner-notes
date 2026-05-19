@@ -1,0 +1,97 @@
+{
+  "id": 7000012,
+  "title": "Now That's What I Call Music! 1",
+  "year": 1983,
+  "country": "UK",
+  "released": "1983-11-28",
+  "notes": "Compilation of hit singles from 1983.",
+  "uri": "https://www.discogs.com/release/7000012",
+  "resource_url": "https://api.discogs.com/releases/7000012",
+  "master_id": 800012,
+  "genres": ["Pop", "Rock"],
+  "styles": ["Synth-pop", "New Wave"],
+  "formats": [{ "name": "Vinyl", "qty": "2", "descriptions": ["2xLP", "Compilation"] }],
+  "artists": [
+    {
+      "name": "Various",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 194,
+      "resource_url": "https://api.discogs.com/artists/194"
+    }
+  ],
+  "extraartists": [
+    {
+      "name": "Simon Fuller",
+      "anv": "",
+      "join": "",
+      "role": "Compiled By",
+      "tracks": "",
+      "id": 500028,
+      "resource_url": "https://api.discogs.com/artists/500028"
+    }
+  ],
+  "labels": [
+    {
+      "name": "EMI",
+      "catno": "NOW 1",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 200010,
+      "resource_url": "https://api.discogs.com/labels/200010"
+    },
+    {
+      "name": "Virgin",
+      "catno": "NOW 1",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 200003,
+      "resource_url": "https://api.discogs.com/labels/200003"
+    }
+  ],
+  "tracklist": [
+    {
+      "position": "A1",
+      "type_": "track",
+      "title": "Karma Chameleon",
+      "duration": "4:01",
+      "extraartists": []
+    },
+    {
+      "position": "A2",
+      "type_": "track",
+      "title": "Red Red Wine",
+      "duration": "3:09",
+      "extraartists": []
+    },
+    {
+      "position": "B1",
+      "type_": "track",
+      "title": "Down Under",
+      "duration": "3:45",
+      "extraartists": []
+    },
+    {
+      "position": "C1",
+      "type_": "track",
+      "title": "Come On Eileen",
+      "duration": "4:10",
+      "extraartists": []
+    }
+  ],
+  "companies": [],
+  "images": [
+    {
+      "type": "primary",
+      "uri": "https://img.discogs.com/7000012-primary.jpg",
+      "uri150": "https://img.discogs.com/7000012-primary-150.jpg",
+      "resource_url": "https://api.discogs.com/images/7000012",
+      "width": 600,
+      "height": 600
+    }
+  ],
+  "identifiers": [{ "type": "Barcode", "value": "077779100521" }],
+  "community": { "have": 2341, "want": 412, "rating": { "count": 187, "average": 3.95 } }
+}

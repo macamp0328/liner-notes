@@ -1,0 +1,107 @@
+{
+  "id": 7000009,
+  "title": "Nevermind",
+  "year": 1991,
+  "country": "US",
+  "released": "1991-09-24",
+  "notes": "Recorded at Sound City Studios and Devonshire Studios.",
+  "uri": "https://www.discogs.com/release/7000009",
+  "resource_url": "https://api.discogs.com/releases/7000009",
+  "master_id": 800009,
+  "genres": ["Rock"],
+  "styles": ["Grunge", "Alternative Rock"],
+  "formats": [{ "name": "Vinyl", "qty": "1", "descriptions": ["LP", "Album"] }],
+  "artists": [
+    {
+      "name": "Nirvana",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 400008,
+      "resource_url": "https://api.discogs.com/artists/400008"
+    }
+  ],
+  "extraartists": [
+    {
+      "name": "Butch Vig",
+      "anv": "",
+      "join": "",
+      "role": "Producer",
+      "tracks": "",
+      "id": 500023,
+      "resource_url": "https://api.discogs.com/artists/500023"
+    },
+    {
+      "name": "Andy Wallace",
+      "anv": "",
+      "join": "",
+      "role": "Mixing",
+      "tracks": "",
+      "id": 500024,
+      "resource_url": "https://api.discogs.com/artists/500024"
+    }
+  ],
+  "labels": [
+    {
+      "name": "DGC Records",
+      "catno": "DGC-24425",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 200006,
+      "resource_url": "https://api.discogs.com/labels/200006"
+    }
+  ],
+  "tracklist": [
+    {
+      "position": "A1",
+      "type_": "track",
+      "title": "Smells Like Teen Spirit",
+      "duration": "5:01",
+      "extraartists": []
+    },
+    {
+      "position": "A2",
+      "type_": "track",
+      "title": "In Bloom",
+      "duration": "4:14",
+      "extraartists": []
+    },
+    {
+      "position": "B1",
+      "type_": "track",
+      "title": "Come as You Are",
+      "duration": "3:38",
+      "extraartists": []
+    },
+    {
+      "position": "B2",
+      "type_": "track",
+      "title": "Lithium",
+      "duration": "4:17",
+      "extraartists": []
+    }
+  ],
+  "companies": [
+    {
+      "name": "Sound City Studios",
+      "catno": "",
+      "entity_type": "23",
+      "entity_type_name": "Recorded At",
+      "id": 100007,
+      "resource_url": "https://api.discogs.com/labels/100007"
+    }
+  ],
+  "images": [
+    {
+      "type": "primary",
+      "uri": "https://img.discogs.com/7000009-primary.jpg",
+      "uri150": "https://img.discogs.com/7000009-primary-150.jpg",
+      "resource_url": "https://api.discogs.com/images/7000009",
+      "width": 600,
+      "height": 600
+    }
+  ],
+  "identifiers": [{ "type": "Barcode", "value": "720642442517" }],
+  "community": { "have": 18234, "want": 4102, "rating": { "count": 3201, "average": 4.52 } }
+}
