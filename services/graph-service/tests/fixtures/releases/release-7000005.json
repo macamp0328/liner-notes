@@ -1,0 +1,91 @@
+{
+  "id": 7000005,
+  "title": "Rocks",
+  "year": 1976,
+  "country": "US",
+  "released": "1976-05-03",
+  "notes": "Recorded at Record Plant Studio, New York, NY.",
+  "uri": "https://www.discogs.com/release/7000005",
+  "resource_url": "https://api.discogs.com/releases/7000005",
+  "master_id": 800005,
+  "genres": ["Rock"],
+  "styles": ["Hard Rock"],
+  "formats": [{ "name": "Vinyl", "qty": "1", "descriptions": ["LP", "Album"] }],
+  "artists": [
+    {
+      "name": "Aerosmith",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 400004,
+      "resource_url": "https://api.discogs.com/artists/400004"
+    }
+  ],
+  "extraartists": [
+    {
+      "name": "Jack Douglas",
+      "anv": "",
+      "join": "",
+      "role": "Producer",
+      "tracks": "",
+      "id": 500014,
+      "resource_url": "https://api.discogs.com/artists/500014"
+    }
+  ],
+  "labels": [
+    {
+      "name": "Columbia",
+      "catno": "PC 34165",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 200002,
+      "resource_url": "https://api.discogs.com/labels/200002"
+    }
+  ],
+  "tracklist": [
+    {
+      "position": "A1",
+      "type_": "track",
+      "title": "Back in the Saddle",
+      "duration": "4:37",
+      "extraartists": []
+    },
+    {
+      "position": "A2",
+      "type_": "track",
+      "title": "Last Child",
+      "duration": "3:26",
+      "extraartists": []
+    },
+    {
+      "position": "B1",
+      "type_": "track",
+      "title": "Sick as a Dog",
+      "duration": "4:09",
+      "extraartists": []
+    }
+  ],
+  "companies": [
+    {
+      "name": "Record Plant Studio",
+      "catno": "",
+      "entity_type": "23",
+      "entity_type_name": "Recorded At",
+      "id": 100004,
+      "resource_url": "https://api.discogs.com/labels/100004"
+    }
+  ],
+  "images": [
+    {
+      "type": "primary",
+      "uri": "https://img.discogs.com/7000005-primary.jpg",
+      "uri150": "https://img.discogs.com/7000005-primary-150.jpg",
+      "resource_url": "https://api.discogs.com/images/7000005",
+      "width": 600,
+      "height": 600
+    }
+  ],
+  "identifiers": [{ "type": "Barcode", "value": "074640165122" }],
+  "community": { "have": 3412, "want": 754, "rating": { "count": 487, "average": 4.41 } }
+}

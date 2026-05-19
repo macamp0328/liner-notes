@@ -1,0 +1,107 @@
+{
+  "id": 7000006,
+  "title": "Never Mind the Bollocks Here's the Sex Pistols",
+  "year": 1977,
+  "country": "UK",
+  "released": "1977-10-28",
+  "notes": "Recorded at Wessex Sound Studios, London.",
+  "uri": "https://www.discogs.com/release/7000006",
+  "resource_url": "https://api.discogs.com/releases/7000006",
+  "master_id": 800006,
+  "genres": ["Rock"],
+  "styles": ["Punk", "Hard Rock"],
+  "formats": [{ "name": "Vinyl", "qty": "1", "descriptions": ["LP", "Album"] }],
+  "artists": [
+    {
+      "name": "Sex Pistols",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 400005,
+      "resource_url": "https://api.discogs.com/artists/400005"
+    }
+  ],
+  "extraartists": [
+    {
+      "name": "Chris Thomas",
+      "anv": "",
+      "join": "",
+      "role": "Producer",
+      "tracks": "",
+      "id": 500015,
+      "resource_url": "https://api.discogs.com/artists/500015"
+    },
+    {
+      "name": "Bill Price",
+      "anv": "",
+      "join": "",
+      "role": "Engineer",
+      "tracks": "",
+      "id": 500016,
+      "resource_url": "https://api.discogs.com/artists/500016"
+    }
+  ],
+  "labels": [
+    {
+      "name": "Virgin",
+      "catno": "V 2086",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 200003,
+      "resource_url": "https://api.discogs.com/labels/200003"
+    }
+  ],
+  "tracklist": [
+    {
+      "position": "A1",
+      "type_": "track",
+      "title": "Holidays in the Sun",
+      "duration": "3:22",
+      "extraartists": []
+    },
+    {
+      "position": "A2",
+      "type_": "track",
+      "title": "Bodies",
+      "duration": "3:03",
+      "extraartists": []
+    },
+    {
+      "position": "B1",
+      "type_": "track",
+      "title": "God Save the Queen",
+      "duration": "3:17",
+      "extraartists": []
+    },
+    {
+      "position": "B2",
+      "type_": "track",
+      "title": "Anarchy in the U.K.",
+      "duration": "3:31",
+      "extraartists": []
+    }
+  ],
+  "companies": [
+    {
+      "name": "Wessex Sound Studios",
+      "catno": "",
+      "entity_type": "23",
+      "entity_type_name": "Recorded At",
+      "id": 100005,
+      "resource_url": "https://api.discogs.com/labels/100005"
+    }
+  ],
+  "images": [
+    {
+      "type": "primary",
+      "uri": "https://img.discogs.com/7000006-primary.jpg",
+      "uri150": "https://img.discogs.com/7000006-primary-150.jpg",
+      "resource_url": "https://api.discogs.com/images/7000006",
+      "width": 600,
+      "height": 600
+    }
+  ],
+  "identifiers": [{ "type": "Barcode", "value": "074643200610" }],
+  "community": { "have": 6103, "want": 1563, "rating": { "count": 890, "average": 4.49 } }
+}

@@ -1,0 +1,135 @@
+{
+  "id": 7000003,
+  "title": "Bitches Brew",
+  "year": 1970,
+  "country": "US",
+  "released": "1970-03-30",
+  "notes": "Recorded at Columbia Recording Studios, 52nd St., New York, NY.",
+  "uri": "https://www.discogs.com/release/7000003",
+  "resource_url": "https://api.discogs.com/releases/7000003",
+  "master_id": 800003,
+  "genres": ["Jazz"],
+  "styles": ["Hard Bop", "Jazz-Funk", "Free Jazz"],
+  "formats": [{ "name": "Vinyl", "qty": "2", "descriptions": ["2xLP", "Album"] }],
+  "artists": [
+    {
+      "name": "Miles Davis",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 400003,
+      "resource_url": "https://api.discogs.com/artists/400003"
+    }
+  ],
+  "extraartists": [
+    {
+      "name": "Ron Carter",
+      "anv": "",
+      "join": "",
+      "role": "Bass",
+      "tracks": "",
+      "id": 500001,
+      "resource_url": "https://api.discogs.com/artists/500001"
+    },
+    {
+      "name": "Jack DeJohnette",
+      "anv": "",
+      "join": "",
+      "role": "Drums",
+      "tracks": "",
+      "id": 500008,
+      "resource_url": "https://api.discogs.com/artists/500008"
+    },
+    {
+      "name": "Chick Corea",
+      "anv": "",
+      "join": "",
+      "role": "Electric Piano",
+      "tracks": "",
+      "id": 500009,
+      "resource_url": "https://api.discogs.com/artists/500009"
+    },
+    {
+      "name": "John McLaughlin",
+      "anv": "",
+      "join": "",
+      "role": "Guitar",
+      "tracks": "",
+      "id": 500010,
+      "resource_url": "https://api.discogs.com/artists/500010"
+    }
+  ],
+  "labels": [
+    {
+      "name": "Columbia",
+      "catno": "GP 26",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 200002,
+      "resource_url": "https://api.discogs.com/labels/200002"
+    }
+  ],
+  "tracklist": [
+    {
+      "position": "A1",
+      "type_": "track",
+      "title": "Pharaoh's Dance",
+      "duration": "20:05",
+      "extraartists": []
+    },
+    {
+      "position": "B1",
+      "type_": "track",
+      "title": "Bitches Brew",
+      "duration": "26:58",
+      "extraartists": [
+        {
+          "name": "Ron Carter",
+          "anv": "",
+          "join": "",
+          "role": "Bass",
+          "tracks": "",
+          "id": 500001,
+          "resource_url": "https://api.discogs.com/artists/500001"
+        }
+      ]
+    },
+    {
+      "position": "C1",
+      "type_": "track",
+      "title": "Spanish Key",
+      "duration": "17:32",
+      "extraartists": []
+    },
+    {
+      "position": "D1",
+      "type_": "track",
+      "title": "Miles Runs the Voodoo Down",
+      "duration": "14:01",
+      "extraartists": []
+    }
+  ],
+  "companies": [
+    {
+      "name": "Columbia 30th Street Studio",
+      "catno": "",
+      "entity_type": "23",
+      "entity_type_name": "Recorded At",
+      "id": 100002,
+      "resource_url": "https://api.discogs.com/labels/100002"
+    }
+  ],
+  "images": [
+    {
+      "type": "primary",
+      "uri": "https://img.discogs.com/7000003-primary.jpg",
+      "uri150": "https://img.discogs.com/7000003-primary-150.jpg",
+      "resource_url": "https://api.discogs.com/images/7000003",
+      "width": 600,
+      "height": 600
+    }
+  ],
+  "identifiers": [{ "type": "Barcode", "value": "074643844021" }],
+  "community": { "have": 7841, "want": 2134, "rating": { "count": 1102, "average": 4.61 } }
+}

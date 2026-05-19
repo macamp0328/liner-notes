@@ -1,0 +1,91 @@
+{
+  "id": 7000010,
+  "title": "Is This It",
+  "year": 2001,
+  "country": "US",
+  "released": "2001-07-30",
+  "notes": "Recorded at Stratosphere Sound, New York, NY.",
+  "uri": "https://www.discogs.com/release/7000010",
+  "resource_url": "https://api.discogs.com/releases/7000010",
+  "master_id": 800010,
+  "genres": ["Rock"],
+  "styles": ["Alternative Rock", "Indie Rock"],
+  "formats": [{ "name": "Vinyl", "qty": "1", "descriptions": ["LP", "Album"] }],
+  "artists": [
+    {
+      "name": "The Strokes",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 400009,
+      "resource_url": "https://api.discogs.com/artists/400009"
+    }
+  ],
+  "extraartists": [
+    {
+      "name": "Gordon Raphael",
+      "anv": "",
+      "join": "",
+      "role": "Producer, Engineer",
+      "tracks": "",
+      "id": 500025,
+      "resource_url": "https://api.discogs.com/artists/500025"
+    }
+  ],
+  "labels": [
+    {
+      "name": "RCA",
+      "catno": "07863 68861-1",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 200007,
+      "resource_url": "https://api.discogs.com/labels/200007"
+    }
+  ],
+  "tracklist": [
+    {
+      "position": "A1",
+      "type_": "track",
+      "title": "Is This It",
+      "duration": "2:36",
+      "extraartists": []
+    },
+    {
+      "position": "A2",
+      "type_": "track",
+      "title": "The Modern Age",
+      "duration": "3:33",
+      "extraartists": []
+    },
+    {
+      "position": "B1",
+      "type_": "track",
+      "title": "Last Nite",
+      "duration": "3:14",
+      "extraartists": []
+    }
+  ],
+  "companies": [
+    {
+      "name": "Stratosphere Sound",
+      "catno": "",
+      "entity_type": "23",
+      "entity_type_name": "Recorded At",
+      "id": 100008,
+      "resource_url": "https://api.discogs.com/labels/100008"
+    }
+  ],
+  "images": [
+    {
+      "type": "primary",
+      "uri": "https://img.discogs.com/7000010-primary.jpg",
+      "uri150": "https://img.discogs.com/7000010-primary-150.jpg",
+      "resource_url": "https://api.discogs.com/images/7000010",
+      "width": 600,
+      "height": 600
+    }
+  ],
+  "identifiers": [{ "type": "Barcode", "value": "078636886114" }],
+  "community": { "have": 12445, "want": 3201, "rating": { "count": 2103, "average": 4.44 } }
+}

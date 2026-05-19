@@ -1,0 +1,119 @@
+{
+  "id": 7000008,
+  "title": "Let It Bleed",
+  "year": 1969,
+  "country": "UK",
+  "released": "1969-12-05",
+  "notes": "Recorded at Olympic Sound Studios and Elektra Studios. Mixed at Criteria Recording Studios.",
+  "uri": "https://www.discogs.com/release/7000008",
+  "resource_url": "https://api.discogs.com/releases/7000008",
+  "master_id": 800008,
+  "genres": ["Rock"],
+  "styles": ["Blues Rock", "Classic Rock"],
+  "formats": [{ "name": "Vinyl", "qty": "1", "descriptions": ["LP", "Album"] }],
+  "artists": [
+    {
+      "name": "The Rolling Stones",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 400007,
+      "resource_url": "https://api.discogs.com/artists/400007"
+    }
+  ],
+  "extraartists": [
+    {
+      "name": "Jimmy Miller",
+      "anv": "",
+      "join": "",
+      "role": "Producer",
+      "tracks": "",
+      "id": 500020,
+      "resource_url": "https://api.discogs.com/artists/500020"
+    },
+    {
+      "name": "Merry Clayton",
+      "anv": "",
+      "join": "",
+      "role": "Backing Vocals",
+      "tracks": "",
+      "id": 500021,
+      "resource_url": "https://api.discogs.com/artists/500021"
+    },
+    {
+      "name": "Al Kooper",
+      "anv": "",
+      "join": "",
+      "role": "Piano, Organ",
+      "tracks": "",
+      "id": 500022,
+      "resource_url": "https://api.discogs.com/artists/500022"
+    }
+  ],
+  "labels": [
+    {
+      "name": "Decca",
+      "catno": "SKL 5025",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 200005,
+      "resource_url": "https://api.discogs.com/labels/200005"
+    }
+  ],
+  "tracklist": [
+    {
+      "position": "A1",
+      "type_": "track",
+      "title": "Gimme Shelter",
+      "duration": "4:31",
+      "extraartists": [
+        {
+          "name": "Merry Clayton",
+          "anv": "",
+          "join": "",
+          "role": "Backing Vocals",
+          "tracks": "",
+          "id": 500021,
+          "resource_url": "https://api.discogs.com/artists/500021"
+        }
+      ]
+    },
+    {
+      "position": "A2",
+      "type_": "track",
+      "title": "Love in Vain",
+      "duration": "4:20",
+      "extraartists": []
+    },
+    {
+      "position": "B1",
+      "type_": "track",
+      "title": "You Can't Always Get What You Want",
+      "duration": "7:28",
+      "extraartists": []
+    }
+  ],
+  "companies": [
+    {
+      "name": "Criteria Recording Studios",
+      "catno": "",
+      "entity_type": "27",
+      "entity_type_name": "Mixed At",
+      "id": 100006,
+      "resource_url": "https://api.discogs.com/labels/100006"
+    }
+  ],
+  "images": [
+    {
+      "type": "primary",
+      "uri": "https://img.discogs.com/7000008-primary.jpg",
+      "uri150": "https://img.discogs.com/7000008-primary-150.jpg",
+      "resource_url": "https://api.discogs.com/images/7000008",
+      "width": 600,
+      "height": 600
+    }
+  ],
+  "identifiers": [{ "type": "Barcode", "value": "042282415141" }],
+  "community": { "have": 9134, "want": 2340, "rating": { "count": 1567, "average": 4.63 } }
+}

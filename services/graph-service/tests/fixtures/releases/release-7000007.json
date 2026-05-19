@@ -1,0 +1,126 @@
+{
+  "id": 7000007,
+  "title": "Layla and Other Assorted Love Songs",
+  "year": 1970,
+  "country": "US",
+  "released": "1970-11-09",
+  "notes": "Recorded at Criteria Recording Studios, Miami, FL.",
+  "uri": "https://www.discogs.com/release/7000007",
+  "resource_url": "https://api.discogs.com/releases/7000007",
+  "master_id": 800007,
+  "genres": ["Rock", "Blues"],
+  "styles": ["Blues Rock", "Hard Rock"],
+  "formats": [{ "name": "Vinyl", "qty": "2", "descriptions": ["2xLP", "Album"] }],
+  "artists": [
+    {
+      "name": "Derek And The Dominos",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 400006,
+      "resource_url": "https://api.discogs.com/artists/400006"
+    }
+  ],
+  "extraartists": [
+    {
+      "name": "Jim Gordon",
+      "anv": "",
+      "join": "",
+      "role": "Drums",
+      "tracks": "",
+      "id": 500017,
+      "resource_url": "https://api.discogs.com/artists/500017"
+    },
+    {
+      "name": "Bobby Whitlock",
+      "anv": "",
+      "join": "",
+      "role": "Keyboards, Vocals",
+      "tracks": "",
+      "id": 500018,
+      "resource_url": "https://api.discogs.com/artists/500018"
+    },
+    {
+      "name": "Duane Allman",
+      "anv": "",
+      "join": "",
+      "role": "Guitar",
+      "tracks": "",
+      "id": 500019,
+      "resource_url": "https://api.discogs.com/artists/500019"
+    }
+  ],
+  "labels": [
+    {
+      "name": "Atco",
+      "catno": "SD 2-704",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 200004,
+      "resource_url": "https://api.discogs.com/labels/200004"
+    }
+  ],
+  "tracklist": [
+    {
+      "position": "A1",
+      "type_": "track",
+      "title": "I Looked Away",
+      "duration": "2:56",
+      "extraartists": []
+    },
+    {
+      "position": "B1",
+      "type_": "track",
+      "title": "Bell Bottom Blues",
+      "duration": "5:00",
+      "extraartists": []
+    },
+    {
+      "position": "C1",
+      "type_": "track",
+      "title": "Layla",
+      "duration": "7:10",
+      "extraartists": [
+        {
+          "name": "Duane Allman",
+          "anv": "",
+          "join": "",
+          "role": "Guitar",
+          "tracks": "",
+          "id": 500019,
+          "resource_url": "https://api.discogs.com/artists/500019"
+        }
+      ]
+    },
+    {
+      "position": "D1",
+      "type_": "track",
+      "title": "Thorn Tree in the Garden",
+      "duration": "3:15",
+      "extraartists": []
+    }
+  ],
+  "companies": [
+    {
+      "name": "Criteria Recording Studios",
+      "catno": "",
+      "entity_type": "23",
+      "entity_type_name": "Recorded At",
+      "id": 100006,
+      "resource_url": "https://api.discogs.com/labels/100006"
+    }
+  ],
+  "images": [
+    {
+      "type": "primary",
+      "uri": "https://img.discogs.com/7000007-primary.jpg",
+      "uri150": "https://img.discogs.com/7000007-primary-150.jpg",
+      "resource_url": "https://api.discogs.com/images/7000007",
+      "width": 600,
+      "height": 600
+    }
+  ],
+  "identifiers": [{ "type": "Barcode", "value": "075679017727" }],
+  "community": { "have": 8234, "want": 2087, "rating": { "count": 1243, "average": 4.69 } }
+}

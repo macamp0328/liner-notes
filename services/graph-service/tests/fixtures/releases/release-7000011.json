@@ -1,0 +1,106 @@
+{
+  "id": 7000011,
+  "title": "DAMN.",
+  "year": 2017,
+  "country": "US",
+  "released": "2017-04-14",
+  "notes": "Produced by various producers. Mixed by MixedByAli.",
+  "uri": "https://www.discogs.com/release/7000011",
+  "resource_url": "https://api.discogs.com/releases/7000011",
+  "master_id": 800011,
+  "genres": ["Hip Hop"],
+  "styles": ["Conscious", "Trap"],
+  "formats": [{ "name": "Vinyl", "qty": "2", "descriptions": ["2xLP", "Album"] }],
+  "artists": [
+    {
+      "name": "Kendrick Lamar",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 400010,
+      "resource_url": "https://api.discogs.com/artists/400010"
+    }
+  ],
+  "extraartists": [
+    {
+      "name": "Sounwave",
+      "anv": "",
+      "join": "",
+      "role": "Producer",
+      "tracks": "",
+      "id": 500026,
+      "resource_url": "https://api.discogs.com/artists/500026"
+    },
+    {
+      "name": "MixedByAli",
+      "anv": "",
+      "join": "",
+      "role": "Mixing",
+      "tracks": "",
+      "id": 500027,
+      "resource_url": "https://api.discogs.com/artists/500027"
+    }
+  ],
+  "labels": [
+    {
+      "name": "Top Dawg Entertainment",
+      "catno": "TDE-002",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 200008,
+      "resource_url": "https://api.discogs.com/labels/200008"
+    },
+    {
+      "name": "Interscope Records",
+      "catno": "B0026887-01",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 200009,
+      "resource_url": "https://api.discogs.com/labels/200009"
+    }
+  ],
+  "tracklist": [
+    {
+      "position": "A1",
+      "type_": "track",
+      "title": "BLOOD.",
+      "duration": "1:59",
+      "extraartists": []
+    },
+    {
+      "position": "A2",
+      "type_": "track",
+      "title": "DNA.",
+      "duration": "3:05",
+      "extraartists": []
+    },
+    {
+      "position": "B1",
+      "type_": "track",
+      "title": "HUMBLE.",
+      "duration": "2:57",
+      "extraartists": []
+    },
+    {
+      "position": "B2",
+      "type_": "track",
+      "title": "LOYALTY.",
+      "duration": "3:47",
+      "extraartists": []
+    }
+  ],
+  "companies": [],
+  "images": [
+    {
+      "type": "primary",
+      "uri": "https://img.discogs.com/7000011-primary.jpg",
+      "uri150": "https://img.discogs.com/7000011-primary-150.jpg",
+      "resource_url": "https://api.discogs.com/images/7000011",
+      "width": 600,
+      "height": 600
+    }
+  ],
+  "identifiers": [{ "type": "Barcode", "value": "602557516852" }],
+  "community": { "have": 15621, "want": 5034, "rating": { "count": 2867, "average": 4.71 } }
+}

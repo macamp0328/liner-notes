@@ -1,0 +1,135 @@
+{
+  "id": 7000001,
+  "title": "Maiden Voyage",
+  "year": 1966,
+  "country": "US",
+  "released": "1966-03-21",
+  "notes": "Recorded at Van Gelder Studio, Englewood Cliffs, NJ.",
+  "uri": "https://www.discogs.com/release/7000001",
+  "resource_url": "https://api.discogs.com/releases/7000001",
+  "master_id": 800001,
+  "genres": ["Jazz"],
+  "styles": ["Hard Bop", "Post Bop"],
+  "formats": [{ "name": "Vinyl", "qty": "1", "descriptions": ["LP", "Album"] }],
+  "artists": [
+    {
+      "name": "Herbie Hancock",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 400001,
+      "resource_url": "https://api.discogs.com/artists/400001"
+    }
+  ],
+  "extraartists": [
+    {
+      "name": "Ron Carter",
+      "anv": "",
+      "join": "",
+      "role": "Bass",
+      "tracks": "",
+      "id": 500001,
+      "resource_url": "https://api.discogs.com/artists/500001"
+    },
+    {
+      "name": "Freddie Hubbard",
+      "anv": "",
+      "join": "",
+      "role": "Trumpet",
+      "tracks": "",
+      "id": 500003,
+      "resource_url": "https://api.discogs.com/artists/500003"
+    },
+    {
+      "name": "George Coleman",
+      "anv": "",
+      "join": "",
+      "role": "Tenor Saxophone",
+      "tracks": "",
+      "id": 500004,
+      "resource_url": "https://api.discogs.com/artists/500004"
+    },
+    {
+      "name": "Anthony Williams",
+      "anv": "",
+      "join": "",
+      "role": "Drums",
+      "tracks": "",
+      "id": 500005,
+      "resource_url": "https://api.discogs.com/artists/500005"
+    }
+  ],
+  "labels": [
+    {
+      "name": "Blue Note Records",
+      "catno": "BLP 4195",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 200001,
+      "resource_url": "https://api.discogs.com/labels/200001"
+    }
+  ],
+  "tracklist": [
+    {
+      "position": "A1",
+      "type_": "track",
+      "title": "Maiden Voyage",
+      "duration": "5:38",
+      "extraartists": [
+        {
+          "name": "Ron Carter",
+          "anv": "",
+          "join": "",
+          "role": "Bass",
+          "tracks": "",
+          "id": 500001,
+          "resource_url": "https://api.discogs.com/artists/500001"
+        }
+      ]
+    },
+    {
+      "position": "A2",
+      "type_": "track",
+      "title": "The Eye of the Hurricane",
+      "duration": "6:23",
+      "extraartists": []
+    },
+    {
+      "position": "B1",
+      "type_": "track",
+      "title": "Little One",
+      "duration": "5:11",
+      "extraartists": []
+    },
+    {
+      "position": "B2",
+      "type_": "track",
+      "title": "Survival of the Fittest",
+      "duration": "7:45",
+      "extraartists": []
+    }
+  ],
+  "companies": [
+    {
+      "name": "Van Gelder Studio",
+      "catno": "",
+      "entity_type": "23",
+      "entity_type_name": "Recorded At",
+      "id": 100001,
+      "resource_url": "https://api.discogs.com/labels/100001"
+    }
+  ],
+  "images": [
+    {
+      "type": "primary",
+      "uri": "https://img.discogs.com/7000001-primary.jpg",
+      "uri150": "https://img.discogs.com/7000001-primary-150.jpg",
+      "resource_url": "https://api.discogs.com/images/7000001",
+      "width": 600,
+      "height": 600
+    }
+  ],
+  "identifiers": [{ "type": "Barcode", "value": "042282415127" }],
+  "community": { "have": 4832, "want": 1247, "rating": { "count": 621, "average": 4.72 } }
+}

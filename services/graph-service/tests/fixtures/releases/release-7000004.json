@@ -1,0 +1,109 @@
+{
+  "id": 7000004,
+  "title": "Head Hunters",
+  "year": 1973,
+  "country": "US",
+  "released": "1973-10-13",
+  "notes": "Recorded at Different Fur Studios, San Francisco, CA.",
+  "uri": "https://www.discogs.com/release/7000004",
+  "resource_url": "https://api.discogs.com/releases/7000004",
+  "master_id": 800004,
+  "genres": ["Jazz"],
+  "styles": ["Jazz-Funk", "Funk"],
+  "formats": [{ "name": "Vinyl", "qty": "1", "descriptions": ["LP", "Album"] }],
+  "artists": [
+    {
+      "name": "Herbie Hancock",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 400001,
+      "resource_url": "https://api.discogs.com/artists/400001"
+    }
+  ],
+  "extraartists": [
+    {
+      "name": "Harvey Mason",
+      "anv": "",
+      "join": "",
+      "role": "Drums",
+      "tracks": "",
+      "id": 500011,
+      "resource_url": "https://api.discogs.com/artists/500011"
+    },
+    {
+      "name": "Bennie Maupin",
+      "anv": "",
+      "join": "",
+      "role": "Tenor Saxophone, Bass Clarinet",
+      "tracks": "",
+      "id": 500012,
+      "resource_url": "https://api.discogs.com/artists/500012"
+    },
+    {
+      "name": "Paul Jackson",
+      "anv": "",
+      "join": "",
+      "role": "Bass",
+      "tracks": "",
+      "id": 500013,
+      "resource_url": "https://api.discogs.com/artists/500013"
+    }
+  ],
+  "labels": [
+    {
+      "name": "Columbia",
+      "catno": "KC 32731",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 200002,
+      "resource_url": "https://api.discogs.com/labels/200002"
+    }
+  ],
+  "tracklist": [
+    {
+      "position": "A1",
+      "type_": "track",
+      "title": "Chameleon",
+      "duration": "15:41",
+      "extraartists": []
+    },
+    {
+      "position": "A2",
+      "type_": "track",
+      "title": "Watermelon Man",
+      "duration": "6:31",
+      "extraartists": []
+    },
+    {
+      "position": "B1",
+      "type_": "track",
+      "title": "Sly",
+      "duration": "10:18",
+      "extraartists": []
+    }
+  ],
+  "companies": [
+    {
+      "name": "Different Fur Studios",
+      "catno": "",
+      "entity_type": "23",
+      "entity_type_name": "Recorded At",
+      "id": 100003,
+      "resource_url": "https://api.discogs.com/labels/100003"
+    }
+  ],
+  "images": [
+    {
+      "type": "primary",
+      "uri": "https://img.discogs.com/7000004-primary.jpg",
+      "uri150": "https://img.discogs.com/7000004-primary-150.jpg",
+      "resource_url": "https://api.discogs.com/images/7000004",
+      "width": 600,
+      "height": 600
+    }
+  ],
+  "identifiers": [{ "type": "Barcode", "value": "074643600012" }],
+  "community": { "have": 5621, "want": 1889, "rating": { "count": 812, "average": 4.58 } }
+}
