@@ -153,6 +153,14 @@ describe('parseRoleCategory', () => {
     expect(parseRoleCategory('WRITTEN-BY')).toBe('composer');
     expect(parseRoleCategory('Mastered By')).toBe('engineer');
   });
+
+  it('skips empty bracket content without throwing', () => {
+    // Exercises the `if (inner.length > 0)` guard in the bracket-token loop:
+    // an empty "[]" must not be pushed as a token (would otherwise match nothing
+    // but waste a comparison loop iteration).
+    expect(parseRoleCategory('Other []')).toBe('other');
+    expect(parseRoleCategory('Bass []')).toBe('performer');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -505,5 +513,16 @@ describe('deriveVersionType', () => {
   it('returns unknown when no keyword matches', () => {
     expect(deriveVersionType('Song (7" Single)')).toBe('unknown');
     expect(deriveVersionType('Song')).toBe('unknown');
+  });
+
+  it('skips empty parenthetical and bracket fragments without throwing', () => {
+    // Exercises the `if (match[1])` guards on the two fragment-extraction
+    // loops. An empty "()" or "[]" produces a falsy capture group that must
+    // not be pushed onto the fragments array.
+    expect(deriveVersionType('Song ()')).toBe('unknown');
+    expect(deriveVersionType('Song []')).toBe('unknown');
+    // A real keyword still wins when mixed with empty fragments.
+    expect(deriveVersionType('Song () (Live)')).toBe('live');
+    expect(deriveVersionType('Song [] [Remix]')).toBe('remix');
   });
 });
