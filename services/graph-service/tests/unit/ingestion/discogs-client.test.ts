@@ -163,10 +163,12 @@ describe('DiscogsClient', () => {
   // Error handling
   // -------------------------------------------------------------------------
   describe('error handling', () => {
-    it('throws on non-429 HTTP errors', async () => {
+    it('throws on non-429 HTTP errors and does not retry', async () => {
       fetchSpy.mockResolvedValueOnce(makeErrorResponse(404, 'Not Found'));
 
       await expect(client.getRelease(99999999)).rejects.toThrow('404');
+      // Non-429 errors must fail fast — no retry loop, no exponential backoff.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
 
     it('retries on 429 and succeeds on next attempt', async () => {
@@ -187,6 +189,43 @@ describe('DiscogsClient', () => {
       await expect(client.getRelease(13570466)).rejects.toThrow(/exceeded max retries/);
       // Should have tried MAX_RETRIES+1 = 6 times
       expect(fetchSpy.mock.calls.length).toBe(6);
+    });
+
+    it('applies exponential backoff: each retry waits roughly double the previous', async () => {
+      // Use a non-zero backoffBaseMs so the doubling is observable. With
+      // backoffBaseMs=0 (the default for other tests) the schedule degenerates
+      // to 0,0,0,... and there is nothing to assert.
+      const backoffClient = new DiscogsClient({
+        token: 'test-token',
+        userAgent: 'liner-notes/test',
+        delayMs: 0,
+        backoffBaseMs: 100,
+      });
+
+      const setTimeoutSpy = vi
+        .spyOn(globalThis, 'setTimeout')
+        .mockImplementation((fn, ..._args) => {
+          (fn as () => void)();
+          return 0 as unknown as ReturnType<typeof setTimeout>;
+        });
+
+      // Two 429s with no Retry-After, then success.
+      fetchSpy
+        .mockResolvedValueOnce(makeErrorResponse(429, 'Too Many Requests'))
+        .mockResolvedValueOnce(makeErrorResponse(429, 'Too Many Requests'))
+        .mockResolvedValueOnce(makeOkResponse(release13570466));
+
+      await backoffClient.getRelease(13570466);
+
+      // The first two setTimeout calls are the 429 backoffs (the third would
+      // be the post-success delayMs sleep, which is 0). Second wait must be
+      // ~2x the first.
+      const firstDelay = setTimeoutSpy.mock.calls[0]?.[1] as number;
+      const secondDelay = setTimeoutSpy.mock.calls[1]?.[1] as number;
+      expect(firstDelay).toBe(100);
+      expect(secondDelay).toBe(200);
+
+      setTimeoutSpy.mockRestore();
     });
 
     it('honours the Retry-After header: waits at least the server-specified duration', async () => {
