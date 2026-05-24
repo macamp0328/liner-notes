@@ -27,10 +27,11 @@ spec:
         - name: ecr-pull-secret
       containers:
         - name: graph-service
-          # Operator sets the image to the freshly pushed ECR tag before applying:
-          #   kubectl set image -n liner-notes deployment/graph-service graph-service=<ECR_URL>:<TAG>
-          # See infra/RUNBOOK.md.
-          image: graph-service:placeholder
+          # `graph-service-image` is a logical name retargeted by the
+          # `images:` block in kustomization.yaml — the operator runs
+          # `kustomize edit set image graph-service-image=<ECR_URL>:<TAG>`
+          # before `kubectl apply -k`. See infra/RUNBOOK.md.
+          image: graph-service-image
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
