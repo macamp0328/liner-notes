@@ -1,0 +1,26 @@
+# Optional overrides for the production deploy.
+#
+# All variables here have defaults in variables.tf — copy this file to
+# `terraform.tfvars` only if you want to deviate from those defaults. The
+# default flow (`terraform apply` with no tfvars) is a sensible starting point.
+
+# AWS region. Must match the `region:` field in
+# infra/k8s/graph-service/external-secret.yaml and the AWS_REGION env in
+# ecr-pull-secret-refresher.yaml — see runbook step 7.
+# aws_region = "us-east-1"
+
+# Bump instance class if you outgrow t3.micro. The Free Tier covers t2.micro
+# / t3.micro for 750 hours/month for the first 12 months.
+# instance_type = "t3.micro"
+
+# Narrow which IPs can reach the graph-service NodePort (30080).
+# Default is wide open ("0.0.0.0/0"); set to your home/office IP for tighter
+# exposure. The repo's auth model (ADMIN_TOKEN on mutating endpoints, public
+# reads) still applies on top of this.
+# allow_app_cidr = ["203.0.113.42/32"]
+
+# SSH access. Default is disabled — use AWS Session Manager
+# (`aws ssm start-session --target <instance-id>`) instead, which doesn't
+# need a key pair or an open port. If you want SSH anyway:
+# ssh_key_name   = "my-keypair"
+# allow_ssh_cidr = ["203.0.113.42/32"]

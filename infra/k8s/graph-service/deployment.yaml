@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: graph-service
+  namespace: liner-notes
+  labels:
+    app.kubernetes.io/name: graph-service
+    app.kubernetes.io/part-of: liner-notes
+spec:
+  replicas: 1
+  # The k3s node is a t3.micro — two pods will not fit. Recreate avoids the
+  # rolling-update double-up; ~30s of downtime on redeploy is acceptable here.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: graph-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: graph-service
+        app.kubernetes.io/part-of: liner-notes
+    spec:
+      # Token kept fresh by the ecr-pull-secret-refresher CronJob; bootstrapped
+      # by the operator before first deploy — see infra/RUNBOOK.md.
+      imagePullSecrets:
+        - name: ecr-pull-secret
+      containers:
+        - name: graph-service
+          # `graph-service-image` is a logical name retargeted by the
+          # `images:` block in kustomization.yaml — the operator runs
+          # `kustomize edit set image graph-service-image=<ECR_URL>:<TAG>`
+          # before `kubectl apply -k`. See infra/RUNBOOK.md.
+          image: graph-service-image
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          # All runtime credentials (Aura URI/user/password, Discogs token, admin
+          # token, optional Genius token) are populated by ExternalSecret from
+          # AWS Secrets Manager — see external-secret.yaml.
+          envFrom:
+            - secretRef:
+                name: graph-service-secrets
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: '3000'
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

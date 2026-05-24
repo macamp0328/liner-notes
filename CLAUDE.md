@@ -271,6 +271,8 @@ Internet
 
 **k3s** on EC2 t3.micro instead of EKS (~$72/month). EC2 Scheduler provides scale-to-zero (~$0/month when stopped).
 
+Operator-facing deploy, redeploy, and recovery procedures live in [`infra/RUNBOOK.md`](infra/RUNBOOK.md).
+
 ---
 
 ## Adding a New Service
