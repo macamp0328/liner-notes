@@ -21,6 +21,10 @@ spec:
         app.kubernetes.io/name: graph-service
         app.kubernetes.io/part-of: liner-notes
     spec:
+      # Token kept fresh by the ecr-pull-secret-refresher CronJob; bootstrapped
+      # by the operator before first deploy — see infra/RUNBOOK.md.
+      imagePullSecrets:
+        - name: ecr-pull-secret
       containers:
         - name: graph-service
           # Operator sets the image to the freshly pushed ECR tag before applying:

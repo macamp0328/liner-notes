@@ -4,6 +4,11 @@ resource "aws_ecr_repository" "graph_service" {
   name                 = "${local.name_prefix}/graph-service"
   image_tag_mutability = "MUTABLE"
 
+  # Allow `terraform destroy` to remove the repo even when images are still
+  # pushed to it. Without this, teardown fails on a non-empty repository and
+  # the operator has to `aws ecr batch-delete-image` first.
+  force_delete = true
+
   image_scanning_configuration {
     scan_on_push = true
   }

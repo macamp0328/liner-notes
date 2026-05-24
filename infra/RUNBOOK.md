@@ -56,11 +56,14 @@ aws secretsmanager put-secret-value \
     "DISCOGS_USERNAME": "<your-discogs-username>",
     "DISCOGS_TOKEN": "<your-discogs-token>",
     "DISCOGS_USER_AGENT": "liner-notes/1.0 +https://github.com/macamp0328/liner-notes",
+    "MUSICBRAINZ_USER_AGENT": "liner-notes/1.0 +https://github.com/macamp0328/liner-notes",
     "ADMIN_TOKEN": "<generated-random-token>"
   }'
 ```
 
-Add `GENIUS_TOKEN` and `ACOUSTICBRAINZ_USER_AGENT` to the JSON if you want lyrics enrichment.
+- **`MUSICBRAINZ_USER_AGENT`** is required by the MusicBrainz / VIAF / Wikidata enrichment paths (`/api/v1/admin/nationality/enrich`, `/api/v1/admin/track-musicbrainz/enrich`, and friends). Without it, those endpoints return 503.
+- Add `GENIUS_TOKEN` to the JSON for lyrics enrichment.
+- `ACOUSTICBRAINZ_USER_AGENT` is optional and defaults to `liner-notes/1.0`.
 
 > **Why the value isn't in Terraform:** keeping the password out of state means it isn't readable from `terraform.tfstate` (which may end up in S3, a Git repo, or a CI cache later). Rotation is then a `put-secret-value` away — no Terraform apply needed.
 
@@ -114,29 +117,50 @@ helm install external-secrets external-secrets/external-secrets \
 kubectl rollout status deployment/external-secrets-webhook -n external-secrets
 ```
 
-### 6. Apply the application manifests
+### 6. Bootstrap the ECR pull secret
+
+Plain k3s/containerd does not use the EC2 instance role for image pulls. The repo ships a CronJob (`ecr-pull-secret-refresher`) that mints a fresh 12h ECR token every 6 hours and writes it to `Secret/ecr-pull-secret`, which the Deployment references via `imagePullSecrets`. The CronJob can't run until the manifests are applied, so for the first pull we create the secret by hand:
+
+```bash
+kubectl apply -f infra/k8s/namespace.yaml
+kubectl -n liner-notes create secret docker-registry ecr-pull-secret \
+  --docker-server="$ECR_URL" \
+  --docker-username=AWS \
+  --docker-password="$(aws ecr get-login-password --region "$REGION")"
+```
+
+After the manifests are applied (next step), the CronJob takes over and the secret stays fresh on its own.
+
+### 7. Apply the application manifests
 
 Copy the repo onto the node (`git clone`), or apply from your laptop with `KUBECONFIG` pointing at the k3s kubeconfig.
 
+**Before applying, do two one-time edits to the checked-in manifests:**
+
+1. **If you applied Terraform with a non-default region** (anything other than `us-east-1`), update two values to match — otherwise ESO will look in the wrong region:
+
+   ```bash
+   sed -i.bak "s/us-east-1/$REGION/g" \
+     infra/k8s/graph-service/external-secret.yaml \
+     infra/k8s/graph-service/ecr-pull-secret-refresher.yaml
+   ```
+
+2. **Set the CronJob's `ECR_REGISTRY` env to your real registry hostname** so the refresh job writes a `dockerconfigjson` with the right server:
+   ```bash
+   sed -i.bak "s|value: REPLACE_ME|value: $ECR_URL|" \
+     infra/k8s/graph-service/ecr-pull-secret-refresher.yaml
+   ```
+
+Then apply:
+
 ```bash
-# From the repo root.
-kubectl apply -f infra/k8s/namespace.yaml
+# Edit infra/k8s/graph-service/deployment.yaml to set the image tag to $ECR_URL:$TAG
+# (or use `kubectl set image` after the initial apply — see "Redeploy procedure").
 
-# Point the deployment at the freshly pushed image.
-kubectl -n liner-notes set image \
-  --local -o yaml \
-  -f infra/k8s/graph-service/deployment.yaml \
-  graph-service=$ECR_URL:$TAG \
-  > /tmp/deployment.yaml
-mv /tmp/deployment.yaml infra/k8s/graph-service/deployment.yaml
-
-# Or simpler: edit deployment.yaml to set the image, then:
 kubectl apply -k infra/k8s/graph-service/
 ```
 
-(In practice the simplest first-deploy flow is to commit the image tag into `deployment.yaml` in a follow-up PR, or use `kubectl set image` after the initial apply — see "Redeploy procedure" below.)
-
-### 7. Verify
+### 8. Verify
 
 ```bash
 kubectl -n liner-notes get pods
@@ -190,15 +214,15 @@ A scheduled keep-warm ping is tracked in [#103](https://github.com/macamp0328/li
 
 ## Where to look when things break
 
-| Symptom                                                         | First thing to check                                                                                                                                                                                                            |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pod stuck in `CrashLoopBackOff` on first deploy                 | `kubectl -n liner-notes describe externalsecret graph-service-secrets` — if status is `SecretSyncedError`, the AWS secret value hasn't been populated (step 2) or the instance role is missing `secretsmanager:GetSecretValue`. |
-| Pod restarts every ~minute                                      | `kubectl -n liner-notes logs deployment/graph-service` — usually a Neo4j connectivity issue: Aura paused, wrong `NEO4J_URI`, or a transient network blip.                                                                       |
-| `503` from `/api/v1/health` with `neo4j: disconnected`          | Aura paused — see "Resuming a paused Aura instance".                                                                                                                                                                            |
-| `ExternalSecret` perpetually `SecretSyncedError: Access Denied` | EC2 instance role missing Secrets Manager read; verify `aws_iam_role_policy.secrets_read` in `infra/terraform/iam.tf` matches the secret ARN.                                                                                   |
-| `ImagePullBackOff`                                              | `kubectl -n liner-notes describe pod` — verify the EC2 instance role has `AmazonEC2ContainerRegistryReadOnly` and the image tag exists in ECR.                                                                                  |
-| Health endpoint unreachable from the internet                   | EC2 security group: `aws_vpc_security_group_ingress_rule.app_nodeport` must allow your IP on port 30080.                                                                                                                        |
-| k3s itself broken                                               | `sudo journalctl -u k3s -n 200` on the node.                                                                                                                                                                                    |
+| Symptom                                                         | First thing to check                                                                                                                                                                                                                  |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pod stuck in `CrashLoopBackOff` on first deploy                 | `kubectl -n liner-notes describe externalsecret graph-service-secrets` — if status is `SecretSyncedError`, the AWS secret value hasn't been populated (step 2) or the instance role is missing `secretsmanager:GetSecretValue`.       |
+| Pod restarts every ~minute                                      | `kubectl -n liner-notes logs deployment/graph-service` — usually a Neo4j connectivity issue: Aura paused, wrong `NEO4J_URI`, or a transient network blip.                                                                             |
+| `503` from `/api/v1/health` with `neo4j: disconnected`          | Aura paused — see "Resuming a paused Aura instance".                                                                                                                                                                                  |
+| `ExternalSecret` perpetually `SecretSyncedError: Access Denied` | EC2 instance role missing Secrets Manager read; verify `aws_iam_role_policy.secrets_read` in `infra/terraform/iam.tf` matches the secret ARN.                                                                                         |
+| `ImagePullBackOff`                                              | `kubectl -n liner-notes get secret ecr-pull-secret` — if missing or older than 12h, re-run the bootstrap from step 6 and `kubectl -n liner-notes create job --from=cronjob/ecr-pull-secret-refresher refresh-now` to force a refresh. |
+| Health endpoint unreachable from the internet                   | EC2 security group: `aws_vpc_security_group_ingress_rule.app_nodeport` must allow your IP on port 30080.                                                                                                                              |
+| k3s itself broken                                               | `sudo journalctl -u k3s -n 200` on the node.                                                                                                                                                                                          |
 
 ---
 
@@ -209,4 +233,4 @@ cd infra/terraform
 terraform destroy
 ```
 
-This deletes the EC2 instance, VPC, ECR repository (and all images), IAM roles, and the Secrets Manager secret container. The Aura instance is **not** managed by Terraform — leave it alone if you want to keep the graph data.
+This deletes the EC2 instance, VPC, ECR repository (and all images — the repo is created with `force_delete = true`), IAM roles, and the Secrets Manager secret container. The Aura instance is **not** managed by Terraform — leave it alone if you want to keep the graph data.
