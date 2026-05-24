@@ -1,5 +1,10 @@
 # Outputs surfaced after `terraform apply` — referenced from infra/RUNBOOK.md.
 
+output "aws_region" {
+  description = "AWS region this deploy lives in. Runbook commands echo through `$REGION`; without this output the runbook would silently fall back to us-east-1."
+  value       = var.aws_region
+}
+
 output "ecr_repository_url" {
   description = "Push graph-service images here."
   value       = aws_ecr_repository.graph_service.repository_url

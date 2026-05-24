@@ -100,10 +100,9 @@ Credentials to have on hand:
 
 ## First-time deploy — step by step
 
-> **Where commands run:**
-> Steps 1–4 run on **your laptop**. Step 5 runs **on the EC2 node** (via Session Manager). Steps 6–8 run **on your laptop again** with `KUBECONFIG` pointed at the node — see below.
+> **Where commands run:** every step in this section runs on **your laptop**. Step 4 opens a Session Manager port-forward in a second terminal that stays running for the rest of the steps; Steps 5–8 reach k3s through that tunnel.
 >
-> Every shell variable set in one step (`ECR_URL`, `REGION`, `INSTANCE_ID`, etc.) is reused in later steps; keep the same terminal open or re-export them.
+> **Shell variables carry between steps.** Set `REGION`, `ECR_URL`, `INSTANCE_ID`, `PUBLIC_DNS`, `SERVICE_URL`, `TAG`, `KUBECONFIG` once in Step 1 / Step 4 — keep the same terminal open or re-export them.
 
 ### Step 1 — Apply Terraform
 
@@ -118,7 +117,7 @@ terraform apply         # type `yes` to confirm
 Capture the outputs for later steps:
 
 ```bash
-export REGION=$(terraform output -raw aws_region 2>/dev/null || echo us-east-1)
+export REGION=$(terraform output -raw aws_region)
 export ECR_URL=$(terraform output -raw ecr_repository_url)
 export INSTANCE_ID=$(terraform output -raw ec2_instance_id)
 export PUBLIC_DNS=$(terraform output -raw ec2_public_dns)
@@ -175,31 +174,45 @@ docker push "$ECR_URL:$TAG"
 
 **Expected:** first build ~2–4 minutes; push ~30s.
 
-### Step 4 — Pull the k3s kubeconfig down to your laptop
+### Step 4 — Get a kubeconfig pointed at the k3s API via SSM port-forward
 
-Open a Session Manager shell to the node and grab the kubeconfig:
+The k3s API server listens on `:6443`. We don't open that port in the security group — instead we tunnel through SSM, which keeps the API private and avoids the TLS-SAN problem (k3s only signs its API cert for `127.0.0.1` / the node's private IP unless told otherwise, so connecting to `$PUBLIC_DNS:6443` would fail certificate verification anyway).
 
-```bash
-aws ssm start-session --region "$REGION" --target "$INSTANCE_ID"
-# inside the session:
-sudo cat /etc/rancher/k3s/k3s.yaml
-exit
-```
-
-Paste the YAML into a local file, swap `127.0.0.1` for the public DNS, and use it:
+**4a. Grab the kubeconfig** (one SSM session, then exit):
 
 ```bash
 mkdir -p ~/.kube
-# paste the YAML you copied into ~/.kube/liner-notes-prod.yaml, then:
-sed -i.bak "s/127.0.0.1/$PUBLIC_DNS/" ~/.kube/liner-notes-prod.yaml
+aws ssm start-session --region "$REGION" --target "$INSTANCE_ID" \
+  --document-name AWS-StartInteractiveCommand \
+  --parameters 'command=["sudo cat /etc/rancher/k3s/k3s.yaml"]' \
+  > ~/.kube/liner-notes-prod.yaml
+# Trim the SSM session header/footer lines if present, then:
 export KUBECONFIG=~/.kube/liner-notes-prod.yaml
-
-kubectl get nodes   # should show one Ready node
 ```
 
-> The k3s API listens on `:6443`. The EC2 security group does **not** open `:6443` by default. To run `kubectl` from your laptop, narrow `allow_app_cidr` in tfvars to your IP and add a port-6443 rule in `infra/terraform/networking.tf`, **or** keep all `kubectl` work inside the SSM shell. The instructions below use `KUBECONFIG` from the laptop — flip them onto the SSM shell if you prefer.
+The kubeconfig points at `https://127.0.0.1:6443` — leave it that way. The k3s API cert is valid for `127.0.0.1`, and the port-forward below makes that local address reach the node.
+
+**4b. Open a port-forward in a separate terminal and leave it running** for the rest of the deploy:
+
+```bash
+# In a NEW terminal — keep this open for steps 5–8.
+aws ssm start-session --region "$REGION" --target "$INSTANCE_ID" \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["6443"],"localPortNumber":["6443"]}'
+```
+
+**4c. In your original terminal, sanity-check the tunnel works:**
+
+```bash
+kubectl get nodes
+# Expected: one Ready node, the t3.micro
+```
+
+If `kubectl` hangs or returns "connection refused," the port-forward in the other terminal hasn't fully come up yet — give it ~5 seconds. If it returns a TLS error, you've probably edited the kubeconfig — restore it from `sudo cat /etc/rancher/k3s/k3s.yaml` again with the `127.0.0.1` server URL intact.
 
 ### Step 5 — Install External Secrets Operator (one-time)
+
+Run from your laptop with `KUBECONFIG` set from Step 4. The port-forward from 4b must still be running.
 
 ```bash
 helm repo add external-secrets https://charts.external-secrets.io
@@ -217,6 +230,8 @@ kubectl -n external-secrets rollout status deployment/external-secrets-webhook
 
 ### Step 6 — Bootstrap the ECR pull secret
 
+Run from your laptop with `KUBECONFIG` set (and the Step 4b port-forward still running).
+
 The CronJob can't run before its own manifest exists, so for the very first pull we create the secret by hand. After this, the CronJob takes over and refreshes it every 6 hours.
 
 ```bash
@@ -230,7 +245,7 @@ kubectl -n liner-notes create secret docker-registry ecr-pull-secret \
 
 ### Step 7 — Apply the application manifests
 
-Two one-time edits before applying, then apply:
+Run from your laptop with `KUBECONFIG` set and the Step 4b port-forward still running. Two one-time edits before applying, then apply:
 
 ```bash
 cd infra/k8s/graph-service
@@ -255,6 +270,8 @@ cd "$(git rev-parse --show-toplevel)"
 **Expected:** all four resources show `created`. The pod takes ~30s to pull the image and start.
 
 ### Step 8 — Verify
+
+Run from your laptop. `kubectl` calls need the Step 4b port-forward; the `curl` reaches the service over the public internet on `:30080` (different port from the k3s API, opened by the security group).
 
 ```bash
 # Pod is Running and Ready
@@ -326,7 +343,8 @@ A scheduled keep-warm ping is tracked in [#103](https://github.com/macamp0328/li
 | `ExternalSecret` perpetually `SecretSyncedError: AccessDenied` | EC2 instance role is missing Secrets Manager read; verify `aws_iam_role_policy.secrets_read` in `infra/terraform/iam.tf` references the correct secret ARN.                                                                                                 |
 | `ImagePullBackOff`                                             | `kubectl -n liner-notes get secret ecr-pull-secret` — if missing or older than 12h, re-run step 6 and force the refresher: `kubectl -n liner-notes create job --from=cronjob/ecr-pull-secret-refresher refresh-now`. Then `rollout restart` the Deployment. |
 | Health endpoint unreachable from the internet                  | EC2 security group: `aws_vpc_security_group_ingress_rule.app_nodeport` must allow your IP on `:30080`.                                                                                                                                                      |
-| `kubectl` from laptop hangs / times out                        | `:6443` isn't open in the security group by default. Either run `kubectl` from the SSM session, or extend the SG. Don't open `:6443` to the world — narrow to your IP.                                                                                      |
+| `kubectl` from laptop hangs / times out                        | The Step 4b SSM port-forward died (laptop sleep, network change). Re-run the `AWS-StartPortForwardingSession` command and retry. The k3s API is intentionally not exposed in the security group — SSM is the only path in.                                  |
+| `kubectl` returns `x509: certificate valid for 127.0.0.1, …`   | The kubeconfig server URL was rewritten away from `127.0.0.1`. Re-fetch it from the node and leave `https://127.0.0.1:6443` intact; the port-forward bridges that local address to the API server.                                                          |
 | k3s itself unhealthy                                           | In an SSM session: `sudo journalctl -u k3s -n 200`, `sudo systemctl status k3s`.                                                                                                                                                                            |
 | Refresher CronJob failing                                      | `kubectl -n liner-notes logs job/<latest-refresher-job>` — typical failures are IMDS unreachable (pod has lost connectivity) or `ECR_REGISTRY=REPLACE_ME` (step 7b skipped).                                                                                |
 
