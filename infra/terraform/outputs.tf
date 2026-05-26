@@ -11,13 +11,13 @@ output "ecr_repository_url" {
 }
 
 output "ec2_public_ip" {
-  description = "Public IP of the k3s node."
-  value       = aws_instance.k3s.public_ip
+  description = "Public IP of the k3s node (Elastic IP — stable across stop/start)."
+  value       = aws_eip.k3s.public_ip
 }
 
 output "ec2_public_dns" {
-  description = "Public DNS name of the k3s node."
-  value       = aws_instance.k3s.public_dns
+  description = "Public DNS name of the k3s node (resolves to the Elastic IP)."
+  value       = aws_eip.k3s.public_dns
 }
 
 output "ec2_instance_id" {
@@ -37,5 +37,20 @@ output "secrets_manager_name" {
 
 output "service_url" {
   description = "Where graph-service will be reachable once deployed."
-  value       = "http://${aws_instance.k3s.public_dns}:30080"
+  value       = "http://${aws_eip.k3s.public_dns}:30080"
+}
+
+output "log_group_name" {
+  description = "CloudWatch Log Group fluent-bit ships graph-service pod stdout into. Referenced by the runbook helm-install command."
+  value       = aws_cloudwatch_log_group.graph_service.name
+}
+
+output "sns_topic_arn" {
+  description = "ARN of the SNS topic that fans out graph-service alarms to email subscribers."
+  value       = aws_sns_topic.alerts.arn
+}
+
+output "health_check_id" {
+  description = "Route 53 health check ID probing /api/v1/health. Use in the AWS console under Route 53 → Health checks to see live status."
+  value       = aws_route53_health_check.graph_service.id
 }

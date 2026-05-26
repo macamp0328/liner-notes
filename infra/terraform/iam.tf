@@ -31,6 +31,15 @@ resource "aws_iam_role_policy_attachment" "ssm_managed" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# Lets the in-cluster fluent-bit daemonset (installed via helm — see RUNBOOK)
+# write to the graph-service CloudWatch Log Group. fluent-bit picks up these
+# permissions from the EC2 instance role via IMDS; no IRSA / OIDC needed because
+# k3s does not run an OIDC provider.
+resource "aws_iam_role_policy_attachment" "cloudwatch_agent" {
+  role       = aws_iam_role.ec2_k3s.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
 # Read access scoped to exactly the one secret we created.
 data "aws_iam_policy_document" "secrets_read" {
   statement {
