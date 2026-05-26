@@ -5,6 +5,7 @@ This is the operator's guide to standing up, redeploying, and recovering the pro
 - [Architecture at a glance](#architecture-at-a-glance)
 - [Prerequisites](#prerequisites)
 - [First-time deploy — step by step](#first-time-deploy--step-by-step)
+- [Observability — fluent-bit and alarms](#observability--fluent-bit-and-alarms)
 - [Redeploy procedure](#redeploy-procedure)
 - [Resuming a paused Aura instance](#resuming-a-paused-aura-instance)
 - [Where to look when things break](#where-to-look-when-things-break)
@@ -372,6 +373,107 @@ curl -sS "$SERVICE_URL/api/v1/releases?limit=3" | jq .
 
 ---
 
+## Observability — fluent-bit and alarms
+
+`terraform apply` (Step 1) created the supporting AWS resources for observability: a CloudWatch Log Group (`/liner-notes/graph-service`), an SNS topic with an email subscription, a Route 53 health check probing `/api/v1/health`, and three alarms (pod restarts, health-check failures, EC2 status check). This section covers the two manual follow-ups: confirming the SNS subscription and installing the in-cluster fluent-bit daemonset that actually writes logs to the log group.
+
+### Step 9 — Confirm the SNS subscription
+
+After `terraform apply`, AWS sends an `AWS Notification - Subscription Confirmation` email to the address in `infra/terraform/observability.tf` (currently `macamp0328@gmail.com`). Click the confirmation link **once**. Until you do, alarms publish to SNS but no email is delivered.
+
+Verify the subscription is active:
+
+```bash
+aws sns list-subscriptions-by-topic \
+  --region "$REGION" \
+  --topic-arn "$(terraform -chdir=infra/terraform output -raw sns_topic_arn)"
+```
+
+The subscription's `SubscriptionArn` should not be the literal string `PendingConfirmation`.
+
+### Step 10 — Install fluent-bit on the node
+
+Same pattern as Step 5 (External Secrets Operator): helm against the local k3s API from an SSM session, not the laptop tunnel.
+
+Open an interactive SSM session:
+
+```bash
+aws ssm start-session --region "$REGION" --target "$INSTANCE_ID"
+```
+
+Inside the session:
+
+```bash
+sudo -i -u ec2-user
+export KUBECONFIG=~/.kube/config
+
+helm repo add eks https://aws.github.io/eks-charts
+helm repo update
+
+# Write the values inline. The systemd input ships kubelet's journal — required
+# for the pod-restart alarm, whose metric filter matches "Liveness probe failed"
+# and "Back-off restarting failed container" log lines that only kubelet emits.
+cat <<'EOF' > /tmp/fluent-bit-values.yaml
+cloudWatchLogs:
+  enabled: true
+  region: us-east-1
+  logGroupName: /liner-notes/graph-service
+  logStreamPrefix: pod.
+  autoCreateGroup: false   # terraform owns the log group
+
+# Default tail input ships /var/log/containers/*.log (pod stdout/stderr).
+# Adding a second stream from systemd captures kubelet's pod-lifecycle events.
+input:
+  systemd:
+    enabled: true
+    filters:
+      systemdUnit:
+        - kubelet.service
+    tag: kubelet.*
+    readFromTail: true
+EOF
+
+helm upgrade --install aws-for-fluent-bit eks/aws-for-fluent-bit \
+  --namespace amazon-cloudwatch \
+  --create-namespace \
+  -f /tmp/fluent-bit-values.yaml \
+  --wait --timeout 5m
+
+# Verify
+kubectl -n amazon-cloudwatch get pods
+```
+
+**Expected:** ~1 minute. One `aws-for-fluent-bit-*` pod per node (just one — single-node k3s) in `Running 1/1`. Then `exit` twice to leave the SSM session.
+
+### Step 11 — Verify logs and alarms
+
+Logs should appear in CloudWatch within ~30 seconds. From your laptop:
+
+```bash
+aws logs tail /liner-notes/graph-service --region "$REGION" --since 5m --follow
+```
+
+You should see graph-service stdout lines and `kubelet.*` entries interleaved.
+
+Quick alarm smoke test — trigger a pod restart and watch for the email:
+
+```bash
+# Port-forward from Step 4b still running, KUBECONFIG still set
+kubectl -n liner-notes delete pod -l app=graph-service
+
+# Wait ~5 minutes, then check the alarm state
+aws cloudwatch describe-alarms \
+  --region "$REGION" \
+  --alarm-names liner-notes-pod-restarts \
+  --query 'MetricAlarms[0].StateValue'
+```
+
+`ALARM` → email arrives shortly after. `INSUFFICIENT_DATA` → fluent-bit isn't shipping kubelet logs (check the systemd input config above) or the deleted pod restarted too cleanly to produce a matching log line.
+
+The Route 53 health check takes longer to fire — needs 3 consecutive 30-second failures (~90s) before it flips to unhealthy, then 2 consecutive 1-min alarm periods (~2min) before the alarm fires. Total: ~3–4 minutes from instance stop to email.
+
+---
+
 ## Redeploy procedure
 
 ```bash
@@ -434,6 +536,9 @@ A scheduled keep-warm ping is tracked in [#103](https://github.com/macamp0328/li
 | Pod `CrashLoopBackOff` on first deploy                                                                               | `kubectl -n liner-notes describe externalsecret graph-service-secrets` — `SecretSyncedError` means Step 2 didn't land cleanly.                                                                                                                                                                       |
 | Pod restarts every ~minute                                                                                           | `kubectl -n liner-notes logs deployment/graph-service` — usually Neo4j: Aura paused, wrong `NEO4J_URI`, or a transient network blip.                                                                                                                                                                 |
 | `503` from `/api/v1/health` with `neo4j: disconnected`                                                               | Aura paused — see "Resuming a paused Aura instance".                                                                                                                                                                                                                                                 |
+| Need to read graph-service logs without `kubectl`                                                                    | Logs ship to CloudWatch Log Group `/liner-notes/graph-service` via fluent-bit. Tail with `aws logs tail /liner-notes/graph-service --since 1h --follow`, or browse in the CloudWatch console.                                                                                                        |
+| Alarm fires but no email arrives                                                                                     | SNS email subscription wasn't confirmed. Re-check the inbox for the AWS confirmation link, or `aws sns list-subscriptions-by-topic` — a subscription stuck in `PendingConfirmation` doesn't deliver. To re-send: `terraform taint aws_sns_topic_subscription.email && terraform apply`.              |
+| `liner-notes-pod-restarts` alarm stays `INSUFFICIENT_DATA`                                                           | fluent-bit's systemd input isn't shipping kubelet logs. The pod-restart metric filter only matches kubelet messages, not pod stdout. Re-check `/tmp/fluent-bit-values.yaml` (Step 10) and `helm upgrade` with the systemd block enabled.                                                             |
 | `helm install` fails with `cannot re-use a name that is still in use`                                                | A previous install left a stuck release record. Clean up: `kubectl delete secret -n external-secrets -l owner=helm` and `kubectl get crd -o name \| grep external-secrets.io \| xargs kubectl delete`. Then retry.                                                                                   |
 | `helm install` fails with TLS handshake timeouts from your laptop                                                    | The SSM port-forward chokes on helm's parallel API calls. Switch to running helm on the node via an interactive SSM session — Step 5 documents the pattern.                                                                                                                                          |
 | Health endpoint unreachable from the internet                                                                        | EC2 security group: `aws_vpc_security_group_ingress_rule.app_nodeport` must allow your IP on `:30080`.                                                                                                                                                                                               |
