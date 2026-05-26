@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "StartSessionOnLinerNotesInstances",
+      "Effect": "Allow",
+      "Action": "ssm:StartSession",
+      "Resource": [
+        "arn:aws:ec2:*:123456789012:instance/*",
+        "arn:aws:ssm:*:*:document/AWS-StartInteractiveCommand",
+        "arn:aws:ssm:*:*:document/AWS-StartPortForwardingSession",
+        "arn:aws:ssm:*:*:document/SSM-SessionManagerRunShell"
+      ],
+      "Condition": {
+        "BoolIfExists": {
+          "ssm:SessionDocumentAccessCheck": "true"
+        }
+      }
+    },
+    {
+      "Sid": "ManageOwnSessions",
+      "Effect": "Allow",
+      "Action": ["ssm:TerminateSession", "ssm:ResumeSession", "ssm:DescribeSessions"],
+      "Resource": "arn:aws:ssm:*:*:session/${aws:username}-*"
+    }
+  ]
+}

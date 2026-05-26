@@ -13,9 +13,9 @@ variable "project_name" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type for the k3s node. t3.micro is free-tier eligible."
+  description = "EC2 instance type for the k3s node. t3.small (2 vCPU / 2 GB) is the minimum that runs k3s + External Secrets Operator + graph-service without OOMing — t3.micro (1 GB) thrashes and the API server stops responding."
   type        = string
-  default     = "t3.micro"
+  default     = "t3.small"
 }
 
 variable "ssh_key_name" {

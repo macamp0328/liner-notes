@@ -24,7 +24,7 @@ flowchart LR
     subgraph vpc["VPC 10.0.0.0/16 · public subnet · SG opens :30080"]
       direction TB
 
-      subgraph ec2["EC2 t3.micro · AL2023 · k3s single-node"]
+      subgraph ec2["EC2 t3.small · AL2023 · k3s single-node"]
         direction TB
 
         subgraph ns["k8s namespace: liner-notes"]
@@ -78,19 +78,48 @@ flowchart LR
 
 ## Prerequisites
 
-On your laptop:
+### Tooling on your laptop
 
-| Tool                     | Why                                                                           |
-| ------------------------ | ----------------------------------------------------------------------------- |
-| AWS CLI                  | Configure with credentials that can manage VPC / EC2 / IAM / ECR / SM         |
-| `terraform`              | `>= 1.5` — pinned in `.mise.toml`                                             |
-| `kubectl`                | `>= 1.30`                                                                     |
-| `kustomize`              | bundled with recent `kubectl` (`kubectl kustomize`) — standalone is also fine |
-| `docker`                 | for building the image                                                        |
-| `helm`                   | `>= 3.10`, used once to install External Secrets Operator                     |
-| `session-manager-plugin` | for `aws ssm start-session` (optional but recommended over SSH)               |
+All mandatory. Install via Homebrew on macOS (or your package manager of choice):
 
-Credentials to have on hand:
+```bash
+brew install mise              # runtime version manager (handles the next four)
+brew install kustomize         # k8s/kubectl bundles a `kustomize` subcommand but not `kustomize edit`
+brew install jq                # for validating the Secrets Manager JSON before submitting
+brew install --cask session-manager-plugin   # required for every `aws ssm` command
+```
+
+Then from the repo root:
+
+```bash
+mise install                   # installs terraform, kubectl, helm, gh, aws-cli per .mise.toml
+```
+
+| Tool                     | Why                                                                                      |
+| ------------------------ | ---------------------------------------------------------------------------------------- |
+| `aws` CLI                | Manage VPC / EC2 / IAM / ECR / Secrets Manager / SSM                                     |
+| `terraform`              | `>= 1.5` — pinned in `.mise.toml`                                                        |
+| `kubectl`                | `>= 1.30` — pinned in `.mise.toml`                                                       |
+| `kustomize`              | Standalone — `kubectl kustomize` doesn't include the `edit` subcommand the runbook needs |
+| `docker`                 | Build the container image (Docker Desktop on macOS)                                      |
+| `helm`                   | `>= 3.10` — one-time install of External Secrets Operator                                |
+| `jq`                     | Validate the Secrets Manager JSON before pushing it                                      |
+| `session-manager-plugin` | Required by every `aws ssm start-session` invocation                                     |
+| `mise`                   | Pins the toolchain versions in `.mise.toml`                                              |
+
+### AWS credentials
+
+The runbook assumes a non-root IAM user (`liner-notes-cli` in our setup) with the following:
+
+- `AmazonEC2FullAccess` (from initial setup)
+- `AmazonEC2ContainerRegistryFullAccess` (from initial setup)
+- `SecretsManagerReadWrite` (from initial setup)
+- **Inline policy** from [`infra/iam/operator-iam-policy.json`](iam/operator-iam-policy.json) — Terraform-managed IAM roles
+- **Inline policy** from [`infra/iam/operator-ssm-policy.json`](iam/operator-ssm-policy.json) — SSM Session Manager
+
+See [`infra/iam/README.md`](iam/README.md) for the one-time attach procedure. **Do this before Step 1** or `terraform apply` and the `aws ssm` calls will fail with `AccessDenied`.
+
+### Credentials to have on hand
 
 - **Aura** — `NEO4J_URI` (`neo4j+s://…databases.neo4j.io`), `NEO4J_USER`, `NEO4J_PASSWORD` from [console.neo4j.io](https://console.neo4j.io).
 - **Discogs** — your username + a personal access token.
@@ -100,9 +129,9 @@ Credentials to have on hand:
 
 ## First-time deploy — step by step
 
-> **Where commands run:** every step in this section runs on **your laptop**. Step 4 opens a Session Manager port-forward in a second terminal that stays running for the rest of the steps; Steps 5–8 reach k3s through that tunnel.
+> **Where commands run:** every step in this section runs on **your laptop** except a few minutes inside Step 5, which open an interactive SSM session on the EC2 node. Step 4 opens a Session Manager port-forward in a second terminal that stays running for Steps 6–8.
 >
-> **Shell variables carry between steps.** Set `REGION`, `ECR_URL`, `INSTANCE_ID`, `PUBLIC_DNS`, `SERVICE_URL`, `TAG`, `KUBECONFIG` once in Step 1 / Step 4 — keep the same terminal open or re-export them.
+> **Shell variables carry between steps.** Set `REGION`, `ECR_URL`, `INSTANCE_ID`, `PUBLIC_DNS`, `SERVICE_URL`, `TAG`, `KUBECONFIG` once in Step 1 / Step 3 / Step 4 — keep the same terminal open or re-export them.
 
 ### Step 1 — Apply Terraform
 
@@ -122,31 +151,43 @@ export ECR_URL=$(terraform output -raw ecr_repository_url)
 export INSTANCE_ID=$(terraform output -raw ec2_instance_id)
 export PUBLIC_DNS=$(terraform output -raw ec2_public_dns)
 export SERVICE_URL=$(terraform output -raw service_url)
+
+# Sanity — every line should print non-empty
+for v in REGION ECR_URL INSTANCE_ID PUBLIC_DNS SERVICE_URL; do
+  printf "%-12s = %s\n" "$v" "$(eval echo \$$v)"
+done
+
+cd "$(git rev-parse --show-toplevel)"
 ```
 
-**Expected:** ~3 minutes. Outputs printed at the end. EC2 user_data continues installing k3s + helm for another ~2 minutes after the instance comes up.
+**Expected:** ~3 minutes for the apply. EC2 user_data continues installing k3s + helm on the node for another ~2 minutes after the instance comes up.
 
 ### Step 2 — Populate AWS Secrets Manager
 
-Terraform created the secret container but **not** the value. Populate it once. `MUSICBRAINZ_USER_AGENT` is mandatory — without it the MusicBrainz / VIAF / Wikidata enrichment endpoints return 503.
+Terraform created the secret _container_ but **not** the value. Populate it once. `MUSICBRAINZ_USER_AGENT` is mandatory — without it the MusicBrainz / VIAF / Wikidata enrichment endpoints return 503.
+
+Build the JSON in a shell variable so you can validate it with `jq` before sending — malformed JSON here is by far the most common cause of `ExternalSecret SecretSyncedError` later:
 
 ```bash
+SECRET_JSON='{
+  "NEO4J_URI":            "neo4j+s://<your-aura-id>.databases.neo4j.io",
+  "NEO4J_USER":           "neo4j",
+  "NEO4J_PASSWORD":       "<your-aura-password>",
+  "DISCOGS_USERNAME":     "<your-discogs-username>",
+  "DISCOGS_TOKEN":        "<your-discogs-token>",
+  "DISCOGS_USER_AGENT":   "liner-notes/1.0 +https://github.com/macamp0328/liner-notes",
+  "MUSICBRAINZ_USER_AGENT": "liner-notes/1.0 +https://github.com/macamp0328/liner-notes",
+  "ADMIN_TOKEN":          "<your-generated-random-token>"
+}'
+
+# Validate first — if jq accepts it, AWS will too
+echo "$SECRET_JSON" | jq .
+
+# Push the value to AWS Secrets Manager
 aws secretsmanager put-secret-value \
   --region "$REGION" \
   --secret-id liner-notes/graph-service/prod \
-  --secret-string "$(cat <<'EOF'
-{
-  "NEO4J_URI": "neo4j+s://<your-aura-id>.databases.neo4j.io",
-  "NEO4J_USER": "neo4j",
-  "NEO4J_PASSWORD": "<your-aura-password>",
-  "DISCOGS_USERNAME": "<your-discogs-username>",
-  "DISCOGS_TOKEN": "<your-discogs-token>",
-  "DISCOGS_USER_AGENT": "liner-notes/1.0 +https://github.com/macamp0328/liner-notes",
-  "MUSICBRAINZ_USER_AGENT": "liner-notes/1.0 +https://github.com/macamp0328/liner-notes",
-  "ADMIN_TOKEN": "<your-generated-random-token>"
-}
-EOF
-)"
+  --secret-string "$SECRET_JSON"
 ```
 
 Add `GENIUS_TOKEN` to the JSON for lyrics enrichment; `ACOUSTICBRAINZ_USER_AGENT` is optional.
@@ -155,30 +196,29 @@ Add `GENIUS_TOKEN` to the JSON for lyrics enrichment; `ACOUSTICBRAINZ_USER_AGENT
 
 ### Step 3 — Build and push the first image
 
-From the repo root:
-
 ```bash
-cd "$(git rev-parse --show-toplevel)"
 export TAG=$(git rev-parse --short HEAD)
 
 aws ecr get-login-password --region "$REGION" \
   | docker login --username AWS --password-stdin "$ECR_URL"
 
-docker build \
+docker buildx build \
+  --platform linux/amd64 \
   -f services/graph-service/Dockerfile \
   -t "$ECR_URL:$TAG" \
+  --push \
   .
-
-docker push "$ECR_URL:$TAG"
 ```
 
-**Expected:** first build ~2–4 minutes; push ~30s.
+**`--platform linux/amd64` is mandatory if you're on an Apple Silicon Mac.** `docker build` without the flag defaults to your host architecture (`linux/arm64` on M1/M2/M3/M4), and the EC2 instance is `linux/amd64` — the pod will fail with `no match for platform in manifest: not found` if you skip this.
+
+`buildx ... --push` builds and pushes in one shot. Expected: ~2–4 minutes for a clean build, ~30s on cached re-runs.
 
 ### Step 4 — Get a kubeconfig pointed at the k3s API via SSM port-forward
 
-The k3s API server listens on `:6443`. We don't open that port in the security group — instead we tunnel through SSM, which keeps the API private and avoids the TLS-SAN problem (k3s only signs its API cert for `127.0.0.1` / the node's private IP unless told otherwise, so connecting to `$PUBLIC_DNS:6443` would fail certificate verification anyway).
+The k3s API server listens on `:6443`. We don't open that port in the security group — instead we tunnel through SSM, which keeps the API private and avoids the TLS-SAN problem (k3s only signs its API cert for `127.0.0.1` / the node's local IPs unless told otherwise, so connecting to `$PUBLIC_DNS:6443` would fail certificate verification).
 
-**4a. Grab the kubeconfig** (one SSM session, then exit):
+**4a. Grab the kubeconfig:**
 
 ```bash
 mkdir -p ~/.kube
@@ -186,66 +226,89 @@ aws ssm start-session --region "$REGION" --target "$INSTANCE_ID" \
   --document-name AWS-StartInteractiveCommand \
   --parameters 'command=["sudo cat /etc/rancher/k3s/k3s.yaml"]' \
   > ~/.kube/liner-notes-prod.yaml
-# Trim the SSM session header/footer lines if present, then:
+
+# Trim the SSM banner lines if present (first line "Starting session..." and
+# trailing "Exiting session..."). Open the file in your editor and ensure the
+# first non-empty line is `apiVersion: v1` and the last is the user's
+# `client-key-data:` value.
+
 export KUBECONFIG=~/.kube/liner-notes-prod.yaml
 ```
 
 The kubeconfig points at `https://127.0.0.1:6443` — leave it that way. The k3s API cert is valid for `127.0.0.1`, and the port-forward below makes that local address reach the node.
 
-**4b. Open a port-forward in a separate terminal and leave it running** for the rest of the deploy:
+**4b. Open a port-forward in a separate terminal** and leave it running for the rest of the deploy:
 
 ```bash
-# In a NEW terminal — keep this open for steps 5–8.
+# In a NEW terminal — keep this open for Steps 6–8.
 aws ssm start-session --region "$REGION" --target "$INSTANCE_ID" \
   --document-name AWS-StartPortForwardingSession \
   --parameters '{"portNumber":["6443"],"localPortNumber":["6443"]}'
 ```
 
-**4c. In your original terminal, sanity-check the tunnel works:**
+**4c. Sanity-check the tunnel:**
 
 ```bash
-kubectl get nodes
-# Expected: one Ready node, the t3.micro
+nc -zv 127.0.0.1 6443                    # "succeeded"
+curl -sk https://127.0.0.1:6443/livez    # "ok" (401 if you've never auth'd — also fine, means TLS is good)
 ```
 
-If `kubectl` hangs or returns "connection refused," the port-forward in the other terminal hasn't fully come up yet — give it ~5 seconds. If it returns a TLS error, you've probably edited the kubeconfig — restore it from `sudo cat /etc/rancher/k3s/k3s.yaml` again with the `127.0.0.1` server URL intact.
+### Step 5 — Install External Secrets Operator (on the node, not via the tunnel)
 
-### Step 5 — Install External Secrets Operator (one-time)
+`helm install` fires ~8 concurrent API calls during install. The SSM port-forward can't carry that level of parallelism reliably — you'll see `TLS handshake timeout` and `client connection lost` errors. Solution: install helm on the node itself, where the k3s API is local with zero network indirection.
 
-Run from your laptop with `KUBECONFIG` set from Step 4. The port-forward from 4b must still be running.
+Open an **interactive** SSM session (separate from the port-forward; the default per-instance limit is 2 concurrent sessions, both fit):
 
 ```bash
+aws ssm start-session --region "$REGION" --target "$INSTANCE_ID"
+```
+
+You'll get a `sh-5.2$` prompt as `ssm-user`. Inside the session:
+
+```bash
+sudo -i -u ec2-user                              # switch to the user that owns ~/.kube/config
+export KUBECONFIG=~/.kube/config
+
+# Sanity — should print one Ready node
+kubectl get nodes
+
+# Install ESO directly on the node — fast and reliable
 helm repo add external-secrets https://charts.external-secrets.io
 helm repo update
 
 helm install external-secrets external-secrets/external-secrets \
   --namespace external-secrets \
   --create-namespace \
-  --set installCRDs=true
+  --set installCRDs=true \
+  --wait --timeout 5m
 
-kubectl -n external-secrets rollout status deployment/external-secrets-webhook
+# Verify
+kubectl get pods -n external-secrets
 ```
 
-**Expected:** ~1 minute. The `rollout status` wait is important — applying the `ClusterSecretStore` before the webhook is ready returns a webhook-timeout error.
+**Expected:** ~1 minute. Three pods Running `1/1`: `external-secrets`, `external-secrets-webhook`, `external-secrets-cert-controller`. Then `exit` twice (once to leave `ec2-user`, once to leave the SSM session) — you're back on your laptop.
 
 ### Step 6 — Bootstrap the ECR pull secret
 
-Run from your laptop with `KUBECONFIG` set (and the Step 4b port-forward still running).
-
-The CronJob can't run before its own manifest exists, so for the very first pull we create the secret by hand. After this, the CronJob takes over and refreshes it every 6 hours.
+Run from your laptop with `KUBECONFIG` set and the Step 4b port-forward still running. The CronJob can't run before its own manifest exists, so we create the first pull secret by hand. After this, the CronJob takes over and refreshes it every 6 hours.
 
 ```bash
+# Strip the repo path off ECR_URL — docker-server wants just the registry hostname
+ECR_REGISTRY="${ECR_URL%%/*}"
+
 kubectl apply -f infra/k8s/namespace.yaml
 
 kubectl -n liner-notes create secret docker-registry ecr-pull-secret \
-  --docker-server="$ECR_URL" \
+  --docker-server="$ECR_REGISTRY" \
   --docker-username=AWS \
   --docker-password="$(aws ecr get-login-password --region "$REGION")"
+
+kubectl get secret -n liner-notes ecr-pull-secret    # should print "ecr-pull-secret  kubernetes.io/dockerconfigjson"
 ```
 
 ### Step 7 — Apply the application manifests
 
-Run from your laptop with `KUBECONFIG` set and the Step 4b port-forward still running. Two one-time edits before applying, then apply:
+Still on your laptop, port-forward still running. Two one-time edits to the checked-in manifests, then apply with kustomize:
 
 ```bash
 cd infra/k8s/graph-service
@@ -257,21 +320,29 @@ if [ "$REGION" != "us-east-1" ]; then
 fi
 
 # 7b. Tell the CronJob which ECR hostname to write into the dockerconfigjson.
-sed -i.bak "s|value: REPLACE_ME|value: $ECR_URL|" ecr-pull-secret-refresher.yaml
+sed -i.bak "s|value: REPLACE_ME|value: $ECR_REGISTRY|" ecr-pull-secret-refresher.yaml
 
 # 7c. Point the Deployment at the image you just pushed.
 kustomize edit set image "graph-service-image=$ECR_URL:$TAG"
 
-# 7d. Apply everything (Deployment, Service, ExternalSecret, CronJob + RBAC).
+# 7d. Apply everything: ServiceAccount/Role/RoleBinding/CronJob/Service/Deployment/ClusterSecretStore/ExternalSecret.
 kubectl apply -k .
+
 cd "$(git rev-parse --show-toplevel)"
 ```
 
-**Expected:** all four resources show `created`. The pod takes ~30s to pull the image and start.
+**Expected:** ~8 lines of `<resource> created`. The pod takes ~30s to pull the image and start.
+
+> **About the working-tree changes:** the `sed` and `kustomize edit` commands modify checked-in files. They're deploy-time overrides — **don't commit them**. After the deploy succeeds, restore the originals:
+>
+> ```bash
+> git restore infra/k8s/graph-service/{external-secret,ecr-pull-secret-refresher,kustomization}.yaml
+> rm -f infra/k8s/graph-service/*.bak
+> ```
 
 ### Step 8 — Verify
 
-Run from your laptop. `kubectl` calls need the Step 4b port-forward; the `curl` reaches the service over the public internet on `:30080` (different port from the k3s API, opened by the security group).
+Run from your laptop. `kubectl` calls need the Step 4b port-forward; `curl` reaches the service over the public internet on `:30080` (different port from the k3s API).
 
 ```bash
 # Pod is Running and Ready
@@ -281,7 +352,7 @@ kubectl -n liner-notes get pods
 kubectl -n liner-notes get externalsecret graph-service-secrets
 
 # Health endpoint returns 200 from the public DNS
-curl "$SERVICE_URL/api/v1/health"
+curl -sS "$SERVICE_URL/api/v1/health"
 # Expected: {"status":"ok","neo4j":"connected"}
 ```
 
@@ -291,7 +362,13 @@ The empty-graph auto-ingest fires on first boot:
 kubectl -n liner-notes logs deployment/graph-service -f
 ```
 
-**Expected:** ~4 minutes for ~6,150 nodes and ~14,297 relationships. You'll see `Graph is empty — starting Discogs ingestion in background` followed by progress logs.
+**Expected:** progress logs starting with `Graph is empty — starting Discogs ingestion in background`. For the project's ~30-record reference collection that ends up around ~6,150 nodes and ~14,297 relationships, the base ingest takes ~4 minutes. Enrichment passes (lyrics, MusicBrainz, AcousticBrainz, Deezer) then run for longer in the background — watch for `Ingestion complete` followed by per-enrichment progress lines.
+
+Spot-check the real data:
+
+```bash
+curl -sS "$SERVICE_URL/api/v1/releases?limit=3" | jq .
+```
 
 ---
 
@@ -303,13 +380,20 @@ export TAG=$(git rev-parse --short HEAD)
 aws ecr get-login-password --region "$REGION" \
   | docker login --username AWS --password-stdin "$ECR_URL"
 
-docker build -f services/graph-service/Dockerfile -t "$ECR_URL:$TAG" .
-docker push "$ECR_URL:$TAG"
+docker buildx build \
+  --platform linux/amd64 \
+  -f services/graph-service/Dockerfile \
+  -t "$ECR_URL:$TAG" \
+  --push \
+  .
 
 cd infra/k8s/graph-service
 kustomize edit set image "graph-service-image=$ECR_URL:$TAG"
 kubectl apply -k .
 kubectl -n liner-notes rollout status deployment/graph-service
+
+# Don't commit the image override
+git restore kustomization.yaml
 cd "$(git rev-parse --show-toplevel)"
 ```
 
@@ -335,18 +419,28 @@ A scheduled keep-warm ping is tracked in [#103](https://github.com/macamp0328/li
 
 ## Where to look when things break
 
-| Symptom                                                        | First thing to check                                                                                                                                                                                                                                        |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pod stuck in `CrashLoopBackOff` on first deploy                | `kubectl -n liner-notes describe externalsecret graph-service-secrets` — if `SecretSyncedError`, the AWS secret value isn't populated (step 2) or the instance role is missing `secretsmanager:GetSecretValue`.                                             |
-| Pod restarts every ~minute                                     | `kubectl -n liner-notes logs deployment/graph-service` — usually Neo4j: Aura paused, wrong `NEO4J_URI`, or a transient network blip.                                                                                                                        |
-| `503` from `/api/v1/health` with `neo4j: disconnected`         | Aura paused — see "Resuming a paused Aura instance".                                                                                                                                                                                                        |
-| `ExternalSecret` perpetually `SecretSyncedError: AccessDenied` | EC2 instance role is missing Secrets Manager read; verify `aws_iam_role_policy.secrets_read` in `infra/terraform/iam.tf` references the correct secret ARN.                                                                                                 |
-| `ImagePullBackOff`                                             | `kubectl -n liner-notes get secret ecr-pull-secret` — if missing or older than 12h, re-run step 6 and force the refresher: `kubectl -n liner-notes create job --from=cronjob/ecr-pull-secret-refresher refresh-now`. Then `rollout restart` the Deployment. |
-| Health endpoint unreachable from the internet                  | EC2 security group: `aws_vpc_security_group_ingress_rule.app_nodeport` must allow your IP on `:30080`.                                                                                                                                                      |
-| `kubectl` from laptop hangs / times out                        | The Step 4b SSM port-forward died (laptop sleep, network change). Re-run the `AWS-StartPortForwardingSession` command and retry. The k3s API is intentionally not exposed in the security group — SSM is the only path in.                                  |
-| `kubectl` returns `x509: certificate valid for 127.0.0.1, …`   | The kubeconfig server URL was rewritten away from `127.0.0.1`. Re-fetch it from the node and leave `https://127.0.0.1:6443` intact; the port-forward bridges that local address to the API server.                                                          |
-| k3s itself unhealthy                                           | In an SSM session: `sudo journalctl -u k3s -n 200`, `sudo systemctl status k3s`.                                                                                                                                                                            |
-| Refresher CronJob failing                                      | `kubectl -n liner-notes logs job/<latest-refresher-job>` — typical failures are IMDS unreachable (pod has lost connectivity) or `ECR_REGISTRY=REPLACE_ME` (step 7b skipped).                                                                                |
+| Symptom                                                                                                              | First thing to check                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `terraform apply` fails with `AccessDenied` on an IAM resource                                                       | Operator IAM policy from [`infra/iam/operator-iam-policy.json`](iam/operator-iam-policy.json) is not attached. See [`infra/iam/README.md`](iam/README.md).                                                                                                                                           |
+| `aws ssm start-session` fails with `not authorized to perform: ssm:StartSession`                                     | Operator SSM policy from [`infra/iam/operator-ssm-policy.json`](iam/operator-ssm-policy.json) is not attached.                                                                                                                                                                                       |
+| `aws ssm start-session` fails with `SessionManagerPlugin is not found`                                               | Install with `brew install --cask session-manager-plugin`.                                                                                                                                                                                                                                           |
+| `terraform plan` shows `forces replacement` on `aws_instance.k3s` after a successful apply                           | Should not happen — `lifecycle { ignore_changes = [ami] }` is in `ec2.tf` precisely to prevent this. If you see it, check that the lifecycle block is still in place.                                                                                                                                |
+| Node OOM, `etcd failed`, load average way over 1× CPU                                                                | t3.micro is undersized — resize to t3.small. With state preserved: `aws ec2 stop-instances`, `aws ec2 modify-instance-attribute --instance-type '{"Value":"t3.small"}'`, `aws ec2 start-instances`. Public IP changes on stop/start without an EIP, so re-export `PUBLIC_DNS` / `SERVICE_URL` after. |
+| `ExternalSecret SecretSyncedError: invalid character … after object key`                                             | The JSON in AWS Secrets Manager is malformed. Re-validate locally with `jq` and `put-secret-value` again. Then `kubectl annotate externalsecret -n liner-notes graph-service-secrets force-sync=$(date +%s) --overwrite` to retry immediately.                                                       |
+| `ExternalSecret SecretSyncedError: AccessDenied`                                                                     | EC2 instance role is missing Secrets Manager read; verify `aws_iam_role_policy.secrets_read` in `infra/terraform/iam.tf` references the correct secret ARN.                                                                                                                                          |
+| `kubectl apply -k .` errors with `no matches for kind "ClusterSecretStore" in version "external-secrets.io/v1beta1"` | The ESO chart you installed has moved past `v1beta1`. Verify with `kubectl api-resources --api-group=external-secrets.io`, update the `apiVersion` in `external-secret.yaml`, re-apply.                                                                                                              |
+| Pod `ImagePullBackOff` with `no match for platform in manifest`                                                      | Image was built for the wrong architecture. Rebuild with `docker buildx build --platform linux/amd64 ... --push .` and delete the pod to force re-pull.                                                                                                                                              |
+| Pod `ImagePullBackOff` with `unauthorized` / `401`                                                                   | `kubectl -n liner-notes get secret ecr-pull-secret` — if missing or older than 12h, re-run Step 6 and force the refresher: `kubectl -n liner-notes create job --from=cronjob/ecr-pull-secret-refresher refresh-now`. Then `rollout restart` the Deployment.                                          |
+| Pod `CrashLoopBackOff` on first deploy                                                                               | `kubectl -n liner-notes describe externalsecret graph-service-secrets` — `SecretSyncedError` means Step 2 didn't land cleanly.                                                                                                                                                                       |
+| Pod restarts every ~minute                                                                                           | `kubectl -n liner-notes logs deployment/graph-service` — usually Neo4j: Aura paused, wrong `NEO4J_URI`, or a transient network blip.                                                                                                                                                                 |
+| `503` from `/api/v1/health` with `neo4j: disconnected`                                                               | Aura paused — see "Resuming a paused Aura instance".                                                                                                                                                                                                                                                 |
+| `helm install` fails with `cannot re-use a name that is still in use`                                                | A previous install left a stuck release record. Clean up: `kubectl delete secret -n external-secrets -l owner=helm` and `kubectl get crd -o name \| grep external-secrets.io \| xargs kubectl delete`. Then retry.                                                                                   |
+| `helm install` fails with TLS handshake timeouts from your laptop                                                    | The SSM port-forward chokes on helm's parallel API calls. Switch to running helm on the node via an interactive SSM session — Step 5 documents the pattern.                                                                                                                                          |
+| Health endpoint unreachable from the internet                                                                        | EC2 security group: `aws_vpc_security_group_ingress_rule.app_nodeport` must allow your IP on `:30080`.                                                                                                                                                                                               |
+| `kubectl` from laptop hangs / times out                                                                              | The Step 4b SSM port-forward died (laptop sleep, network change). Re-run the `AWS-StartPortForwardingSession` command and retry. The k3s API is intentionally not exposed in the security group — SSM is the only path in.                                                                           |
+| `kubectl` returns `x509: certificate valid for 127.0.0.1, …`                                                         | The kubeconfig server URL was rewritten away from `127.0.0.1`. Re-fetch with `aws ssm start-session ... 'command=["sudo cat /etc/rancher/k3s/k3s.yaml"]'` and leave `https://127.0.0.1:6443` intact; the port-forward bridges that local address to the API server.                                  |
+| k3s itself unhealthy                                                                                                 | In an SSM session: `sudo journalctl -u k3s -n 200`, `sudo systemctl status k3s`.                                                                                                                                                                                                                     |
+| Refresher CronJob failing                                                                                            | `kubectl -n liner-notes logs job/<latest-refresher-job>` — typical failures are IMDS unreachable (pod has lost connectivity) or `ECR_REGISTRY=REPLACE_ME` (Step 7b skipped).                                                                                                                         |
 
 ---
 

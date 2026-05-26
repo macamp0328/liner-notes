@@ -57,4 +57,14 @@ resource "aws_instance" "k3s" {
   tags = {
     Name = "${local.name_prefix}-k3s"
   }
+
+  # `data.aws_ami.al2023 { most_recent = true }` resolves to whatever AL2023 AMI
+  # Amazon publishes on each `terraform plan`. Without this, the next plan after
+  # an AMI release would force a destroy/replace of a running prod node — losing
+  # the EBS volume, kubeconfig, and any in-cluster state. Operators can still
+  # opt in to a node refresh by tainting the resource, which is much safer than
+  # the default behaviour.
+  lifecycle {
+    ignore_changes = [ami]
+  }
 }

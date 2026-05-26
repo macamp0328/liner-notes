@@ -1,0 +1,42 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ManageLinerNotesIamRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListInstanceProfilesForRole",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:UpdateRole",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:GetRolePolicy",
+        "iam:PassRole"
+      ],
+      "Resource": "arn:aws:iam::123456789012:role/liner-notes-*"
+    },
+    {
+      "Sid": "ManageLinerNotesInstanceProfiles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateInstanceProfile",
+        "iam:DeleteInstanceProfile",
+        "iam:GetInstanceProfile",
+        "iam:AddRoleToInstanceProfile",
+        "iam:RemoveRoleFromInstanceProfile",
+        "iam:TagInstanceProfile",
+        "iam:UntagInstanceProfile"
+      ],
+      "Resource": "arn:aws:iam::123456789012:instance-profile/liner-notes-*"
+    }
+  ]
+}
