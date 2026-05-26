@@ -68,3 +68,20 @@ resource "aws_instance" "k3s" {
     ignore_changes = [ami]
   }
 }
+
+# Pin the node's public IP. Required for the Route 53 health check in
+# observability.tf to survive the EC2 Scheduler stop/start cycles that keep
+# the prod cost near $0 — without an EIP, the public DNS changes on every
+# restart and the health check silently probes a stale address.
+resource "aws_eip" "k3s" {
+  domain = "vpc"
+
+  tags = {
+    Name = "${local.name_prefix}-k3s"
+  }
+}
+
+resource "aws_eip_association" "k3s" {
+  instance_id   = aws_instance.k3s.id
+  allocation_id = aws_eip.k3s.id
+}
