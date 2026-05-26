@@ -39,3 +39,8 @@ output "service_url" {
   description = "Where graph-service will be reachable once deployed."
   value       = "http://${aws_instance.k3s.public_dns}:30080"
 }
+
+output "log_group_name" {
+  description = "CloudWatch Log Group fluent-bit ships graph-service pod stdout into. Referenced by the runbook helm-install command."
+  value       = aws_cloudwatch_log_group.graph_service.name
+}
