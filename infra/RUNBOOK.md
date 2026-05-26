@@ -393,7 +393,7 @@ The subscription's `SubscriptionArn` should not be the literal string `PendingCo
 
 ### Step 10 — Install fluent-bit on the node
 
-Same pattern as Step 5 (External Secrets Operator): helm against the local k3s API from an SSM session, not the laptop tunnel.
+Same pattern as Step 5 (External Secrets Operator): helm against the local k3s API from an SSM session, not the laptop tunnel. The chart values are checked in at [`infra/k8s/aws-for-fluent-bit/values.yaml`](k8s/aws-for-fluent-bit/values.yaml) and pulled from the repo at apply time — do not paste them into the SSM terminal (Session Manager occasionally collapses newlines in long heredoc pastes, which silently drops sections of the values file).
 
 Open an interactive SSM session:
 
@@ -410,36 +410,15 @@ export KUBECONFIG=~/.kube/config
 helm repo add eks https://aws.github.io/eks-charts
 helm repo update
 
-# Resolve the node's own region from IMDSv2 — keeps fluent-bit's
-# cloudWatchLogs.region in sync with the Terraform deploy region even if
-# var.aws_region was overridden.
-IMDS_TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
-NODE_REGION=$(curl -s -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
+# Pull the values file from the repo. The raw URL is pinned to main so the
+# version applied to prod is exactly what's been merged and reviewed.
+curl -fsSL https://raw.githubusercontent.com/macamp0328/liner-notes/main/infra/k8s/aws-for-fluent-bit/values.yaml \
+  > /tmp/fluent-bit-values.yaml
 
-# Write the values inline. The systemd input ships the k3s systemd unit's
-# journal — k3s embeds kubelet, so liveness-probe and pod-restart messages
-# are logged there, not to a standalone kubelet.service. The pod-restart
-# metric filter ("Liveness probe failed", "Back-off restarting failed
-# container") matches lines from this stream.
-cat <<EOF > /tmp/fluent-bit-values.yaml
-cloudWatchLogs:
-  enabled: true
-  region: $NODE_REGION
-  logGroupName: /liner-notes/graph-service
-  logStreamPrefix: pod.
-  autoCreateGroup: false   # terraform owns the log group
-
-# Default tail input ships /var/log/containers/*.log (pod stdout/stderr).
-# Adding a second stream from systemd captures k3s/kubelet pod-lifecycle events.
-input:
-  systemd:
-    enabled: true
-    filters:
-      systemdUnit:
-        - k3s.service
-    tag: k3s.*
-    readFromTail: true
-EOF
+# Sanity-check the file landed intact — should print >= 50 lines and end
+# with the [INPUT] block.
+wc -l /tmp/fluent-bit-values.yaml
+tail -8 /tmp/fluent-bit-values.yaml
 
 helm upgrade --install aws-for-fluent-bit eks/aws-for-fluent-bit \
   --namespace amazon-cloudwatch \
@@ -447,27 +426,49 @@ helm upgrade --install aws-for-fluent-bit eks/aws-for-fluent-bit \
   -f /tmp/fluent-bit-values.yaml \
   --wait --timeout 5m
 
-# Verify
 kubectl -n amazon-cloudwatch get pods
 ```
 
-**Expected:** ~1 minute. One `aws-for-fluent-bit-*` pod per node (just one — single-node k3s) in `Running 1/1`. Then `exit` twice to leave the SSM session.
+**Expected:** ~1 minute. One `aws-for-fluent-bit-*` pod per node (just one — single-node k3s) in `Running 1/1`.
+
+**Before leaving the SSM session, confirm the systemd input actually started:**
+
+```bash
+kubectl -n amazon-cloudwatch logs -l app.kubernetes.io/name=aws-for-fluent-bit \
+  | grep -iE 'systemd|journal' | head -5
+```
+
+You should see lines like `[input:systemd:systemd.0]` indicating fluent-bit opened the journal. **Zero matching lines = the values file was applied but the systemd input never initialized** — investigate before continuing. The most common cause is the chart silently ignoring the values block (re-run `wc -l /tmp/fluent-bit-values.yaml` and compare against the repo file).
+
+Then `exit` twice to leave the SSM session.
 
 ### Step 11 — Verify logs and alarms
 
 Logs should appear in CloudWatch within ~30 seconds. From your laptop:
 
 ```bash
-aws logs tail /liner-notes/graph-service --region "$REGION" --since 5m --follow
+# Confirm BOTH streams are flowing — pod stdout and k3s systemd journal.
+aws logs describe-log-streams \
+  --region "$REGION" \
+  --log-group-name /liner-notes/graph-service \
+  --order-by LastEventTime --descending --max-items 10 \
+  --query 'logStreams[].logStreamName' --output table
 ```
 
-You should see graph-service stdout lines and `k3s.*` entries (k3s embeds kubelet, so its pod-lifecycle messages flow through the k3s systemd unit) interleaved.
+Expect a mix of `pod.kube.var.log.containers.*` streams (one per pod) and at least one `k3s.*` stream. If `k3s.*` is missing, jump back to the verification step in Step 10 — the rest of this section assumes the systemd input is producing data.
+
+```bash
+# Tail interleaved
+aws logs tail /liner-notes/graph-service --region "$REGION" --since 5m --follow
+```
 
 Quick alarm smoke test — trigger a pod restart and watch for the email:
 
 ```bash
-# Port-forward from Step 4b still running, KUBECONFIG still set
-kubectl -n liner-notes delete pod -l app=graph-service
+# Port-forward from Step 4b still running, KUBECONFIG still set.
+# Note the label selector: the graph-service deployment uses the Helm-style
+# `app.kubernetes.io/name` label, not the legacy `app` label.
+kubectl -n liner-notes delete pod -l app.kubernetes.io/name=graph-service
 
 # Wait ~5 minutes, then check the alarm state
 aws cloudwatch describe-alarms \
@@ -476,7 +477,7 @@ aws cloudwatch describe-alarms \
   --query 'MetricAlarms[0].StateValue'
 ```
 
-`ALARM` → email arrives shortly after. `INSUFFICIENT_DATA` → fluent-bit isn't shipping the k3s systemd journal (check the `systemdUnit: - k3s.service` block above) or the deleted pod restarted too cleanly to produce a matching log line.
+`ALARM` → email arrives shortly after. `INSUFFICIENT_DATA` → either no `k3s.*` stream exists (re-check Step 10 verification) or the deleted pod restarted too cleanly to produce a matching log line.
 
 The Route 53 health check takes longer to fire — needs 3 consecutive 30-second failures (~90s) before it flips to unhealthy, then 2 consecutive 1-min alarm periods (~2min) before the alarm fires. Total: ~3–4 minutes from instance stop to email.
 
@@ -529,31 +530,31 @@ A scheduled keep-warm ping is tracked in [#103](https://github.com/macamp0328/li
 
 ## Where to look when things break
 
-| Symptom                                                                                                              | First thing to check                                                                                                                                                                                                                                                                                          |
-| -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `terraform apply` fails with `AccessDenied` on an IAM resource                                                       | Operator IAM policy from [`infra/iam/operator-iam-policy.json`](iam/operator-iam-policy.json) is not attached. See [`infra/iam/README.md`](iam/README.md).                                                                                                                                                    |
-| `aws ssm start-session` fails with `not authorized to perform: ssm:StartSession`                                     | Operator SSM policy from [`infra/iam/operator-ssm-policy.json`](iam/operator-ssm-policy.json) is not attached.                                                                                                                                                                                                |
-| `aws ssm start-session` fails with `SessionManagerPlugin is not found`                                               | Install with `brew install --cask session-manager-plugin`.                                                                                                                                                                                                                                                    |
-| `terraform plan` shows `forces replacement` on `aws_instance.k3s` after a successful apply                           | Should not happen — `lifecycle { ignore_changes = [ami] }` is in `ec2.tf` precisely to prevent this. If you see it, check that the lifecycle block is still in place.                                                                                                                                         |
-| Node OOM, `etcd failed`, load average way over 1× CPU                                                                | t3.micro is undersized — resize to t3.small. With state preserved: `aws ec2 stop-instances`, `aws ec2 modify-instance-attribute --instance-type '{"Value":"t3.small"}'`, `aws ec2 start-instances`. Public IP changes on stop/start without an EIP, so re-export `PUBLIC_DNS` / `SERVICE_URL` after.          |
-| `ExternalSecret SecretSyncedError: invalid character … after object key`                                             | The JSON in AWS Secrets Manager is malformed. Re-validate locally with `jq` and `put-secret-value` again. Then `kubectl annotate externalsecret -n liner-notes graph-service-secrets force-sync=$(date +%s) --overwrite` to retry immediately.                                                                |
-| `ExternalSecret SecretSyncedError: AccessDenied`                                                                     | EC2 instance role is missing Secrets Manager read; verify `aws_iam_role_policy.secrets_read` in `infra/terraform/iam.tf` references the correct secret ARN.                                                                                                                                                   |
-| `kubectl apply -k .` errors with `no matches for kind "ClusterSecretStore" in version "external-secrets.io/v1beta1"` | The ESO chart you installed has moved past `v1beta1`. Verify with `kubectl api-resources --api-group=external-secrets.io`, update the `apiVersion` in `external-secret.yaml`, re-apply.                                                                                                                       |
-| Pod `ImagePullBackOff` with `no match for platform in manifest`                                                      | Image was built for the wrong architecture. Rebuild with `docker buildx build --platform linux/amd64 ... --push .` and delete the pod to force re-pull.                                                                                                                                                       |
-| Pod `ImagePullBackOff` with `unauthorized` / `401`                                                                   | `kubectl -n liner-notes get secret ecr-pull-secret` — if missing or older than 12h, re-run Step 6 and force the refresher: `kubectl -n liner-notes create job --from=cronjob/ecr-pull-secret-refresher refresh-now`. Then `rollout restart` the Deployment.                                                   |
-| Pod `CrashLoopBackOff` on first deploy                                                                               | `kubectl -n liner-notes describe externalsecret graph-service-secrets` — `SecretSyncedError` means Step 2 didn't land cleanly.                                                                                                                                                                                |
-| Pod restarts every ~minute                                                                                           | `kubectl -n liner-notes logs deployment/graph-service` — usually Neo4j: Aura paused, wrong `NEO4J_URI`, or a transient network blip.                                                                                                                                                                          |
-| `503` from `/api/v1/health` with `neo4j: disconnected`                                                               | Aura paused — see "Resuming a paused Aura instance".                                                                                                                                                                                                                                                          |
-| Need to read graph-service logs without `kubectl`                                                                    | Logs ship to CloudWatch Log Group `/liner-notes/graph-service` via fluent-bit. Tail with `aws logs tail /liner-notes/graph-service --since 1h --follow`, or browse in the CloudWatch console.                                                                                                                 |
-| Alarm fires but no email arrives                                                                                     | SNS email subscription wasn't confirmed. Re-check the inbox for the AWS confirmation link, or `aws sns list-subscriptions-by-topic` — a subscription stuck in `PendingConfirmation` doesn't deliver. To re-send: `terraform taint aws_sns_topic_subscription.email && terraform apply`.                       |
-| `liner-notes-pod-restarts` alarm stays `INSUFFICIENT_DATA`                                                           | fluent-bit's systemd input isn't shipping the k3s journal. k3s embeds kubelet, so pod-restart and liveness-probe log lines come from `k3s.service` — not a standalone `kubelet.service`, which doesn't exist on this host. Re-check `/tmp/fluent-bit-values.yaml` (Step 10) for `systemdUnit: - k3s.service`. |
-| `helm install` fails with `cannot re-use a name that is still in use`                                                | A previous install left a stuck release record. Clean up: `kubectl delete secret -n external-secrets -l owner=helm` and `kubectl get crd -o name \| grep external-secrets.io \| xargs kubectl delete`. Then retry.                                                                                            |
-| `helm install` fails with TLS handshake timeouts from your laptop                                                    | The SSM port-forward chokes on helm's parallel API calls. Switch to running helm on the node via an interactive SSM session — Step 5 documents the pattern.                                                                                                                                                   |
-| Health endpoint unreachable from the internet                                                                        | EC2 security group: `aws_vpc_security_group_ingress_rule.app_nodeport` must allow your IP on `:30080`.                                                                                                                                                                                                        |
-| `kubectl` from laptop hangs / times out                                                                              | The Step 4b SSM port-forward died (laptop sleep, network change). Re-run the `AWS-StartPortForwardingSession` command and retry. The k3s API is intentionally not exposed in the security group — SSM is the only path in.                                                                                    |
-| `kubectl` returns `x509: certificate valid for 127.0.0.1, …`                                                         | The kubeconfig server URL was rewritten away from `127.0.0.1`. Re-fetch with `aws ssm start-session ... 'command=["sudo cat /etc/rancher/k3s/k3s.yaml"]'` and leave `https://127.0.0.1:6443` intact; the port-forward bridges that local address to the API server.                                           |
-| k3s itself unhealthy                                                                                                 | In an SSM session: `sudo journalctl -u k3s -n 200`, `sudo systemctl status k3s`.                                                                                                                                                                                                                              |
-| Refresher CronJob failing                                                                                            | `kubectl -n liner-notes logs job/<latest-refresher-job>` — typical failures are IMDS unreachable (pod has lost connectivity) or `ECR_REGISTRY=REPLACE_ME` (Step 7b skipped).                                                                                                                                  |
+| Symptom                                                                                                              | First thing to check                                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `terraform apply` fails with `AccessDenied` on an IAM resource                                                       | Operator IAM policy from [`infra/iam/operator-iam-policy.json`](iam/operator-iam-policy.json) is not attached. See [`infra/iam/README.md`](iam/README.md).                                                                                                                                                                                                                                                                    |
+| `aws ssm start-session` fails with `not authorized to perform: ssm:StartSession`                                     | Operator SSM policy from [`infra/iam/operator-ssm-policy.json`](iam/operator-ssm-policy.json) is not attached.                                                                                                                                                                                                                                                                                                                |
+| `aws ssm start-session` fails with `SessionManagerPlugin is not found`                                               | Install with `brew install --cask session-manager-plugin`.                                                                                                                                                                                                                                                                                                                                                                    |
+| `terraform plan` shows `forces replacement` on `aws_instance.k3s` after a successful apply                           | Should not happen — `lifecycle { ignore_changes = [ami] }` is in `ec2.tf` precisely to prevent this. If you see it, check that the lifecycle block is still in place.                                                                                                                                                                                                                                                         |
+| Node OOM, `etcd failed`, load average way over 1× CPU                                                                | t3.micro is undersized — resize to t3.small. With state preserved: `aws ec2 stop-instances`, `aws ec2 modify-instance-attribute --instance-type '{"Value":"t3.small"}'`, `aws ec2 start-instances`. Public IP changes on stop/start without an EIP, so re-export `PUBLIC_DNS` / `SERVICE_URL` after.                                                                                                                          |
+| `ExternalSecret SecretSyncedError: invalid character … after object key`                                             | The JSON in AWS Secrets Manager is malformed. Re-validate locally with `jq` and `put-secret-value` again. Then `kubectl annotate externalsecret -n liner-notes graph-service-secrets force-sync=$(date +%s) --overwrite` to retry immediately.                                                                                                                                                                                |
+| `ExternalSecret SecretSyncedError: AccessDenied`                                                                     | EC2 instance role is missing Secrets Manager read; verify `aws_iam_role_policy.secrets_read` in `infra/terraform/iam.tf` references the correct secret ARN.                                                                                                                                                                                                                                                                   |
+| `kubectl apply -k .` errors with `no matches for kind "ClusterSecretStore" in version "external-secrets.io/v1beta1"` | The ESO chart you installed has moved past `v1beta1`. Verify with `kubectl api-resources --api-group=external-secrets.io`, update the `apiVersion` in `external-secret.yaml`, re-apply.                                                                                                                                                                                                                                       |
+| Pod `ImagePullBackOff` with `no match for platform in manifest`                                                      | Image was built for the wrong architecture. Rebuild with `docker buildx build --platform linux/amd64 ... --push .` and delete the pod to force re-pull.                                                                                                                                                                                                                                                                       |
+| Pod `ImagePullBackOff` with `unauthorized` / `401`                                                                   | `kubectl -n liner-notes get secret ecr-pull-secret` — if missing or older than 12h, re-run Step 6 and force the refresher: `kubectl -n liner-notes create job --from=cronjob/ecr-pull-secret-refresher refresh-now`. Then `rollout restart` the Deployment.                                                                                                                                                                   |
+| Pod `CrashLoopBackOff` on first deploy                                                                               | `kubectl -n liner-notes describe externalsecret graph-service-secrets` — `SecretSyncedError` means Step 2 didn't land cleanly.                                                                                                                                                                                                                                                                                                |
+| Pod restarts every ~minute                                                                                           | `kubectl -n liner-notes logs deployment/graph-service` — usually Neo4j: Aura paused, wrong `NEO4J_URI`, or a transient network blip.                                                                                                                                                                                                                                                                                          |
+| `503` from `/api/v1/health` with `neo4j: disconnected`                                                               | Aura paused — see "Resuming a paused Aura instance".                                                                                                                                                                                                                                                                                                                                                                          |
+| Need to read graph-service logs without `kubectl`                                                                    | Logs ship to CloudWatch Log Group `/liner-notes/graph-service` via fluent-bit. Tail with `aws logs tail /liner-notes/graph-service --since 1h --follow`, or browse in the CloudWatch console.                                                                                                                                                                                                                                 |
+| Alarm fires but no email arrives                                                                                     | SNS email subscription wasn't confirmed. Re-check the inbox for the AWS confirmation link, or `aws sns list-subscriptions-by-topic` — a subscription stuck in `PendingConfirmation` doesn't deliver. To re-send: `terraform taint aws_sns_topic_subscription.email && terraform apply`.                                                                                                                                       |
+| `liner-notes-pod-restarts` alarm stays `INSUFFICIENT_DATA`                                                           | fluent-bit's systemd input isn't shipping the k3s journal. Check that a `k3s.*` log stream exists in the log group, and that `kubectl -n amazon-cloudwatch logs -l app.kubernetes.io/name=aws-for-fluent-bit \| grep systemd` returns non-empty. If both are empty, re-run Step 10 — the `additionalInputs` block in [`infra/k8s/aws-for-fluent-bit/values.yaml`](k8s/aws-for-fluent-bit/values.yaml) is the source of truth. |
+| `helm install` fails with `cannot re-use a name that is still in use`                                                | A previous install left a stuck release record. Clean up: `kubectl delete secret -n external-secrets -l owner=helm` and `kubectl get crd -o name \| grep external-secrets.io \| xargs kubectl delete`. Then retry.                                                                                                                                                                                                            |
+| `helm install` fails with TLS handshake timeouts from your laptop                                                    | The SSM port-forward chokes on helm's parallel API calls. Switch to running helm on the node via an interactive SSM session — Step 5 documents the pattern.                                                                                                                                                                                                                                                                   |
+| Health endpoint unreachable from the internet                                                                        | EC2 security group: `aws_vpc_security_group_ingress_rule.app_nodeport` must allow your IP on `:30080`.                                                                                                                                                                                                                                                                                                                        |
+| `kubectl` from laptop hangs / times out                                                                              | The Step 4b SSM port-forward died (laptop sleep, network change). Re-run the `AWS-StartPortForwardingSession` command and retry. The k3s API is intentionally not exposed in the security group — SSM is the only path in.                                                                                                                                                                                                    |
+| `kubectl` returns `x509: certificate valid for 127.0.0.1, …`                                                         | The kubeconfig server URL was rewritten away from `127.0.0.1`. Re-fetch with `aws ssm start-session ... 'command=["sudo cat /etc/rancher/k3s/k3s.yaml"]'` and leave `https://127.0.0.1:6443` intact; the port-forward bridges that local address to the API server.                                                                                                                                                           |
+| k3s itself unhealthy                                                                                                 | In an SSM session: `sudo journalctl -u k3s -n 200`, `sudo systemctl status k3s`.                                                                                                                                                                                                                                                                                                                                              |
+| Refresher CronJob failing                                                                                            | `kubectl -n liner-notes logs job/<latest-refresher-job>` — typical failures are IMDS unreachable (pod has lost connectivity) or `ECR_REGISTRY=REPLACE_ME` (Step 7b skipped).                                                                                                                                                                                                                                                  |
 
 ---
 
