@@ -17,7 +17,7 @@
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_group" "graph_service" {
-  name              = "/liner-notes/graph-service"
+  name              = "/${local.name_prefix}/graph-service"
   retention_in_days = 30
 }
 
@@ -55,7 +55,7 @@ resource "aws_cloudwatch_log_metric_filter" "pod_restarts" {
 
   metric_transformation {
     name      = "PodRestarts"
-    namespace = "liner-notes/graph-service"
+    namespace = "${local.name_prefix}/graph-service"
     value     = "1"
     unit      = "Count"
     # `default_value` keeps the metric reporting 0 instead of going to "no data"
@@ -90,10 +90,9 @@ resource "aws_cloudwatch_metric_alarm" "pod_restarts" {
 # response status code, not body — fine for the health endpoint, which
 # returns 200 on success and 503 when Neo4j is disconnected.
 #
-# Route 53 health check metrics are published only to us-east-1; the alarm
-# below uses the default provider region, which must be us-east-1. If the
-# project ever moves regions, the alarm needs its own provider alias for
-# us-east-1 or it will silently never fire.
+# Route 53 health check metrics are published only to us-east-1. The alarm
+# below uses the aws.us_east_1 provider alias (declared in main.tf) so it
+# always reads from the right region regardless of var.aws_region.
 # ---------------------------------------------------------------------------
 
 resource "aws_route53_health_check" "graph_service" {
@@ -110,6 +109,8 @@ resource "aws_route53_health_check" "graph_service" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "health_check" {
+  provider = aws.us_east_1
+
   alarm_name          = "${local.name_prefix}-health-check"
   alarm_description   = "graph-service /api/v1/health is failing from Route 53 external probers."
   comparison_operator = "LessThanThreshold"
@@ -126,6 +127,8 @@ resource "aws_cloudwatch_metric_alarm" "health_check" {
     HealthCheckId = aws_route53_health_check.graph_service.id
   }
 
+  # SNS topic lives in the default-region account scope; cross-region alarm →
+  # SNS is supported by CloudWatch.
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
 }
