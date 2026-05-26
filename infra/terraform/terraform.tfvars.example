@@ -9,9 +9,11 @@
 # ecr-pull-secret-refresher.yaml — see runbook step 7.
 # aws_region = "us-east-1"
 
-# Bump instance class if you outgrow t3.micro. The Free Tier covers t2.micro
-# / t3.micro for 750 hours/month for the first 12 months.
-# instance_type = "t3.micro"
+# Default is t3.small (2 vCPU / 2 GB). t3.micro (1 GB) is too tight for
+# k3s + ESO + graph-service — the API server starts dropping requests
+# under any concurrent load. Bump higher (t3.medium, t3.large) if you
+# add more services or push significantly more traffic.
+# instance_type = "t3.small"
 
 # Narrow which IPs can reach the graph-service NodePort (30080).
 # Default is wide open ("0.0.0.0/0"); set to your home/office IP for tighter
