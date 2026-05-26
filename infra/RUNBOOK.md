@@ -420,10 +420,28 @@ curl -fsSL https://raw.githubusercontent.com/macamp0328/liner-notes/main/infra/k
 wc -l /tmp/fluent-bit-values.yaml
 tail -8 /tmp/fluent-bit-values.yaml
 
+# Resolve the node's region from IMDSv2 so fluent-bit ships to the same
+# region terraform created the log group in, even if var.aws_region was
+# overridden. The values file's static `region: us-east-1` is a fallback.
+IMDS_TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+NODE_REGION=$(curl -s -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
+  http://169.254.169.254/latest/meta-data/placement/region)
+
+# `--version 0.2.0` pins the chart to the version the values file was
+# tested against. The values file re-declares the chart's default volumes
+# because v0.2.0 has no extraVolumes/extraVolumeMounts append-style key —
+# if the chart's defaults change in a later version, our override would
+# silently drop them. Bump both in lockstep.
+#
+# If you've overridden var.project_name in terraform, also pass:
+#   --set cloudWatchLogs.logGroupName=/<your-project-name>/graph-service
 helm upgrade --install aws-for-fluent-bit eks/aws-for-fluent-bit \
+  --version 0.2.0 \
   --namespace amazon-cloudwatch \
   --create-namespace \
   -f /tmp/fluent-bit-values.yaml \
+  --set cloudWatchLogs.region="$NODE_REGION" \
   --wait --timeout 5m
 
 kubectl -n amazon-cloudwatch get pods

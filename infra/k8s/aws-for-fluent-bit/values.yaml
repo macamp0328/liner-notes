@@ -1,13 +1,15 @@
 # Helm values for eks/aws-for-fluent-bit on the k3s node.
 #
 # Issue: https://github.com/macamp0328/liner-notes/issues/117
-# Chart: eks/aws-for-fluent-bit v0.2.0 (app v3.2.1)
+# Chart: eks/aws-for-fluent-bit v0.2.0 (app v3.2.1) — pin via `--version 0.2.0`
 #
-# Applied by RUNBOOK.md "Observability — fluent-bit and alarms" Step 10:
-#   curl -fsSL <raw-url-of-this-file> > /tmp/fluent-bit-values.yaml
-#   helm upgrade --install aws-for-fluent-bit eks/aws-for-fluent-bit \
-#     --namespace amazon-cloudwatch --create-namespace \
-#     -f /tmp/fluent-bit-values.yaml --wait --timeout 5m
+# Applied by RUNBOOK.md "Observability — fluent-bit and alarms" Step 10. The
+# runbook resolves `cloudWatchLogs.region` dynamically from IMDS and passes
+# it via `--set`, so the value below is only a fallback. `logGroupName` is
+# static — if you've overridden `var.project_name` in terraform, override
+# here too:
+#   helm upgrade ... --set cloudWatchLogs.logGroupName=/<your-project>/graph-service
+# With `autoCreateGroup: false`, a mismatch silently drops every log line.
 #
 # Two streams flow into the CloudWatch Log Group /liner-notes/graph-service:
 #   - pod stdout/stderr  — via the chart's default tail input on /var/log/containers/*.log
@@ -17,8 +19,8 @@
 
 cloudWatchLogs:
   enabled: true
-  region: us-east-1
-  logGroupName: /liner-notes/graph-service
+  region: us-east-1 # overridden via --set from IMDS in RUNBOOK Step 10
+  logGroupName: /liner-notes/graph-service # must match var.project_name (see header)
   logStreamPrefix: pod.
   autoCreateGroup: false # terraform owns the log group
 
