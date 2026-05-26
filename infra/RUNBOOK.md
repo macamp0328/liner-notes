@@ -83,16 +83,16 @@ flowchart LR
 All mandatory. Install via Homebrew on macOS (or your package manager of choice):
 
 ```bash
-brew install mise              # runtime version manager (handles the next four)
+brew install mise              # runtime version manager — pins the toolchain per .mise.toml below
 brew install kustomize         # k8s/kubectl bundles a `kustomize` subcommand but not `kustomize edit`
 brew install jq                # for validating the Secrets Manager JSON before submitting
 brew install --cask session-manager-plugin   # required for every `aws ssm` command
 ```
 
-Then from the repo root:
+Then from the repo root, install the mise-managed tools (`terraform`, `kubectl`, `helm`, `gh`, `aws-cli`, `node`, `pnpm`):
 
 ```bash
-mise install                   # installs terraform, kubectl, helm, gh, aws-cli per .mise.toml
+mise install
 ```
 
 | Tool                     | Why                                                                                      |
@@ -131,7 +131,7 @@ See [`infra/iam/README.md`](iam/README.md) for the one-time attach procedure. **
 
 > **Where commands run:** every step in this section runs on **your laptop** except a few minutes inside Step 5, which open an interactive SSM session on the EC2 node. Step 4 opens a Session Manager port-forward in a second terminal that stays running for Steps 6–8.
 >
-> **Shell variables carry between steps.** Set `REGION`, `ECR_URL`, `INSTANCE_ID`, `PUBLIC_DNS`, `SERVICE_URL`, `TAG`, `KUBECONFIG` once in Step 1 / Step 3 / Step 4 — keep the same terminal open or re-export them.
+> **Shell variables carry between steps.** Set `REGION`, `ECR_URL`, `ECR_REGISTRY`, `INSTANCE_ID`, `PUBLIC_DNS`, `SERVICE_URL`, `TAG`, `KUBECONFIG` once in Step 1 / Step 3 / Step 4 — keep the same terminal open or re-export them.
 
 ### Step 1 — Apply Terraform
 
@@ -148,13 +148,14 @@ Capture the outputs for later steps:
 ```bash
 export REGION=$(terraform output -raw aws_region)
 export ECR_URL=$(terraform output -raw ecr_repository_url)
+export ECR_REGISTRY="${ECR_URL%%/*}"          # registry hostname only (strip the repo path)
 export INSTANCE_ID=$(terraform output -raw ec2_instance_id)
 export PUBLIC_DNS=$(terraform output -raw ec2_public_dns)
 export SERVICE_URL=$(terraform output -raw service_url)
 
 # Sanity — every line should print non-empty
-for v in REGION ECR_URL INSTANCE_ID PUBLIC_DNS SERVICE_URL; do
-  printf "%-12s = %s\n" "$v" "$(eval echo \$$v)"
+for v in REGION ECR_URL ECR_REGISTRY INSTANCE_ID PUBLIC_DNS SERVICE_URL; do
+  printf "%-14s = %s\n" "$v" "$(eval echo \$$v)"
 done
 
 cd "$(git rev-parse --show-toplevel)"
@@ -292,10 +293,9 @@ kubectl get pods -n external-secrets
 
 Run from your laptop with `KUBECONFIG` set and the Step 4b port-forward still running. The CronJob can't run before its own manifest exists, so we create the first pull secret by hand. After this, the CronJob takes over and refreshes it every 6 hours.
 
-```bash
-# Strip the repo path off ECR_URL — docker-server wants just the registry hostname
-ECR_REGISTRY="${ECR_URL%%/*}"
+`ECR_REGISTRY` was exported in Step 1 — `docker-server` wants the registry hostname only, not the repo path:
 
+```bash
 kubectl apply -f infra/k8s/namespace.yaml
 
 kubectl -n liner-notes create secret docker-registry ecr-pull-secret \

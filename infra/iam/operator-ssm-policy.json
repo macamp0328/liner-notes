@@ -2,20 +2,25 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "StartSessionOnLinerNotesInstances",
+      "Sid": "StartSessionOnLinerNotesInstancesByTag",
+      "Effect": "Allow",
+      "Action": "ssm:StartSession",
+      "Resource": "arn:aws:ec2:*:123456789012:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ssm:resourceTag/Project": "liner-notes"
+        }
+      }
+    },
+    {
+      "Sid": "UseSessionManagerDocuments",
       "Effect": "Allow",
       "Action": "ssm:StartSession",
       "Resource": [
-        "arn:aws:ec2:*:123456789012:instance/*",
         "arn:aws:ssm:*:*:document/AWS-StartInteractiveCommand",
         "arn:aws:ssm:*:*:document/AWS-StartPortForwardingSession",
         "arn:aws:ssm:*:*:document/SSM-SessionManagerRunShell"
-      ],
-      "Condition": {
-        "BoolIfExists": {
-          "ssm:SessionDocumentAccessCheck": "true"
-        }
-      }
+      ]
     },
     {
       "Sid": "ManageOwnSessions",
