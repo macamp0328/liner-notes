@@ -484,8 +484,10 @@ helm repo update
 curl -fsSL https://raw.githubusercontent.com/macamp0328/liner-notes/main/infra/k8s/aws-for-fluent-bit/values.yaml \
   > /tmp/fluent-bit-values.yaml
 
-# Sanity-check the file landed intact — should print >= 50 lines and end
-# with the [INPUT] block.
+# Sanity-check the file landed intact — should print >= 100 lines and end
+# with the `additionalFilters` [FILTER] grep block (issue #152). If it
+# still ends with the systemd [INPUT] block, the values file pre-dates
+# #152 and the log-group scoping filter is missing.
 wc -l /tmp/fluent-bit-values.yaml
 tail -8 /tmp/fluent-bit-values.yaml
 
