@@ -348,7 +348,9 @@ function categorize(resourceType: string): Category {
 
 // Single Unicode glyph per resource family. Gives each node a visual landmark
 // beyond the cluster color, so a viewer can spot "the role" or "the VPC" at a
-// glance without reading the label. Falls back to a blank if a type is new.
+// glance without reading the label. Falls back to a generic ◻️ square for any
+// unmapped type — empty-string would leave the label visually off-balance
+// (the leading "icon · name" alignment would collapse).
 function iconFor(resourceType: string): string {
   const t = resourceType.replace(/^aws_/, '');
   // IAM
