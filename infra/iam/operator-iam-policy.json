@@ -47,6 +47,7 @@
         "logs:PutRetentionPolicy",
         "logs:DeleteRetentionPolicy",
         "logs:ListTagsLogGroup",
+        "logs:ListTagsForResource",
         "logs:TagResource",
         "logs:UntagResource",
         "logs:PutMetricFilter",
