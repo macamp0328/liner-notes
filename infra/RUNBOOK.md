@@ -121,7 +121,7 @@ The runbook assumes a non-root IAM user (`liner-notes-cli` in our setup) with th
 - `AmazonEC2FullAccess` (from initial setup)
 - `AmazonEC2ContainerRegistryFullAccess` (from initial setup)
 - `SecretsManagerReadWrite` (from initial setup)
-- **Inline policy** from [`infra/iam/operator-iam-policy.json`](iam/operator-iam-policy.json) — Terraform-managed IAM roles, CloudWatch logs + alarms, SNS topic + subscription, Route 53 health checks
+- **Customer-managed policy** from [`infra/iam/operator-iam-policy.json`](iam/operator-iam-policy.json) — Terraform-managed IAM roles, CloudWatch logs + alarms, SNS topic + subscription, Route 53 health checks. Managed rather than inline because the JSON exceeds AWS's 2048-char per-user inline-policy aggregate cap.
 - **Inline policy** from [`infra/iam/operator-ssm-policy.json`](iam/operator-ssm-policy.json) — SSM Session Manager
 
 See [`infra/iam/README.md`](iam/README.md) for the one-time attach procedure. **Do this before Step 1** or `terraform apply` and the `aws ssm` calls will fail with `AccessDenied`.
