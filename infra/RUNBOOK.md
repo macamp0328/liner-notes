@@ -381,7 +381,9 @@ curl -sS "$SERVICE_URL/api/v1/releases?limit=3" | jq .
 
 ## Observability — fluent-bit and alarms
 
-`terraform apply` (Step 1) created the supporting AWS resources for observability: a CloudWatch Log Group (`/liner-notes/graph-service`), an SNS topic with an email subscription, a Route 53 health check probing `/api/v1/health`, and three alarms (pod restarts, health-check failures, EC2 status check). This section covers the two manual follow-ups: confirming the SNS subscription and installing the in-cluster fluent-bit daemonset that actually writes logs to the log group.
+`terraform apply` (Step 1) created the supporting AWS resources for observability: a CloudWatch Log Group (`/liner-notes/graph-service`), an SNS topic with an email subscription, a Route 53 health check probing `/api/v1/health`, three alarms (pod restarts, health-check failures, EC2 status check), and a `liner-notes-graph-service` dashboard surfacing all of the above in one view. This section covers the two manual follow-ups: confirming the SNS subscription and installing the in-cluster fluent-bit daemonset that actually writes logs to the log group.
+
+The unified at-a-glance view is at `terraform output -raw dashboard_url` — three alarm tiles, Route 53 probe, EC2 CPU/network/status, and log activity, all on one page.
 
 ### Step 9 — Confirm the SNS subscription
 
