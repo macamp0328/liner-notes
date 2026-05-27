@@ -69,6 +69,7 @@
         "ec2:DescribeNetworkInterfaces",
         "ec2:DescribeInstances",
         "ec2:DescribeInstanceAttribute",
+        "ec2:DescribeInstanceCreditSpecifications",
         "ec2:DescribeInstanceTypes",
         "ec2:DescribeInstanceStatus",
         "ec2:DescribeIamInstanceProfileAssociations",
