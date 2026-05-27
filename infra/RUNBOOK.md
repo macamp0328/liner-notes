@@ -117,6 +117,12 @@ The runbook assumes a non-root IAM user (`liner-notes-cli` in our setup) with th
 - `SecretsManagerReadWrite` (from initial setup)
 - **Inline policy** from [`infra/iam/operator-iam-policy.json`](iam/operator-iam-policy.json) — Terraform-managed IAM roles
 - **Inline policy** from [`infra/iam/operator-ssm-policy.json`](iam/operator-ssm-policy.json) — SSM Session Manager
+- **Temporary managed policies** until [#127](https://github.com/macamp0328/liner-notes/issues/127) scopes them into `operator-iam-policy.json` — needed for the observability resources (CloudWatch Log Group + alarms, SNS topic, Route 53 health check) added in [#125](https://github.com/macamp0328/liner-notes/pull/125):
+  - `CloudWatchFullAccess`
+  - `AmazonSNSFullAccess`
+  - `AmazonRoute53FullAccess`
+
+  These must be attached by the **root user** (or an admin) — `liner-notes-cli` can't grant itself permissions. From the AWS Console: IAM → Users → `liner-notes-cli` → Add permissions → Attach policies directly.
 
 See [`infra/iam/README.md`](iam/README.md) for the one-time attach procedure. **Do this before Step 1** or `terraform apply` and the `aws ssm` calls will fail with `AccessDenied`.
 
@@ -163,6 +169,8 @@ cd "$(git rev-parse --show-toplevel)"
 ```
 
 **Expected:** ~3 minutes for the apply. EC2 user_data continues installing k3s + helm on the node for another ~2 minutes after the instance comes up.
+
+> **EIP IP-swap on first apply.** `aws_eip.k3s` (added in [#125](https://github.com/macamp0328/liner-notes/pull/125)) replaces the instance's auto-assigned public IP with a stable Elastic IP. On the very first `terraform apply` against an existing instance, the public IP changes — re-fetch `PUBLIC_DNS` / `SERVICE_URL` (the export block above does this), and refresh any browser bookmarks pointed at the old address. After that, the EIP is permanent across stop/start cycles.
 
 ### Step 2 — Populate AWS Secrets Manager
 
