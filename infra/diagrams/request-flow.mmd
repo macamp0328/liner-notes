@@ -7,6 +7,13 @@
 %% Edit this when the request flow changes (new ingress path, new external
 %% dependency, secrets/image pull mechanics change). The /diagrams skill
 %% can help draft updates — see .claude/skills/diagrams/SKILL.md.
+%%
+%% Edge colors encode flow category (see the inline legend at the bottom):
+%%   slate  — user request path (ingress → pod)
+%%   blue   — heavy data path (Cypher to Aura, image pull from ECR)
+%%   purple — secret sync / control plane (ESO, ECR-token CronJob)
+%%   green  — external egress data (Discogs ingestion)
+%%   gray   — k8s mount / IAM attachment (structural, default styling)
 
 flowchart LR
   user([Your laptop / browser]):::ext
@@ -23,38 +30,77 @@ flowchart LR
         subgraph ns["k8s namespace: liner-notes"]
           direction TB
           svc[/"Service · NodePort 30080"/]
-          pod["Pod · graph-service<br/>envFrom: graph-service-secrets<br/>imagePullSecrets: ecr-pull-secret"]
+          pod["Pod · graph-service"]
           k8s_secret[("Secret · graph-service-secrets")]
           k8s_pull[("Secret · ecr-pull-secret<br/>(dockerconfigjson)")]
           cron["CronJob · ecr-pull-secret-refresher<br/>every 6h"]
           svc --> pod
           k8s_secret -.envFrom.-> pod
           k8s_pull -.imagePullSecret.-> pod
-          cron --writes--> k8s_pull
+          cron -- "writes refreshed token" --> k8s_pull
         end
 
         subgraph eso["k8s namespace: external-secrets"]
           eso_op["External Secrets Operator"]
         end
 
-        eso_op --syncs every 1h--> k8s_secret
+        eso_op -- "syncs every 1h" --> k8s_secret
       end
     end
 
-    ecr["ECR · liner-notes/graph-service<br/>(last 10 tagged images)"]
-    sm["Secrets Manager<br/>liner-notes/graph-service/prod"]
-    iam["EC2 IAM role · ec2_k3s<br/>ECR read · SM read · SSM"]
+    subgraph account["AWS account scope (outside the VPC)"]
+      direction TB
+      ecr["ECR · liner-notes/graph-service<br/>(last 10 tagged images)"]
+      sm["Secrets Manager<br/>liner-notes/graph-service/prod"]
+      iam["EC2 IAM role · ec2_k3s<br/>ECR read · SM read · SSM"]
+    end
     iam -.attached.-> ec2
   end
 
-  aura[("Neo4j AuraDB Free · GCP")]:::ext
-  discogs[("Discogs API")]:::ext
+  subgraph external["External services"]
+    direction TB
+    aura[("Neo4j AuraDB Free · GCP<br/>neo4j+s:// · :7687")]:::ext
+    discogs[("Discogs API<br/>https · 60 req/min")]:::ext
+  end
 
   user -- "http :30080 (NodePort)" --> svc
   pod == "Cypher · neo4j+s://" ==> aura
   pod -.ingest.-> discogs
   cron == "ecr get-login-password<br/>(IMDS → instance role)" ==> ecr
   eso_op == "GetSecretValue<br/>(IMDS → instance role)" ==> sm
-  pod == "image pull (via dockerconfigjson)" ==> ecr
+  pod == "image pull<br/>(via dockerconfigjson)" ==> ecr
+
+  subgraph legend["Edge legend &nbsp;·&nbsp; color = flow category"]
+    direction LR
+    lr1[src]:::legendNode -- "user request" --> lr2[sink]:::legendNode
+    ld1[src]:::legendNode == "heavy data path" ==> ld2[sink]:::legendNode
+    lc1[src]:::legendNode -. "secret sync / control plane" .-> lc2[sink]:::legendNode
+    le1[src]:::legendNode -. "external egress" .-> le2[sink]:::legendNode
+  end
+
+  %% Edge indices follow declaration order across the entire file.
+  %% Main edges (0–11):
+  %%   0  svc --> pod                          (request)
+  %%   1  k8s_secret -.envFrom.-> pod          (mount, gray default)
+  %%   2  k8s_pull -.imagePullSecret.-> pod    (mount, gray default)
+  %%   3  cron --writes--> k8s_pull            (secret sync)
+  %%   4  eso_op --syncs--> k8s_secret         (secret sync)
+  %%   5  iam -.attached.-> ec2                (attachment, gray default)
+  %%   6  user --> svc                         (request)
+  %%   7  pod ==> aura                         (data path)
+  %%   8  pod -.ingest.-> discogs              (external egress)
+  %%   9  cron ==> ecr                         (secret sync — image-pull token)
+  %%  10  eso_op ==> sm                        (secret sync)
+  %%  11  pod ==> ecr                          (data path — image pull)
+  %% Legend edges (12–15):
+  %%  12  lr1 --> lr2                          (request)
+  %%  13  ld1 ==> ld2                          (data path)
+  %%  14  lc1 -.-> lc2                         (secret sync)
+  %%  15  le1 -.-> le2                         (external egress)
+  linkStyle 0,6,12 stroke:#0f172a,stroke-width:2px
+  linkStyle 7,11,13 stroke:#1d4ed8,stroke-width:2.5px
+  linkStyle 3,4,9,10,14 stroke:#7c3aed,stroke-width:1.8px
+  linkStyle 8,15 stroke:#15803d,stroke-width:1.8px
 
   classDef ext fill:#f4f4f4,stroke:#999,stroke-dasharray:5 3
+  classDef legendNode fill:#ffffff,stroke:#cbd5e1,color:#475569
