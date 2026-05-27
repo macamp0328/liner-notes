@@ -178,14 +178,14 @@ gh run view {run_id} --log-failed
 
 **Diagnose the root cause:**
 
-| Log signature             | Likely cause     | Fix approach                                          |
-| ------------------------- | ---------------- | ----------------------------------------------------- |
-| `ESLint` errors           | Linting          | `pnpm --filter ./services/graph-service lint` then fix manually  |
-| `Prettier` / `Code style` | Formatting       | `pnpm exec prettier --write .`                                   |
-| `TS` / `error TS`         | Type errors      | `pnpm --filter ./services/graph-service typecheck` then fix      |
-| `FAIL` / `AssertionError` | Test failure     | Fix the failing test or the code under test                      |
-| `Build failed`            | Compilation error| Fix the import/export/syntax error; check `.js` exts             |
-| `pnpm audit`              | Vulnerability    | `pnpm audit --fix` or update the affected package                |
+| Log signature             | Likely cause      | Fix approach                                                    |
+| ------------------------- | ----------------- | --------------------------------------------------------------- |
+| `ESLint` errors           | Linting           | `pnpm --filter ./services/graph-service lint` then fix manually |
+| `Prettier` / `Code style` | Formatting        | `pnpm exec prettier --write .`                                  |
+| `TS` / `error TS`         | Type errors       | `pnpm --filter ./services/graph-service typecheck` then fix     |
+| `FAIL` / `AssertionError` | Test failure      | Fix the failing test or the code under test                     |
+| `Build failed`            | Compilation error | Fix the import/export/syntax error; check `.js` exts            |
+| `pnpm audit`              | Vulnerability     | `pnpm audit --fix` or update the affected package               |
 
 ### Step 3: Apply fix and verify locally
 

@@ -45,7 +45,15 @@ coverage/
 .vitest-cache/
 
 # Claude Code
-.claude/
+#
+# Track shared project workflows (skills, hooks). Ignore personal state
+# and transient agent scratch space:
+#   - settings.local.json holds per-developer overrides (Claude convention)
+#   - worktrees/ is where agents check out branches for parallel work
+#   - .DS_Store is macOS Finder noise
+.claude/.DS_Store
+.claude/settings.local.json
+.claude/worktrees/
 
 # pnpm local store (created when PNPM_STORE_DIR points inside the repo)
 .pnpm-store/
