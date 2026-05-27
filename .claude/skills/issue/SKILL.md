@@ -35,8 +35,9 @@ gh issue view 47 --repo macamp0328/liner-notes --json number,title,body,labels,c
 Read the full `body` and every entry in `comments`. Acceptance criteria, design decisions, and constraints are frequently added in comments after the initial description — don't stop at the body.
 
 From this, establish:
+
 - **What is being asked for** (1-2 sentences in your own words)
-- **Issue type** — infer from labels or content: `feat`, `fix`, `chore`, `docs`, `refactor`, etc. This becomes the Conventional Commits type.
+- **Issue type** — infer from labels or content: `feat`, `fix`, `chore`, `docs`, `refactor`, etc. Use it as an optional commit prefix when helpful.
 - **Which service is affected** — almost always `graph-service`
 
 ---
@@ -83,6 +84,7 @@ Always branch off `origin/main`, never off whichever branch happens to be checke
 Work incrementally. For non-trivial changes, break the work into logical commits (one per coherent unit of change) rather than one giant commit at the end.
 
 For each unit:
+
 1. Make the change
 2. Run the pre-commit chain (Phase 6)
 3. Commit if the chain is green
@@ -115,7 +117,7 @@ pnpm --filter graph-service test:unit:coverage
 
 ## Phase 7 — Commit
 
-Conventional Commits format. The subject **must start with a lowercase letter** — the commit-msg hook enforces this and CI will reject it otherwise.
+Commit message format is not enforced. Prefer clear, concise messages; starting the subject with a lowercase letter is still recommended for consistency.
 
 ```
 <type>(<optional-scope>): <lowercase subject>
@@ -179,5 +181,5 @@ EOF
 - **Stop and ask** if the issue scope turns out to be significantly larger or different than what was planned
 - **ESM imports:** all local/relative imports require `.js` extensions (`import { foo } from './bar.js'`)
 - **No `any`** without an inline justification comment
-- **No comments** unless the *why* is non-obvious — well-named identifiers explain the what
+- **No comments** unless the _why_ is non-obvious — well-named identifiers explain the what
 - **Explicit return types** on all exported functions

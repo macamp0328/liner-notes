@@ -12,10 +12,13 @@
 # With `autoCreateGroup: false`, a mismatch silently drops every log line.
 #
 # Two streams flow into the CloudWatch Log Group /liner-notes/graph-service:
-#   - pod stdout/stderr  — via the chart's default tail input on /var/log/containers/*.log
-#   - k3s systemd journal — via the additionalInputs block below, which the
-#     pod-restarts metric filter (observability.tf) matches against for
-#     "Liveness probe failed" / "Back-off restarting failed container".
+#   - pod stdout/stderr  — via the chart's default tail input on /var/log/containers/*.log;
+#                          arrives in CloudWatch as `pod.kube.var.log.containers.*` streams.
+#   - k3s systemd journal — via the additionalInputs block below; arrives as
+#                          `pod.k3s.k3s.service` (the chart prefixes every tag with
+#                          `pod.`). The pod-restarts metric filter (observability.tf)
+#                          matches "Liveness probe failed" / "CrashLoopBackOff" against
+#                          this stream's content.
 
 cloudWatchLogs:
   enabled: true
@@ -26,11 +29,14 @@ cloudWatchLogs:
 
 # volumes / volumeMounts are full-override keys in this chart (no
 # extraVolumes / extraVolumeMounts append-style alternative exists in
-# v0.2.0). Re-declare the two chart defaults alongside the two new hostPath
-# mounts the systemd input needs:
-#   - /run/log/journal       — AL2023 stores the journal in this volatile dir
-#                              under /run/log/journal/<machine-id>/
-#   - /etc/machine-id        — required so journald can match the journal namespace
+# v0.2.0). Re-declare the two chart defaults alongside the /etc/machine-id
+# bind needed by the systemd input:
+#   - /var/log               — chart default; also surfaces /var/log/journal
+#                              transitively, since AL2023 stores the journal
+#                              persistently at /var/log/journal/<machine-id>/
+#                              (the volatile /run/log/journal/ stays empty).
+#   - /etc/machine-id        — required so the systemd input can match the
+#                              journal namespace inside the container.
 volumes:
   - name: varlog
     hostPath:
@@ -38,9 +44,6 @@ volumes:
   - name: varlibdockercontainers
     hostPath:
       path: /var/lib/docker/containers
-  - name: runlogjournal
-    hostPath:
-      path: /run/log/journal
   - name: etcmachineid
     hostPath:
       path: /etc/machine-id
@@ -52,9 +55,6 @@ volumeMounts:
   - name: varlibdockercontainers
     mountPath: /var/lib/docker/containers
     readOnly: true
-  - name: runlogjournal
-    mountPath: /run/log/journal
-    readOnly: true
   - name: etcmachineid
     mountPath: /etc/machine-id
     readOnly: true
@@ -63,10 +63,16 @@ volumeMounts:
 # `input.systemd.*` value path is silently a no-op in v0.2.0 — confirmed by
 # `helm show values eks/aws-for-fluent-bit | grep systemd` returning nothing.
 # Raw fluent-bit input config is the only working hook.
+#
+# Path points at /var/log/journal — verified with `journalctl --header`
+# returning `File path: /var/log/journal/<machine-id>/system.journal`.
+# A previous revision of this file used /run/log/journal (the volatile
+# location) which AL2023 leaves empty when persistent storage is enabled —
+# the systemd input started cleanly but produced zero records.
 additionalInputs: |
   [INPUT]
       Name             systemd
       Tag              k3s.*
-      Path             /run/log/journal
+      Path             /var/log/journal
       Systemd_Filter   _SYSTEMD_UNIT=k3s.service
       Read_From_Tail   On
