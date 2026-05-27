@@ -56,14 +56,16 @@ pnpm diagrams:generate
 #   infra/diagrams/request-flow.mmd     — hand-maintained logical flow (source of truth)
 # The script also inlines request-flow.mmd into the README and the runbook
 # between <!-- diagrams:request-flow:start --> / :end markers.
-# CI auto-regenerates on PRs touching infra/terraform/** — see .github/workflows/diagrams.yml.
+# CI re-runs the generator on PRs touching infra/terraform/** and FAILS if the
+# committed diagrams differ — regenerate locally and commit before pushing.
+# See .github/workflows/diagrams.yml.
 ```
 
 ### When to refresh diagrams
 
 Two distinct workflows; pick the right one for the change you're making.
 
-**Auto-handled by CI — don't think about it.** Any change under `infra/terraform/**` causes [`.github/workflows/diagrams.yml`](.github/workflows/diagrams.yml) to regenerate `resource-graph.svg` and the per-file Mermaid diagrams. The workflow auto-commits the regenerated files to the PR branch for same-repo PRs; fork PRs run the regeneration but skip the auto-commit (fork tokens can't push back), so for those the maintainer runs `pnpm diagrams:generate` locally before merge. You can run the generator locally to preview either way — it's not required for same-repo PRs.
+**Regenerate locally before pushing.** Any change under `infra/terraform/**` requires running `pnpm diagrams:generate` locally and committing the updated `resource-graph.svg` and `per-file/*.mmd` files alongside your terraform change. [`.github/workflows/diagrams.yml`](.github/workflows/diagrams.yml) re-runs the generator on every same-paths PR and **fails the check** if the committed artifacts don't match — same generator, same pinned graphviz image (`nshine/dot:2.40.1`), byte-identical output. The workflow used to auto-commit the regenerated files, but pushes from the default `GITHUB_TOKEN` don't trigger downstream workflows (GitHub anti-recursion rule), which left the PR's actual HEAD with no CI run and branch protection blocking the merge. Fail-on-drift trades one local command for a clean check rollup.
 
 **Needs a manual edit.** The hand-maintained logical flow at [`infra/diagrams/request-flow.mmd`](infra/diagrams/request-flow.mmd) is _not_ derived from Terraform — CI will never update it. Edit it directly (or use the `/diagrams draft` skill, which walks the diff with current infra context) after any of the following:
 

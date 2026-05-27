@@ -11,6 +11,14 @@ flowchart LR
     aws_route53_health_check_graph_service["graph_service<br/><small>route53 health check</small>"]
     aws_cloudwatch_metric_alarm_health_check["health_check<br/><small>cloudwatch metric alarm</small>"]
     aws_cloudwatch_metric_alarm_ec2_status_check["ec2_status_check<br/><small>cloudwatch metric alarm</small>"]
+    aws_cloudwatch_log_metric_filter_error_log_lines["error_log_lines<br/><small>cloudwatch log metric filter</small>"]
+    aws_cloudwatch_metric_alarm_error_log_lines["error_log_lines<br/><small>cloudwatch metric alarm</small>"]
+    aws_cloudwatch_log_metric_filter_http_request_count["http_request_count<br/><small>cloudwatch log metric filter</small>"]
+    aws_cloudwatch_log_metric_filter_http_5xx_count["http_5xx_count<br/><small>cloudwatch log metric filter</small>"]
+    aws_cloudwatch_metric_alarm_http_5xx["http_5xx<br/><small>cloudwatch metric alarm</small>"]
+    aws_cloudwatch_log_metric_filter_neo4j_disconnects["neo4j_disconnects<br/><small>cloudwatch log metric filter</small>"]
+    aws_cloudwatch_metric_alarm_neo4j_disconnects["neo4j_disconnects<br/><small>cloudwatch metric alarm</small>"]
+    aws_cloudwatch_metric_alarm_billing["billing<br/><small>cloudwatch metric alarm</small>"]
     aws_cloudwatch_dashboard_graph_service["graph_service<br/><small>cloudwatch dashboard</small>"]
   end
   subgraph ext_ec2_tf["ec2.tf"]
@@ -18,17 +26,36 @@ flowchart LR
     aws_instance_k3s(["aws_instance.k3s"])
   end
   aws_cloudwatch_dashboard_graph_service --> aws_cloudwatch_log_group_graph_service
+  aws_cloudwatch_dashboard_graph_service --> aws_cloudwatch_log_metric_filter_error_log_lines
+  aws_cloudwatch_dashboard_graph_service --> aws_cloudwatch_log_metric_filter_http_5xx_count
+  aws_cloudwatch_dashboard_graph_service --> aws_cloudwatch_log_metric_filter_http_request_count
+  aws_cloudwatch_dashboard_graph_service --> aws_cloudwatch_log_metric_filter_neo4j_disconnects
   aws_cloudwatch_dashboard_graph_service --> aws_cloudwatch_log_metric_filter_pod_restarts
+  aws_cloudwatch_dashboard_graph_service --> aws_cloudwatch_metric_alarm_billing
   aws_cloudwatch_dashboard_graph_service --> aws_cloudwatch_metric_alarm_ec2_status_check
+  aws_cloudwatch_dashboard_graph_service --> aws_cloudwatch_metric_alarm_error_log_lines
   aws_cloudwatch_dashboard_graph_service --> aws_cloudwatch_metric_alarm_health_check
+  aws_cloudwatch_dashboard_graph_service --> aws_cloudwatch_metric_alarm_http_5xx
+  aws_cloudwatch_dashboard_graph_service --> aws_cloudwatch_metric_alarm_neo4j_disconnects
   aws_cloudwatch_dashboard_graph_service --> aws_cloudwatch_metric_alarm_pod_restarts
   aws_cloudwatch_dashboard_graph_service -.-> aws_instance_k3s
   aws_cloudwatch_dashboard_graph_service --> aws_route53_health_check_graph_service
+  aws_cloudwatch_log_metric_filter_error_log_lines --> aws_cloudwatch_log_group_graph_service
+  aws_cloudwatch_log_metric_filter_http_5xx_count --> aws_cloudwatch_log_group_graph_service
+  aws_cloudwatch_log_metric_filter_http_request_count --> aws_cloudwatch_log_group_graph_service
+  aws_cloudwatch_log_metric_filter_neo4j_disconnects --> aws_cloudwatch_log_group_graph_service
   aws_cloudwatch_log_metric_filter_pod_restarts --> aws_cloudwatch_log_group_graph_service
+  aws_cloudwatch_metric_alarm_billing --> aws_sns_topic_alerts
   aws_cloudwatch_metric_alarm_ec2_status_check -.-> aws_instance_k3s
   aws_cloudwatch_metric_alarm_ec2_status_check --> aws_sns_topic_alerts
+  aws_cloudwatch_metric_alarm_error_log_lines --> aws_cloudwatch_log_metric_filter_error_log_lines
+  aws_cloudwatch_metric_alarm_error_log_lines --> aws_sns_topic_alerts
   aws_cloudwatch_metric_alarm_health_check --> aws_route53_health_check_graph_service
   aws_cloudwatch_metric_alarm_health_check --> aws_sns_topic_alerts
+  aws_cloudwatch_metric_alarm_http_5xx --> aws_cloudwatch_log_metric_filter_http_5xx_count
+  aws_cloudwatch_metric_alarm_http_5xx --> aws_sns_topic_alerts
+  aws_cloudwatch_metric_alarm_neo4j_disconnects --> aws_cloudwatch_log_metric_filter_neo4j_disconnects
+  aws_cloudwatch_metric_alarm_neo4j_disconnects --> aws_sns_topic_alerts
   aws_cloudwatch_metric_alarm_pod_restarts --> aws_cloudwatch_log_metric_filter_pod_restarts
   aws_cloudwatch_metric_alarm_pod_restarts --> aws_sns_topic_alerts
   aws_route53_health_check_graph_service -.-> aws_eip_k3s

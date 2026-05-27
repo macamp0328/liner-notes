@@ -1,14 +1,21 @@
 name: Diagrams
 
-# Regenerate architecture diagrams under infra/diagrams/ and commit any
-# changes back to the PR branch. Triggers when:
+# Regenerate architecture diagrams under infra/diagrams/ and FAIL the PR
+# if the committed diagrams don't match what the generator produces.
+# Triggers when:
 #   - a .tf file changes (resource graph or per-file diagrams stale)
 #   - request-flow.mmd changes (hand-maintained logical flow updated)
 #   - this workflow or the generator script changes
 #
-# Auth model: uses the default GITHUB_TOKEN with contents:write so the
-# action can push to the PR branch. No PAT required. The auto-commit step
-# is a no-op when the diagrams are already up to date.
+# Why fail-on-drift instead of auto-commit:
+#   GitHub's anti-recursion rule does not trigger downstream workflows on
+#   pushes made with the default GITHUB_TOKEN. The previous auto-commit
+#   design landed a `chore(diagrams): regenerate ...` commit on the PR
+#   branch after CI ran on the prior SHA, leaving the actual PR HEAD with
+#   zero checks and branch protection blocking the merge. Fixing it would
+#   require a PAT or GitHub App token — extra moving parts for one repo.
+#   Failing the check instead pushes regeneration to the contributor's
+#   workstation, which is one command (`pnpm diagrams:generate`).
 #
 # Local equivalent (Mac): `brew install inframap`, ensure Docker Desktop is
 # running, then `pnpm diagrams:generate`. CI installs inframap from source
@@ -24,20 +31,12 @@ on:
       - 'scripts/diagrams/**'
       - '.github/workflows/diagrams.yml'
 
-# Allow the auto-commit step to push back to the PR branch.
-permissions:
-  contents: write
-
 jobs:
   regenerate:
     name: Regenerate diagrams
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          # Check out the PR branch (not the merge ref) so we can push back.
-          ref: ${{ github.event.pull_request.head.ref }}
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
 
       - uses: actions/setup-go@v6
         with:
@@ -69,14 +68,16 @@ jobs:
       - name: Regenerate diagrams
         run: pnpm diagrams:generate
 
-      - name: Commit regenerated diagrams (if changed)
-        # Fork PRs run with a read-only GITHUB_TOKEN against the fork — the
-        # push back would fail. Skip the commit step on fork PRs; the
-        # maintainer can run `pnpm diagrams:generate` locally before merge.
-        if: github.event.pull_request.head.repo.full_name == github.repository
-        uses: stefanzweifel/git-auto-commit-action@v6
-        with:
-          commit_message: 'chore(diagrams): regenerate architecture diagrams'
-          file_pattern: 'infra/diagrams/** README.md infra/RUNBOOK.md'
-          commit_user_name: 'github-actions[bot]'
-          commit_user_email: '41898282+github-actions[bot]@users.noreply.github.com'
+      - name: Fail if diagrams are out of date
+        # Any drift between the committed diagram artifacts and what the
+        # generator produces means the contributor forgot to run
+        # `pnpm diagrams:generate` locally before pushing. Print the diff so
+        # the failure is self-explanatory, then exit non-zero.
+        run: |
+          if ! git diff --quiet -- infra/diagrams README.md infra/RUNBOOK.md; then
+            echo "::error::Diagrams are out of date. Run 'pnpm diagrams:generate' locally and commit the result."
+            echo "Drift:"
+            git --no-pager diff --stat -- infra/diagrams README.md infra/RUNBOOK.md
+            git --no-pager diff -- infra/diagrams README.md infra/RUNBOOK.md | head -200
+            exit 1
+          fi
