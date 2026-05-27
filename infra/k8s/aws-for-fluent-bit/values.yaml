@@ -12,13 +12,20 @@
 # With `autoCreateGroup: false`, a mismatch silently drops every log line.
 #
 # Two streams flow into the CloudWatch Log Group /liner-notes/graph-service:
-#   - pod stdout/stderr  — via the chart's default tail input on /var/log/containers/*.log;
-#                          arrives in CloudWatch as `pod.kube.var.log.containers.*` streams.
+#   - pod stdout/stderr  — via the chart's default tail input on /var/log/containers/*.log.
+#                          The default tail picks up every pod on the node, so an
+#                          `additionalFilters` grep block below narrows it to the
+#                          graph-service pod only (see issue #152). Surviving records
+#                          arrive in CloudWatch as `pod.kube.var.log.containers.graph-service-*`
+#                          streams. The `pod.` prefix comes from the output's
+#                          `logStreamPrefix`, not the internal fluent-bit tag (which
+#                          is `kube.*`).
 #   - k3s systemd journal — via the additionalInputs block below; arrives as
-#                          `pod.k3s.k3s.service` (the chart prefixes every tag with
-#                          `pod.`). The pod-restarts metric filter (observability.tf)
-#                          matches "Liveness probe failed" / "CrashLoopBackOff" against
-#                          this stream's content.
+#                          `pod.k3s.k3s.service`. The pod-restarts metric filter
+#                          (observability.tf) matches "Liveness probe failed" /
+#                          "CrashLoopBackOff" against this stream's content, so the
+#                          grep filter is scoped to `Match kube.*` and never touches
+#                          the systemd stream.
 
 cloudWatchLogs:
   enabled: true
@@ -76,3 +83,29 @@ additionalInputs: |
       Path             /var/log/journal
       Systemd_Filter   _SYSTEMD_UNIT=k3s.service
       Read_From_Tail   On
+
+# additionalFilters is appended raw into the fluent-bit ConfigMap (same
+# pattern as additionalInputs above) AFTER the chart's built-in kubernetes
+# enrichment filter, so the `kubernetes.labels.*` record fields are
+# populated by the time grep runs.
+#
+# Without this filter the default tail input on /var/log/containers/*.log
+# ships logs from EVERY pod on the node (aws-for-fluent-bit itself,
+# external-secrets, k3s system pods, etc.) into the
+# /liner-notes/graph-service log group — inflating CloudWatch ingestion
+# cost (issue #148 billing alarm) and polluting every metric filter in
+# infra/terraform/observability.tf, all of which match against this single
+# log group (e.g. `error_log_lines` would match fluent-bit's own [error]
+# lines as graph-service errors).
+#
+# `Match kube.*` scopes the filter to the kubernetes tail stream only.
+# The systemd journal input above (Tag k3s.*) is untouched — the
+# pod_restarts metric filter (observability.tf:64) depends on it. Note the
+# `pod.` prefix that appears on CloudWatch log stream names comes from
+# `cloudWatchLogs.logStreamPrefix` (the output stage), not the internal
+# fluent-bit tag, so `pod.kube.*` would never match here.
+additionalFilters: |
+  [FILTER]
+      Name   grep
+      Match  kube.*
+      Regex  $kubernetes['labels']['app.kubernetes.io/name'] ^graph-service$
