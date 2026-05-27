@@ -22,7 +22,7 @@
 // Requires `inframap` and `dot` on PATH. README documents install.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
@@ -186,11 +186,23 @@ function ensureToolsAvailable(): void {
   }
 }
 
+// Read a file and treat ENOENT as a missing-file signal rather than throwing.
+// Avoids the existsSync→readFileSync race that CodeQL flags as TOCTOU.
+function tryReadFile(path: string): string | null {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
 // Read a .mmd file and strip the leading %% header-comment block (the
 // "this file is the source of truth" preamble). Inlined output should be
-// just the diagram itself.
-function loadMermaidBody(mmdPath: string): string {
-  const raw = readFileSync(mmdPath, 'utf8');
+// just the diagram itself. Returns null if the file does not exist.
+function loadMermaidBody(mmdPath: string): string | null {
+  const raw = tryReadFile(mmdPath);
+  if (raw === null) return null;
   const lines = raw.split('\n');
   // Drop leading %% comment lines (and any blank lines between them).
   let i = 0;
@@ -207,11 +219,11 @@ function inlineIntoMarkdown(mmdName: string, body: string, targets: string[]): v
 
   for (const rel of targets) {
     const path = join(REPO_ROOT, rel);
-    if (!existsSync(path)) {
+    const src = tryReadFile(path);
+    if (src === null) {
       console.warn(`  ⚠️  ${rel} not found — skipping inline`);
       continue;
     }
-    const src = readFileSync(path, 'utf8');
     const startIdx = src.indexOf(startMarker);
     const endIdx = src.indexOf(endMarker);
     if (startIdx === -1 || endIdx === -1) {
@@ -228,9 +240,26 @@ function inlineIntoMarkdown(mmdName: string, body: string, targets: string[]): v
   }
 }
 
+// Inframap iterates a Go map internally, so successive runs produce DOT with
+// the same statements in different orders. dot's layout is order-sensitive,
+// so this leaks all the way through to the SVG and produces a noisy diff on
+// every regen. Sort the statements (the lines between `{` and `}`) before
+// rendering so the output is byte-stable across runs.
+function makeDotDeterministic(dot: string): string {
+  const lines = dot.split('\n');
+  const openIdx = lines.findIndex((l) => l.trimEnd().endsWith('{'));
+  const closeIdx = lines.findIndex((l, i) => i > openIdx && l.trim().startsWith('}'));
+  if (openIdx === -1 || closeIdx === -1) return dot;
+  const head = lines.slice(0, openIdx + 1);
+  const body = lines.slice(openIdx + 1, closeIdx).filter((l) => l.trim() !== '');
+  const tail = lines.slice(closeIdx);
+  body.sort();
+  return [...head, ...body, ...tail].join('\n');
+}
+
 function renderResourceGraph(outFile: string): void {
   const dot = run('inframap', ['generate', '--hcl', '--raw', TF_DIR]).toString();
-  const svg = run('dot', ['-Tsvg'], { input: dot });
+  const svg = run('dot', ['-Tsvg'], { input: makeDotDeterministic(dot) });
   writeFileSync(outFile, svg);
   console.log(`  wrote ${outFile.replace(REPO_ROOT + '/', '')}`);
 }
@@ -238,9 +267,7 @@ function renderResourceGraph(outFile: string): void {
 function main(): void {
   ensureToolsAvailable();
 
-  if (existsSync(PER_FILE_DIR)) {
-    rmSync(PER_FILE_DIR, { recursive: true });
-  }
+  rmSync(PER_FILE_DIR, { recursive: true, force: true });
   mkdirSync(PER_FILE_DIR, { recursive: true });
 
   const files = listTfFiles();
@@ -275,11 +302,12 @@ function main(): void {
   console.log('\nInlining Mermaid sources into markdown...');
   for (const [mmdName, targets] of Object.entries(MARKDOWN_TARGETS)) {
     const mmdPath = join(OUT_DIR, `${mmdName}.mmd`);
-    if (!existsSync(mmdPath)) {
+    const body = loadMermaidBody(mmdPath);
+    if (body === null) {
       console.warn(`  ⚠️  ${mmdPath} missing — skipping`);
       continue;
     }
-    inlineIntoMarkdown(mmdName, loadMermaidBody(mmdPath), targets);
+    inlineIntoMarkdown(mmdName, body, targets);
   }
 
   console.log('\n✅ Diagrams regenerated.');
