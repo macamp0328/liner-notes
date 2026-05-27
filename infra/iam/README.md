@@ -21,13 +21,15 @@ The `liner-notes-cli` user can't grant itself permissions, so these steps run as
 
 ### Substitute your account ID into both policies
 
+These commands assume admin credentials are configured under a CLI profile named `root` (see the CLI path below). If you're going through the console path, set `ACCOUNT_ID` manually to your target account ID instead of using the `sts` call.
+
 ```bash
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ACCOUNT_ID=$(aws --profile root sts get-caller-identity --query Account --output text)
 sed "s/123456789012/$ACCOUNT_ID/g" infra/iam/operator-iam-policy.json > /tmp/liner-notes-iam.json
 sed "s/123456789012/$ACCOUNT_ID/g" infra/iam/operator-ssm-policy.json > /tmp/liner-notes-ssm.json
 ```
 
-The `123456789012` literal in both files is the AWS documentation placeholder — it must be replaced before the policies will actually grant anything in your account.
+The `123456789012` literal in both files is the AWS documentation placeholder — it must be replaced before the policies will actually grant anything in your account. The `--profile root` is the same profile used by the CLI commands below, so the ARN baked into the substituted JSON always matches the account where the policy is created.
 
 ### Create + attach `operator-iam-policy.json` as a customer-managed policy
 
@@ -72,7 +74,7 @@ When `operator-iam-policy.json` changes in the repo, push a new version of the m
 **CLI path:**
 
 ```bash
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ACCOUNT_ID=$(aws --profile root sts get-caller-identity --query Account --output text)
 POLICY_ARN="arn:aws:iam::$ACCOUNT_ID:policy/liner-notes-iam"
 
 sed "s/123456789012/$ACCOUNT_ID/g" infra/iam/operator-iam-policy.json > /tmp/liner-notes-iam.json
@@ -82,6 +84,8 @@ aws --profile root iam create-policy-version \
   --policy-document file:///tmp/liner-notes-iam.json \
   --set-as-default
 ```
+
+`sts get-caller-identity` uses `--profile root` so the resolved `ACCOUNT_ID` matches the account `create-policy-version` will write to — without it, a contributor whose default profile points at a different account would silently target the wrong policy.
 
 The inline `operator-ssm-policy` is updated by re-pasting via the console (same path as initial attach) — no versioning, the new JSON replaces the old.
 
