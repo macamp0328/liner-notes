@@ -172,3 +172,165 @@ resource "aws_cloudwatch_metric_alarm" "ec2_status_check" {
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
 }
+
+# ---------------------------------------------------------------------------
+# Dashboard — single-pane-of-glass view of the three alarms plus the
+# underlying metrics (Route 53 probe, pod restarts, EC2 CPU/network/status,
+# log activity). The bridge to Prometheus/Grafana/APM, which stay deferred
+# at this scale (see issue #117).
+#
+# Cross-region: the health-check alarm and its source metric live in
+# us-east-1 (Route 53 metrics are only published there). Widget 2 hard-codes
+# that region; Widget 1 lists the alarm by ARN, so Terraform resolves the
+# correct region per alarm. Everything else uses var.aws_region.
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_dashboard" "graph_service" {
+  dashboard_name = "${local.name_prefix}-graph-service"
+
+  dashboard_body = jsonencode({
+    widgets = [
+      {
+        type   = "alarm"
+        x      = 0
+        y      = 0
+        width  = 24
+        height = 3
+        properties = {
+          title = "Service alarms"
+          alarms = [
+            aws_cloudwatch_metric_alarm.pod_restarts.arn,
+            aws_cloudwatch_metric_alarm.health_check.arn,
+            aws_cloudwatch_metric_alarm.ec2_status_check.arn,
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 3
+        width  = 12
+        height = 6
+        properties = {
+          title   = "Route 53 health check status (24h)"
+          view    = "timeSeries"
+          stacked = false
+          region  = "us-east-1"
+          period  = 60
+          stat    = "Minimum"
+          metrics = [
+            ["AWS/Route53", "HealthCheckStatus", "HealthCheckId", aws_route53_health_check.graph_service.id],
+          ]
+          yAxis = { left = { min = 0, max = 1 } }
+          annotations = {
+            horizontal = [{ value = 1, label = "Healthy", color = "#2ca02c" }]
+          }
+        }
+      },
+      {
+        type   = "metric"
+        x      = 12
+        y      = 3
+        width  = 12
+        height = 6
+        properties = {
+          title   = "Pod restarts (24h)"
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          period  = 300
+          stat    = "Sum"
+          metrics = [
+            [
+              aws_cloudwatch_log_metric_filter.pod_restarts.metric_transformation[0].namespace,
+              aws_cloudwatch_log_metric_filter.pod_restarts.metric_transformation[0].name,
+            ],
+          ]
+          yAxis = { left = { min = 0 } }
+          annotations = {
+            horizontal = [{ value = 1, label = "Alarm threshold (>0)", color = "#d62728" }]
+          }
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 9
+        width  = 8
+        height = 6
+        properties = {
+          title   = "EC2 CPU utilization"
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          period  = 300
+          stat    = "Average"
+          metrics = [
+            ["AWS/EC2", "CPUUtilization", "InstanceId", aws_instance.k3s.id],
+          ]
+          yAxis = { left = { min = 0, max = 100 } }
+        }
+      },
+      {
+        type   = "metric"
+        x      = 8
+        y      = 9
+        width  = 8
+        height = 6
+        properties = {
+          title   = "EC2 network in / out"
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          period  = 300
+          stat    = "Average"
+          metrics = [
+            ["AWS/EC2", "NetworkIn", "InstanceId", aws_instance.k3s.id, { label = "In" }],
+            [".", "NetworkOut", ".", ".", { label = "Out" }],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 16
+        y      = 9
+        width  = 8
+        height = 6
+        properties = {
+          title   = "EC2 status checks"
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          period  = 60
+          stat    = "Maximum"
+          metrics = [
+            ["AWS/EC2", "StatusCheckFailed_System", "InstanceId", aws_instance.k3s.id, { label = "System" }],
+            [".", "StatusCheckFailed_Instance", ".", ".", { label = "Instance" }],
+          ]
+          yAxis = { left = { min = 0, max = 1 } }
+          annotations = {
+            horizontal = [{ value = 1, label = "Failure", color = "#d62728" }]
+          }
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 15
+        width  = 24
+        height = 6
+        properties = {
+          title   = "Log activity — ${aws_cloudwatch_log_group.graph_service.name}"
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          period  = 300
+          stat    = "Sum"
+          metrics = [
+            ["AWS/Logs", "IncomingLogEvents", "LogGroupName", aws_cloudwatch_log_group.graph_service.name],
+          ]
+        }
+      },
+    ]
+  })
+}

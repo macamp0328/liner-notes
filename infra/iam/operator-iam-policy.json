@@ -85,6 +85,22 @@
       "Resource": "*"
     },
     {
+      "Sid": "ManageLinerNotesDashboards",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutDashboard",
+        "cloudwatch:GetDashboard",
+        "cloudwatch:DeleteDashboards"
+      ],
+      "Resource": "arn:aws:cloudwatch::123456789012:dashboard/liner-notes-*"
+    },
+    {
+      "Sid": "ListAllDashboards",
+      "Effect": "Allow",
+      "Action": "cloudwatch:ListDashboards",
+      "Resource": "*"
+    },
+    {
       "Sid": "ManageLinerNotesSnsTopics",
       "Effect": "Allow",
       "Action": [
