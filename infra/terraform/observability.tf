@@ -41,17 +41,30 @@ resource "aws_sns_topic_subscription" "email" {
 # ---------------------------------------------------------------------------
 # Pod-restart detection.
 #
-# Matches kubelet log lines that indicate a pod was killed or is being
-# restarted. fluent-bit must be configured to ship systemd kubelet logs into
-# the same log group as the pod stdout — pod stdout alone doesn't include
-# these messages. See infra/RUNBOOK.md "Observability — fluent-bit install"
-# for the helm values block that enables the systemd input.
+# Matches kubelet log lines that indicate a pod was killed or is crash-looping.
+# fluent-bit must be configured to ship the k3s systemd journal into the same
+# log group as the pod stdout — pod stdout alone doesn't include these
+# messages. See infra/RUNBOOK.md "Observability — fluent-bit install" for the
+# helm values block that enables the systemd input.
+#
+# Pattern phrases verified against actual kubelet output on AL2023 + k3s:
+#   - "Liveness probe failed"  → kubelet's standard wording when an HTTP
+#                                liveness probe returns non-2xx.
+#   - "CrashLoopBackOff"       → the unique Kubernetes state name; appears
+#                                verbatim in every kubelet "Error syncing pod"
+#                                log line when a container is crash-looping.
+#                                More reliable than the "Back-off restarting
+#                                failed container" wording, which is in
+#                                Kubernetes Events (etcd) but uses lowercased
+#                                "back-off Xs restarting failed container=NAME"
+#                                in kubelet's stdout/journal — a substring
+#                                mismatch with the cleaner phrasing.
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_metric_filter" "pod_restarts" {
   name           = "${local.name_prefix}-pod-restarts"
   log_group_name = aws_cloudwatch_log_group.graph_service.name
-  pattern        = "?\"Liveness probe failed\" ?\"Back-off restarting failed container\""
+  pattern        = "?\"Liveness probe failed\" ?\"CrashLoopBackOff\""
 
   metric_transformation {
     name      = "PodRestarts"
