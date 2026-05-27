@@ -63,9 +63,9 @@ pnpm diagrams:generate
 
 Two distinct workflows; pick the right one for the change you're making.
 
-**Auto-handled by CI — don't think about it.** Any change under `infra/terraform/**` causes [`.github/workflows/diagrams.yml`](.github/workflows/diagrams.yml) to regenerate `resource-graph.svg` and the per-file Mermaid diagrams and commit them back to the PR branch. You can run `pnpm diagrams:generate` locally to preview, but it's not required — leaving the regeneration to CI is the normal flow.
+**Auto-handled by CI — don't think about it.** Any change under `infra/terraform/**` causes [`.github/workflows/diagrams.yml`](.github/workflows/diagrams.yml) to regenerate `resource-graph.svg` and the per-file Mermaid diagrams. The workflow auto-commits the regenerated files to the PR branch for same-repo PRs; fork PRs run the regeneration but skip the auto-commit (fork tokens can't push back), so for those the maintainer runs `pnpm diagrams:generate` locally before merge. You can run the generator locally to preview either way — it's not required for same-repo PRs.
 
-**Needs a manual edit.** The hand-maintained logical flow at [`infra/diagrams/request-flow.mmd`](infra/diagrams/request-flow.mmd) is _not_ derived from Terraform — CI will never update it. Edit it directly (or use the `/diagrams draft` skill, which walks the diff with current infra context) when any of the following changes:
+**Needs a manual edit.** The hand-maintained logical flow at [`infra/diagrams/request-flow.mmd`](infra/diagrams/request-flow.mmd) is _not_ derived from Terraform — CI will never update it. Edit it directly (or use the `/diagrams draft` skill, which walks the diff with current infra context) after any of the following:
 
 - A new external service joins or leaves the runtime path (e.g. adding Cloudflare in front of the NodePort, swapping Aura for self-hosted Neo4j).
 - The ingress path changes (NodePort → ALB, new domain, mTLS termination moving).
