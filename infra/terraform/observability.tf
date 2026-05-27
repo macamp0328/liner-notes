@@ -44,8 +44,8 @@ resource "aws_sns_topic_subscription" "email" {
 # Matches kubelet log lines that indicate a pod was killed or is crash-looping.
 # fluent-bit must be configured to ship the k3s systemd journal into the same
 # log group as the pod stdout — pod stdout alone doesn't include these
-# messages. See infra/RUNBOOK.md "Observability — fluent-bit install" for the
-# helm values block that enables the systemd input.
+# messages. See infra/RUNBOOK.md "Observability — fluent-bit and alarms" (Step 10)
+# and infra/k8s/aws-for-fluent-bit/values.yaml for the systemd input configuration.
 #
 # Pattern phrases verified against actual kubelet output on AL2023 + k3s:
 #   - "Liveness probe failed"  → kubelet's standard wording when an HTTP
