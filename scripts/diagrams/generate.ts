@@ -139,8 +139,10 @@ function buildPerFileMermaid(
     const sgId = `ext_${mermaidId(otherFile)}`;
     lines.push(`  subgraph ${sgId}["${otherFile}"]`);
     for (const addr of addrs) {
-      const last = addr.split('.').slice(-2).join('.');
-      lines.push(`    ${mermaidId(addr)}(["${last}"])`);
+      // Use the full Terraform address so `data.aws_ami.al2023` keeps its
+      // `data.` prefix (slicing the last two segments would strip it and
+      // make the per-file diagram inaccurate).
+      lines.push(`    ${mermaidId(addr)}(["${addr}"])`);
     }
     lines.push('  end');
   }

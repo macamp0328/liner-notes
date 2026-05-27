@@ -10,7 +10,7 @@ flowchart LR
     aws_iam_instance_profile_ec2_k3s(["aws_iam_instance_profile.ec2_k3s"])
   end
   subgraph ext_main_tf["main.tf"]
-    data_aws_ami_al2023(["aws_ami.al2023"])
+    data_aws_ami_al2023(["data.aws_ami.al2023"])
   end
   subgraph ext_networking_tf["networking.tf"]
     aws_subnet_public(["aws_subnet.public"])
