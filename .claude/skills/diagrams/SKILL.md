@@ -29,10 +29,13 @@ Two modes, dispatched on `$ARGUMENTS`:
 Both tools are required. If either is missing, install and re-run.
 
 ```bash
-which inframap dot
-# Expected: /opt/homebrew/bin/inframap, /opt/homebrew/bin/dot
-# If missing:  brew install inframap graphviz
+which inframap docker
+# Expected: /opt/homebrew/bin/inframap (or similar), /usr/local/bin/docker
+# If inframap is missing:  brew install inframap
+# If docker is missing:    install Docker Desktop and start the daemon
 ```
+
+Graphviz itself runs inside a pinned Docker image (`nshine/dot:2.40.1`) — no local graphviz install needed, and the SVG output is byte-identical to CI.
 
 ---
 
@@ -131,5 +134,6 @@ If the diff looks right, hand back to the user with a one-line summary of what c
 
 - **Stale markdown copy after editing `request-flow.mmd`** → did you run `pnpm diagrams:generate`? The inline copy in README/RUNBOOK is only updated by the script.
 - **Resource graph looks empty / only shows EC2** → you're probably looking at Inframap's curated (default) output. The script uses `--raw` for completeness; if you tried `inframap generate ...` by hand without `--raw`, that's the difference.
+- **`docker run` fails with "Cannot connect to the Docker daemon"** → Docker Desktop isn't running. Start it and re-run the generator. The script renders SVG via a pinned `nshine/dot:2.40.1` image rather than a local graphviz install, so Docker is required.
 - **Per-file Mermaid shows an external resource not appearing in any file** → likely a `data` block reference. Confirm by grepping `infra/terraform/` for `data "<type>"`.
 - **CI pushed a `chore(diagrams): regenerate` commit you didn't expect** → the [`diagrams.yml` workflow](../../.github/workflows/diagrams.yml) auto-commits on PRs touching `infra/terraform/**`. This is expected; reset/rebase if you didn't want it.
