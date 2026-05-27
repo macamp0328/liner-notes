@@ -176,16 +176,22 @@ resource "aws_cloudwatch_metric_alarm" "ec2_status_check" {
 # ---------------------------------------------------------------------------
 # Error log lines — pino emits structured JSON; ERROR is `level: 50`.
 #
-# Pre-check from issue #147: graph-service uses `Fastify({ logger: true })`
-# with no custom serializers (services/graph-service/src/server.ts), so the
-# top-level `level` field is the standard pino numeric level (50 = ERROR,
-# 60 = FATAL). The JSON selector matches both implicitly via `>= 50`.
+# graph-service uses `Fastify({ logger: true })` with no custom serializers
+# (services/graph-service/src/server.ts), so the pino `level` field is the
+# standard numeric level (50 = ERROR, 60 = FATAL). The selector matches both
+# implicitly via `>= 50`.
+#
+# **JSON path:** fluent-bit ships each pod stdout line wrapped in an envelope
+# — the pino payload sits under `$.data.*`, not at the root. Filters that
+# match `$.level` would never fire against real log events. Verified against
+# events landing in `/liner-notes/graph-service` (#150). The Neo4j-disconnect
+# and pod-restart filters below use raw substring patterns and are unaffected.
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_metric_filter" "error_log_lines" {
   name           = "${local.name_prefix}-error-log-lines"
   log_group_name = aws_cloudwatch_log_group.graph_service.name
-  pattern        = "{ $.level >= 50 }"
+  pattern        = "{ $.data.level >= 50 }"
 
   metric_transformation {
     name          = "ErrorLogLines"
@@ -222,12 +228,16 @@ resource "aws_cloudwatch_metric_alarm" "error_log_lines" {
 #   - request_count : every completed request (`statusCode > 0`)
 #   - http_5xx      : 5xx only
 # Single-replica deploy, so any 5xx is worth investigating.
+#
+# **JSON path:** same fluent-bit envelope as `error_log_lines` above — the
+# pino payload lives at `$.data.*`, so the request fields are at
+# `$.data.res.statusCode`, not `$.res.statusCode` (#150).
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_metric_filter" "http_request_count" {
   name           = "${local.name_prefix}-http-request-count"
   log_group_name = aws_cloudwatch_log_group.graph_service.name
-  pattern        = "{ $.res.statusCode > 0 }"
+  pattern        = "{ $.data.res.statusCode > 0 }"
 
   metric_transformation {
     name          = "RequestCount"
@@ -241,7 +251,7 @@ resource "aws_cloudwatch_log_metric_filter" "http_request_count" {
 resource "aws_cloudwatch_log_metric_filter" "http_5xx_count" {
   name           = "${local.name_prefix}-http-5xx-count"
   log_group_name = aws_cloudwatch_log_group.graph_service.name
-  pattern        = "{ $.res.statusCode >= 500 }"
+  pattern        = "{ $.data.res.statusCode >= 500 }"
 
   metric_transformation {
     name          = "Http5xxCount"
