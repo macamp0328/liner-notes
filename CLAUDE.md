@@ -59,6 +59,22 @@ pnpm diagrams:generate
 # CI auto-regenerates on PRs touching infra/terraform/** — see .github/workflows/diagrams.yml.
 ```
 
+### When to refresh diagrams
+
+Two distinct workflows; pick the right one for the change you're making.
+
+**Auto-handled by CI — don't think about it.** Any change under `infra/terraform/**` causes [`.github/workflows/diagrams.yml`](.github/workflows/diagrams.yml) to regenerate `resource-graph.svg` and the per-file Mermaid diagrams and commit them back to the PR branch. You can run `pnpm diagrams:generate` locally to preview, but it's not required — leaving the regeneration to CI is the normal flow.
+
+**Needs a manual edit.** The hand-maintained logical flow at [`infra/diagrams/request-flow.mmd`](infra/diagrams/request-flow.mmd) is _not_ derived from Terraform — CI will never update it. Edit it directly (or use the `/diagrams draft` skill, which walks the diff with current infra context) when any of the following changes:
+
+- A new external service joins or leaves the runtime path (e.g. adding Cloudflare in front of the NodePort, swapping Aura for self-hosted Neo4j).
+- The ingress path changes (NodePort → ALB, new domain, mTLS termination moving).
+- A new in-cluster component appears that the reader needs to understand (e.g. an ingress controller, a sidecar, a new namespace).
+- Auth or secrets mechanics shift (e.g. IRSA instead of IMDS-via-instance-role, a new CronJob inserted in the secret loop).
+- A new heavy-traffic data path enters or leaves the picture (e.g. ingesting from a second upstream API).
+
+After editing `request-flow.mmd`, run `pnpm diagrams:generate` so the inlined copies in [`README.md`](README.md) and [`infra/RUNBOOK.md`](infra/RUNBOOK.md) update between their marker comments.
+
 **CI is the last wall of defense, not the first.** Any code change touching production code must pass `test:unit` locally before commit. Broken tests discovered in CI = a wasted cycle.
 
 ---
