@@ -11,7 +11,6 @@ name: CI
 #             └──→ schema-validation (Neo4j service container)
 #
 #   audit, secrets-scan, codeql — independent, always run in parallel
-#   commitlint — PR-only (skipped on pushes to main)
 #
 # For agents: if format/lint/typecheck fail, all test jobs are skipped (fast-fail).
 # Fix static checks first, then re-push to re-trigger the full suite.
@@ -272,23 +271,3 @@ jobs:
         uses: github/codeql-action/analyze@v4
         with:
           wait-for-processing: false
-
-  commitlint:
-    name: Commit Message Lint
-    # Enforces Conventional Commits on all commits in the PR.
-    # Only runs on PRs — pushes to main are squash merges validated at PR time.
-    # Config: commitlint.config.mjs at the repo root.
-    # Agents: commits must follow Conventional Commits (e.g. feat:, fix:, chore:, docs:, test:, refactor:, perf:, ci:).
-    # fetch-depth: 0 is required — wagoid/commitlint-github-action walks the full commit range.
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: wagoid/commitlint-github-action@v6
-        with:
-          configFile: commitlint.config.mjs

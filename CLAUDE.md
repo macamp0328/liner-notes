@@ -26,15 +26,8 @@ pnpm --filter graph-service dev
 # Hooks (auto-installed on pnpm install via husky):
 #   pre-commit  — prettier via lint-staged (runs on every commit, staged files only)
 #   pre-push    — lint + typecheck + test:unit (runs before every push)
-# Only commit-msg needs manual install:
-#   cp scripts/hooks/commit-msg .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg
-# Commit message must follow Conventional Commits.
-# CI rule: subject-case never [sentence-case, start-case, pascal-case, upper-case]
-# In practice: the subject must BEGIN with a lowercase letter; mid-word capitals are fine.
-#   type(scope)?: subject
-#   Valid types: feat fix chore docs test refactor perf ci style build revert
-#   WRONG: "feat: OpenAPI docs" (O is uppercase — sentence-case)
-#   RIGHT:  "feat: openAPI docs" (starts lowercase; 'API' mid-word is fine)
+# Commit message format is not enforced — the repo squash-merges into main, so
+# the PR title is what lands in history, not individual branch commits.
 
 # Tests
 pnpm --filter graph-service test              # all tests
@@ -173,7 +166,7 @@ For the full graph schema (node labels, relationship types, constraints, API end
 - `main` is protected — no direct commits ever
 - All changes via PR with CI passing
 - Squash merge into `main` — one clean commit per task
-- Conventional Commits: `feat:`, `fix:`, `chore:`, `docs:`, `test:`
+- Commit messages aren't enforced; write whatever helps the reviewer
 
 **Agent git workflow (every task):**
 
@@ -236,7 +229,7 @@ No service talks to Neo4j directly except `graph-service`.
 
 ## CI Requirements
 
-**Fast-fail chain:** `format`, `lint`, `typecheck` run first in parallel → `tests-and-coverage` + `schema-validation` → `docker-build`. The following jobs run independently of this chain on every PR: `audit`, `secrets-scan`, `codeql`, `commitlint`.
+**Fast-fail chain:** `format`, `lint`, `typecheck` run first in parallel → `tests-and-coverage` + `schema-validation` → `docker-build`. The following jobs run independently of this chain on every PR: `audit`, `secrets-scan`, `codeql`.
 
 | Check             | Tool                                   | Requirement                            |
 | ----------------- | -------------------------------------- | -------------------------------------- |
@@ -249,7 +242,6 @@ No service talks to Neo4j directly except `graph-service`.
 | Security audit    | `pnpm audit`                           | No high/critical vulnerabilities       |
 | Secrets scan      | TruffleHog                             | No credentials in committed code       |
 | CodeQL scan       | GitHub CodeQL (security-extended)      | No security alerts                     |
-| Commit lint       | wagoid/commitlint-github-action        | Conventional Commits                   |
 
 ---
 
@@ -260,7 +252,7 @@ Internet
     │
 [Cloudflare DNS + bot protection]  ← future sprint
     │
-[EC2 t3.micro — k3s single-node Kubernetes]
+[EC2 t3.small — k3s single-node Kubernetes]
     └── graph-service Pod
 
 [Neo4j Aura Free]       — external managed database
@@ -269,7 +261,7 @@ Internet
 [AWS CloudWatch]        — logs + alerts
 ```
 
-**k3s** on EC2 t3.micro instead of EKS (~$72/month). EC2 Scheduler provides scale-to-zero (~$0/month when stopped).
+**k3s** on EC2 t3.small instead of EKS (~$72/month). EC2 Scheduler provides scale-to-zero (~$0/month when stopped). t3.micro (1 GB) thrashes under k3s + ESO + graph-service; see [`infra/terraform/variables.tf`](infra/terraform/variables.tf) for the sizing rationale.
 
 Operator-facing deploy, redeploy, and recovery procedures live in [`infra/RUNBOOK.md`](infra/RUNBOOK.md).
 

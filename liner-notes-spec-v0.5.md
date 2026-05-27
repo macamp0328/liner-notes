@@ -288,7 +288,7 @@ liner-notes/
 - `main` is protected — no direct commits ever
 - All changes via PR with CI passing
 - Squash merge into `main` — one clean commit per task
-- Conventional Commits format on all commits: `feat:`, `fix:`, `chore:`, `docs:`, `test:`
+- Commit message format is not enforced; use clear subjects (e.g. `feat:`, `fix:`, `chore:`) when helpful
 - Branches are short-lived — agents complete a task, open a PR, done
 - Never leave a branch open across multiple unrelated tasks
 
@@ -313,7 +313,7 @@ Each worktree is a fully independent working directory pointing to its own branc
 git fetch origin
 git checkout -b task/{n}-{description} origin/main
 
-# 2. Work, committing incrementally with conventional commits
+# 2. Work, committing incrementally with clear commit messages
 git add .
 git commit -m "feat: scaffold monorepo structure"
 

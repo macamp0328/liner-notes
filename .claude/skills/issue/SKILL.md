@@ -37,7 +37,7 @@ Read the full `body` and every entry in `comments`. Acceptance criteria, design 
 From this, establish:
 
 - **What is being asked for** (1-2 sentences in your own words)
-- **Issue type** — infer from labels or content: `feat`, `fix`, `chore`, `docs`, `refactor`, etc. This becomes the Conventional Commits type.
+- **Issue type** — infer from labels or content: `feat`, `fix`, `chore`, `docs`, `refactor`, etc. Use it as an optional commit prefix when helpful.
 - **Which service is affected** — almost always `graph-service`
 
 ---
@@ -117,7 +117,7 @@ pnpm --filter graph-service test:unit:coverage
 
 ## Phase 7 — Commit
 
-Conventional Commits format. The subject **must start with a lowercase letter** — the commit-msg hook enforces this and CI will reject it otherwise.
+Commit message format is not enforced. Prefer clear, concise messages; starting the subject with a lowercase letter is still recommended for consistency.
 
 ```
 <type>(<optional-scope>): <lowercase subject>
