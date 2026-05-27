@@ -51,9 +51,11 @@ pnpm --filter graph-service build
 # Generate OpenAPI docs
 pnpm --filter graph-service docs:generate
 
-# Architecture diagrams (Inframap + Mermaid). One-time install on macOS:
-#   brew install inframap graphviz
-# Then from the repo root:
+# Architecture diagrams (Inframap + Mermaid).
+#   Mac local: `brew install inframap` and ensure Docker Desktop is running.
+#   The script renders SVG via a pinned Docker image (nshine/dot:2.40.1) so
+#   the output is byte-identical between Mac and CI — no graphviz version
+#   drift, no "every PR re-renders the SVG" churn.
 pnpm diagrams:generate
 # Outputs:
 #   infra/diagrams/resource-graph.svg   — auto-generated, every AWS resource + dependency

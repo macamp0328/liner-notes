@@ -11,6 +11,11 @@
 // absolute file paths, which won't render outside the author's machine. We
 // use --raw so the SVG is self-contained and portable.
 //
+// Graphviz rendering runs in a pinned Docker image (nshine/dot:2.40.1) so the
+// SVG bytes are identical across Mac (brew), Ubuntu CI (apt), and anywhere
+// else this script runs. Without the pin, every PR triggered a 200+-line SVG
+// churn diff just from version drift between local and CI graphviz.
+//
 // Markdown inlining: for each (mmdName, [files]) entry in MARKDOWN_TARGETS we
 // look for the marker pair:
 //   <!-- diagrams:<mmdName>:start -->
@@ -19,7 +24,8 @@
 // containing request-flow.mmd. This keeps README + RUNBOOK in sync from one
 // source.
 //
-// Requires `inframap` and `dot` on PATH. README documents install.
+// Requires `inframap` and `docker` on PATH (and the Docker daemon running).
+// README documents install.
 
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -174,15 +180,25 @@ function run(cmd: string, args: string[], opts: { input?: string } = {}): Buffer
   return r.stdout;
 }
 
+// Pinned via tag + digest. Graphviz layout is version-sensitive, so a Mac
+// running brew's graphviz 15.x produces a different SVG than Ubuntu CI's apt
+// graphviz 2.43.x for the same DOT input — causing per-PR SVG churn even
+// when nothing semantic changed. Routing rendering through a pinned image
+// makes the SVG byte-stable across machines.
+const GRAPHVIZ_IMAGE =
+  'nshine/dot:2.40.1@sha256:17ba91db2197ae4154cdc4b397a263017ce15c7f2c0cb8bf29404d78bcb4bd6d';
+
 function ensureToolsAvailable(): void {
-  for (const tool of ['inframap', 'dot']) {
+  for (const [tool, hint] of [
+    [
+      'inframap',
+      'macOS: brew install inframap   CI: go install github.com/cycloidio/inframap@v0.8.1',
+    ],
+    ['docker', 'install Docker Desktop on Mac, or use a Linux box with the docker daemon running'],
+  ] as const) {
     const r = spawnSync('which', [tool]);
     if (r.status !== 0) {
-      console.error(
-        `\n❌ "${tool}" not found on PATH.\n` +
-          `   macOS:  brew install inframap graphviz\n` +
-          `   Linux:  see README "Architecture diagrams" section\n`,
-      );
+      console.error(`\n❌ "${tool}" not found on PATH.\n   ${hint}\n`);
       process.exit(1);
     }
   }
@@ -261,7 +277,11 @@ function makeDotDeterministic(dot: string): string {
 
 function renderResourceGraph(outFile: string): void {
   const dot = run('inframap', ['generate', '--hcl', '--raw', TF_DIR]).toString();
-  const svg = run('dot', ['-Tsvg'], { input: makeDotDeterministic(dot) });
+  const svg = run(
+    'docker',
+    ['run', '--rm', '-i', '--platform=linux/amd64', GRAPHVIZ_IMAGE, 'dot', '-Tsvg'],
+    { input: makeDotDeterministic(dot) },
+  );
   writeFileSync(outFile, svg);
   console.log(`  wrote ${outFile.replace(REPO_ROOT + '/', '')}`);
 }
