@@ -133,7 +133,7 @@ If the diff looks right, hand back to the user with a one-line summary of what c
 ## Common pitfalls
 
 - **Stale markdown copy after editing `request-flow.mmd`** → did you run `pnpm diagrams:generate`? The inline copy in README/RUNBOOK is only updated by the script.
-- **Resource graph looks empty / only shows EC2** → you're probably looking at Inframap's curated (default) output. The script uses `--raw` for completeness; if you tried `inframap generate ...` by hand without `--raw`, that's the difference.
+- **You ran `inframap generate ...` by hand and only see EC2** → that's Inframap's curated default. The script always passes `--raw` and then post-processes the DOT into category clusters with HTML labels; running `inframap` alone bypasses both. Use `pnpm diagrams:generate` (or the regenerate mode of this skill) to get the same SVG that lands in the repo.
 - **`docker run` fails with "Cannot connect to the Docker daemon"** → Docker Desktop isn't running. Start it and re-run the generator. The script renders SVG via a pinned `nshine/dot:2.40.1` image rather than a local graphviz install, so Docker is required.
 - **Per-file Mermaid shows an external resource not appearing in any file** → likely a `data` block reference. Confirm by grepping `infra/terraform/` for `data "<type>"`.
 - **CI pushed a `chore(diagrams): regenerate` commit you didn't expect** → the [`diagrams.yml` workflow](../../.github/workflows/diagrams.yml) auto-commits on PRs touching `infra/terraform/**`. This is expected; reset/rebase if you didn't want it.
