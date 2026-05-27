@@ -12,10 +12,13 @@
 # With `autoCreateGroup: false`, a mismatch silently drops every log line.
 #
 # Two streams flow into the CloudWatch Log Group /liner-notes/graph-service:
-#   - pod stdout/stderr  — via the chart's default tail input on /var/log/containers/*.log
-#   - k3s systemd journal — via the additionalInputs block below, which the
-#     pod-restarts metric filter (observability.tf) matches against for
-#     "Liveness probe failed" / "Back-off restarting failed container".
+#   - pod stdout/stderr  — via the chart's default tail input on /var/log/containers/*.log;
+#                          arrives in CloudWatch as `pod.kube.var.log.containers.*` streams.
+#   - k3s systemd journal — via the additionalInputs block below; arrives as
+#                          `pod.k3s.k3s.service` (the chart prefixes every tag with
+#                          `pod.`). The pod-restarts metric filter (observability.tf)
+#                          matches "Liveness probe failed" / "CrashLoopBackOff" against
+#                          this stream's content.
 
 cloudWatchLogs:
   enabled: true

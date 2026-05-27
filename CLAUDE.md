@@ -252,7 +252,7 @@ Internet
     │
 [Cloudflare DNS + bot protection]  ← future sprint
     │
-[EC2 t3.micro — k3s single-node Kubernetes]
+[EC2 t3.small — k3s single-node Kubernetes]
     └── graph-service Pod
 
 [Neo4j Aura Free]       — external managed database
@@ -261,7 +261,7 @@ Internet
 [AWS CloudWatch]        — logs + alerts
 ```
 
-**k3s** on EC2 t3.micro instead of EKS (~$72/month). EC2 Scheduler provides scale-to-zero (~$0/month when stopped).
+**k3s** on EC2 t3.small instead of EKS (~$72/month). EC2 Scheduler provides scale-to-zero (~$0/month when stopped). t3.micro (1 GB) thrashes under k3s + ESO + graph-service; see [`infra/terraform/variables.tf`](infra/terraform/variables.tf) for the sizing rationale.
 
 Operator-facing deploy, redeploy, and recovery procedures live in [`infra/RUNBOOK.md`](infra/RUNBOOK.md).
 
