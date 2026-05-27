@@ -16,6 +16,15 @@
 // else this script runs. Without the pin, every PR triggered a 200+-line SVG
 // churn diff just from version drift between local and CI graphviz.
 //
+// Readability: Inframap's raw DOT is a flat list of 34 ellipses with truncated
+// labels. We post-process the DOT (postProcessDot) to:
+//   - group resources by category cluster (IAM, Networking, Compute, ...)
+//   - color-code each cluster
+//   - replace ellipses with rounded boxes
+//   - strip the `aws_` prefix from labels (the cluster color carries provider)
+//   - apply Helvetica + orthogonal splines + concentrate=true
+// Same DOT input → same SVG; ordering is deterministic.
+//
 // Markdown inlining: for each (mmdName, [files]) entry in MARKDOWN_TARGETS we
 // look for the marker pair:
 //   <!-- diagrams:<mmdName>:start -->
@@ -66,13 +75,48 @@ function stripComments(src: string): string {
 const DECL_RE = /^(resource|data)\s+"([a-zA-Z0-9_-]+)"\s+"([a-zA-Z0-9_-]+)"\s*\{/gm;
 
 function parseDeclarations(src: string, file: string): ResourceRef[] {
-  const out: ResourceRef[] = [];
-  for (const m of src.matchAll(DECL_RE)) {
+  return parseBlocks(src, file).map((b) => b.decl);
+}
+
+type Block = { decl: ResourceRef; body: string };
+
+// Extract each `resource|data "type" "name" { ... }` block via brace-matching.
+// Tracks string literals so braces inside HCL strings don't throw off the
+// depth counter. Returns the inner body (without the outer braces) per block,
+// which is what we scan for cross-resource references.
+function parseBlocks(src: string, file: string): Block[] {
+  const out: Block[] = [];
+  // Reset regex state by constructing a fresh stateful matcher.
+  const headerRE = /^(resource|data)\s+"([a-zA-Z0-9_-]+)"\s+"([a-zA-Z0-9_-]+)"\s*\{/gm;
+  let m: RegExpExecArray | null;
+  while ((m = headerRE.exec(src))) {
+    const bodyStart = m.index + m[0].length;
+    let depth = 1;
+    let i = bodyStart;
+    while (i < src.length && depth > 0) {
+      const c = src[i];
+      if (c === '"') {
+        // Walk over a string literal (HCL allows escapes and ${...} interp).
+        i++;
+        while (i < src.length && src[i] !== '"') {
+          if (src[i] === '\\') i++;
+          i++;
+        }
+      } else if (c === '{') {
+        depth++;
+      } else if (c === '}') {
+        depth--;
+      }
+      i++;
+    }
     out.push({
-      kind: m[1] as 'resource' | 'data',
-      type: m[2],
-      name: m[3],
-      file,
+      decl: {
+        kind: m[1] as 'resource' | 'data',
+        type: m[2],
+        name: m[3],
+        file,
+      },
+      body: src.slice(bodyStart, i - 1),
     });
   }
   return out;
@@ -110,10 +154,15 @@ function shortType(type: string): string {
   return type.replace(/^aws_/, '').replace(/_/g, ' ');
 }
 
+type ResourceEdge = {
+  from: Address; // an address declared in this file
+  to: Address; // any known address (same file or another file)
+};
+
 function buildPerFileMermaid(
   file: string,
-  declsInFile: ResourceRef[],
-  refsFromFile: Set<Address>,
+  blocksInFile: Block[],
+  edges: ResourceEdge[],
   declToFile: Map<Address, string>,
 ): string {
   const lines: string[] = [];
@@ -121,47 +170,52 @@ function buildPerFileMermaid(
   lines.push(`%% Source: infra/terraform/${file}`);
   lines.push('flowchart LR');
 
-  const declAddrs = new Set(declsInFile.map(addressOf));
-  const externalRefs = [...refsFromFile].filter((a) => !declAddrs.has(a));
+  const declAddrs = new Set(blocksInFile.map((b) => addressOf(b.decl)));
+  const externalAddrs = new Set<Address>();
+  for (const e of edges) if (!declAddrs.has(e.to)) externalAddrs.add(e.to);
 
   // Subgraph: resources declared in this file.
   lines.push(`  subgraph this["${file}"]`);
-  for (const d of declsInFile) {
-    const addr = addressOf(d);
-    const label = `${d.kind === 'data' ? '📥 ' : ''}${d.name}<br/><small>${shortType(d.type)}</small>`;
+  lines.push(`    direction LR`);
+  for (const b of blocksInFile) {
+    const addr = addressOf(b.decl);
+    const icon = b.decl.kind === 'data' ? '📥 ' : '';
+    const label = `${icon}${b.decl.name}<br/><small>${shortType(b.decl.type)}</small>`;
     lines.push(`    ${mermaidId(addr)}["${label}"]`);
   }
   lines.push('  end');
 
-  // External resources, grouped by source file.
+  // External resources, grouped by source file. Stable order via sort.
   const byFile = new Map<string, Address[]>();
-  for (const addr of externalRefs) {
+  for (const addr of [...externalAddrs].sort()) {
     const f = declToFile.get(addr) ?? 'unknown';
     if (!byFile.has(f)) byFile.set(f, []);
     byFile.get(f)!.push(addr);
   }
-
   for (const [otherFile, addrs] of [...byFile.entries()].sort()) {
     const sgId = `ext_${mermaidId(otherFile)}`;
     lines.push(`  subgraph ${sgId}["${otherFile}"]`);
     for (const addr of addrs) {
-      // Use the full Terraform address so `data.aws_ami.al2023` keeps its
-      // `data.` prefix (slicing the last two segments would strip it and
-      // make the per-file diagram inaccurate).
+      // Full Terraform address so `data.aws_ami.al2023` keeps its `data.` prefix.
       lines.push(`    ${mermaidId(addr)}(["${addr}"])`);
     }
     lines.push('  end');
   }
 
-  // Edges: every declared resource in this file -> every external ref it might
-  // touch. We don't know exact attribute usage at this granularity, so we draw
-  // a single edge from the file's "this" subgraph border into each external
-  // node. Render with a hub node to keep edge count manageable.
-  if (externalRefs.length > 0 && declsInFile.length > 0) {
-    // Use the first declared resource as hub for visual anchor.
-    for (const addr of externalRefs) {
-      lines.push(`  this -.-> ${mermaidId(addr)}`);
-    }
+  // Edges. Intra-file edges (both endpoints declared here) are solid; cross-
+  // file edges are dashed. Self-references are skipped. Edges are sorted and
+  // deduplicated for deterministic, churn-free output.
+  const seen = new Set<string>();
+  const sortedEdges = [...edges].sort((a, b) =>
+    (a.from + ' -> ' + a.to).localeCompare(b.from + ' -> ' + b.to),
+  );
+  for (const e of sortedEdges) {
+    if (e.from === e.to) continue;
+    const key = `${e.from}->${e.to}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const arrow = declAddrs.has(e.to) ? '-->' : '-.->';
+    lines.push(`  ${mermaidId(e.from)} ${arrow} ${mermaidId(e.to)}`);
   }
 
   return lines.join('\n') + '\n';
@@ -258,21 +312,133 @@ function inlineIntoMarkdown(mmdName: string, body: string, targets: string[]): v
   }
 }
 
+// ---------------------------------------------------------------------------
+// Resource categorization — drives both cluster grouping and color in the
+// final SVG. Extend the regexes when a new family of AWS resources lands.
+// ---------------------------------------------------------------------------
+
+type Category =
+  | 'iam'
+  | 'compute'
+  | 'networking'
+  | 'observability'
+  | 'storage'
+  | 'secrets'
+  | 'edge'
+  | 'other';
+
+const CATEGORY_META: Record<Category, { label: string; fill: string; order: number }> = {
+  networking: { label: 'Networking', fill: '#dcfce7', order: 1 }, // soft green
+  compute: { label: 'Compute', fill: '#dbeafe', order: 2 }, // soft blue
+  iam: { label: 'IAM & Identity', fill: '#fef3c7', order: 3 }, // soft yellow
+  secrets: { label: 'Secrets', fill: '#ede9fe', order: 4 }, // soft purple
+  storage: { label: 'Storage & Registry', fill: '#ffedd5', order: 5 }, // soft orange
+  observability: { label: 'Observability', fill: '#fce7f3', order: 6 }, // soft pink
+  edge: { label: 'Edge & DNS', fill: '#cffafe', order: 7 }, // soft cyan
+  other: { label: 'Other', fill: '#f1f5f9', order: 8 }, // soft gray
+};
+
+function categorize(resourceType: string): Category {
+  const t = resourceType.replace(/^aws_/, '');
+  if (/^(iam_|caller_identity)/.test(t)) return 'iam';
+  if (/^(instance|eip|ami|launch_template|autoscaling|ebs)/.test(t)) return 'compute';
+  if (/^(vpc|subnet|internet_gateway|route|security_group|nat_gateway|network_acl)/.test(t))
+    return 'networking';
+  if (/^(cloudwatch|sns|sqs|cloudtrail)/.test(t)) return 'observability';
+  if (/^(route53_health)/.test(t)) return 'observability';
+  if (/^(ecr|s3|efs)/.test(t)) return 'storage';
+  if (/^(secretsmanager|kms|ssm_parameter)/.test(t)) return 'secrets';
+  if (/^(cloudfront|route53)/.test(t)) return 'edge';
+  return 'other';
+}
+
 // Inframap iterates a Go map internally, so successive runs produce DOT with
 // the same statements in different orders. dot's layout is order-sensitive,
 // so this leaks all the way through to the SVG and produces a noisy diff on
-// every regen. Sort the statements (the lines between `{` and `}`) before
-// rendering so the output is byte-stable across runs.
-function makeDotDeterministic(dot: string): string {
-  const lines = dot.split('\n');
-  const openIdx = lines.findIndex((l) => l.trimEnd().endsWith('{'));
-  const closeIdx = lines.findIndex((l, i) => i > openIdx && l.trim().startsWith('}'));
-  if (openIdx === -1 || closeIdx === -1) return dot;
-  const head = lines.slice(0, openIdx + 1);
-  const body = lines.slice(openIdx + 1, closeIdx).filter((l) => l.trim() !== '');
-  const tail = lines.slice(closeIdx);
-  body.sort();
-  return [...head, ...body, ...tail].join('\n');
+// every regen.
+//
+// We don't just sort — we fully restructure: parse the inframap output into
+// nodes + edges, then emit a new DOT with category clusters, per-cluster fill
+// colors, rounded box nodes, Helvetica, and orthogonal edge routing. Same DOT
+// input → byte-identical SVG; node order is deterministic via sort.
+function postProcessDot(dot: string): string {
+  const edgeRE = /^\s*"([^"]+)"\s*->\s*"([^"]+)"\s*;\s*$/;
+  const nodeRE = /^\s*"([^"]+)"\s*\[[^\]]*\]\s*;\s*$/;
+
+  const nodes = new Set<string>();
+  const edges: Array<[string, string]> = [];
+
+  for (const line of dot.split('\n')) {
+    const e = line.match(edgeRE);
+    if (e) {
+      nodes.add(e[1]);
+      nodes.add(e[2]);
+      edges.push([e[1], e[2]]);
+      continue;
+    }
+    const n = line.match(nodeRE);
+    if (n) nodes.add(n[1]);
+  }
+
+  // Bucket nodes by category, sorted within each bucket for determinism.
+  const byCategory = new Map<Category, string[]>();
+  for (const node of [...nodes].sort()) {
+    // node looks like "aws_instance.k3s" or "data.aws_ami.al2023"
+    const typePart = node.startsWith('data.') ? node.split('.')[1] : node.split('.')[0];
+    const cat = categorize(typePart);
+    if (!byCategory.has(cat)) byCategory.set(cat, []);
+    byCategory.get(cat)!.push(node);
+  }
+
+  const out: string[] = [];
+  out.push('digraph G {');
+  out.push(
+    '  graph [rankdir=LR, splines=ortho, concentrate=true, nodesep=0.35, ranksep=0.9, pad=0.4, bgcolor=transparent, fontname="Helvetica"];',
+  );
+  out.push(
+    '  node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, margin="0.18,0.10", color="#475569", fontcolor="#0f172a"];',
+  );
+  out.push('  edge  [color="#94a3b8", arrowsize=0.7, penwidth=0.9];');
+  out.push('');
+
+  const orderedCats = (
+    Object.entries(CATEGORY_META) as [Category, (typeof CATEGORY_META)[Category]][]
+  )
+    .sort(([, a], [, b]) => a.order - b.order)
+    .map(([cat]) => cat);
+
+  for (const cat of orderedCats) {
+    const ns = byCategory.get(cat);
+    if (!ns || ns.length === 0) continue;
+    const meta = CATEGORY_META[cat];
+    out.push(`  subgraph cluster_${cat} {`);
+    out.push(`    label="${meta.label}";`);
+    out.push(`    style="rounded,filled";`);
+    out.push(`    fillcolor="${meta.fill}";`);
+    out.push(`    color="#cbd5e1";`);
+    out.push(`    fontname="Helvetica-Bold";`);
+    out.push(`    fontsize=13;`);
+    out.push(`    fontcolor="#334155";`);
+    out.push(`    margin=14;`);
+    for (const node of ns) {
+      // Strip aws_ from labels; the cluster carries the AWS provider context.
+      // Replace _ with space for readability; keep the address structure
+      // (type . name or data . type . name).
+      const label = node.replace(/^aws_/, '').replace(/\.aws_/, '.');
+      out.push(`    "${node}" [label="${label}", fillcolor="white"];`);
+    }
+    out.push(`  }`);
+    out.push('');
+  }
+
+  // Edges last, sorted for determinism.
+  edges.sort(([a1, a2], [b1, b2]) => (a1 + a2).localeCompare(b1 + b2));
+  for (const [from, to] of edges) {
+    out.push(`  "${from}" -> "${to}";`);
+  }
+  out.push('}');
+
+  return out.join('\n');
 }
 
 function renderResourceGraph(outFile: string): void {
@@ -280,7 +446,7 @@ function renderResourceGraph(outFile: string): void {
   const svg = run(
     'docker',
     ['run', '--rm', '-i', '--platform=linux/amd64', GRAPHVIZ_IMAGE, 'dot', '-Tsvg'],
-    { input: makeDotDeterministic(dot) },
+    { input: postProcessDot(dot) },
   );
   writeFileSync(outFile, svg);
   console.log(`  wrote ${outFile.replace(REPO_ROOT + '/', '')}`);
@@ -293,26 +459,33 @@ function main(): void {
   mkdirSync(PER_FILE_DIR, { recursive: true });
 
   const files = listTfFiles();
-  const allDecls: ResourceRef[] = [];
-  const fileSources = new Map<string, string>();
+  const blocksByFile = new Map<string, Block[]>();
 
   for (const file of files) {
     const src = stripComments(readFileSync(join(TF_DIR, file), 'utf8'));
-    fileSources.set(file, src);
-    allDecls.push(...parseDeclarations(src, file));
+    blocksByFile.set(file, parseBlocks(src, file));
   }
 
+  const allBlocks = [...blocksByFile.values()].flat();
   const declToFile = new Map<Address, string>();
-  for (const d of allDecls) declToFile.set(addressOf(d), d.file);
+  for (const b of allBlocks) declToFile.set(addressOf(b.decl), b.decl.file);
   const knownAddrs = new Set(declToFile.keys());
 
-  console.log(`Parsed ${allDecls.length} resources across ${files.length} files.`);
+  console.log(`Parsed ${allBlocks.length} resources across ${files.length} files.`);
 
   for (const file of files) {
-    const declsInFile = allDecls.filter((d) => d.file === file);
-    if (declsInFile.length === 0) continue;
-    const refs = findReferences(fileSources.get(file)!, knownAddrs);
-    const mmd = buildPerFileMermaid(file, declsInFile, refs, declToFile);
+    const blocks = blocksByFile.get(file)!;
+    if (blocks.length === 0) continue;
+    // Build edges per-resource by scanning each block's body individually.
+    // This is what makes the per-file diagram accurate: we know *which*
+    // resource in this file references *which* other resource.
+    const edges: ResourceEdge[] = [];
+    for (const b of blocks) {
+      const refs = findReferences(b.body, knownAddrs);
+      const from = addressOf(b.decl);
+      for (const to of refs) edges.push({ from, to });
+    }
+    const mmd = buildPerFileMermaid(file, blocks, edges, declToFile);
     const out = join(PER_FILE_DIR, file.replace(/\.tf$/, '.mmd'));
     writeFileSync(out, mmd);
     console.log(`  wrote ${out.replace(REPO_ROOT + '/', '')}`);
