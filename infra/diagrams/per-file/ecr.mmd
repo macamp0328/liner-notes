@@ -2,6 +2,8 @@
 %% Source: infra/terraform/ecr.tf
 flowchart LR
   subgraph this["ecr.tf"]
+    direction LR
     aws_ecr_repository_graph_service["graph_service<br/><small>ecr repository</small>"]
     aws_ecr_lifecycle_policy_graph_service["graph_service<br/><small>ecr lifecycle policy</small>"]
   end
+  aws_ecr_lifecycle_policy_graph_service --> aws_ecr_repository_graph_service
