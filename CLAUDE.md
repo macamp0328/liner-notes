@@ -50,6 +50,18 @@ pnpm --filter graph-service build
 
 # Generate OpenAPI docs
 pnpm --filter graph-service docs:generate
+
+# Architecture diagrams (Inframap + Mermaid). One-time install on macOS:
+#   brew install inframap graphviz
+# Then from the repo root:
+pnpm diagrams:generate
+# Outputs:
+#   infra/diagrams/resource-graph.svg   — auto-generated, every AWS resource + dependency
+#   infra/diagrams/per-file/<name>.mmd  — auto-generated, one per .tf file
+#   infra/diagrams/request-flow.mmd     — hand-maintained logical flow (source of truth)
+# The script also inlines request-flow.mmd into the README and the runbook
+# between <!-- diagrams:request-flow:start --> / :end markers.
+# CI auto-regenerates on PRs touching infra/terraform/** — see .github/workflows/diagrams.yml.
 ```
 
 **CI is the last wall of defense, not the first.** Any code change touching production code must pass `test:unit` locally before commit. Broken tests discovered in CI = a wasted cycle.
@@ -67,10 +79,12 @@ liner-notes/
 │   ├── pull_request_template.md ← PR checklist for agents
 │   └── workflows/
 │       ├── ci.yml               ← runs on every PR
-│       └── deploy.yml           ← runs on merge to main
+│       ├── deploy.yml           ← runs on merge to main
+│       └── diagrams.yml         ← regenerates architecture diagrams on infra changes
 ├── scripts/
 │   ├── explore-discogs.ts
-│   └── discogs-api-notes.md
+│   ├── discogs-api-notes.md
+│   └── diagrams/                ← `pnpm diagrams:generate` — Inframap + per-file Mermaid
 ├── services/
 │   └── graph-service/           ← Fastify REST API + Neo4j ingestion
 │       ├── CLAUDE.md            ← service-specific handbook (read this too)
@@ -87,7 +101,8 @@ liner-notes/
 │       └── Dockerfile
 ├── infra/
 │   ├── terraform/               ← AWS resources
-│   └── k8s/                     ← Kubernetes manifests
+│   ├── k8s/                     ← Kubernetes manifests
+│   └── diagrams/                ← request-flow.mmd (hand) + resource-graph.svg + per-file/ (auto)
 ├── docker-compose.yml           ← local: Neo4j + graph-service
 └── .env.example                 ← all env vars documented, no values
 ```

@@ -15,6 +15,8 @@ This is the operator's guide to standing up, redeploying, and recovering the pro
 
 ## Architecture at a glance
 
+<!-- diagrams:request-flow:start -->
+
 ```mermaid
 flowchart LR
   user([Your laptop / browser]):::ext
@@ -55,7 +57,7 @@ flowchart LR
     iam -.attached.-> ec2
   end
 
-  aura[("Neo4j AuraDB Free · GCP<br/>~6,150 nodes / ~14,297 rels")]:::ext
+  aura[("Neo4j AuraDB Free · GCP")]:::ext
   discogs[("Discogs API")]:::ext
 
   user -- "http :30080 (NodePort)" --> svc
@@ -67,6 +69,10 @@ flowchart LR
 
   classDef ext fill:#f4f4f4,stroke:#999,stroke-dasharray:5 3
 ```
+
+<!-- diagrams:request-flow:end -->
+
+> **Source of truth:** [`infra/diagrams/request-flow.mmd`](diagrams/request-flow.mmd). Regenerate with `pnpm diagrams:generate` after editing. A full Terraform resource graph (auto-generated) lives at [`diagrams/resource-graph.svg`](diagrams/resource-graph.svg); per-file Mermaid diagrams are under [`diagrams/per-file/`](diagrams/per-file/).
 
 **Key flows:**
 

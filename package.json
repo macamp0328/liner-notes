@@ -13,6 +13,7 @@
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
+    "diagrams:generate": "tsx scripts/diagrams/generate.ts",
     "prepare": "husky || true"
   },
   "lint-staged": {

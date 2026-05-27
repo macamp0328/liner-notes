@@ -1,0 +1,78 @@
+name: Diagrams
+
+# Regenerate architecture diagrams under infra/diagrams/ and commit any
+# changes back to the PR branch. Triggers when:
+#   - a .tf file changes (resource graph or per-file diagrams stale)
+#   - request-flow.mmd changes (hand-maintained logical flow updated)
+#   - this workflow or the generator script changes
+#
+# Auth model: uses the default GITHUB_TOKEN with contents:write so the
+# action can push to the PR branch. No PAT required. The auto-commit step
+# is a no-op when the diagrams are already up to date.
+#
+# Local equivalent (Mac): `brew install inframap graphviz` then
+# `pnpm diagrams:generate`. CI installs inframap from source (the v0.8.1
+# release ships no binaries) and graphviz via apt.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'infra/terraform/**'
+      - 'infra/diagrams/request-flow.mmd'
+      - 'scripts/diagrams/**'
+      - '.github/workflows/diagrams.yml'
+
+# Allow the auto-commit step to push back to the PR branch.
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    name: Regenerate diagrams
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Check out the PR branch (not the merge ref) so we can push back.
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.23'
+
+      - name: Install inframap from source
+        # The v0.8.1 release has no binary assets attached — go install is the
+        # most reliable path. Pin to a tag to keep CI reproducible.
+        run: go install github.com/cycloidio/inframap@v0.8.1
+
+      - name: Install graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate diagrams
+        run: pnpm diagrams:generate
+
+      - name: Commit regenerated diagrams (if changed)
+        # Fork PRs run with a read-only GITHUB_TOKEN against the fork — the
+        # push back would fail. Skip the commit step on fork PRs; the
+        # maintainer can run `pnpm diagrams:generate` locally before merge.
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: stefanzweifel/git-auto-commit-action@v6
+        with:
+          commit_message: 'chore(diagrams): regenerate architecture diagrams'
+          file_pattern: 'infra/diagrams/** README.md infra/RUNBOOK.md'
+          commit_user_name: 'github-actions[bot]'
+          commit_user_email: '41898282+github-actions[bot]@users.noreply.github.com'
