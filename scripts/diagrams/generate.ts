@@ -346,6 +346,113 @@ function categorize(resourceType: string): Category {
   return 'other';
 }
 
+// Single Unicode glyph per resource family. Gives each node a visual landmark
+// beyond the cluster color, so a viewer can spot "the role" or "the VPC" at a
+// glance without reading the label. Falls back to a generic ◻️ square for any
+// unmapped type — empty-string would leave the label visually off-balance
+// (the leading "icon · name" alignment would collapse).
+function iconFor(resourceType: string): string {
+  const t = resourceType.replace(/^aws_/, '');
+  // IAM
+  if (/^iam_role_policy_attachment/.test(t)) return '🔗';
+  if (/^iam_role_policy/.test(t)) return '📜';
+  if (/^iam_role/.test(t)) return '👤';
+  if (/^iam_instance_profile/.test(t)) return '🪪';
+  if (/^iam_policy_document/.test(t)) return '📜';
+  if (/^caller_identity/.test(t)) return '🆔';
+  // Compute
+  if (/^instance/.test(t)) return '🖥️';
+  if (/^eip_association/.test(t)) return '🔌';
+  if (/^eip/.test(t)) return '📍';
+  if (/^ami/.test(t)) return '💿';
+  // Networking
+  if (/^vpc_security_group/.test(t)) return '🚦';
+  if (/^security_group/.test(t)) return '🛡️';
+  if (/^vpc$/.test(t)) return '🏢';
+  if (/^subnet/.test(t)) return '🧩';
+  if (/^internet_gateway/.test(t)) return '🚪';
+  if (/^route_table_association/.test(t)) return '🔗';
+  if (/^route_table/.test(t)) return '🗺️';
+  if (/^availability_zones/.test(t)) return '🌎';
+  // Observability
+  if (/^cloudwatch_metric_alarm/.test(t)) return '🚨';
+  if (/^cloudwatch_log_metric_filter/.test(t)) return '🔎';
+  if (/^cloudwatch_log/.test(t)) return '📋';
+  if (/^cloudwatch/.test(t)) return '📊';
+  if (/^sns_topic_subscription/.test(t)) return '📧';
+  if (/^sns/.test(t)) return '📣';
+  if (/^route53_health/.test(t)) return '💓';
+  if (/^route53/.test(t)) return '🌍';
+  // Storage / registry
+  if (/^ecr_lifecycle/.test(t)) return '♻️';
+  if (/^ecr/.test(t)) return '📦';
+  if (/^s3/.test(t)) return '🪣';
+  // Secrets
+  if (/^secretsmanager/.test(t)) return '🔒';
+  if (/^kms/.test(t)) return '🗝️';
+  return '◻️';
+}
+
+// Cleaner short type label for the small caption under each node's name.
+// Falls back to the snake_case type with `aws_` stripped and `_` → space.
+function shortTypeLabel(resourceType: string): string {
+  const t = resourceType.replace(/^aws_/, '');
+  const map: Record<string, string> = {
+    // IAM
+    iam_role: 'IAM role',
+    iam_role_policy: 'role policy',
+    iam_role_policy_attachment: 'policy attachment',
+    iam_instance_profile: 'instance profile',
+    iam_policy_document: 'policy doc',
+    caller_identity: 'AWS account',
+    // Compute
+    instance: 'EC2 instance',
+    eip: 'Elastic IP',
+    eip_association: 'EIP association',
+    ami: 'AMI lookup',
+    // Networking
+    vpc: 'VPC',
+    vpc_security_group_ingress_rule: 'ingress rule',
+    vpc_security_group_egress_rule: 'egress rule',
+    security_group: 'security group',
+    subnet: 'subnet',
+    internet_gateway: 'internet gateway',
+    route_table: 'route table',
+    route_table_association: 'route table assoc',
+    availability_zones: 'AZ lookup',
+    // Observability
+    cloudwatch_log_group: 'log group',
+    cloudwatch_log_metric_filter: 'log metric filter',
+    cloudwatch_metric_alarm: 'metric alarm',
+    sns_topic: 'SNS topic',
+    sns_topic_subscription: 'SNS subscription',
+    route53_health_check: 'Route 53 health check',
+    // Storage / registry
+    ecr_repository: 'ECR repo',
+    ecr_lifecycle_policy: 'ECR lifecycle',
+    // Secrets
+    secretsmanager_secret: 'Secrets Manager',
+  };
+  return map[t] ?? t.replace(/_/g, ' ');
+}
+
+// AWS region the diagram is anchored to. Hard-coded because main.tf pins to
+// us-east-1 (Route 53 health-check metrics only publish in that region).
+const AWS_REGION = 'us-east-1';
+
+// Graphviz HTML labels are XML-ish — escape the five characters that would
+// break parsing. Names + short types only contain alphanumerics + _ + space
+// in practice, but be defensive in case a future resource type sneaks in
+// something funkier.
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 // Inframap iterates a Go map internally, so successive runs produce DOT with
 // the same statements in different orders. dot's layout is order-sensitive,
 // so this leaks all the way through to the SVG and produces a noisy diff on
@@ -395,6 +502,21 @@ function postProcessDot(dot: string): string {
   out.push('  edge  [color="#94a3b8", arrowsize=0.7, penwidth=0.9];');
   out.push('');
 
+  // Outer wrapping cluster — "AWS · us-east-1". Sets the canonical
+  // "this is one cloud account in one region" framing that traditional
+  // architecture diagrams have.
+  out.push(`  subgraph cluster_aws {`);
+  out.push(`    label=<<b>AWS</b>  ·  region ${AWS_REGION}>;`);
+  out.push(`    style="rounded,filled";`);
+  out.push(`    fillcolor="#f8fafc";`);
+  out.push(`    color="#cbd5e1";`);
+  out.push(`    fontname="Helvetica";`);
+  out.push(`    fontsize=15;`);
+  out.push(`    fontcolor="#0f172a";`);
+  out.push(`    labeljust=l;`);
+  out.push(`    margin=20;`);
+  out.push('');
+
   const orderedCats = (
     Object.entries(CATEGORY_META) as [Category, (typeof CATEGORY_META)[Category]][]
   )
@@ -405,25 +527,37 @@ function postProcessDot(dot: string): string {
     const ns = byCategory.get(cat);
     if (!ns || ns.length === 0) continue;
     const meta = CATEGORY_META[cat];
-    out.push(`  subgraph cluster_${cat} {`);
-    out.push(`    label="${meta.label}";`);
-    out.push(`    style="rounded,filled";`);
-    out.push(`    fillcolor="${meta.fill}";`);
-    out.push(`    color="#cbd5e1";`);
-    out.push(`    fontname="Helvetica-Bold";`);
-    out.push(`    fontsize=13;`);
-    out.push(`    fontcolor="#334155";`);
-    out.push(`    margin=14;`);
+    out.push(`    subgraph cluster_${cat} {`);
+    out.push(`      label="${meta.label}";`);
+    out.push(`      style="rounded,filled";`);
+    out.push(`      fillcolor="${meta.fill}";`);
+    out.push(`      color="#cbd5e1";`);
+    out.push(`      fontname="Helvetica-Bold";`);
+    out.push(`      fontsize=13;`);
+    out.push(`      fontcolor="#334155";`);
+    out.push(`      margin=14;`);
     for (const node of ns) {
-      // Strip aws_ from labels; the cluster carries the AWS provider context.
-      // Replace _ with space for readability; keep the address structure
-      // (type . name or data . type . name).
-      const label = node.replace(/^aws_/, '').replace(/\.aws_/, '.');
-      out.push(`    "${node}" [label="${label}", fillcolor="white"];`);
+      const isData = node.startsWith('data.');
+      const segments = node.split('.');
+      const resourceType = isData ? segments[1] : segments[0];
+      const resourceName = isData ? segments[2] : segments[1];
+      const icon = iconFor(resourceType);
+      const typeLabel = shortTypeLabel(resourceType);
+      // Graphviz HTML-like label: icon + bold name on line 1, soft-gray short
+      // type below. The `data.` lookup prefix is shown as a small badge so
+      // data sources are visually distinguishable from real resources.
+      const dataBadge = isData ? '<font point-size="8" color="#94a3b8">data · </font>' : '';
+      const label =
+        `<${icon}  ${dataBadge}<b>${escapeHtml(resourceName)}</b>` +
+        `<br/><font point-size="9" color="#64748b">${escapeHtml(typeLabel)}</font>>`;
+      out.push(`      "${node}" [label=${label}, fillcolor="white"];`);
     }
-    out.push(`  }`);
+    out.push(`    }`);
     out.push('');
   }
+
+  out.push(`  }`); // close cluster_aws
+  out.push('');
 
   // Edges last, sorted for determinism.
   edges.sort(([a1, a2], [b1, b2]) => (a1 + a2).localeCompare(b1 + b2));
