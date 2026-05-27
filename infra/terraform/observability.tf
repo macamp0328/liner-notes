@@ -174,6 +174,183 @@ resource "aws_cloudwatch_metric_alarm" "ec2_status_check" {
 }
 
 # ---------------------------------------------------------------------------
+# Error log lines — pino emits structured JSON; ERROR is `level: 50`.
+#
+# Pre-check from issue #147: graph-service uses `Fastify({ logger: true })`
+# with no custom serializers (services/graph-service/src/server.ts), so the
+# top-level `level` field is the standard pino numeric level (50 = ERROR,
+# 60 = FATAL). The JSON selector matches both implicitly via `>= 50`.
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_metric_filter" "error_log_lines" {
+  name           = "${local.name_prefix}-error-log-lines"
+  log_group_name = aws_cloudwatch_log_group.graph_service.name
+  pattern        = "{ $.level >= 50 }"
+
+  metric_transformation {
+    name          = "ErrorLogLines"
+    namespace     = "${local.name_prefix}/graph-service"
+    value         = "1"
+    unit          = "Count"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "error_log_lines" {
+  alarm_name          = "${local.name_prefix}-error-log-lines"
+  alarm_description   = "graph-service emitted more than 5 ERROR-level log lines in 5 minutes."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  period              = 300
+  threshold           = 5
+  treat_missing_data  = "notBreaching"
+
+  metric_name = aws_cloudwatch_log_metric_filter.error_log_lines.metric_transformation[0].name
+  namespace   = aws_cloudwatch_log_metric_filter.error_log_lines.metric_transformation[0].namespace
+  statistic   = "Sum"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+}
+
+# ---------------------------------------------------------------------------
+# HTTP request count + 5xx rate.
+#
+# Fastify's default request-complete log line is JSON with `res.statusCode`
+# nested under `res` (the framework's built-in `res` serializer). Two
+# filters share the same log shape:
+#   - request_count : every completed request (`statusCode > 0`)
+#   - http_5xx      : 5xx only
+# Single-replica deploy, so any 5xx is worth investigating.
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_metric_filter" "http_request_count" {
+  name           = "${local.name_prefix}-http-request-count"
+  log_group_name = aws_cloudwatch_log_group.graph_service.name
+  pattern        = "{ $.res.statusCode > 0 }"
+
+  metric_transformation {
+    name          = "RequestCount"
+    namespace     = "${local.name_prefix}/graph-service"
+    value         = "1"
+    unit          = "Count"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "http_5xx_count" {
+  name           = "${local.name_prefix}-http-5xx-count"
+  log_group_name = aws_cloudwatch_log_group.graph_service.name
+  pattern        = "{ $.res.statusCode >= 500 }"
+
+  metric_transformation {
+    name          = "Http5xxCount"
+    namespace     = "${local.name_prefix}/graph-service"
+    value         = "1"
+    unit          = "Count"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "http_5xx" {
+  alarm_name          = "${local.name_prefix}-http-5xx"
+  alarm_description   = "graph-service returned one or more 5xx responses in 5 minutes."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  period              = 300
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+
+  metric_name = aws_cloudwatch_log_metric_filter.http_5xx_count.metric_transformation[0].name
+  namespace   = aws_cloudwatch_log_metric_filter.http_5xx_count.metric_transformation[0].namespace
+  statistic   = "Sum"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+}
+
+# ---------------------------------------------------------------------------
+# Neo4j disconnect detector.
+#
+# Substring match (not JSON selector) because these strings appear inside
+# error-message and stack-trace text rather than as a structured field.
+# Catches the recurring Aura free-tier auto-pause after 72h of inactivity
+# (see infra/RUNBOOK.md "Resuming a paused Aura instance") earlier than the
+# binary /health flip — graph-service logs the driver error before the
+# health endpoint observes the disconnect.
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_metric_filter" "neo4j_disconnects" {
+  name           = "${local.name_prefix}-neo4j-disconnects"
+  log_group_name = aws_cloudwatch_log_group.graph_service.name
+  pattern        = "?\"ServiceUnavailable\" ?\"SessionExpired\""
+
+  metric_transformation {
+    name          = "Neo4jDisconnects"
+    namespace     = "${local.name_prefix}/graph-service"
+    value         = "1"
+    unit          = "Count"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "neo4j_disconnects" {
+  alarm_name          = "${local.name_prefix}-neo4j-disconnects"
+  alarm_description   = "graph-service logged a Neo4j ServiceUnavailable or SessionExpired in 5 minutes."
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  period              = 300
+  threshold           = 1
+  treat_missing_data  = "notBreaching"
+
+  metric_name = aws_cloudwatch_log_metric_filter.neo4j_disconnects.metric_transformation[0].name
+  namespace   = aws_cloudwatch_log_metric_filter.neo4j_disconnects.metric_transformation[0].namespace
+  statistic   = "Sum"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+}
+
+# ---------------------------------------------------------------------------
+# Billing alarm.
+#
+# AWS/Billing EstimatedCharges only publishes to us-east-1, so this alarm
+# uses the existing `aws.us_east_1` provider alias (declared in main.tf and
+# already reused by the Route 53 health-check alarm). Cross-region alarm →
+# SNS is supported.
+#
+# Threshold $20 is roughly 2x the baseline (EC2 t3.small + EIP + Aura Free +
+# minimal data transfer) — cheap insurance against a runaway resource.
+#
+# **One-time prerequisite (not Terraform-managed):** the AWS account must
+# have billing alerts enabled under Billing → Billing preferences → Receive
+# Billing Alerts. Documented in infra/RUNBOOK.md.
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_metric_alarm" "billing" {
+  provider = aws.us_east_1
+
+  alarm_name          = "${local.name_prefix}-billing"
+  alarm_description   = "AWS estimated charges exceeded $20 (USD) for the billing period."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  period              = 21600
+  threshold           = 20
+  treat_missing_data  = "notBreaching"
+
+  metric_name = "EstimatedCharges"
+  namespace   = "AWS/Billing"
+  statistic   = "Maximum"
+
+  dimensions = {
+    Currency = "USD"
+  }
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+}
+
+# ---------------------------------------------------------------------------
 # Dashboard — single-pane-of-glass view of the three alarms plus the
 # underlying metrics (Route 53 probe, pod restarts, EC2 CPU/network/status,
 # log activity). The bridge to Prometheus/Grafana/APM, which stay deferred
@@ -202,6 +379,10 @@ resource "aws_cloudwatch_dashboard" "graph_service" {
             aws_cloudwatch_metric_alarm.pod_restarts.arn,
             aws_cloudwatch_metric_alarm.health_check.arn,
             aws_cloudwatch_metric_alarm.ec2_status_check.arn,
+            aws_cloudwatch_metric_alarm.error_log_lines.arn,
+            aws_cloudwatch_metric_alarm.http_5xx.arn,
+            aws_cloudwatch_metric_alarm.neo4j_disconnects.arn,
+            aws_cloudwatch_metric_alarm.billing.arn,
           ]
         }
       },
@@ -329,6 +510,103 @@ resource "aws_cloudwatch_dashboard" "graph_service" {
           metrics = [
             ["AWS/Logs", "IncomingLogEvents", "LogGroupName", aws_cloudwatch_log_group.graph_service.name],
           ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 21
+        width  = 6
+        height = 6
+        properties = {
+          title   = "ERROR log lines (24h)"
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          period  = 300
+          stat    = "Sum"
+          metrics = [
+            [
+              aws_cloudwatch_log_metric_filter.error_log_lines.metric_transformation[0].namespace,
+              aws_cloudwatch_log_metric_filter.error_log_lines.metric_transformation[0].name,
+            ],
+          ]
+          yAxis = { left = { min = 0 } }
+          annotations = {
+            horizontal = [{ value = 5, label = "Alarm threshold (>5)", color = "#d62728" }]
+          }
+        }
+      },
+      {
+        type   = "metric"
+        x      = 6
+        y      = 21
+        width  = 6
+        height = 6
+        properties = {
+          title   = "Request count (24h)"
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          period  = 300
+          stat    = "Sum"
+          metrics = [
+            [
+              aws_cloudwatch_log_metric_filter.http_request_count.metric_transformation[0].namespace,
+              aws_cloudwatch_log_metric_filter.http_request_count.metric_transformation[0].name,
+            ],
+          ]
+          yAxis = { left = { min = 0 } }
+        }
+      },
+      {
+        type   = "metric"
+        x      = 12
+        y      = 21
+        width  = 6
+        height = 6
+        properties = {
+          title   = "HTTP 5xx count (24h)"
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          period  = 300
+          stat    = "Sum"
+          metrics = [
+            [
+              aws_cloudwatch_log_metric_filter.http_5xx_count.metric_transformation[0].namespace,
+              aws_cloudwatch_log_metric_filter.http_5xx_count.metric_transformation[0].name,
+            ],
+          ]
+          yAxis = { left = { min = 0 } }
+          annotations = {
+            horizontal = [{ value = 1, label = "Alarm threshold (>0)", color = "#d62728" }]
+          }
+        }
+      },
+      {
+        type   = "metric"
+        x      = 18
+        y      = 21
+        width  = 6
+        height = 6
+        properties = {
+          title   = "Neo4j disconnects (24h)"
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          period  = 300
+          stat    = "Sum"
+          metrics = [
+            [
+              aws_cloudwatch_log_metric_filter.neo4j_disconnects.metric_transformation[0].namespace,
+              aws_cloudwatch_log_metric_filter.neo4j_disconnects.metric_transformation[0].name,
+            ],
+          ]
+          yAxis = { left = { min = 0 } }
+          annotations = {
+            horizontal = [{ value = 1, label = "Alarm threshold (≥1)", color = "#d62728" }]
+          }
         }
       },
     ]

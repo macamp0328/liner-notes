@@ -381,9 +381,21 @@ curl -sS "$SERVICE_URL/api/v1/releases?limit=3" | jq .
 
 ## Observability — fluent-bit and alarms
 
-`terraform apply` (Step 1) created the supporting AWS resources for observability: a CloudWatch Log Group (`/liner-notes/graph-service`), an SNS topic with an email subscription, a Route 53 health check probing `/api/v1/health`, three alarms (pod restarts, health-check failures, EC2 status check), and a `liner-notes-graph-service` dashboard surfacing all of the above in one view. This section covers the two manual follow-ups: confirming the SNS subscription and installing the in-cluster fluent-bit daemonset that actually writes logs to the log group.
+`terraform apply` (Step 1) created the supporting AWS resources for observability: a CloudWatch Log Group (`/liner-notes/graph-service`), an SNS topic with an email subscription, a Route 53 health check probing `/api/v1/health`, seven alarms, and a `liner-notes-graph-service` dashboard surfacing all of the above in one view.
 
-The unified at-a-glance view is at `terraform output -raw dashboard_url` — three alarm tiles, Route 53 probe, EC2 CPU/network/status, and log activity, all on one page.
+| Alarm                           | Fires on                                                                     |
+| ------------------------------- | ---------------------------------------------------------------------------- |
+| `liner-notes-pod-restarts`      | Kubelet logs `Liveness probe failed` or `CrashLoopBackOff` within 5 min.     |
+| `liner-notes-health-check`      | Route 53 external probe of `/api/v1/health` fails for 2 consecutive minutes. |
+| `liner-notes-ec2-status-check`  | AWS EC2 system or instance status check fails for 2 consecutive minutes.     |
+| `liner-notes-error-log-lines`   | More than 5 pino ERROR-level (`level >= 50`) log lines in 5 min.             |
+| `liner-notes-http-5xx`          | One or more 5xx responses logged by Fastify in 5 min.                        |
+| `liner-notes-neo4j-disconnects` | `ServiceUnavailable` or `SessionExpired` appears in the log group in 5 min.  |
+| `liner-notes-billing`           | AWS estimated charges exceed $20 (USD) for the current billing period.       |
+
+This section covers the three manual follow-ups: confirming the SNS subscription, enabling AWS account-level billing alerts, and installing the in-cluster fluent-bit daemonset that actually writes logs to the log group.
+
+The unified at-a-glance view is at `terraform output -raw dashboard_url` — alarm tiles, Route 53 probe, EC2 CPU/network/status, log activity, and per-metric widgets for the log-driven alarms, all on one page.
 
 ### Step 9 — Confirm the SNS subscription
 
@@ -398,6 +410,16 @@ aws sns list-subscriptions-by-topic \
 ```
 
 The subscription's `SubscriptionArn` should not be the literal string `PendingConfirmation`.
+
+### Step 9b — Enable account-level billing alerts (one-time)
+
+The `liner-notes-billing` alarm reads `AWS/Billing → EstimatedCharges`, but that metric is only published once the account opts into billing alerts. It is **not Terraform-manageable** — there is no IAM API for it. Do this once per AWS account:
+
+1. Sign in to the [AWS Billing console](https://console.aws.amazon.com/billing/home#/preferences) as the account root user (the toggle is root-only).
+2. Open **Billing → Billing preferences**.
+3. Tick **Receive Billing Alerts** and save.
+
+Until this is on, the billing alarm stays in `INSUFFICIENT_DATA` indefinitely — no harm done, but it also won't fire. Once enabled, the metric starts publishing every ~6 hours and the alarm becomes useful within a day.
 
 ### Step 10 — Install fluent-bit on the node
 
