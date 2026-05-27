@@ -33,7 +33,6 @@
         "ecr:GetLifecyclePolicy",
         "ecr:DeleteLifecyclePolicy",
         "ecr:PutImageScanningConfiguration",
-        "ecr:GetRegistryScanningConfiguration",
         "ecr:TagResource",
         "ecr:UntagResource",
         "ecr:ListTagsForResource",
