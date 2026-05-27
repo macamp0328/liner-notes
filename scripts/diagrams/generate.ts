@@ -72,12 +72,6 @@ function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])(\/\/|#)[^\n]*/g, '$1');
 }
 
-const DECL_RE = /^(resource|data)\s+"([a-zA-Z0-9_-]+)"\s+"([a-zA-Z0-9_-]+)"\s*\{/gm;
-
-function parseDeclarations(src: string, file: string): ResourceRef[] {
-  return parseBlocks(src, file).map((b) => b.decl);
-}
-
 type Block = { decl: ResourceRef; body: string };
 
 // Extract each `resource|data "type" "name" { ... }` block via brace-matching.
