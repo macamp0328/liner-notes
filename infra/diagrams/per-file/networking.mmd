@@ -2,6 +2,7 @@
 %% Source: infra/terraform/networking.tf
 flowchart LR
   subgraph this["networking.tf"]
+    direction LR
     aws_vpc_main["main<br/><small>vpc</small>"]
     aws_internet_gateway_main["main<br/><small>internet gateway</small>"]
     data_aws_availability_zones_available["📥 available<br/><small>availability zones</small>"]
@@ -13,3 +14,14 @@ flowchart LR
     aws_vpc_security_group_ingress_rule_ssh["ssh<br/><small>vpc security group ingress rule</small>"]
     aws_vpc_security_group_egress_rule_all["all<br/><small>vpc security group egress rule</small>"]
   end
+  aws_internet_gateway_main --> aws_vpc_main
+  aws_route_table_association_public --> aws_route_table_public
+  aws_route_table_association_public --> aws_subnet_public
+  aws_route_table_public --> aws_internet_gateway_main
+  aws_route_table_public --> aws_vpc_main
+  aws_security_group_k3s_node --> aws_vpc_main
+  aws_subnet_public --> aws_vpc_main
+  aws_subnet_public --> data_aws_availability_zones_available
+  aws_vpc_security_group_egress_rule_all --> aws_security_group_k3s_node
+  aws_vpc_security_group_ingress_rule_app_nodeport --> aws_security_group_k3s_node
+  aws_vpc_security_group_ingress_rule_ssh --> aws_security_group_k3s_node

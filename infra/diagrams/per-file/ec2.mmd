@@ -2,6 +2,7 @@
 %% Source: infra/terraform/ec2.tf
 flowchart LR
   subgraph this["ec2.tf"]
+    direction LR
     aws_instance_k3s["k3s<br/><small>instance</small>"]
     aws_eip_k3s["k3s<br/><small>eip</small>"]
     aws_eip_association_k3s["k3s<br/><small>eip association</small>"]
@@ -13,10 +14,12 @@ flowchart LR
     data_aws_ami_al2023(["data.aws_ami.al2023"])
   end
   subgraph ext_networking_tf["networking.tf"]
-    aws_subnet_public(["aws_subnet.public"])
     aws_security_group_k3s_node(["aws_security_group.k3s_node"])
+    aws_subnet_public(["aws_subnet.public"])
   end
-  this -.-> aws_subnet_public
-  this -.-> aws_security_group_k3s_node
-  this -.-> aws_iam_instance_profile_ec2_k3s
-  this -.-> data_aws_ami_al2023
+  aws_eip_association_k3s --> aws_eip_k3s
+  aws_eip_association_k3s --> aws_instance_k3s
+  aws_instance_k3s -.-> aws_iam_instance_profile_ec2_k3s
+  aws_instance_k3s -.-> aws_security_group_k3s_node
+  aws_instance_k3s -.-> aws_subnet_public
+  aws_instance_k3s -.-> data_aws_ami_al2023
