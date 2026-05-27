@@ -116,12 +116,10 @@ mise install
 
 ### AWS credentials
 
-The runbook assumes a non-root IAM user (`liner-notes-cli` in our setup) with the following:
+The runbook assumes a non-root IAM user (`liner-notes-cli` in our setup) with the following — no AWS-managed policies, all permissions come from this repo:
 
-- `AmazonEC2FullAccess` (from initial setup)
-- `AmazonEC2ContainerRegistryFullAccess` (from initial setup)
-- `SecretsManagerReadWrite` (from initial setup)
-- **Customer-managed policy** from [`infra/iam/operator-iam-policy.json`](iam/operator-iam-policy.json) — Terraform-managed IAM roles, CloudWatch logs + alarms, SNS topic + subscription, Route 53 health checks. Managed rather than inline because the JSON exceeds AWS's 2048-char per-user inline-policy aggregate cap.
+- **Customer-managed policy** from [`infra/iam/operator-iam-policy.json`](iam/operator-iam-policy.json) — Terraform-managed IAM roles, CloudWatch logs + alarms, SNS topic + subscription, Route 53 health checks
+- **Customer-managed policy** from [`infra/iam/operator-deploy-policy.json`](iam/operator-deploy-policy.json) — VPC, EC2, EIP, ECR, Secrets Manager (everything `terraform apply` plus the runbook's `docker push` / `put-secret-value` / instance-resize flows touch)
 - **Inline policy** from [`infra/iam/operator-ssm-policy.json`](iam/operator-ssm-policy.json) — SSM Session Manager
 
 See [`infra/iam/README.md`](iam/README.md) for the one-time attach procedure. **Do this before Step 1** or `terraform apply` and the `aws ssm` calls will fail with `AccessDenied`.
