@@ -85,6 +85,16 @@
       "Resource": "*"
     },
     {
+      "Sid": "ReadAllMetrics",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:GetMetricStatistics",
+        "cloudwatch:GetMetricData",
+        "cloudwatch:ListMetrics"
+      ],
+      "Resource": "*"
+    },
+    {
       "Sid": "ManageLinerNotesDashboards",
       "Effect": "Allow",
       "Action": [
