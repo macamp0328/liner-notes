@@ -58,7 +58,9 @@
       ],
       "Resource": [
         "arn:aws:logs:*:123456789012:log-group:/liner-notes/*",
-        "arn:aws:logs:*:123456789012:log-group:/liner-notes/*:*"
+        "arn:aws:logs:*:123456789012:log-group:/liner-notes/*:*",
+        "arn:aws:logs:*:123456789012:log-group:/aws/lambda/liner-notes-*",
+        "arn:aws:logs:*:123456789012:log-group:/aws/lambda/liner-notes-*:*"
       ]
     },
     {
