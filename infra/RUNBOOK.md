@@ -668,6 +668,13 @@ cd "$(git rev-parse --show-toplevel)"
 
 The Deployment uses `strategy: Recreate` — there will be ~30 seconds of downtime while the old pod terminates and the new one starts. Acceptable for a personal-project prod; a multi-AZ HA setup is out of scope.
 
+> **Changed a secret value first?** If this redeploy follows an edit to `liner-notes/graph-service/prod` in Secrets Manager, force an immediate ESO sync so the new pod reads the updated value. The External Secrets Operator otherwise refreshes the in-cluster `graph-service-secrets` only hourly, and the pod reads env (`envFrom`) only at start — so a fresh pod can come up with the stale value:
+>
+> ```bash
+> kubectl -n liner-notes annotate externalsecret graph-service-secrets force-sync=$(date +%s) --overwrite
+> kubectl -n liner-notes get externalsecret graph-service-secrets   # LAST SYNC resets to a few seconds
+> ```
+
 ---
 
 ## Full reload from scratch
@@ -709,6 +716,12 @@ aws logs tail /liner-notes/graph-service --follow   # watch enrichment stages; ~
 ```
 
 Alternatively, trigger without a restart: `curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "$GRAPH_SERVICE_URL/api/v1/admin/ingest"` (returns 202; poll `pnpm status:lyrics` etc.).
+
+> **Changed a secret value (e.g. `GENIUS_TOKEN`) before this reload?** Force an ESO sync _before_ the rollout restart, or the new pod comes up with the stale value and that enrichment silently degrades (e.g. lyrics falls back to LRCLIB-only). ESO refreshes `graph-service-secrets` hourly; the pod reads env only at start:
+>
+> ```bash
+> kubectl -n liner-notes annotate externalsecret graph-service-secrets force-sync=$(date +%s) --overwrite
+> ```
 
 **4. Run the manual track-level enrichments** — these are admin-only and **not** part of `runIngestion`, so they stay null after a reload until kicked off (MusicBrainz is 1 req/sec → the track-musicbrainz pass for ~2000 tracks takes ~30 min):
 
