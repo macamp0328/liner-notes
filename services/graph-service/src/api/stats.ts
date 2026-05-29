@@ -26,6 +26,10 @@ const coverageSchema = {
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
   let cache: { at: number; data: StatsData } | null = null;
+  // Coalesce concurrent refreshes: on a cold/expired cache, many simultaneous
+  // requests would each run getStats() (four full-label scans). Sharing one
+  // in-flight promise collapses them into a single refresh.
+  let inFlight: Promise<StatsData> | null = null;
 
   fastify.get<{ Reply: StatsReply }>(
     '/api/v1/stats',
@@ -85,10 +89,22 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (): Promise<StatsReply> => {
       const now = Date.now();
-      if (!cache || now - cache.at > CACHE_TTL_MS) {
-        cache = { at: now, data: await getStats(getDriver()) };
+      if (cache && now - cache.at <= CACHE_TTL_MS) {
+        return { data: cache.data };
       }
-      return { data: cache.data };
+      // Cache miss or expiry — start a refresh if none is running, then await
+      // whichever refresh is in flight so concurrent callers share one query.
+      if (!inFlight) {
+        inFlight = getStats(getDriver())
+          .then((data) => {
+            cache = { at: Date.now(), data };
+            return data;
+          })
+          .finally(() => {
+            inFlight = null;
+          });
+      }
+      return { data: await inFlight };
     },
   );
 }
