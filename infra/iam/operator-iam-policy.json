@@ -53,6 +53,7 @@
         "logs:PutMetricFilter",
         "logs:DeleteMetricFilter",
         "logs:DescribeMetricFilters",
+        "logs:DescribeLogStreams",
         "logs:FilterLogEvents"
       ],
       "Resource": [
