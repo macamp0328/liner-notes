@@ -428,9 +428,9 @@ Run from your laptop, inside a fresh clone of the repo. Triggers the five manual
 ```bash
 # One-off env (or drop these into a gitignored .env.local at the repo root)
 export GRAPH_SERVICE_URL="$SERVICE_URL"
-export ADMIN_TOKEN=$(aws secretsmanager get-secret-value \
+export ADMIN_TOKEN="$(aws secretsmanager get-secret-value \
   --secret-id liner-notes/graph-service/prod \
-  --query SecretString --output text | jq -r .ADMIN_TOKEN)
+  --query SecretString --output text | jq -r '.ADMIN_TOKEN')"
 
 # Snapshot the current state of every enrichment (read-only, ~1s)
 pnpm status:nationality
@@ -680,9 +680,9 @@ Use this to discard the entire graph and rebuild it from Discogs — e.g. after 
 
 ```bash
 export GRAPH_SERVICE_URL="$SERVICE_URL"   # e.g. http://<EC2_DNS>:30080 — from the deploy env block
-export ADMIN_TOKEN=$(aws secretsmanager get-secret-value \
+export ADMIN_TOKEN="$(aws secretsmanager get-secret-value \
   --secret-id liner-notes/graph-service/prod \
-  --query SecretString --output text | jq -r .ADMIN_TOKEN)
+  --query SecretString --output text | jq -r '.ADMIN_TOKEN')"
 ```
 
 **1. (Optional) Snapshot the current coverage** so you can compare before/after:
@@ -697,6 +697,8 @@ curl -s "$GRAPH_SERVICE_URL/api/v1/stats" | jq .
 pnpm db:wipe
 # → POST /api/v1/admin/reset?confirm=wipe-all → { "data": { "deleted": <nodeCount> } }
 ```
+
+> **Requires the reset endpoint** (`POST /api/v1/admin/reset` + the `pnpm db:wipe` script) added in [#163](https://github.com/macamp0328/liner-notes/pull/163). Confirm the running image includes it before relying on this step. On an older build without the endpoint, wipe directly instead — `cypher-shell -a "$NEO4J_URI" -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" "MATCH (n) DETACH DELETE n"` (creds from the prod secret).
 
 **3. Re-ingest.** An empty graph auto-triggers ingestion on pod start, so the cleanest trigger is a rollout restart (runs base ingestion + the in-pipeline enrichments: lyrics, master-data/originalYear, artist genres, track versions, artist profiles):
 
@@ -721,14 +723,15 @@ pnpm enrich:bootstrap
 curl -s "$GRAPH_SERVICE_URL/api/v1/stats" | jq .data.enrichment
 ```
 
-| Metric                             | Target                | Filled by                                      |
-| ---------------------------------- | --------------------- | ---------------------------------------------- |
-| `releasesWithOriginalYear`         | ≥ 90%                 | step 3 (master-data)                           |
-| `artistsWithProfile`               | ≥ 80%                 | step 3 (artist-profiles)                       |
-| `tracksWithLyrics`                 | best-effort           | step 3 (LRCLIB + Genius if `GENIUS_TOKEN` set) |
-| `tracksWithRecordingMbid` / `Isrc` | high                  | step 4 (`track-musicbrainz`)                   |
-| `tracksWithTempo`                  | of those with an mbid | step 4 (`track-acousticbrainz`)                |
-| `tracksWithDeezerBpm`              | of those with an isrc | step 4 (`track-deezer`)                        |
+| Metric                     | Target                | Filled by                                      |
+| -------------------------- | --------------------- | ---------------------------------------------- |
+| `releasesWithOriginalYear` | ≥ 90%                 | step 3 (master-data)                           |
+| `artistsWithProfile`       | ≥ 80%                 | step 3 (artist-profiles)                       |
+| `tracksWithLyrics`         | best-effort           | step 3 (LRCLIB + Genius if `GENIUS_TOKEN` set) |
+| `tracksWithRecordingMbid`  | high                  | step 4 (`track-musicbrainz`)                   |
+| `tracksWithIsrc`           | high                  | step 4 (`track-musicbrainz`)                   |
+| `tracksWithTempo`          | of those with an mbid | step 4 (`track-acousticbrainz`)                |
+| `tracksWithDeezerBpm`      | of those with an isrc | step 4 (`track-deezer`)                        |
 
 > `tracksWithLyrics` is LRCLIB-only (~70%) unless `GENIUS_TOKEN` is present in the prod secret — the Genius fallback is skipped when it's unset.
 
