@@ -12,6 +12,7 @@ const TEST_TOKEN = 'test-admin-token-integration';
 const ADMIN_ROUTES: { method: 'GET' | 'POST'; url: string }[] = [
   { method: 'POST', url: '/api/v1/admin/ingest' },
   { method: 'GET', url: '/api/v1/admin/ingest/status' },
+  { method: 'POST', url: '/api/v1/admin/reset' },
   { method: 'POST', url: '/api/v1/admin/lyrics/enrich' },
   { method: 'POST', url: '/api/v1/admin/lyrics/clear-genius' },
   { method: 'GET', url: '/api/v1/admin/lyrics/status' },
