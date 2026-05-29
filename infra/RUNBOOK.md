@@ -8,6 +8,7 @@ This is the operator's guide to standing up, redeploying, and recovering the pro
 - [Observability — fluent-bit and alarms](#observability--fluent-bit-and-alarms)
 - [Redeploy procedure](#redeploy-procedure)
 - [Full reload from scratch](#full-reload-from-scratch)
+- [Instance power switch — scale-to-zero](#instance-power-switch--scale-to-zero)
 - [Resuming a paused Aura instance](#resuming-a-paused-aura-instance)
 - [Where to look when things break](#where-to-look-when-things-break)
 - [Tear-down](#tear-down)
@@ -750,6 +751,46 @@ curl -s "$GRAPH_SERVICE_URL/api/v1/stats" | jq .data.enrichment
 
 ---
 
+## Instance power switch — scale-to-zero
+
+The k3s node doesn't need to run 24/7. A small Lambda (`liner-notes-instance-scheduler`, see [`infra/terraform/scheduler.tf`](terraform/scheduler.tf)) starts/stops it on demand and on a nightly schedule, suppressing the two transient alarms (`liner-notes-ec2-status-check`, `liner-notes-health-check`) while the node is intentionally down so a planned stop doesn't page you. A stopped EC2 node plus an auto-paused Aura instance (see "Resuming a paused Aura instance" below) is a coherent "asleep" state at ~$0/month.
+
+> **One-time prerequisite.** `operator-deploy-policy.json` grants `lambda:InvokeFunction` on `function:liner-notes-*`. If you set this account up before [#118](https://github.com/macamp0328/liner-notes/issues/118), re-attach the operator policies per [`infra/iam/README.md`](iam/README.md) before the switch will work.
+
+### The switch
+
+Run from the repo root (uses your default AWS profile; honors `AWS_PROFILE`):
+
+| Command             | What it does                                                                                                | When                              |
+| ------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `pnpm power:off`    | Pauses the nightly schedule, suppresses the two alarms, stops the node. Stays down until you say otherwise. | Away for days/weeks.              |
+| `pnpm power:on`     | Pauses the nightly schedule, starts the node, re-enables the alarms. Stays up — the 23:00 stop won't fire.  | Working now, including overnight. |
+| `pnpm power:auto`   | Re-arms the nightly stop (23:00 ET) / start (08:00 ET) cost-saver and starts the node now.                  | Back to hands-off cost saving.    |
+| `pnpm power:status` | Read-only: prints the instance state and each schedule's ENABLED/DISABLED state.                            | Checking where things stand.      |
+
+Each command prints the resulting state, e.g.:
+
+```json
+{
+  "action": "on",
+  "instance": "running",
+  "schedules": { "liner-notes-instance-stop": "DISABLED", "liner-notes-instance-start": "DISABLED" }
+}
+```
+
+`on` and `off` are _manual overrides_ — both pause the schedule so it can't undo your choice. `auto` is the only mode that re-arms it. Out of the box the schedule is created **DISABLED** (`nightly_schedule_enabled = false` in [`variables.tf`](terraform/variables.tf)); set that var to `true` or run `pnpm power:auto` to opt in.
+
+### What to expect on a cold start
+
+`user_data` runs only on first boot, so a stopped→started node does **not** re-bootstrap — k3s, the EBS volume, kubeconfig, and in-cluster state persist across stop/start. After `pnpm power:on` / `pnpm power:auto`:
+
+- Give the node ~1–2 minutes; k3s restarts the graph-service pod automatically.
+- The ECR pull-secret CronJob refreshes every 6h; after a long stop the in-cluster `ecr-pull-secret` may be stale until the next fire. If the pod is stuck `ImagePullBackOff` with `unauthorized`, force a refresh: `kubectl -n liner-notes create job --from=cronjob/ecr-pull-secret-refresher refresh-now`, then `kubectl -n liner-notes rollout restart deployment/graph-service`.
+- The first request is slow: the pod settles and **Aura resumes from its own pause** if it has been idle ≥72h (see below).
+- The two transient alarms are re-enabled automatically — no manual alarm steps.
+
+---
+
 ## Resuming a paused Aura instance
 
 AuraDB Free auto-pauses after **72 hours of inactivity**. Traffic does **not** auto-resume a paused instance.
@@ -793,6 +834,8 @@ A scheduled keep-warm ping is tracked in [#103](https://github.com/macamp0328/li
 | `kubectl` returns `x509: certificate valid for 127.0.0.1, …`                                                         | The kubeconfig server URL was rewritten away from `127.0.0.1`. Re-fetch with `aws ssm start-session ... 'command=["sudo cat /etc/rancher/k3s/k3s.yaml"]'` and leave `https://127.0.0.1:6443` intact; the port-forward bridges that local address to the API server.                                                                                                                                                                                                                                                                                                                            |
 | k3s itself unhealthy                                                                                                 | In an SSM session: `sudo journalctl -u k3s -n 200`, `sudo systemctl status k3s`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Refresher CronJob failing                                                                                            | `kubectl -n liner-notes logs job/<latest-refresher-job>` — typical failures are IMDS unreachable (pod has lost connectivity) or `ECR_REGISTRY=REPLACE_ME` (Step 7b skipped).                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `pnpm power:*` fails with `AccessDenied` on `lambda:InvokeFunction`                                                  | Operator policy predates [#118](https://github.com/macamp0328/liner-notes/issues/118) — re-attach `operator-deploy-policy.json` per [`infra/iam/README.md`](iam/README.md).                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `pnpm power:*` fails with `ResourceNotFoundException`                                                                | The scheduler Lambda isn't deployed (`terraform apply`), or `project_name` was overridden — set `SCHEDULER_LAMBDA_NAME` to the `instance_scheduler_function_name` output.                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ---
 

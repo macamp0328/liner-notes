@@ -35,3 +35,27 @@ variable "allow_app_cidr" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
+
+variable "nightly_schedule_enabled" {
+  description = "Initial state of the nightly stop/start cost-saving schedules on first apply. The runtime switch (`pnpm power:on|off|auto`) takes over thereafter — terraform ignores later state changes — so this only decides whether the node sleeps on the schedule out of the box. Default false (manual control via the power switch)."
+  type        = bool
+  default     = false
+}
+
+variable "scheduler_timezone" {
+  description = "IANA timezone the stop/start crons are evaluated in. EventBridge Scheduler handles DST automatically."
+  type        = string
+  default     = "America/New_York"
+}
+
+variable "scheduler_stop_cron" {
+  description = "EventBridge Scheduler cron for the nightly stop, evaluated in scheduler_timezone. Default 23:00."
+  type        = string
+  default     = "cron(0 23 * * ? *)"
+}
+
+variable "scheduler_start_cron" {
+  description = "EventBridge Scheduler cron for the nightly start, evaluated in scheduler_timezone. Default 08:00."
+  type        = string
+  default     = "cron(0 8 * * ? *)"
+}

@@ -59,3 +59,13 @@ output "dashboard_url" {
   description = "CloudWatch dashboard for graph-service — alarms, EC2 health, log activity at one URL. Referenced from infra/RUNBOOK.md."
   value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${aws_cloudwatch_dashboard.graph_service.dashboard_name}"
 }
+
+output "instance_scheduler_function_name" {
+  description = "Lambda the power switch invokes. Set as SCHEDULER_LAMBDA_NAME for scripts/admin/power.sh if you override project_name."
+  value       = aws_lambda_function.instance_scheduler.function_name
+}
+
+output "instance_schedule_names" {
+  description = "Names of the nightly stop/start EventBridge schedules toggled by `pnpm power:auto`/`off`."
+  value       = [aws_scheduler_schedule.stop.name, aws_scheduler_schedule.start.name]
+}

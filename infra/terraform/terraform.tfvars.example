@@ -26,3 +26,16 @@
 # need a key pair or an open port. If you want SSH anyway:
 # ssh_key_name   = "my-keypair"
 # allow_ssh_cidr = ["203.0.113.42/32"]
+
+# Scale-to-zero power switch (see infra/RUNBOOK.md). The Lambda and schedules
+# are always created; these only tune the nightly cost-saver. The runtime
+# switch (`pnpm power:on|off|auto`) owns the schedule state after first apply.
+#
+# Start the node sleeping on the nightly schedule out of the box (default is
+# manual control — schedules created DISABLED):
+# nightly_schedule_enabled = true
+#
+# Stop/start times. Crons are evaluated in scheduler_timezone (DST-aware).
+# scheduler_timezone   = "America/New_York"
+# scheduler_stop_cron  = "cron(0 23 * * ? *)"
+# scheduler_start_cron = "cron(0 8 * * ? *)"
