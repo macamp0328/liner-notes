@@ -30,6 +30,10 @@
     "status:track-acousticbrainz": "scripts/admin/get.sh /api/v1/admin/track-acousticbrainz/status",
     "status:track-deezer": "scripts/admin/get.sh /api/v1/admin/track-deezer/status",
     "db:wipe": "scripts/admin/post.sh '/api/v1/admin/reset?confirm=wipe-all'",
+    "power:on": "scripts/admin/power.sh on",
+    "power:off": "scripts/admin/power.sh off",
+    "power:auto": "scripts/admin/power.sh auto",
+    "power:status": "scripts/admin/power.sh status",
     "prepare": "husky || true"
   },
   "lint-staged": {
