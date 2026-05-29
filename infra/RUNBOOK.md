@@ -7,6 +7,7 @@ This is the operator's guide to standing up, redeploying, and recovering the pro
 - [First-time deploy — step by step](#first-time-deploy--step-by-step)
 - [Observability — fluent-bit and alarms](#observability--fluent-bit-and-alarms)
 - [Redeploy procedure](#redeploy-procedure)
+- [Full reload from scratch](#full-reload-from-scratch)
 - [Resuming a paused Aura instance](#resuming-a-paused-aura-instance)
 - [Where to look when things break](#where-to-look-when-things-break)
 - [Tear-down](#tear-down)
@@ -427,9 +428,9 @@ Run from your laptop, inside a fresh clone of the repo. Triggers the five manual
 ```bash
 # One-off env (or drop these into a gitignored .env.local at the repo root)
 export GRAPH_SERVICE_URL="$SERVICE_URL"
-export ADMIN_TOKEN=$(aws secretsmanager get-secret-value \
+export ADMIN_TOKEN="$(aws secretsmanager get-secret-value \
   --secret-id liner-notes/graph-service/prod \
-  --query SecretString --output text | jq -r .ADMIN_TOKEN)
+  --query SecretString --output text | jq -r '.ADMIN_TOKEN')"
 
 # Snapshot the current state of every enrichment (read-only, ~1s)
 pnpm status:nationality
@@ -666,6 +667,73 @@ cd "$(git rev-parse --show-toplevel)"
 ```
 
 The Deployment uses `strategy: Recreate` — there will be ~30 seconds of downtime while the old pod terminates and the new one starts. Acceptable for a personal-project prod; a multi-AZ HA setup is out of scope.
+
+---
+
+## Full reload from scratch
+
+Use this to discard the entire graph and rebuild it from Discogs — e.g. after a schema change, to clear stale nodes that `MERGE` can't remove (releases deleted from the collection), or to validate the ingestion + enrichment pipeline end-to-end on an empty graph.
+
+> **The graph is fully reconstructable from Discogs.** There is no separate backup to restore; a wipe is safe by design. The only data that does _not_ come back automatically is the manual track-level enrichment (MusicBrainz/AcousticBrainz/Deezer), which you re-run explicitly in step 4.
+
+**Prereqs.** Set `GRAPH_SERVICE_URL` and `ADMIN_TOKEN` once (the `pnpm` admin scripts read them from a gitignored `.env.local`, or export inline):
+
+```bash
+export GRAPH_SERVICE_URL="$SERVICE_URL"   # e.g. http://<EC2_DNS>:30080 — from the deploy env block
+export ADMIN_TOKEN="$(aws secretsmanager get-secret-value \
+  --secret-id liner-notes/graph-service/prod \
+  --query SecretString --output text | jq -r '.ADMIN_TOKEN')"
+```
+
+**1. (Optional) Snapshot the current coverage** so you can compare before/after:
+
+```bash
+curl -s "$GRAPH_SERVICE_URL/api/v1/stats" | jq .
+```
+
+**2. Wipe the graph.** Double-gated (admin token + explicit confirm); see the [reset endpoint](../services/graph-service/src/api/admin.ts):
+
+```bash
+pnpm db:wipe
+# → POST /api/v1/admin/reset?confirm=wipe-all → { "data": { "deleted": <nodeCount> } }
+```
+
+> **Requires the reset endpoint** (`POST /api/v1/admin/reset` + the `pnpm db:wipe` script) added in [#163](https://github.com/macamp0328/liner-notes/pull/163). Confirm the running image includes it before relying on this step. On an older build without the endpoint, wipe directly instead — `cypher-shell -a "$NEO4J_URI" -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" "MATCH (n) DETACH DELETE n"` (creds from the prod secret).
+
+**3. Re-ingest.** An empty graph auto-triggers ingestion on pod start, so the cleanest trigger is a rollout restart (runs base ingestion + the in-pipeline enrichments: lyrics, master-data/originalYear, artist genres, track versions, artist profiles):
+
+```bash
+# Needs the Step 4b SSM port-forward running and KUBECONFIG set (see First-time deploy).
+kubectl -n liner-notes rollout restart deployment/graph-service
+aws logs tail /liner-notes/graph-service --follow   # watch enrichment stages; ~4 min for ~200 releases
+```
+
+Alternatively, trigger without a restart: `curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "$GRAPH_SERVICE_URL/api/v1/admin/ingest"` (returns 202; poll `pnpm status:lyrics` etc.).
+
+**4. Run the manual track-level enrichments** — these are admin-only and **not** part of `runIngestion`, so they stay null after a reload until kicked off (MusicBrainz is 1 req/sec → the track-musicbrainz pass for ~2000 tracks takes ~30 min):
+
+```bash
+pnpm enrich:bootstrap
+# mb-release-events → track-musicbrainz → (track-acousticbrainz ‖ track-deezer) → nationality
+```
+
+**5. Verify coverage** against the targets:
+
+```bash
+curl -s "$GRAPH_SERVICE_URL/api/v1/stats" | jq .data.enrichment
+```
+
+| Metric                     | Target                | Filled by                                      |
+| -------------------------- | --------------------- | ---------------------------------------------- |
+| `releasesWithOriginalYear` | ≥ 90%                 | step 3 (master-data)                           |
+| `artistsWithProfile`       | ≥ 80%                 | step 3 (artist-profiles)                       |
+| `tracksWithLyrics`         | best-effort           | step 3 (LRCLIB + Genius if `GENIUS_TOKEN` set) |
+| `tracksWithRecordingMbid`  | high                  | step 4 (`track-musicbrainz`)                   |
+| `tracksWithIsrc`           | high                  | step 4 (`track-musicbrainz`)                   |
+| `tracksWithTempo`          | of those with an mbid | step 4 (`track-acousticbrainz`)                |
+| `tracksWithDeezerBpm`      | of those with an isrc | step 4 (`track-deezer`)                        |
+
+> `tracksWithLyrics` is LRCLIB-only (~70%) unless `GENIUS_TOKEN` is present in the prod secret — the Genius fallback is skipped when it's unset.
 
 ---
 
