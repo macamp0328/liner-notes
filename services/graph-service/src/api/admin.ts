@@ -318,7 +318,10 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
       const deleted = await wipeGraph(getDriver());
-      request.log.warn(`[admin] Graph wiped via POST /reset — ${deleted} nodes deleted`);
+      // Log at error level (Pino 50) so this destructive action trips the
+      // CloudWatch error metric filter (`$.data.level >= 50`) — a graph wipe is
+      // rare and high-impact enough to warrant surfacing as an alertable event.
+      request.log.error(`[admin] Graph wiped via POST /reset — ${deleted} nodes deleted`);
       return reply.send({ data: { deleted } });
     },
   );
