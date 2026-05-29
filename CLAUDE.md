@@ -296,7 +296,7 @@ Internet
 [AWS CloudWatch]        — logs + alerts
 ```
 
-**k3s** on EC2 t3.small instead of EKS (~$72/month). EC2 Scheduler provides scale-to-zero (~$0/month when stopped). t3.micro (1 GB) thrashes under k3s + ESO + graph-service; see [`infra/terraform/variables.tf`](infra/terraform/variables.tf) for the sizing rationale.
+**k3s** on EC2 t3.small instead of EKS (~$72/month). Scale-to-zero is implemented via a scheduler Lambda + EventBridge schedules ([`infra/terraform/scheduler.tf`](infra/terraform/scheduler.tf)): a nightly stop/start cost-saver plus a `pnpm power:on|off|auto|status` switch (~$0/month when stopped). It is opt-in — the nightly schedule ships DISABLED; see the "Instance power switch" section of [`infra/RUNBOOK.md`](infra/RUNBOOK.md). t3.micro (1 GB) thrashes under k3s + ESO + graph-service; see [`infra/terraform/variables.tf`](infra/terraform/variables.tf) for the sizing rationale.
 
 Operator-facing deploy, redeploy, and recovery procedures live in [`infra/RUNBOOK.md`](infra/RUNBOOK.md).
 
