@@ -408,12 +408,59 @@ The empty-graph auto-ingest fires on first boot:
 kubectl -n liner-notes logs deployment/graph-service -f
 ```
 
-**Expected:** progress logs starting with `Graph is empty — starting Discogs ingestion in background`. For the project's ~30-record reference collection that ends up around ~6,150 nodes and ~14,297 relationships, the base ingest takes ~4 minutes. Enrichment passes (lyrics, MusicBrainz, AcousticBrainz, Deezer) then run for longer in the background — watch for `Ingestion complete` followed by per-enrichment progress lines.
+**Expected:** progress logs starting with `Graph is empty — starting Discogs ingestion in background`. For the project's ~30-record reference collection that ends up around ~6,150 nodes and ~14,297 relationships, the base ingest takes ~4 minutes. The pipeline then runs `lyrics`, `master-data`, and `artist-profiles` enrichments in the background — watch for `Ingestion complete` followed by per-enrichment progress lines.
+
+Five further enrichments (`nationality`, `mb-release-events`, `track-musicbrainz`, `track-acousticbrainz`, `track-deezer`) are **not** part of `runIngestion` because they'd lengthen the cold-start path from ~4 min to ~45 min. They have to be triggered manually — see [Step 8b](#step-8b--first-deploy-enrichment-bootstrap).
 
 Spot-check the real data:
 
 ```bash
 curl -sS "$SERVICE_URL/api/v1/releases?limit=3" | jq .
+```
+
+---
+
+### Step 8b — First-deploy enrichment bootstrap
+
+Run from your laptop, inside a fresh clone of the repo. Triggers the five manual-only enrichment passes in dependency order — `mb-release-events` → `track-musicbrainz` → (`track-acousticbrainz` + `track-deezer` in parallel) → `nationality`.
+
+```bash
+# One-off env (or drop these into a gitignored .env.local at the repo root)
+export GRAPH_SERVICE_URL="$SERVICE_URL"
+export ADMIN_TOKEN=$(aws secretsmanager get-secret-value \
+  --secret-id liner-notes/graph-service/prod \
+  --query SecretString --output text | jq -r .ADMIN_TOKEN)
+
+# Snapshot the current state of every enrichment (read-only, ~1s)
+pnpm status:nationality
+pnpm status:mb-release-events
+pnpm status:track-musicbrainz
+pnpm status:track-acousticbrainz
+pnpm status:track-deezer
+
+# Run all four manual stages in dependency order
+pnpm enrich:bootstrap
+```
+
+**Expected runtime** for the ~30-record reference collection:
+
+| Stage                  | Duration | Why                                                 |
+| ---------------------- | -------- | --------------------------------------------------- |
+| `mb-release-events`    | ~5 min   | One MusicBrainz call per master (rate-limit 1 rps). |
+| `track-musicbrainz`    | ~30 min  | One MusicBrainz call per track for ISRC matching.   |
+| `track-acousticbrainz` | ~5 min   | AcousticBrainz; runs in parallel with deezer.       |
+| `track-deezer`         | ~5 min   | Deezer; runs in parallel with acousticbrainz.       |
+| `nationality`          | ~5 min   | VIAF + Wikidata lookups per person.                 |
+
+**Total**: ~45 minutes wall-clock for a fresh collection. Keep the terminal open — the HTTP requests block until each stage completes, and `curl -fsS` will exit non-zero if any stage fails so the `&&`-chained sequence stops cleanly.
+
+Individual stages can be run on their own (`pnpm enrich:nationality`, `pnpm enrich:track-deezer`, etc.) when only one needs a re-run.
+
+After the run, spot-check that the new properties populated:
+
+```bash
+curl -sS "$SERVICE_URL/api/v1/releases?limit=1" | jq '.data[0].tracks[0] | {position, isrc, tempo, deezerBpm}'
+# Expected: isrc, tempo, deezerBpm all non-null on a typical track.
 ```
 
 ---
