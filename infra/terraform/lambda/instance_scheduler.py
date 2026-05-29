@@ -17,14 +17,18 @@ alerts.
 
 Environment:
   INSTANCE_ID     - the EC2 instance to control.
-  ALARM_NAMES     - comma-separated CloudWatch alarm names to suppress while
-                    the instance is intentionally stopped.
+  ALARM_NAMES     - comma-separated `name@region` pairs of CloudWatch alarms to
+                    suppress while the instance is intentionally stopped. The
+                    region is explicit per alarm because the alarms don't all
+                    live in the same region: the EC2 status-check alarm is in
+                    the deploy region, but the Route 53 health-check alarm is
+                    always in us-east-1 (that's the only region Route 53
+                    health-check metrics publish to). enable/disable_alarm_actions
+                    silently no-ops on a name absent from the client's region,
+                    so a single client in the Lambda's region would leave the
+                    health alarm un-suppressed whenever aws_region is overridden.
   SCHEDULE_NAMES  - comma-separated EventBridge Scheduler schedule names that
                     make up the nightly cost-saver (the stop + start pair).
-
-The CloudWatch client uses the Lambda's own region. The default deployment is
-single-region (us-east-1), where both alarms live; a multi-region deployment
-would need the alarms colocated with this function.
 """
 
 import os
@@ -32,23 +36,41 @@ import os
 import boto3
 
 ec2 = boto3.client("ec2")
-cloudwatch = boto3.client("cloudwatch")
 scheduler = boto3.client("scheduler")
 
 INSTANCE_ID = os.environ["INSTANCE_ID"]
-ALARM_NAMES = [name for name in os.environ.get("ALARM_NAMES", "").split(",") if name]
 SCHEDULE_NAMES = [
     name for name in os.environ.get("SCHEDULE_NAMES", "").split(",") if name
 ]
 
+_cloudwatch_clients = {}
+
+
+def _alarms_by_region():
+    """Parse ALARM_NAMES ("name@region,...") into {region: [names]}."""
+    by_region = {}
+    for entry in os.environ.get("ALARM_NAMES", "").split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        name, _, region = entry.partition("@")
+        by_region.setdefault(region, []).append(name)
+    return by_region
+
+
+def _cloudwatch(region):
+    if region not in _cloudwatch_clients:
+        _cloudwatch_clients[region] = boto3.client("cloudwatch", region_name=region)
+    return _cloudwatch_clients[region]
+
 
 def _set_alarm_actions(enabled):
-    if not ALARM_NAMES:
-        return
-    if enabled:
-        cloudwatch.enable_alarm_actions(AlarmNames=ALARM_NAMES)
-    else:
-        cloudwatch.disable_alarm_actions(AlarmNames=ALARM_NAMES)
+    for region, names in _alarms_by_region().items():
+        client = _cloudwatch(region)
+        if enabled:
+            client.enable_alarm_actions(AlarmNames=names)
+        else:
+            client.disable_alarm_actions(AlarmNames=names)
 
 
 def _set_schedule_state(state):
@@ -75,13 +97,24 @@ def _set_schedule_state(state):
 
 
 def _start():
-    ec2.start_instances(InstanceIds=[INSTANCE_ID])
-    _set_alarm_actions(True)
+    # Re-enable alarms even if the start call fails — a node that didn't come
+    # back up should page, not sit silently with its monitoring disabled.
+    try:
+        ec2.start_instances(InstanceIds=[INSTANCE_ID])
+    finally:
+        _set_alarm_actions(True)
 
 
 def _stop():
+    # Disable alarms first so the planned stop doesn't page, but roll the
+    # suppression back if the stop fails — a still-running node must stay
+    # monitored.
     _set_alarm_actions(False)
-    ec2.stop_instances(InstanceIds=[INSTANCE_ID])
+    try:
+        ec2.stop_instances(InstanceIds=[INSTANCE_ID])
+    except Exception:
+        _set_alarm_actions(True)
+        raise
 
 
 def _instance_state():

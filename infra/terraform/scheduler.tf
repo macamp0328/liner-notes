@@ -50,9 +50,14 @@ resource "aws_lambda_function" "instance_scheduler" {
   environment {
     variables = {
       INSTANCE_ID = aws_instance.k3s.id
+      # `name@region` pairs — the alarms don't share a region. The EC2
+      # status-check alarm lives in the deploy region; the health-check alarm
+      # is pinned to us-east-1 (provider aws.us_east_1 in observability.tf,
+      # because Route 53 health-check metrics only publish there). The Lambda
+      # toggles each alarm in its own region.
       ALARM_NAMES = join(",", [
-        aws_cloudwatch_metric_alarm.ec2_status_check.alarm_name,
-        aws_cloudwatch_metric_alarm.health_check.alarm_name,
+        "${aws_cloudwatch_metric_alarm.ec2_status_check.alarm_name}@${var.aws_region}",
+        "${aws_cloudwatch_metric_alarm.health_check.alarm_name}@us-east-1",
       ])
       SCHEDULE_NAMES = join(",", [local.stop_schedule_name, local.start_schedule_name])
     }
