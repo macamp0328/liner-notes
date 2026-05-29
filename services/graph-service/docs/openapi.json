@@ -4116,6 +4116,178 @@
           }
         }
       }
+    },
+    "/api/v1/stats": {
+      "get": {
+        "summary": "Public graph + enrichment coverage stats",
+        "tags": ["ops"],
+        "description": "Unauthenticated node counts and per-enrichment coverage (covered/applicable/pct). Cached for 60s. Leaks only collection size — all underlying data is already public.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["counts", "enrichment"],
+                      "properties": {
+                        "counts": {
+                          "type": "object",
+                          "required": ["releases", "artists", "tracks", "masters"],
+                          "properties": {
+                            "releases": {
+                              "type": "integer"
+                            },
+                            "artists": {
+                              "type": "integer"
+                            },
+                            "tracks": {
+                              "type": "integer"
+                            },
+                            "masters": {
+                              "type": "integer"
+                            }
+                          }
+                        },
+                        "enrichment": {
+                          "type": "object",
+                          "required": [
+                            "releasesWithOriginalYear",
+                            "artistsWithProfile",
+                            "tracksWithLyrics",
+                            "tracksWithRecordingMbid",
+                            "tracksWithIsrc",
+                            "tracksWithTempo",
+                            "tracksWithDeezerBpm"
+                          ],
+                          "properties": {
+                            "releasesWithOriginalYear": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "artistsWithProfile": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "tracksWithLyrics": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "tracksWithRecordingMbid": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "tracksWithIsrc": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "tracksWithTempo": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "tracksWithDeezerBpm": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "servers": [
