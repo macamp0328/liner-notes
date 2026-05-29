@@ -450,4 +450,41 @@ describe('enrichLyrics', () => {
       'genius',
     );
   });
+
+  // -------------------------------------------------------------------------
+  // Initial query failure — returns a failed summary instead of throwing (#151)
+  // -------------------------------------------------------------------------
+  it('returns a failed summary (does not throw) when the initial track query fails', async () => {
+    mockGetUnenrichedTracks.mockRejectedValue(new Error('Neo4j unavailable'));
+
+    const summary = await enrichLyrics(fakeDriver);
+
+    expect(summary.enriched).toBe(0);
+    expect(summary.skipped).toBe(0);
+    expect(summary.failed).toBe(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // LRCLIB write failure — counts failed and continues to the next track (#151)
+  // -------------------------------------------------------------------------
+  it('counts failed and continues when the LRCLIB lyrics write throws', async () => {
+    const track1 = { ...sampleTrack, position: 'A1', title: 'Track 1' };
+    const track2 = { ...sampleTrack, position: 'A2', title: 'Track 2' };
+    mockGetUnenrichedTracks.mockResolvedValue([track1, track2]);
+
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse(lrclibHit)) // track1: LRCLIB hit → write throws
+      .mockResolvedValueOnce(makeOkResponse(lrclibHit)); // track2: LRCLIB hit → write succeeds
+    mockSetTrackLyrics
+      .mockRejectedValueOnce(new Error('Neo4j write failed')) // track1 write
+      .mockResolvedValueOnce(undefined); // track2 write
+
+    const summary = await enrichLyrics(fakeDriver);
+
+    expect(summary.failed).toBe(1);
+    expect(summary.enriched).toBe(1);
+    // Both tracks attempted a write — the first throw did not abort the loop
+    expect(mockSetTrackLyrics).toHaveBeenCalledTimes(2);
+  });
 });

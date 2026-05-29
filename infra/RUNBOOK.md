@@ -7,6 +7,7 @@ This is the operator's guide to standing up, redeploying, and recovering the pro
 - [First-time deploy — step by step](#first-time-deploy--step-by-step)
 - [Observability — fluent-bit and alarms](#observability--fluent-bit-and-alarms)
 - [Redeploy procedure](#redeploy-procedure)
+- [Full reload from scratch](#full-reload-from-scratch)
 - [Resuming a paused Aura instance](#resuming-a-paused-aura-instance)
 - [Where to look when things break](#where-to-look-when-things-break)
 - [Tear-down](#tear-down)
@@ -408,12 +409,59 @@ The empty-graph auto-ingest fires on first boot:
 kubectl -n liner-notes logs deployment/graph-service -f
 ```
 
-**Expected:** progress logs starting with `Graph is empty — starting Discogs ingestion in background`. For the project's ~30-record reference collection that ends up around ~6,150 nodes and ~14,297 relationships, the base ingest takes ~4 minutes. Enrichment passes (lyrics, MusicBrainz, AcousticBrainz, Deezer) then run for longer in the background — watch for `Ingestion complete` followed by per-enrichment progress lines.
+**Expected:** progress logs starting with `Graph is empty — starting Discogs ingestion in background`. For the project's ~30-record reference collection that ends up around ~6,150 nodes and ~14,297 relationships, the base ingest takes ~4 minutes. The pipeline then runs `lyrics`, `master-data`, and `artist-profiles` enrichments in the background — watch for `Ingestion complete` followed by per-enrichment progress lines.
+
+Five further enrichments (`nationality`, `mb-release-events`, `track-musicbrainz`, `track-acousticbrainz`, `track-deezer`) are **not** part of `runIngestion` because they'd lengthen the cold-start path from ~4 min to ~45 min. They have to be triggered manually — see [Step 8b](#step-8b--first-deploy-enrichment-bootstrap).
 
 Spot-check the real data:
 
 ```bash
 curl -sS "$SERVICE_URL/api/v1/releases?limit=3" | jq .
+```
+
+---
+
+### Step 8b — First-deploy enrichment bootstrap
+
+Run from your laptop, inside a fresh clone of the repo. Triggers the five manual-only enrichment passes in dependency order — `mb-release-events` → `track-musicbrainz` → (`track-acousticbrainz` + `track-deezer` in parallel) → `nationality`.
+
+```bash
+# One-off env (or drop these into a gitignored .env.local at the repo root)
+export GRAPH_SERVICE_URL="$SERVICE_URL"
+export ADMIN_TOKEN="$(aws secretsmanager get-secret-value \
+  --secret-id liner-notes/graph-service/prod \
+  --query SecretString --output text | jq -r '.ADMIN_TOKEN')"
+
+# Snapshot the current state of every enrichment (read-only, ~1s)
+pnpm status:nationality
+pnpm status:mb-release-events
+pnpm status:track-musicbrainz
+pnpm status:track-acousticbrainz
+pnpm status:track-deezer
+
+# Run all four manual stages in dependency order
+pnpm enrich:bootstrap
+```
+
+**Expected runtime** for the ~30-record reference collection:
+
+| Stage                  | Duration | Why                                                 |
+| ---------------------- | -------- | --------------------------------------------------- |
+| `mb-release-events`    | ~5 min   | One MusicBrainz call per master (rate-limit 1 rps). |
+| `track-musicbrainz`    | ~30 min  | One MusicBrainz call per track for ISRC matching.   |
+| `track-acousticbrainz` | ~5 min   | AcousticBrainz; runs in parallel with deezer.       |
+| `track-deezer`         | ~5 min   | Deezer; runs in parallel with acousticbrainz.       |
+| `nationality`          | ~5 min   | VIAF + Wikidata lookups per person.                 |
+
+**Total**: ~45 minutes wall-clock for a fresh collection. Keep the terminal open — the HTTP requests block until each stage completes, and `curl -fsS` will exit non-zero if any stage fails so the `&&`-chained sequence stops cleanly.
+
+Individual stages can be run on their own (`pnpm enrich:nationality`, `pnpm enrich:track-deezer`, etc.) when only one needs a re-run.
+
+After the run, spot-check that the new properties populated:
+
+```bash
+curl -sS "$SERVICE_URL/api/v1/releases?limit=1" | jq '.data[0].tracks[0] | {position, isrc, tempo, deezerBpm}'
+# Expected: isrc, tempo, deezerBpm all non-null on a typical track.
 ```
 
 ---
@@ -619,6 +667,86 @@ cd "$(git rev-parse --show-toplevel)"
 ```
 
 The Deployment uses `strategy: Recreate` — there will be ~30 seconds of downtime while the old pod terminates and the new one starts. Acceptable for a personal-project prod; a multi-AZ HA setup is out of scope.
+
+> **Changed a secret value first?** If this redeploy follows an edit to `liner-notes/graph-service/prod` in Secrets Manager, force an immediate ESO sync so the new pod reads the updated value. The External Secrets Operator otherwise refreshes the in-cluster `graph-service-secrets` only hourly, and the pod reads env (`envFrom`) only at start — so a fresh pod can come up with the stale value:
+>
+> ```bash
+> kubectl -n liner-notes annotate externalsecret graph-service-secrets force-sync=$(date +%s) --overwrite
+> kubectl -n liner-notes get externalsecret graph-service-secrets   # LAST SYNC resets to a few seconds
+> ```
+
+---
+
+## Full reload from scratch
+
+Use this to discard the entire graph and rebuild it from Discogs — e.g. after a schema change, to clear stale nodes that `MERGE` can't remove (releases deleted from the collection), or to validate the ingestion + enrichment pipeline end-to-end on an empty graph.
+
+> **The graph is fully reconstructable from Discogs.** There is no separate backup to restore; a wipe is safe by design. The only data that does _not_ come back automatically is the manual track-level enrichment (MusicBrainz/AcousticBrainz/Deezer), which you re-run explicitly in step 4.
+
+**Prereqs.** Set `GRAPH_SERVICE_URL` and `ADMIN_TOKEN` once (the `pnpm` admin scripts read them from a gitignored `.env.local`, or export inline):
+
+```bash
+export GRAPH_SERVICE_URL="$SERVICE_URL"   # e.g. http://<EC2_DNS>:30080 — from the deploy env block
+export ADMIN_TOKEN="$(aws secretsmanager get-secret-value \
+  --secret-id liner-notes/graph-service/prod \
+  --query SecretString --output text | jq -r '.ADMIN_TOKEN')"
+```
+
+**1. (Optional) Snapshot the current coverage** so you can compare before/after:
+
+```bash
+curl -s "$GRAPH_SERVICE_URL/api/v1/stats" | jq .
+```
+
+**2. Wipe the graph.** Double-gated (admin token + explicit confirm); see the [reset endpoint](../services/graph-service/src/api/admin.ts):
+
+```bash
+pnpm db:wipe
+# → POST /api/v1/admin/reset?confirm=wipe-all → { "data": { "deleted": <nodeCount> } }
+```
+
+> **Requires the reset endpoint** (`POST /api/v1/admin/reset` + the `pnpm db:wipe` script) added in [#163](https://github.com/macamp0328/liner-notes/pull/163). Confirm the running image includes it before relying on this step. On an older build without the endpoint, wipe directly instead — `cypher-shell -a "$NEO4J_URI" -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" "MATCH (n) DETACH DELETE n"` (creds from the prod secret).
+
+**3. Re-ingest.** An empty graph auto-triggers ingestion on pod start, so the cleanest trigger is a rollout restart (runs base ingestion + the in-pipeline enrichments: lyrics, master-data/originalYear, artist genres, track versions, artist profiles):
+
+```bash
+# Needs the Step 4b SSM port-forward running and KUBECONFIG set (see First-time deploy).
+kubectl -n liner-notes rollout restart deployment/graph-service
+aws logs tail /liner-notes/graph-service --follow   # watch enrichment stages; ~4 min for ~200 releases
+```
+
+Alternatively, trigger without a restart: `curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "$GRAPH_SERVICE_URL/api/v1/admin/ingest"` (returns 202; poll `pnpm status:lyrics` etc.).
+
+> **Changed a secret value (e.g. `GENIUS_TOKEN`) before this reload?** Force an ESO sync _before_ the rollout restart, or the new pod comes up with the stale value and that enrichment silently degrades (e.g. lyrics falls back to LRCLIB-only). ESO refreshes `graph-service-secrets` hourly; the pod reads env only at start:
+>
+> ```bash
+> kubectl -n liner-notes annotate externalsecret graph-service-secrets force-sync=$(date +%s) --overwrite
+> ```
+
+**4. Run the manual track-level enrichments** — these are admin-only and **not** part of `runIngestion`, so they stay null after a reload until kicked off (MusicBrainz is 1 req/sec → the track-musicbrainz pass for ~2000 tracks takes ~30 min):
+
+```bash
+pnpm enrich:bootstrap
+# mb-release-events → track-musicbrainz → (track-acousticbrainz ‖ track-deezer) → nationality
+```
+
+**5. Verify coverage** against the targets:
+
+```bash
+curl -s "$GRAPH_SERVICE_URL/api/v1/stats" | jq .data.enrichment
+```
+
+| Metric                     | Target                | Filled by                                      |
+| -------------------------- | --------------------- | ---------------------------------------------- |
+| `releasesWithOriginalYear` | ≥ 90%                 | step 3 (master-data)                           |
+| `artistsWithProfile`       | ≥ 80%                 | step 3 (artist-profiles)                       |
+| `tracksWithLyrics`         | best-effort           | step 3 (LRCLIB + Genius if `GENIUS_TOKEN` set) |
+| `tracksWithRecordingMbid`  | high                  | step 4 (`track-musicbrainz`)                   |
+| `tracksWithIsrc`           | high                  | step 4 (`track-musicbrainz`)                   |
+| `tracksWithTempo`          | of those with an mbid | step 4 (`track-acousticbrainz`)                |
+| `tracksWithDeezerBpm`      | of those with an isrc | step 4 (`track-deezer`)                        |
+
+> `tracksWithLyrics` is LRCLIB-only (~70%) unless `GENIUS_TOKEN` is present in the prod secret — the Genius fallback is skipped when it's unset.
 
 ---
 

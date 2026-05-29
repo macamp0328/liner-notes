@@ -42,6 +42,34 @@ const PER_PAGE = 50;
 const PROGRESS_INTERVAL = 10;
 
 /**
+ * Run a single enrichment stage with failure isolation.
+ *
+ * Enrichment stages are independent and individually idempotent (each selects
+ * the nodes it still needs to process). A throw escaping one stage — a transient
+ * Neo4j write error, or an upstream 5xx that slips past the stage's own per-item
+ * catch — must not abort the stages that follow it. The error is logged and
+ * pushed onto `errors` so it surfaces in the run summary and, via the level>=50
+ * log line, in CloudWatch. The stage's `fallback` summary is returned so the
+ * pipeline can continue and report zero progress for the skipped stage.
+ */
+async function runStage<T>(
+  name: string,
+  fn: () => Promise<T>,
+  fallback: T,
+  log: Logger,
+  errors: string[],
+): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    errors.push(`Enrichment stage "${name}": ${msg}`);
+    log.error(`[ingest] Enrichment stage "${name}" failed and was skipped: ${msg}`);
+    return fallback;
+  }
+}
+
+/**
  * Run the full Discogs → Neo4j ingestion pipeline.
  *
  * Steps:
@@ -105,20 +133,56 @@ export async function runIngestion(
     }
   }
 
+  // Steps 3-7: Enrichment stages. Each runs in isolation via runStage — a throw
+  // in one stage is logged and recorded in `errors` but must NOT abort the stages
+  // that follow. Before this, a transient failure in an early stage (e.g. lyrics)
+  // silently skipped every later stage for the whole run, leaving master-data and
+  // artist-profiles permanently null (issue #151).
+
   // Step 3: Enrich tracks with lyrics (LRCLIB primary, Genius fallback)
-  const lyricsEnrichment = await enrichLyrics(driver, log);
+  const lyricsEnrichment = await runStage(
+    'lyrics',
+    () => enrichLyrics(driver, log),
+    { enriched: 0, skipped: 0, failed: 0, durationMs: 0 },
+    log,
+    errors,
+  );
 
   // Step 4: Enrich releases with master data (originalYear + global pressing countries/formats)
-  const masterDataEnrichment = await enrichMasterData(client, driver, log);
+  const masterDataEnrichment = await runStage(
+    'master-data',
+    () => enrichMasterData(client, driver, log),
+    { enriched: 0, skipped: 0, failed: 0, durationMs: 0 },
+    log,
+    errors,
+  );
 
   // Step 5: Aggregate genres/styles from Release nodes onto Artist nodes
-  const artistGenresEnrichment = await enrichArtistGenres(driver, log);
+  const artistGenresEnrichment = await runStage(
+    'artist-genres',
+    () => enrichArtistGenres(driver, log),
+    { genresEnriched: 0, stylesEnriched: 0, skipped: 0, failed: 0, durationMs: 0 },
+    log,
+    errors,
+  );
 
   // Step 6: Create IS_VERSION_OF relationships between track variants
-  const trackVersionsEnrichment = await enrichTrackVersions(driver, log);
+  const trackVersionsEnrichment = await runStage(
+    'track-versions',
+    () => enrichTrackVersions(driver, log),
+    { enriched: 0, skipped: 0, failed: 0, durationMs: 0 },
+    log,
+    errors,
+  );
 
   // Step 7: Enrich Artist nodes with realName + profile from Discogs artist API
-  const artistProfilesEnrichment = await enrichArtistProfiles(client, driver, log);
+  const artistProfilesEnrichment = await runStage(
+    'artist-profiles',
+    () => enrichArtistProfiles(client, driver, log),
+    { enriched: 0, skipped: 0, failed: 0, durationMs: 0 },
+    log,
+    errors,
+  );
 
   const durationMs = Date.now() - startTime;
   const durationSec = Math.round(durationMs / 1000);
