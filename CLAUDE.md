@@ -43,7 +43,39 @@ pnpm --filter graph-service build
 
 # Generate OpenAPI docs
 pnpm --filter graph-service docs:generate
+
+# Architecture diagrams (Inframap + Mermaid).
+#   Mac local: `brew install inframap` and ensure Docker Desktop is running.
+#   The script renders SVG via a pinned Docker image (nshine/dot:2.40.1) so
+#   the output is byte-identical between Mac and CI — no graphviz version
+#   drift, no "every PR re-renders the SVG" churn.
+pnpm diagrams:generate
+# Outputs:
+#   infra/diagrams/resource-graph.svg   — auto-generated, every AWS resource + dependency
+#   infra/diagrams/per-file/<name>.mmd  — auto-generated, one per .tf file
+#   infra/diagrams/request-flow.mmd     — hand-maintained logical flow (source of truth)
+# The script also inlines request-flow.mmd into the README and the runbook
+# between <!-- diagrams:request-flow:start --> / :end markers.
+# CI re-runs the generator on PRs touching infra/terraform/** and FAILS if the
+# committed diagrams differ — regenerate locally and commit before pushing.
+# See .github/workflows/diagrams.yml.
 ```
+
+### When to refresh diagrams
+
+Two distinct workflows; pick the right one for the change you're making.
+
+**Regenerate locally before pushing.** Any change under `infra/terraform/**` requires running `pnpm diagrams:generate` locally and committing the updated `resource-graph.svg` and `per-file/*.mmd` files alongside your terraform change. [`.github/workflows/diagrams.yml`](.github/workflows/diagrams.yml) re-runs the generator on every same-paths PR and **fails the check** if the committed artifacts don't match — same generator, same pinned graphviz image (`nshine/dot:2.40.1`), byte-identical output. The workflow used to auto-commit the regenerated files, but pushes from the default `GITHUB_TOKEN` don't trigger downstream workflows (GitHub anti-recursion rule), which left the PR's actual HEAD with no CI run and branch protection blocking the merge. Fail-on-drift trades one local command for a clean check rollup.
+
+**Needs a manual edit.** The hand-maintained logical flow at [`infra/diagrams/request-flow.mmd`](infra/diagrams/request-flow.mmd) is _not_ derived from Terraform — CI will never update it. Edit it directly (or use the `/diagrams draft` skill, which walks the diff with current infra context) after any of the following:
+
+- A new external service joins or leaves the runtime path (e.g. adding Cloudflare in front of the NodePort, swapping Aura for self-hosted Neo4j).
+- The ingress path changes (NodePort → ALB, new domain, mTLS termination moving).
+- A new in-cluster component appears that the reader needs to understand (e.g. an ingress controller, a sidecar, a new namespace).
+- Auth or secrets mechanics shift (e.g. IRSA instead of IMDS-via-instance-role, a new CronJob inserted in the secret loop).
+- A new heavy-traffic data path enters or leaves the picture (e.g. ingesting from a second upstream API).
+
+After editing `request-flow.mmd`, run `pnpm diagrams:generate` so the inlined copies in [`README.md`](README.md) and [`infra/RUNBOOK.md`](infra/RUNBOOK.md) update between their marker comments.
 
 **CI is the last wall of defense, not the first.** Any code change touching production code must pass `test:unit` locally before commit. Broken tests discovered in CI = a wasted cycle.
 
@@ -60,10 +92,12 @@ liner-notes/
 │   ├── pull_request_template.md ← PR checklist for agents
 │   └── workflows/
 │       ├── ci.yml               ← runs on every PR
-│       └── deploy.yml           ← runs on merge to main
+│       ├── deploy.yml           ← runs on merge to main
+│       └── diagrams.yml         ← regenerates architecture diagrams on infra changes
 ├── scripts/
 │   ├── explore-discogs.ts
-│   └── discogs-api-notes.md
+│   ├── discogs-api-notes.md
+│   └── diagrams/                ← `pnpm diagrams:generate` — Inframap + per-file Mermaid
 ├── services/
 │   └── graph-service/           ← Fastify REST API + Neo4j ingestion
 │       ├── CLAUDE.md            ← service-specific handbook (read this too)
@@ -80,7 +114,8 @@ liner-notes/
 │       └── Dockerfile
 ├── infra/
 │   ├── terraform/               ← AWS resources
-│   └── k8s/                     ← Kubernetes manifests
+│   ├── k8s/                     ← Kubernetes manifests
+│   └── diagrams/                ← request-flow.mmd (hand) + resource-graph.svg + per-file/ (auto)
 ├── docker-compose.yml           ← local: Neo4j + graph-service
 └── .env.example                 ← all env vars documented, no values
 ```

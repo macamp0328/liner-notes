@@ -15,6 +15,8 @@ This is the operator's guide to standing up, redeploying, and recovering the pro
 
 ## Architecture at a glance
 
+<!-- diagrams:request-flow:start -->
+
 ```mermaid
 flowchart LR
   user([Your laptop / browser]):::ext
@@ -31,42 +33,85 @@ flowchart LR
         subgraph ns["k8s namespace: liner-notes"]
           direction TB
           svc[/"Service · NodePort 30080"/]
-          pod["Pod · graph-service<br/>envFrom: graph-service-secrets<br/>imagePullSecrets: ecr-pull-secret"]
+          pod["Pod · graph-service"]
           k8s_secret[("Secret · graph-service-secrets")]
           k8s_pull[("Secret · ecr-pull-secret<br/>(dockerconfigjson)")]
           cron["CronJob · ecr-pull-secret-refresher<br/>every 6h"]
           svc --> pod
           k8s_secret -.envFrom.-> pod
           k8s_pull -.imagePullSecret.-> pod
-          cron --writes--> k8s_pull
+          cron -- "writes refreshed token" --> k8s_pull
         end
 
         subgraph eso["k8s namespace: external-secrets"]
           eso_op["External Secrets Operator"]
         end
 
-        eso_op --syncs every 1h--> k8s_secret
+        eso_op -- "syncs every 1h" --> k8s_secret
       end
     end
 
-    ecr["ECR · liner-notes/graph-service<br/>(last 10 tagged images)"]
-    sm["Secrets Manager<br/>liner-notes/graph-service/prod"]
-    iam["EC2 IAM role · ec2_k3s<br/>ECR read · SM read · SSM"]
+    subgraph account["AWS account scope (outside the VPC)"]
+      direction TB
+      ecr["ECR · liner-notes/graph-service<br/>(last 10 tagged images)"]
+      sm["Secrets Manager<br/>liner-notes/graph-service/prod"]
+      iam["EC2 IAM role · ec2_k3s<br/>ECR read · SM read · SSM"]
+    end
     iam -.attached.-> ec2
   end
 
-  aura[("Neo4j AuraDB Free · GCP<br/>~6,150 nodes / ~14,297 rels")]:::ext
-  discogs[("Discogs API")]:::ext
+  subgraph external["External services"]
+    direction TB
+    aura[("Neo4j AuraDB Free · GCP<br/>neo4j+s:// · :7687")]:::ext
+    discogs[("Discogs API<br/>https · 60 req/min")]:::ext
+  end
 
   user -- "http :30080 (NodePort)" --> svc
   pod == "Cypher · neo4j+s://" ==> aura
   pod -.ingest.-> discogs
   cron == "ecr get-login-password<br/>(IMDS → instance role)" ==> ecr
   eso_op == "GetSecretValue<br/>(IMDS → instance role)" ==> sm
-  pod == "image pull (via dockerconfigjson)" ==> ecr
+  pod == "image pull<br/>(via dockerconfigjson)" ==> ecr
+
+  subgraph legend["Edge legend &nbsp;·&nbsp; color = flow category"]
+    direction LR
+    lr1[src]:::legendNode -- "user request" --> lr2[sink]:::legendNode
+    ld1[src]:::legendNode == "heavy data path" ==> ld2[sink]:::legendNode
+    lc1[src]:::legendNode -. "secret sync / control plane" .-> lc2[sink]:::legendNode
+    le1[src]:::legendNode -. "external egress" .-> le2[sink]:::legendNode
+  end
+
+  %% Edge indices follow declaration order across the entire file.
+  %% Main edges (0–11):
+  %%   0  svc --> pod                          (request)
+  %%   1  k8s_secret -.envFrom.-> pod          (mount, gray default)
+  %%   2  k8s_pull -.imagePullSecret.-> pod    (mount, gray default)
+  %%   3  cron -- "writes refreshed token" --> k8s_pull   (secret sync)
+  %%   4  eso_op -- "syncs every 1h" --> k8s_secret       (secret sync)
+  %%   5  iam -.attached.-> ec2                (attachment, gray default)
+  %%   6  user --> svc                         (request)
+  %%   7  pod ==> aura                         (data path)
+  %%   8  pod -.ingest.-> discogs              (external egress)
+  %%   9  cron ==> ecr                         (secret sync — image-pull token)
+  %%  10  eso_op ==> sm                        (secret sync)
+  %%  11  pod ==> ecr                          (data path — image pull)
+  %% Legend edges (12–15):
+  %%  12  lr1 --> lr2                          (request)
+  %%  13  ld1 ==> ld2                          (data path)
+  %%  14  lc1 -.-> lc2                         (secret sync)
+  %%  15  le1 -.-> le2                         (external egress)
+  linkStyle 0,6,12 stroke:#0f172a,stroke-width:2px
+  linkStyle 7,11,13 stroke:#1d4ed8,stroke-width:2.5px
+  linkStyle 3,4,9,10,14 stroke:#7c3aed,stroke-width:1.8px
+  linkStyle 8,15 stroke:#15803d,stroke-width:1.8px
 
   classDef ext fill:#f4f4f4,stroke:#999,stroke-dasharray:5 3
+  classDef legendNode fill:#ffffff,stroke:#cbd5e1,color:#475569
 ```
+
+<!-- diagrams:request-flow:end -->
+
+> **Source of truth:** [`infra/diagrams/request-flow.mmd`](diagrams/request-flow.mmd). Regenerate with `pnpm diagrams:generate` after editing. A full Terraform resource graph (auto-generated) lives at [`diagrams/resource-graph.svg`](diagrams/resource-graph.svg); per-file Mermaid diagrams are under [`diagrams/per-file/`](diagrams/per-file/).
 
 **Key flows:**
 
@@ -110,19 +155,11 @@ mise install
 
 ### AWS credentials
 
-The runbook assumes a non-root IAM user (`liner-notes-cli` in our setup) with the following:
+The runbook assumes a non-root IAM user (`liner-notes-cli` in our setup) with the following — no AWS-managed policies, all permissions come from this repo:
 
-- `AmazonEC2FullAccess` (from initial setup)
-- `AmazonEC2ContainerRegistryFullAccess` (from initial setup)
-- `SecretsManagerReadWrite` (from initial setup)
-- **Inline policy** from [`infra/iam/operator-iam-policy.json`](iam/operator-iam-policy.json) — Terraform-managed IAM roles
+- **Customer-managed policy** from [`infra/iam/operator-iam-policy.json`](iam/operator-iam-policy.json) — Terraform-managed IAM roles, CloudWatch logs + alarms, SNS topic + subscription, Route 53 health checks
+- **Customer-managed policy** from [`infra/iam/operator-deploy-policy.json`](iam/operator-deploy-policy.json) — VPC, EC2, EIP, ECR, Secrets Manager (everything `terraform apply` plus the runbook's `docker push` / `put-secret-value` / instance-resize flows touch)
 - **Inline policy** from [`infra/iam/operator-ssm-policy.json`](iam/operator-ssm-policy.json) — SSM Session Manager
-- **Temporary managed policies** until [#127](https://github.com/macamp0328/liner-notes/issues/127) scopes them into `operator-iam-policy.json` — needed for the observability resources (CloudWatch Log Group + alarms, SNS topic, Route 53 health check) added in [#125](https://github.com/macamp0328/liner-notes/pull/125):
-  - `CloudWatchFullAccess`
-  - `AmazonSNSFullAccess`
-  - `AmazonRoute53FullAccess`
-
-  These must be attached by the **root user** (or an admin) — `liner-notes-cli` can't grant itself permissions. From the AWS Console: IAM → Users → `liner-notes-cli` → Add permissions → Attach policies directly.
 
 See [`infra/iam/README.md`](iam/README.md) for the one-time attach procedure. **Do this before Step 1** or `terraform apply` and the `aws ssm` calls will fail with `AccessDenied`.
 
@@ -383,7 +420,21 @@ curl -sS "$SERVICE_URL/api/v1/releases?limit=3" | jq .
 
 ## Observability — fluent-bit and alarms
 
-`terraform apply` (Step 1) created the supporting AWS resources for observability: a CloudWatch Log Group (`/liner-notes/graph-service`), an SNS topic with an email subscription, a Route 53 health check probing `/api/v1/health`, and three alarms (pod restarts, health-check failures, EC2 status check). This section covers the two manual follow-ups: confirming the SNS subscription and installing the in-cluster fluent-bit daemonset that actually writes logs to the log group.
+`terraform apply` (Step 1) created the supporting AWS resources for observability: a CloudWatch Log Group (`/liner-notes/graph-service`), an SNS topic with an email subscription, a Route 53 health check probing `/api/v1/health`, seven alarms, and a `liner-notes-graph-service` dashboard surfacing all of the above in one view.
+
+| Alarm                           | Fires on                                                                     |
+| ------------------------------- | ---------------------------------------------------------------------------- |
+| `liner-notes-pod-restarts`      | Kubelet logs `Liveness probe failed` or `CrashLoopBackOff` within 5 min.     |
+| `liner-notes-health-check`      | Route 53 external probe of `/api/v1/health` fails for 2 consecutive minutes. |
+| `liner-notes-ec2-status-check`  | AWS EC2 system or instance status check fails for 2 consecutive minutes.     |
+| `liner-notes-error-log-lines`   | More than 5 pino ERROR-level (`level >= 50`) log lines in 5 min.             |
+| `liner-notes-http-5xx`          | One or more 5xx responses logged by Fastify in 5 min.                        |
+| `liner-notes-neo4j-disconnects` | `ServiceUnavailable` or `SessionExpired` appears in the log group in 5 min.  |
+| `liner-notes-billing`           | AWS estimated charges exceed $20 (USD) for the current billing period.       |
+
+This section covers the three manual follow-ups: confirming the SNS subscription, enabling AWS account-level billing alerts, and installing the in-cluster fluent-bit daemonset that actually writes logs to the log group.
+
+The unified at-a-glance view is at `terraform output -raw dashboard_url` — alarm tiles, Route 53 probe, EC2 CPU/network/status, log activity, and per-metric widgets for the log-driven alarms, all on one page.
 
 ### Step 9 — Confirm the SNS subscription
 
@@ -398,6 +449,16 @@ aws sns list-subscriptions-by-topic \
 ```
 
 The subscription's `SubscriptionArn` should not be the literal string `PendingConfirmation`.
+
+### Step 9b — Enable account-level billing alerts (one-time)
+
+The `liner-notes-billing` alarm reads `AWS/Billing → EstimatedCharges`, but that metric is only published once the account opts into billing alerts. It is **not Terraform-manageable** — there is no IAM API for it. Do this once per AWS account:
+
+1. Sign in to the [AWS Billing console](https://console.aws.amazon.com/billing/home#/preferences) as the account root user (the toggle is root-only).
+2. Open **Billing → Billing preferences**.
+3. Tick **Receive Billing Alerts** and save.
+
+Until this is on, the billing alarm stays in `INSUFFICIENT_DATA` indefinitely — no harm done, but it also won't fire. Once enabled, the metric starts publishing every ~6 hours and the alarm becomes useful within a day.
 
 ### Step 10 — Install fluent-bit on the node
 
@@ -423,8 +484,10 @@ helm repo update
 curl -fsSL https://raw.githubusercontent.com/macamp0328/liner-notes/main/infra/k8s/aws-for-fluent-bit/values.yaml \
   > /tmp/fluent-bit-values.yaml
 
-# Sanity-check the file landed intact — should print >= 50 lines and end
-# with the [INPUT] block.
+# Sanity-check the file landed intact — should print >= 100 lines and end
+# with the `additionalFilters` [FILTER] grep block (issue #152). If it
+# still ends with the systemd [INPUT] block, the values file pre-dates
+# #152 and the log-group scoping filter is missing.
 wc -l /tmp/fluent-bit-values.yaml
 tail -8 /tmp/fluent-bit-values.yaml
 

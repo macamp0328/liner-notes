@@ -37,6 +37,110 @@
         "iam:UntagInstanceProfile"
       ],
       "Resource": "arn:aws:iam::123456789012:instance-profile/liner-notes-*"
+    },
+    {
+      "Sid": "ManageLinerNotesLogGroups",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:PutRetentionPolicy",
+        "logs:DeleteRetentionPolicy",
+        "logs:ListTagsLogGroup",
+        "logs:ListTagsForResource",
+        "logs:TagResource",
+        "logs:UntagResource",
+        "logs:PutMetricFilter",
+        "logs:DeleteMetricFilter",
+        "logs:DescribeMetricFilters",
+        "logs:FilterLogEvents"
+      ],
+      "Resource": [
+        "arn:aws:logs:*:123456789012:log-group:/liner-notes/*",
+        "arn:aws:logs:*:123456789012:log-group:/liner-notes/*:*"
+      ]
+    },
+    {
+      "Sid": "DescribeAllLogGroups",
+      "Effect": "Allow",
+      "Action": "logs:DescribeLogGroups",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ManageLinerNotesAlarms",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:DeleteAlarms",
+        "cloudwatch:ListTagsForResource",
+        "cloudwatch:TagResource",
+        "cloudwatch:UntagResource"
+      ],
+      "Resource": "arn:aws:cloudwatch:*:123456789012:alarm:liner-notes-*"
+    },
+    {
+      "Sid": "DescribeAllAlarms",
+      "Effect": "Allow",
+      "Action": "cloudwatch:DescribeAlarms",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadAllMetrics",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:GetMetricStatistics",
+        "cloudwatch:GetMetricData",
+        "cloudwatch:ListMetrics"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ManageLinerNotesDashboards",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutDashboard",
+        "cloudwatch:GetDashboard",
+        "cloudwatch:DeleteDashboards"
+      ],
+      "Resource": "arn:aws:cloudwatch::123456789012:dashboard/liner-notes-*"
+    },
+    {
+      "Sid": "ListAllDashboards",
+      "Effect": "Allow",
+      "Action": "cloudwatch:ListDashboards",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ManageLinerNotesSnsTopics",
+      "Effect": "Allow",
+      "Action": [
+        "sns:CreateTopic",
+        "sns:DeleteTopic",
+        "sns:GetTopicAttributes",
+        "sns:SetTopicAttributes",
+        "sns:ListTagsForResource",
+        "sns:TagResource",
+        "sns:UntagResource",
+        "sns:Subscribe",
+        "sns:Unsubscribe",
+        "sns:GetSubscriptionAttributes",
+        "sns:ListSubscriptionsByTopic"
+      ],
+      "Resource": "arn:aws:sns:*:123456789012:liner-notes-*"
+    },
+    {
+      "Sid": "ManageRoute53HealthChecks",
+      "Effect": "Allow",
+      "Action": [
+        "route53:CreateHealthCheck",
+        "route53:DeleteHealthCheck",
+        "route53:GetHealthCheck",
+        "route53:ListHealthChecks",
+        "route53:UpdateHealthCheck",
+        "route53:ChangeTagsForResource",
+        "route53:ListTagsForResource"
+      ],
+      "Resource": "*"
     }
   ]
 }

@@ -54,3 +54,8 @@ output "health_check_id" {
   description = "Route 53 health check ID probing /api/v1/health. Use in the AWS console under Route 53 → Health checks to see live status."
   value       = aws_route53_health_check.graph_service.id
 }
+
+output "dashboard_url" {
+  description = "CloudWatch dashboard for graph-service — alarms, EC2 health, log activity at one URL. Referenced from infra/RUNBOOK.md."
+  value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${aws_cloudwatch_dashboard.graph_service.dashboard_name}"
+}
