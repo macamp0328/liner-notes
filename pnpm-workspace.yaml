@@ -1,5 +1,8 @@
 packages:
   - 'services/*'
 
+allowBuilds:
+  esbuild: true
+
 onlyBuiltDependencies:
   - esbuild
