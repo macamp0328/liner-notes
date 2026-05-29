@@ -188,7 +188,14 @@ export async function enrichLyrics(
 
   log.info('[lyrics] Starting lyrics enrichment');
 
-  const tracks = await getUnenrichedTracks(driver);
+  let tracks;
+  try {
+    tracks = await getUnenrichedTracks(driver);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.error(`[lyrics] Failed to fetch unenriched tracks: ${msg}`);
+    return { enriched: 0, skipped: 0, failed: 1, durationMs: Date.now() - startTime };
+  }
   log.info(`[lyrics] Found ${tracks.length} tracks without lyrics`);
 
   const geniusToken = process.env['GENIUS_TOKEN'];
@@ -209,8 +216,20 @@ export async function enrichLyrics(
     if (lrclibFailed) continue;
 
     if (lrclibResult !== null) {
-      await setTrackLyrics(driver, track.releaseDiscogsId, track.position, lrclibResult, 'lrclib');
-      enriched++;
+      try {
+        await setTrackLyrics(
+          driver,
+          track.releaseDiscogsId,
+          track.position,
+          lrclibResult,
+          'lrclib',
+        );
+        enriched++;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.error(`[lyrics] Failed to write LRCLIB lyrics for "${track.title}": ${msg}`);
+        failed++;
+      }
       continue;
     }
 
