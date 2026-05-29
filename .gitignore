@@ -38,6 +38,8 @@ tfplan
 # The committed terraform.tfvars.example documents the available knobs.
 *.tfvars
 !*.tfvars.example
+# Lambda deployment package — built from lambda/*.py by archive_file on plan.
+infra/terraform/lambda/*.zip
 
 
 # Test coverage
