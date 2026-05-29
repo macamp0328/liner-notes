@@ -42,6 +42,27 @@ export async function hasReleases(driver: Driver): Promise<boolean> {
 }
 
 /**
+ * Delete every node and relationship in the graph. Returns the number of nodes
+ * removed. Destructive and irreversible — intended for a deliberate "wipe and
+ * reload from scratch" (the graph is fully reconstructable from Discogs). The
+ * collection is small (~200 releases / a few thousand nodes), so a single
+ * DETACH DELETE is well within Aura's transaction limits.
+ */
+export async function wipeGraph(driver: Driver): Promise<number> {
+  const session = driver.session();
+  try {
+    const result = await session.run('MATCH (n) DETACH DELETE n RETURN count(n) AS deleted');
+    const raw = result.records[0]?.get('deleted') as { toNumber(): number } | number | null;
+    if (raw === null || raw === undefined) return 0;
+    return typeof (raw as { toNumber(): number }).toNumber === 'function'
+      ? (raw as { toNumber(): number }).toNumber()
+      : (raw as number);
+  } finally {
+    await session.close();
+  }
+}
+
+/**
  * Merge all nodes and relationships for a single Discogs release.
  * Opens one session; all sub-operations run sequentially within it.
  * Each MERGE is idempotent — safe to call multiple times with the same data.
