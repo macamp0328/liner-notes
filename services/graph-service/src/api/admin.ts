@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { adminAuthHook } from './middleware/admin-auth.js';
 import { getDriver } from '../db/client.js';
+import { wipeGraph } from '../db/ingestion-repository.js';
 import { buildDiscogsClientFromEnv, runIngestion } from '../ingestion/ingest.js';
 import {
   getJobState,
@@ -261,6 +262,64 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (_request, reply) => {
       return reply.send({ data: getJobState() });
+    },
+  );
+
+  fastify.post<{
+    Querystring: { confirm?: string };
+    Reply: { data: { deleted: number } } | { error: { code: string; message: string } };
+  }>(
+    '/reset',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Wipe the entire graph (destructive)',
+        description:
+          '**Deletes ALL nodes and relationships** via `MATCH (n) DETACH DELETE n`. ' +
+          'Intended for a deliberate "wipe and reload from scratch" — the graph is fully ' +
+          'reconstructable from Discogs, so there is no separate backup to restore.\n\n' +
+          'Double-gated: requires the `ADMIN_TOKEN` bearer **and** an explicit `?confirm=wipe-all` ' +
+          'query parameter. Without the exact confirm value it returns 400 and changes nothing.\n\n' +
+          'After wiping, restart the pod (or call `POST /api/v1/admin/ingest`) to re-ingest: an empty ' +
+          'graph auto-triggers ingestion on startup.',
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            confirm: { type: 'string', description: 'Must equal "wipe-all" to proceed.' },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['deleted'],
+                properties: { deleted: { type: 'integer' } },
+              },
+            },
+          },
+          400: errorShape,
+          401: errorShape,
+          503: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (request, reply) => {
+      if (request.query.confirm !== 'wipe-all') {
+        return reply.code(400).send({
+          error: {
+            code: 'CONFIRMATION_REQUIRED',
+            message: 'Refusing to wipe the graph without ?confirm=wipe-all',
+          },
+        });
+      }
+      const deleted = await wipeGraph(getDriver());
+      request.log.warn(`[admin] Graph wiped via POST /reset — ${deleted} nodes deleted`);
+      return reply.send({ data: { deleted } });
     },
   );
 

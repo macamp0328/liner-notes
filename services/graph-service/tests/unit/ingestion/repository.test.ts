@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Driver, Session, Result, Record as Neo4jRecord } from 'neo4j-driver';
-import { hasReleases, mergeReleaseGraph } from '../../../src/db/ingestion-repository.js';
+import { hasReleases, mergeReleaseGraph, wipeGraph } from '../../../src/db/ingestion-repository.js';
 import release13570466 from '../../fixtures/release-13570466.json' with { type: 'json' };
 import release9999991 from '../../fixtures/release-9999991.json' with { type: 'json' };
 import release9999992 from '../../fixtures/release-9999992.json' with { type: 'json' };
@@ -351,5 +351,32 @@ describe('mergeReleaseGraph', () => {
     ][];
     const trackCalls = calls.filter(([q]) => q.includes('MERGE (t:Track'));
     expect(trackCalls.every(([, params]) => params['isInstrumental'] === false)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// wipeGraph — DETACH DELETE everything, return the deleted-node count
+// ---------------------------------------------------------------------------
+describe('wipeGraph', () => {
+  it('runs DETACH DELETE and returns the deleted-node count', async () => {
+    const record = {
+      get: vi.fn().mockReturnValue({ toNumber: () => 4217 }),
+    } as unknown as Neo4jRecord;
+    const result = { records: [record] } as unknown as Result;
+    const { session, runSpy } = makeMockSession(result);
+
+    const deleted = await wipeGraph(makeMockDriver(session));
+
+    expect(deleted).toBe(4217);
+    const [query] = runSpy.mock.calls[0] as [string];
+    expect(query).toContain('DETACH DELETE');
+    expect(session.close).toHaveBeenCalledOnce();
+  });
+
+  it('returns 0 on an already-empty graph (no record / null count)', async () => {
+    const result = { records: [] } as unknown as Result;
+    const { session } = makeMockSession(result);
+
+    expect(await wipeGraph(makeMockDriver(session))).toBe(0);
   });
 });
