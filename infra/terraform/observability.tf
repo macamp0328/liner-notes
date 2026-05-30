@@ -865,7 +865,7 @@ resource "aws_cloudwatch_dashboard" "graph_service" {
           title  = "Collection size (nodes)"
           region = var.aws_region
           view   = "timeSeries"
-          query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | filter data.msg = \"stats snapshot\" | stats latest(data.stats.counts.releases) as releases, latest(data.stats.counts.artists) as artists, latest(data.stats.counts.tracks) as tracks, latest(data.stats.counts.masters) as masters by bin(6h)"
+          query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | filter data.msg = \"stats snapshot\" | stats latest(data.stats.counts.releases) as releases, latest(data.stats.counts.artists) as artists, latest(data.stats.counts.tracks) as tracks, latest(data.stats.counts.masters) as masters by bin(1h)"
         }
       },
       {
@@ -878,7 +878,7 @@ resource "aws_cloudwatch_dashboard" "graph_service" {
           title  = "Enrichment coverage (%)"
           region = var.aws_region
           view   = "timeSeries"
-          query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | filter data.msg = \"stats snapshot\" | stats latest(data.stats.enrichment.tracksWithLyrics.pct) as lyrics, latest(data.stats.enrichment.releasesWithOriginalYear.pct) as originalYear, latest(data.stats.enrichment.tracksWithRecordingMbid.pct) as recordingMbid, latest(data.stats.enrichment.tracksWithTempo.pct) as tempo, latest(data.stats.enrichment.artistsWithProfile.pct) as artistProfile by bin(6h)"
+          query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | filter data.msg = \"stats snapshot\" | stats latest(data.stats.enrichment.tracksWithLyrics.pct) as lyrics, latest(data.stats.enrichment.releasesWithOriginalYear.pct) as originalYear, latest(data.stats.enrichment.tracksWithRecordingMbid.pct) as recordingMbid, latest(data.stats.enrichment.tracksWithTempo.pct) as tempo, latest(data.stats.enrichment.artistsWithProfile.pct) as artistProfile by bin(1h)"
         }
       },
     ]

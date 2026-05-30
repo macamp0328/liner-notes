@@ -19,6 +19,14 @@ export interface SnapshotLogger {
 export const DEFAULT_SNAPSHOT_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /**
+ * Upper bound. `setInterval` delays above the 32-bit signed-int max overflow and
+ * Node clamps them to 1ms — turning a "very long interval" into a tight loop. Cap
+ * here so a large `STATS_SNAPSHOT_INTERVAL_MS` degrades gracefully (24.8 days is
+ * already well past the 30-day retention horizon).
+ */
+export const MAX_SNAPSHOT_INTERVAL_MS = 2_147_483_647;
+
+/**
  * Fetch whole-graph stats and emit them as one structured log line. fluent-bit
  * ships this to CloudWatch, where Logs Insights line charts plot `data.stats.*`
  * over time (collection size, enrichment coverage %).
@@ -37,13 +45,16 @@ export async function logStatsSnapshot(driver: Driver, logger: SnapshotLogger): 
 
 /**
  * Resolve the snapshot interval from `STATS_SNAPSHOT_INTERVAL_MS`, falling back
- * to the default for an unset, non-numeric, or non-positive value.
+ * to the default for an unset, non-numeric, or non-positive value, and clamping
+ * to MAX_SNAPSHOT_INTERVAL_MS so an oversized value can't trip Node's
+ * setInterval overflow (delays past the 32-bit max are clamped to 1ms).
  */
 export function resolveSnapshotIntervalMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env['STATS_SNAPSHOT_INTERVAL_MS'];
   if (raw === undefined) return DEFAULT_SNAPSHOT_INTERVAL_MS;
   const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SNAPSHOT_INTERVAL_MS;
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_SNAPSHOT_INTERVAL_MS;
+  return Math.min(parsed, MAX_SNAPSHOT_INTERVAL_MS);
 }
 
 /**

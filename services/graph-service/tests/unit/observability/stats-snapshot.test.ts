@@ -10,6 +10,7 @@ import {
   resolveSnapshotIntervalMs,
   startStatsSnapshots,
   DEFAULT_SNAPSHOT_INTERVAL_MS,
+  MAX_SNAPSHOT_INTERVAL_MS,
 } from '../../../src/observability/stats-snapshot.js';
 
 const STATS = {
@@ -77,6 +78,13 @@ describe('resolveSnapshotIntervalMs', () => {
     expect(resolveSnapshotIntervalMs({ STATS_SNAPSHOT_INTERVAL_MS: 'abc' })).toBe(
       DEFAULT_SNAPSHOT_INTERVAL_MS,
     );
+  });
+
+  it('caps an oversized interval at the 32-bit max (Node setInterval overflow guard)', () => {
+    expect(resolveSnapshotIntervalMs({ STATS_SNAPSHOT_INTERVAL_MS: '999999999999' })).toBe(
+      MAX_SNAPSHOT_INTERVAL_MS,
+    );
+    expect(MAX_SNAPSHOT_INTERVAL_MS).toBe(2_147_483_647);
   });
 });
 
