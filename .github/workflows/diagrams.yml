@@ -23,8 +23,8 @@ name: Diagrams
 # Docker image (nshine/dot:2.40.1) so the output is byte-identical to local Mac.
 
 on:
+  # PRs to any base branch (stacked PRs included), not just main.
   pull_request:
-    branches: [main]
     paths:
       - 'infra/terraform/**'
       - 'infra/diagrams/request-flow.mmd'
