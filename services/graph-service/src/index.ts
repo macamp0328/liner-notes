@@ -1,14 +1,19 @@
 import { type FastifyInstance } from 'fastify';
 import { buildServer } from './server.js';
+import { getDriver } from './db/client.js';
+import { startStatsSnapshots, resolveSnapshotIntervalMs } from './observability/stats-snapshot.js';
 
 const start = async (): Promise<void> => {
   let app: FastifyInstance | undefined;
+  let stopSnapshots: (() => void) | null = null;
   try {
     app = await buildServer();
     const port = parseInt(process.env['PORT'] ?? '3000', 10);
 
-    // Graceful shutdown — triggers onClose hook which closes the Neo4j driver
+    // Graceful shutdown — stop the stats-snapshot timer, then close (which fires
+    // the onClose hook that closes the Neo4j driver).
     const shutdown = (): void => {
+      stopSnapshots?.();
       void app!
         .close()
         .then(() => process.exit(0))
@@ -18,6 +23,11 @@ const start = async (): Promise<void> => {
     process.on('SIGINT', shutdown);
 
     await app.listen({ port, host: '0.0.0.0' });
+
+    // onReady has now run and Neo4j is connected, so begin periodic graph-stats
+    // snapshots — structured logs that feed the "Collection over time" dashboard
+    // widgets. The interval is unref'd; shutdown stops it explicitly above.
+    stopSnapshots = startStatsSnapshots(getDriver(), app.log, resolveSnapshotIntervalMs());
 
     if (process.env['NODE_ENV'] !== 'production') {
       const w = 53;
