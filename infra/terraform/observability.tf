@@ -361,14 +361,39 @@ resource "aws_cloudwatch_metric_alarm" "billing" {
 }
 
 # ---------------------------------------------------------------------------
-# Dashboard — single-pane-of-glass view of the three alarms plus the
-# underlying metrics (Route 53 probe, pod restarts, EC2 CPU/network/status,
-# log activity). The bridge to Prometheus/Grafana/APM, which stay deferred
-# at this scale (see issue #117).
+# Dashboard — single pane of glass, organized into labelled sections:
+#   1. Service alarms          — the alarm status strip.
+#   2. At a glance             — headline counts (requests / 5xx / errors /
+#                                Neo4j disconnects) as single-value tiles with
+#                                sparklines, aggregated over the selected range.
+#   3. Health & infrastructure — Route 53 probe, EC2 CPU/network/status,
+#                                pod restarts, Neo4j disconnects.
+#   4. Traffic & latency       — response-latency percentiles, HTTP status mix,
+#                                and real (non-probe) request volume.
+#   5. Errors & diagnostics    — the ERROR-rate metric next to the actual
+#                                recent error text, a grouped top-N message
+#                                summary, and external-API rate-limit pressure.
+#   6. Ingestion & enrichment activity — log volume + a pipeline run history.
 #
-# Cross-region: the health-check alarm and its source metric live in
-# us-east-1 (Route 53 metrics are only published there). Widget 2 hard-codes
-# that region; Widget 1 lists the alarm by ARN, so Terraform resolves the
+# Sections 4–6 are CloudWatch Logs Insights widgets that query the structured
+# pino logs fluent-bit already ships to this log group. They add NO new custom
+# metrics, so no metric cost — Logs Insights bills per GB scanned, negligible
+# at this log volume. Prometheus/Grafana/APM stay deferred (issue #117).
+#
+# At this scale most HTTP volume is the Route 53 health probe (every 30s from
+# many global checkers), so the latency/status widgets are probe-influenced and
+# the "real requests" widget filters the probes out. The richest data here is
+# background pipeline activity (ingestion/enrichment/error logs), which fills in
+# regardless of request traffic.
+#
+# Logs Insights field paths: fluent-bit wraps each pino line under `data.*`
+# (the same envelope the metric filters above target via `$.data.*`), so the
+# queries reference `data.msg`, `data.level`, `data.responseTime`,
+# `data.res.statusCode`, `data.req.url`, etc. — not the bare pino fields.
+#
+# Cross-region: the health-check alarm and its source metric live in us-east-1
+# (Route 53 metrics are only published there). The Route 53 widget hard-codes
+# that region; the alarm strip lists alarms by ARN, so Terraform resolves the
 # correct region per alarm. Everything else uses var.aws_region.
 # ---------------------------------------------------------------------------
 
@@ -376,6 +401,12 @@ resource "aws_cloudwatch_dashboard" "graph_service" {
   dashboard_name = "${local.name_prefix}-graph-service"
 
   dashboard_body = jsonencode({
+    # Open on the last 3 days by default — wide enough to span the last active
+    # session and catch Aura's 72h auto-pause, without drowning in noise.
+    # `periodOverride = inherit` keeps each widget's own period.
+    start          = "-P3D"
+    periodOverride = "inherit"
+
     widgets = [
       {
         type   = "alarm"
@@ -396,14 +427,121 @@ resource "aws_cloudwatch_dashboard" "graph_service" {
           ]
         }
       },
+      # --- 📊 At a glance -----------------------------------------------------
+      {
+        type   = "text"
+        x      = 0
+        y      = 3
+        width  = 24
+        height = 1
+        properties = {
+          markdown = "## 📊 At a glance — totals over the selected time range"
+        }
+      },
       {
         type   = "metric"
         x      = 0
-        y      = 3
-        width  = 12
+        y      = 4
+        width  = 6
+        height = 3
+        properties = {
+          title     = "Requests"
+          view      = "singleValue"
+          sparkline = true
+          region    = var.aws_region
+          stat      = "Sum"
+          period    = 300
+          metrics = [
+            [
+              aws_cloudwatch_log_metric_filter.http_request_count.metric_transformation[0].namespace,
+              aws_cloudwatch_log_metric_filter.http_request_count.metric_transformation[0].name,
+            ],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 6
+        y      = 4
+        width  = 6
+        height = 3
+        properties = {
+          title     = "HTTP 5xx"
+          view      = "singleValue"
+          sparkline = true
+          region    = var.aws_region
+          stat      = "Sum"
+          period    = 300
+          metrics = [
+            [
+              aws_cloudwatch_log_metric_filter.http_5xx_count.metric_transformation[0].namespace,
+              aws_cloudwatch_log_metric_filter.http_5xx_count.metric_transformation[0].name,
+            ],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 12
+        y      = 4
+        width  = 6
+        height = 3
+        properties = {
+          title     = "ERROR log lines"
+          view      = "singleValue"
+          sparkline = true
+          region    = var.aws_region
+          stat      = "Sum"
+          period    = 300
+          metrics = [
+            [
+              aws_cloudwatch_log_metric_filter.error_log_lines.metric_transformation[0].namespace,
+              aws_cloudwatch_log_metric_filter.error_log_lines.metric_transformation[0].name,
+            ],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 18
+        y      = 4
+        width  = 6
+        height = 3
+        properties = {
+          title     = "Neo4j disconnects"
+          view      = "singleValue"
+          sparkline = true
+          region    = var.aws_region
+          stat      = "Sum"
+          period    = 300
+          metrics = [
+            [
+              aws_cloudwatch_log_metric_filter.neo4j_disconnects.metric_transformation[0].namespace,
+              aws_cloudwatch_log_metric_filter.neo4j_disconnects.metric_transformation[0].name,
+            ],
+          ]
+        }
+      },
+
+      # --- 🩺 Health & infrastructure ----------------------------------------
+      {
+        type   = "text"
+        x      = 0
+        y      = 7
+        width  = 24
+        height = 1
+        properties = {
+          markdown = "## 🩺 Health & infrastructure"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 8
+        width  = 8
         height = 6
         properties = {
-          title   = "Route 53 health check status (24h)"
+          title   = "Route 53 health check status"
           view    = "timeSeries"
           stacked = false
           region  = "us-east-1"
@@ -420,71 +558,8 @@ resource "aws_cloudwatch_dashboard" "graph_service" {
       },
       {
         type   = "metric"
-        x      = 12
-        y      = 3
-        width  = 12
-        height = 6
-        properties = {
-          title   = "Pod restarts (24h)"
-          view    = "timeSeries"
-          stacked = false
-          region  = var.aws_region
-          period  = 300
-          stat    = "Sum"
-          metrics = [
-            [
-              aws_cloudwatch_log_metric_filter.pod_restarts.metric_transformation[0].namespace,
-              aws_cloudwatch_log_metric_filter.pod_restarts.metric_transformation[0].name,
-            ],
-          ]
-          yAxis = { left = { min = 0 } }
-          annotations = {
-            horizontal = [{ value = 1, label = "Alarm threshold (>0)", color = "#d62728" }]
-          }
-        }
-      },
-      {
-        type   = "metric"
-        x      = 0
-        y      = 9
-        width  = 8
-        height = 6
-        properties = {
-          title   = "EC2 CPU utilization"
-          view    = "timeSeries"
-          stacked = false
-          region  = var.aws_region
-          period  = 300
-          stat    = "Average"
-          metrics = [
-            ["AWS/EC2", "CPUUtilization", "InstanceId", aws_instance.k3s.id],
-          ]
-          yAxis = { left = { min = 0, max = 100 } }
-        }
-      },
-      {
-        type   = "metric"
         x      = 8
-        y      = 9
-        width  = 8
-        height = 6
-        properties = {
-          title   = "EC2 network in / out"
-          view    = "timeSeries"
-          stacked = false
-          region  = var.aws_region
-          period  = 300
-          stat    = "Average"
-          metrics = [
-            ["AWS/EC2", "NetworkIn", "InstanceId", aws_instance.k3s.id, { label = "In" }],
-            [".", "NetworkOut", ".", ".", { label = "Out" }],
-          ]
-        }
-      },
-      {
-        type   = "metric"
-        x      = 16
-        y      = 9
+        y      = 8
         width  = 8
         height = 6
         properties = {
@@ -506,30 +581,164 @@ resource "aws_cloudwatch_dashboard" "graph_service" {
       },
       {
         type   = "metric"
-        x      = 0
-        y      = 15
-        width  = 24
+        x      = 16
+        y      = 8
+        width  = 8
         height = 6
         properties = {
-          title   = "Log activity — ${aws_cloudwatch_log_group.graph_service.name}"
+          title   = "Pod restarts"
           view    = "timeSeries"
           stacked = false
           region  = var.aws_region
           period  = 300
           stat    = "Sum"
           metrics = [
-            ["AWS/Logs", "IncomingLogEvents", "LogGroupName", aws_cloudwatch_log_group.graph_service.name],
+            [
+              aws_cloudwatch_log_metric_filter.pod_restarts.metric_transformation[0].namespace,
+              aws_cloudwatch_log_metric_filter.pod_restarts.metric_transformation[0].name,
+            ],
           ]
+          yAxis = { left = { min = 0 } }
+          annotations = {
+            horizontal = [{ value = 1, label = "Alarm threshold (>0)", color = "#d62728" }]
+          }
         }
       },
       {
         type   = "metric"
         x      = 0
-        y      = 21
-        width  = 6
+        y      = 14
+        width  = 8
         height = 6
         properties = {
-          title   = "ERROR log lines (24h)"
+          title   = "EC2 CPU utilization"
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          period  = 300
+          stat    = "Average"
+          metrics = [
+            ["AWS/EC2", "CPUUtilization", "InstanceId", aws_instance.k3s.id],
+          ]
+          yAxis = { left = { min = 0, max = 100 } }
+        }
+      },
+      {
+        type   = "metric"
+        x      = 8
+        y      = 14
+        width  = 8
+        height = 6
+        properties = {
+          title   = "EC2 network in / out"
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          period  = 300
+          stat    = "Average"
+          metrics = [
+            ["AWS/EC2", "NetworkIn", "InstanceId", aws_instance.k3s.id, { label = "In" }],
+            [".", "NetworkOut", ".", ".", { label = "Out" }],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 16
+        y      = 14
+        width  = 8
+        height = 6
+        properties = {
+          title   = "Neo4j disconnects"
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          period  = 300
+          stat    = "Sum"
+          metrics = [
+            [
+              aws_cloudwatch_log_metric_filter.neo4j_disconnects.metric_transformation[0].namespace,
+              aws_cloudwatch_log_metric_filter.neo4j_disconnects.metric_transformation[0].name,
+            ],
+          ]
+          yAxis = { left = { min = 0 } }
+          annotations = {
+            horizontal = [{ value = 1, label = "Alarm threshold (≥1)", color = "#d62728" }]
+          }
+        }
+      },
+
+      # --- 🚦 Traffic & latency ----------------------------------------------
+      {
+        type   = "text"
+        x      = 0
+        y      = 20
+        width  = 24
+        height = 1
+        properties = {
+          markdown = "## 🚦 Traffic & latency"
+        }
+      },
+      {
+        type   = "log"
+        x      = 0
+        y      = 21
+        width  = 8
+        height = 6
+        properties = {
+          title  = "Response latency (ms) — all routes, probe-influenced"
+          region = var.aws_region
+          view   = "timeSeries"
+          query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | filter ispresent(data.responseTime) | stats avg(data.responseTime) as avg, pct(data.responseTime, 50) as p50, pct(data.responseTime, 90) as p90, pct(data.responseTime, 99) as p99 by bin(5m)"
+        }
+      },
+      {
+        type   = "log"
+        x      = 8
+        y      = 21
+        width  = 8
+        height = 6
+        properties = {
+          title   = "HTTP status mix"
+          region  = var.aws_region
+          view    = "timeSeries"
+          stacked = true
+          query   = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | filter ispresent(data.res.statusCode) | stats count(*) as requests by data.res.statusCode, bin(5m)"
+        }
+      },
+      {
+        type   = "log"
+        x      = 16
+        y      = 21
+        width  = 8
+        height = 6
+        properties = {
+          title  = "Real requests / hour (excl. health + stats probes)"
+          region = var.aws_region
+          view   = "timeSeries"
+          query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | filter ispresent(data.req.url) and data.req.url not like \"/api/v1/health\" and data.req.url not like \"/api/v1/stats\" | stats count(*) as real_requests by bin(1h)"
+        }
+      },
+
+      # --- 🧨 Errors & diagnostics -------------------------------------------
+      {
+        type   = "text"
+        x      = 0
+        y      = 27
+        width  = 24
+        height = 1
+        properties = {
+          markdown = "## 🧨 Errors & diagnostics"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 28
+        width  = 8
+        height = 6
+        properties = {
+          title   = "ERROR log lines"
           view    = "timeSeries"
           stacked = false
           region  = var.aws_region
@@ -548,75 +757,85 @@ resource "aws_cloudwatch_dashboard" "graph_service" {
         }
       },
       {
-        type   = "metric"
-        x      = 6
-        y      = 21
-        width  = 6
+        type   = "log"
+        x      = 8
+        y      = 28
+        width  = 16
         height = 6
         properties = {
-          title   = "Request count (24h)"
-          view    = "timeSeries"
-          stacked = false
-          region  = var.aws_region
-          period  = 300
-          stat    = "Sum"
-          metrics = [
-            [
-              aws_cloudwatch_log_metric_filter.http_request_count.metric_transformation[0].namespace,
-              aws_cloudwatch_log_metric_filter.http_request_count.metric_transformation[0].name,
-            ],
-          ]
-          yAxis = { left = { min = 0 } }
+          title  = "Recent errors (level ≥ 50)"
+          region = var.aws_region
+          view   = "table"
+          query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | fields @timestamp, data.level as level, data.msg as message, data.err.message as error | filter data.level >= 50 | sort @timestamp desc | limit 25"
         }
       },
       {
-        type   = "metric"
+        type   = "log"
+        x      = 0
+        y      = 34
+        width  = 12
+        height = 6
+        properties = {
+          title  = "Top log messages (warn+, grouped)"
+          region = var.aws_region
+          view   = "table"
+          query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | filter data.level >= 40 | stats count(*) as occurrences by data.msg | sort occurrences desc | limit 15"
+        }
+      },
+      {
+        type   = "log"
         x      = 12
-        y      = 21
-        width  = 6
+        y      = 34
+        width  = 12
         height = 6
         properties = {
-          title   = "HTTP 5xx count (24h)"
-          view    = "timeSeries"
-          stacked = false
-          region  = var.aws_region
-          period  = 300
-          stat    = "Sum"
-          metrics = [
-            [
-              aws_cloudwatch_log_metric_filter.http_5xx_count.metric_transformation[0].namespace,
-              aws_cloudwatch_log_metric_filter.http_5xx_count.metric_transformation[0].name,
-            ],
-          ]
-          yAxis = { left = { min = 0 } }
-          annotations = {
-            horizontal = [{ value = 1, label = "Alarm threshold (>0)", color = "#d62728" }]
-          }
+          title  = "External-API rate-limit backoffs"
+          region = var.aws_region
+          view   = "bar"
+          query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | filter data.msg like /Rate limited/ | stats count(*) as backoffs by bin(1h)"
+        }
+      },
+
+      # --- 🎚️ Ingestion & enrichment activity --------------------------------
+      {
+        type   = "text"
+        x      = 0
+        y      = 40
+        width  = 24
+        height = 1
+        properties = {
+          markdown = "## 🎚️ Ingestion & enrichment activity"
         }
       },
       {
         type   = "metric"
-        x      = 18
-        y      = 21
-        width  = 6
+        x      = 0
+        y      = 41
+        width  = 12
         height = 6
         properties = {
-          title   = "Neo4j disconnects (24h)"
+          title   = "Log activity — ${aws_cloudwatch_log_group.graph_service.name}"
           view    = "timeSeries"
           stacked = false
           region  = var.aws_region
           period  = 300
           stat    = "Sum"
           metrics = [
-            [
-              aws_cloudwatch_log_metric_filter.neo4j_disconnects.metric_transformation[0].namespace,
-              aws_cloudwatch_log_metric_filter.neo4j_disconnects.metric_transformation[0].name,
-            ],
+            ["AWS/Logs", "IncomingLogEvents", "LogGroupName", aws_cloudwatch_log_group.graph_service.name],
           ]
-          yAxis = { left = { min = 0 } }
-          annotations = {
-            horizontal = [{ value = 1, label = "Alarm threshold (≥1)", color = "#d62728" }]
-          }
+        }
+      },
+      {
+        type   = "log"
+        x      = 12
+        y      = 41
+        width  = 12
+        height = 6
+        properties = {
+          title  = "Pipeline run history"
+          region = var.aws_region
+          view   = "table"
+          query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | fields @timestamp, data.msg as event | filter data.msg like /Starting ingestion|Ingestion complete|Discogs ingestion|Enrichment stage|Graph wiped|Graph is empty/ | sort @timestamp desc | limit 25"
         }
       },
     ]
