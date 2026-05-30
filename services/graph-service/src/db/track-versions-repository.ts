@@ -120,3 +120,23 @@ export async function releasesShareArtist(
     await session.close();
   }
 }
+
+/**
+ * Delete every IS_VERSION_OF relationship for a clean recompute. The
+ * relationships are purely derived (enrichTrackVersions re-MERGEs them), so a
+ * reset is safe and lets a re-run rebuild the version graph from scratch.
+ * Returns the number of relationships deleted.
+ */
+export async function resetTrackVersions(driver: Driver): Promise<number> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `MATCH ()-[r:IS_VERSION_OF]->()
+       DELETE r
+       RETURN count(r) AS reset`,
+    );
+    return (result.records[0]?.get('reset') as Neo4jInt | undefined)?.toNumber() ?? 0;
+  } finally {
+    await session.close();
+  }
+}
