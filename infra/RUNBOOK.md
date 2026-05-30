@@ -483,7 +483,7 @@ curl -sS "$SERVICE_URL/api/v1/releases?limit=1" | jq '.data[0].tracks[0] | {posi
 
 This section covers the three manual follow-ups: confirming the SNS subscription, enabling AWS account-level billing alerts, and installing the in-cluster fluent-bit daemonset that actually writes logs to the log group.
 
-The unified at-a-glance view is at `terraform output -raw dashboard_url` — alarm tiles, Route 53 probe, EC2 CPU/network/status, log activity, and per-metric widgets for the log-driven alarms, all on one page.
+The unified view is at `terraform output -raw dashboard_url`, organized into labelled sections: an **alarm strip**; **At a glance** single-value tiles (requests, 5xx, errors, Neo4j disconnects); **Health & infrastructure** (Route 53 probe, EC2 CPU/network/status, pod restarts, Neo4j disconnects); **Traffic & latency** (response-latency percentiles, HTTP status mix, and real non-probe request volume); **Errors & diagnostics** (the ERROR-rate metric alongside the actual recent-error text, a grouped top-message summary, and external-API rate-limit backoffs); **Ingestion & enrichment activity** (log throughput plus a pipeline run-history table); and **Collection over time** (graph size and enrichment-coverage % trended from the periodic `stats snapshot` log line graph-service emits). It opens on the last 3 days by default. The Traffic, Errors, Ingestion, and Collection panels are CloudWatch Logs Insights queries over the structured logs fluent-bit already ships — they add no new custom metrics, so no metric cost.
 
 ### Step 9 — Confirm the SNS subscription
 

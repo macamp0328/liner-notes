@@ -22,8 +22,11 @@ name: CI
 #   instead of two, and coverage is measured against the complete test run.
 
 on:
+  # Run the full CI suite on every PR regardless of base branch, so stacked PRs
+  # (feature → feature) get the same gate as PRs into main — no need to wait for
+  # the merge into main to get CI feedback. `push` stays main-only: branch
+  # commits are already covered by their PR's pull_request run.
   pull_request:
-    branches: [main]
   push:
     branches: [main]
 
