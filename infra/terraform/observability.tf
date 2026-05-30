@@ -377,10 +377,12 @@ resource "aws_cloudwatch_metric_alarm" "billing" {
 #   7. Collection over time — graph size and enrichment coverage % trended from
 #      the periodic "stats snapshot" log line (see stats-snapshot.ts).
 #
-# Sections 4–7 are CloudWatch Logs Insights widgets that query the structured
-# pino logs fluent-bit already ships to this log group. They add NO new custom
-# metrics, so no metric cost — Logs Insights bills per GB scanned, negligible
-# at this log volume. Prometheus/Grafana/APM stay deferred (issue #117).
+# Sections 4–7 add CloudWatch Logs Insights widgets that query the structured
+# pino logs fluent-bit already ships to this log group (sections 5 and 6 also
+# keep a metric widget each — the ERROR-rate series and log throughput). The
+# Logs Insights widgets add NO new custom metrics, so no metric cost — Logs
+# Insights bills per GB scanned, negligible at this log volume.
+# Prometheus/Grafana/APM stay deferred (issue #117).
 #
 # At this scale most HTTP volume is the Route 53 health probe (every 30s from
 # many global checkers), so the latency/status widgets are probe-influenced and
