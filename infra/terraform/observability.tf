@@ -374,8 +374,10 @@ resource "aws_cloudwatch_metric_alarm" "billing" {
 #                                recent error text, a grouped top-N message
 #                                summary, and external-API rate-limit pressure.
 #   6. Ingestion & enrichment activity — log volume + a pipeline run history.
+#   7. Collection over time — graph size and enrichment coverage % trended from
+#      the periodic "stats snapshot" log line (see stats-snapshot.ts).
 #
-# Sections 4–6 are CloudWatch Logs Insights widgets that query the structured
+# Sections 4–7 are CloudWatch Logs Insights widgets that query the structured
 # pino logs fluent-bit already ships to this log group. They add NO new custom
 # metrics, so no metric cost — Logs Insights bills per GB scanned, negligible
 # at this log volume. Prometheus/Grafana/APM stay deferred (issue #117).
@@ -836,6 +838,47 @@ resource "aws_cloudwatch_dashboard" "graph_service" {
           region = var.aws_region
           view   = "table"
           query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | fields @timestamp, data.msg as event | filter data.msg like /Starting ingestion|Ingestion complete|Discogs ingestion|Enrichment stage|Graph wiped|Graph is empty/ | sort @timestamp desc | limit 25"
+        }
+      },
+
+      # --- 📈 Collection over time -------------------------------------------
+      # Driven by the periodic "stats snapshot" log line graph-service emits
+      # (src/observability/stats-snapshot.ts → getStats). Fills in as snapshots
+      # accumulate; bounded by the 30-day log retention.
+      {
+        type   = "text"
+        x      = 0
+        y      = 47
+        width  = 24
+        height = 1
+        properties = {
+          markdown = "## 📈 Collection over time"
+        }
+      },
+      {
+        type   = "log"
+        x      = 0
+        y      = 48
+        width  = 12
+        height = 6
+        properties = {
+          title  = "Collection size (nodes)"
+          region = var.aws_region
+          view   = "timeSeries"
+          query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | filter data.msg = \"stats snapshot\" | stats latest(data.stats.counts.releases) as releases, latest(data.stats.counts.artists) as artists, latest(data.stats.counts.tracks) as tracks, latest(data.stats.counts.masters) as masters by bin(1h)"
+        }
+      },
+      {
+        type   = "log"
+        x      = 12
+        y      = 48
+        width  = 12
+        height = 6
+        properties = {
+          title  = "Enrichment coverage (%)"
+          region = var.aws_region
+          view   = "timeSeries"
+          query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | filter data.msg = \"stats snapshot\" | stats latest(data.stats.enrichment.tracksWithLyrics.pct) as lyrics, latest(data.stats.enrichment.releasesWithOriginalYear.pct) as originalYear, latest(data.stats.enrichment.tracksWithRecordingMbid.pct) as recordingMbid, latest(data.stats.enrichment.tracksWithTempo.pct) as tempo, latest(data.stats.enrichment.artistsWithProfile.pct) as artistProfile by bin(1h)"
         }
       },
     ]
