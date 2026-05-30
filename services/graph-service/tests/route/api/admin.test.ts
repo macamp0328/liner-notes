@@ -67,6 +67,31 @@ vi.mock('../../../src/ingestion/deezer-client.js', () => ({
   buildDeezerClientFromEnv: vi.fn().mockReturnValue({}),
 }));
 
+const mockEnrichArtistProfiles = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/enrichment/artist-profiles.js', () => ({
+  enrichArtistProfiles: mockEnrichArtistProfiles,
+}));
+
+const mockResetArtistProfilesEnrichment = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/db/artist-profiles-repository.js', () => ({
+  resetArtistProfilesEnrichment: mockResetArtistProfilesEnrichment,
+}));
+
+const mockEnrichArtistGenres = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/enrichment/artist-genres.js', () => ({
+  enrichArtistGenres: mockEnrichArtistGenres,
+}));
+
+const mockEnrichTrackVersions = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/enrichment/track-versions.js', () => ({
+  enrichTrackVersions: mockEnrichTrackVersions,
+}));
+
+const mockResetTrackVersions = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/db/track-versions-repository.js', () => ({
+  resetTrackVersions: mockResetTrackVersions,
+}));
+
 // job-state is mocked so integration tests don't share singleton state
 const mockGetJobState = vi.hoisted(() => vi.fn());
 const mockStartJob = vi.hoisted(() => vi.fn().mockReturnValue('test-job-id'));
@@ -165,6 +190,27 @@ describe('Admin API', () => {
       durationMs: 800,
     });
     mockResetTrackDeezerEnrichment.mockResolvedValue(4);
+    mockEnrichArtistProfiles.mockResolvedValue({
+      enriched: 12,
+      skipped: 3,
+      failed: 0,
+      durationMs: 9000,
+    });
+    mockResetArtistProfilesEnrichment.mockResolvedValue(15);
+    mockEnrichArtistGenres.mockResolvedValue({
+      genresEnriched: 20,
+      stylesEnriched: 18,
+      skipped: 0,
+      failed: 0,
+      durationMs: 300,
+    });
+    mockEnrichTrackVersions.mockResolvedValue({
+      enriched: 6,
+      skipped: 2,
+      failed: 0,
+      durationMs: 150,
+    });
+    mockResetTrackVersions.mockResolvedValue(9);
     resetAllPipelineStates();
     app = await buildServer();
     await app.ready();
@@ -774,6 +820,330 @@ describe('Admin API', () => {
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/admin/track-deezer/status',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── POST /artist-profiles/enrich ─────────────────────────────────────────
+  describe('POST /api/v1/admin/artist-profiles/enrich', () => {
+    it('returns 200 with enrichment summary on success', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/artist-profiles/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { enriched: number; skipped: number; failed: number; durationMs: number };
+      };
+      expect(body.data.enriched).toBe(12);
+      expect(body.data.skipped).toBe(3);
+      expect(body.data.failed).toBe(0);
+      expect(body.data.durationMs).toBe(9000);
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/artist-profiles/enrich',
+      });
+      expect(response.statusCode).toBe(401);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('UNAUTHORIZED');
+    });
+
+    it('returns 409 when enrichment is already in progress', async () => {
+      mockEnrichArtistProfiles.mockImplementationOnce(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(() => resolve({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 }), 100),
+          ),
+      );
+
+      const [r1, r2] = await Promise.all([
+        app.inject({
+          method: 'POST',
+          url: '/api/v1/admin/artist-profiles/enrich',
+          headers: { authorization: `Bearer ${VALID_TOKEN}` },
+        }),
+        app.inject({
+          method: 'POST',
+          url: '/api/v1/admin/artist-profiles/enrich',
+          headers: { authorization: `Bearer ${VALID_TOKEN}` },
+        }),
+      ]);
+
+      const codes = [r1.statusCode, r2.statusCode].sort((a, b) => a - b);
+      expect(codes).toEqual([200, 409]);
+      const body409 = r1.statusCode === 409 ? r1 : r2;
+      const parsed = JSON.parse(body409.payload) as { error: { code: string } };
+      expect(parsed.error.code).toBe('ENRICHMENT_RUNNING');
+    });
+  });
+
+  // ── POST /artist-profiles/reset ──────────────────────────────────────────
+  describe('POST /api/v1/admin/artist-profiles/reset', () => {
+    it('returns 200 with count of reset artists', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/artist-profiles/reset',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as { data: { reset: number } };
+      expect(body.data.reset).toBe(15);
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/artist-profiles/reset',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── GET /artist-profiles/status ──────────────────────────────────────────
+  describe('GET /api/v1/admin/artist-profiles/status', () => {
+    it('returns 200 with running:false and null lastResult before any run', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/artist-profiles/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { running: boolean; lastResult: unknown };
+      };
+      expect(body.data.running).toBe(false);
+      expect(body.data.lastResult).toBeNull();
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/artist-profiles/status',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── POST /artist-genres/enrich ───────────────────────────────────────────
+  describe('POST /api/v1/admin/artist-genres/enrich', () => {
+    it('returns 200 with the non-standard genres/styles summary on success', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/artist-genres/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { genresEnriched: number; stylesEnriched: number; skipped: number; failed: number };
+      };
+      expect(body.data.genresEnriched).toBe(20);
+      expect(body.data.stylesEnriched).toBe(18);
+      expect(body.data.skipped).toBe(0);
+      expect(body.data.failed).toBe(0);
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/artist-genres/enrich',
+      });
+      expect(response.statusCode).toBe(401);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('UNAUTHORIZED');
+    });
+
+    it('returns 409 when enrichment is already in progress', async () => {
+      mockEnrichArtistGenres.mockImplementationOnce(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(
+              () =>
+                resolve({
+                  genresEnriched: 0,
+                  stylesEnriched: 0,
+                  skipped: 0,
+                  failed: 0,
+                  durationMs: 0,
+                }),
+              100,
+            ),
+          ),
+      );
+
+      const [r1, r2] = await Promise.all([
+        app.inject({
+          method: 'POST',
+          url: '/api/v1/admin/artist-genres/enrich',
+          headers: { authorization: `Bearer ${VALID_TOKEN}` },
+        }),
+        app.inject({
+          method: 'POST',
+          url: '/api/v1/admin/artist-genres/enrich',
+          headers: { authorization: `Bearer ${VALID_TOKEN}` },
+        }),
+      ]);
+
+      const codes = [r1.statusCode, r2.statusCode].sort((a, b) => a - b);
+      expect(codes).toEqual([200, 409]);
+      const body409 = r1.statusCode === 409 ? r1 : r2;
+      const parsed = JSON.parse(body409.payload) as { error: { code: string } };
+      expect(parsed.error.code).toBe('ENRICHMENT_RUNNING');
+    });
+  });
+
+  // ── GET /artist-genres/status ────────────────────────────────────────────
+  describe('GET /api/v1/admin/artist-genres/status', () => {
+    it('returns 200 with running:false and null lastResult before any run', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/artist-genres/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { running: boolean; lastResult: unknown };
+      };
+      expect(body.data.running).toBe(false);
+      expect(body.data.lastResult).toBeNull();
+    });
+
+    it('returns the genres/styles summary in lastResult after a successful run', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/artist-genres/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/artist-genres/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { lastResult: { genresEnriched: number; stylesEnriched: number } | null };
+      };
+      expect(body.data.lastResult?.genresEnriched).toBe(20);
+      expect(body.data.lastResult?.stylesEnriched).toBe(18);
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/artist-genres/status',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── POST /track-versions/enrich ──────────────────────────────────────────
+  describe('POST /api/v1/admin/track-versions/enrich', () => {
+    it('returns 200 with enrichment summary on success', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/track-versions/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { enriched: number; skipped: number; failed: number; durationMs: number };
+      };
+      expect(body.data.enriched).toBe(6);
+      expect(body.data.skipped).toBe(2);
+      expect(body.data.failed).toBe(0);
+      expect(body.data.durationMs).toBe(150);
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/track-versions/enrich',
+      });
+      expect(response.statusCode).toBe(401);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('UNAUTHORIZED');
+    });
+
+    it('returns 409 when enrichment is already in progress', async () => {
+      mockEnrichTrackVersions.mockImplementationOnce(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(() => resolve({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 }), 100),
+          ),
+      );
+
+      const [r1, r2] = await Promise.all([
+        app.inject({
+          method: 'POST',
+          url: '/api/v1/admin/track-versions/enrich',
+          headers: { authorization: `Bearer ${VALID_TOKEN}` },
+        }),
+        app.inject({
+          method: 'POST',
+          url: '/api/v1/admin/track-versions/enrich',
+          headers: { authorization: `Bearer ${VALID_TOKEN}` },
+        }),
+      ]);
+
+      const codes = [r1.statusCode, r2.statusCode].sort((a, b) => a - b);
+      expect(codes).toEqual([200, 409]);
+      const body409 = r1.statusCode === 409 ? r1 : r2;
+      const parsed = JSON.parse(body409.payload) as { error: { code: string } };
+      expect(parsed.error.code).toBe('ENRICHMENT_RUNNING');
+    });
+  });
+
+  // ── POST /track-versions/reset ───────────────────────────────────────────
+  describe('POST /api/v1/admin/track-versions/reset', () => {
+    it('returns 200 with count of deleted relationships', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/track-versions/reset',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as { data: { reset: number } };
+      expect(body.data.reset).toBe(9);
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/track-versions/reset',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── GET /track-versions/status ───────────────────────────────────────────
+  describe('GET /api/v1/admin/track-versions/status', () => {
+    it('returns 200 with running:false and null lastResult before any run', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/track-versions/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { running: boolean; lastResult: unknown };
+      };
+      expect(body.data.running).toBe(false);
+      expect(body.data.lastResult).toBeNull();
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/track-versions/status',
       });
       expect(response.statusCode).toBe(401);
     });

@@ -33,6 +33,14 @@ const ADMIN_ROUTES: { method: 'GET' | 'POST'; url: string }[] = [
   { method: 'POST', url: '/api/v1/admin/track-deezer/enrich' },
   { method: 'POST', url: '/api/v1/admin/track-deezer/reset' },
   { method: 'GET', url: '/api/v1/admin/track-deezer/status' },
+  { method: 'POST', url: '/api/v1/admin/artist-profiles/enrich' },
+  { method: 'POST', url: '/api/v1/admin/artist-profiles/reset' },
+  { method: 'GET', url: '/api/v1/admin/artist-profiles/status' },
+  { method: 'POST', url: '/api/v1/admin/artist-genres/enrich' },
+  { method: 'GET', url: '/api/v1/admin/artist-genres/status' },
+  { method: 'POST', url: '/api/v1/admin/track-versions/enrich' },
+  { method: 'POST', url: '/api/v1/admin/track-versions/reset' },
+  { method: 'GET', url: '/api/v1/admin/track-versions/status' },
 ];
 
 // Status routes only — safe to call with a valid token because they touch
