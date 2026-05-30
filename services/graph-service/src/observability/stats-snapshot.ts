@@ -28,8 +28,10 @@ export const MAX_SNAPSHOT_INTERVAL_MS = 2_147_483_647;
 
 /**
  * Fetch whole-graph stats and emit them as one structured log line. fluent-bit
- * ships this to CloudWatch, where Logs Insights line charts plot `data.stats.*`
- * over time (collection size, enrichment coverage %).
+ * ships this to CloudWatch, where Logs Insights bar charts plot `data.stats.*`
+ * over time (collection size, enrichment coverage %). Bars, not lines: these
+ * snapshots are sparse (6h cadence on a scale-to-zero host), and a line widget
+ * errors on a window with fewer than two points.
  *
  * Never throws: a failed snapshot is a missed data point, not an incident, so
  * it logs at `warn` (not `error`) to avoid tripping the ERROR-rate alarm.
