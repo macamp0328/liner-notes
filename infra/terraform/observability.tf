@@ -846,7 +846,11 @@ resource "aws_cloudwatch_dashboard" "graph_service" {
       # --- 📈 Collection over time -------------------------------------------
       # Driven by the periodic "stats snapshot" log line graph-service emits
       # (src/observability/stats-snapshot.ts → getStats). Fills in as snapshots
-      # accumulate; bounded by the 30-day log retention.
+      # accumulate; bounded by the 30-day log retention. Rendered as bar charts,
+      # not line charts: snapshots are sparse (6h cadence, and the EC2 host is
+      # scale-to-zero so it's off most of the time), and a timeSeries widget
+      # errors with "data is not suitable for a line chart" when a window holds
+      # fewer than two points. Bars render fine from a single snapshot.
       {
         type   = "text"
         x      = 0
@@ -866,8 +870,8 @@ resource "aws_cloudwatch_dashboard" "graph_service" {
         properties = {
           title  = "Collection size (nodes)"
           region = var.aws_region
-          view   = "timeSeries"
-          query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | filter data.msg = \"stats snapshot\" | stats latest(data.stats.counts.releases) as releases, latest(data.stats.counts.artists) as artists, latest(data.stats.counts.tracks) as tracks, latest(data.stats.counts.masters) as masters by bin(1h)"
+          view   = "bar"
+          query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | filter data.msg = \"stats snapshot\" | stats latest(data.stats.counts.releases) as releases, latest(data.stats.counts.artists) as artists, latest(data.stats.counts.tracks) as tracks, latest(data.stats.counts.masters) as masters by bin(6h)"
         }
       },
       {
@@ -879,8 +883,8 @@ resource "aws_cloudwatch_dashboard" "graph_service" {
         properties = {
           title  = "Enrichment coverage (%)"
           region = var.aws_region
-          view   = "timeSeries"
-          query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | filter data.msg = \"stats snapshot\" | stats latest(data.stats.enrichment.tracksWithLyrics.pct) as lyrics, latest(data.stats.enrichment.releasesWithOriginalYear.pct) as originalYear, latest(data.stats.enrichment.tracksWithRecordingMbid.pct) as recordingMbid, latest(data.stats.enrichment.tracksWithTempo.pct) as tempo, latest(data.stats.enrichment.artistsWithProfile.pct) as artistProfile by bin(1h)"
+          view   = "bar"
+          query  = "SOURCE '${aws_cloudwatch_log_group.graph_service.name}' | filter data.msg = \"stats snapshot\" | stats latest(data.stats.enrichment.tracksWithLyrics.pct) as lyrics, latest(data.stats.enrichment.releasesWithOriginalYear.pct) as originalYear, latest(data.stats.enrichment.tracksWithRecordingMbid.pct) as recordingMbid, latest(data.stats.enrichment.tracksWithTempo.pct) as tempo, latest(data.stats.enrichment.artistsWithProfile.pct) as artistProfile by bin(6h)"
         }
       },
     ]
