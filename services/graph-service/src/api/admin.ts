@@ -28,6 +28,11 @@ import { resetTrackAcousticBrainzEnrichment } from '../db/track-acousticbrainz-r
 import { buildDeezerClientFromEnv } from '../ingestion/deezer-client.js';
 import { enrichTrackDeezer } from '../enrichment/track-deezer.js';
 import { resetTrackDeezerEnrichment } from '../db/track-deezer-repository.js';
+import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
+import { resetArtistProfilesEnrichment } from '../db/artist-profiles-repository.js';
+import { enrichArtistGenres } from '../enrichment/artist-genres.js';
+import { enrichTrackVersions } from '../enrichment/track-versions.js';
+import { resetTrackVersions } from '../db/track-versions-repository.js';
 
 const errorShape = {
   type: 'object',
@@ -111,6 +116,13 @@ type TrackDeezerSummary = {
   tracksFailed: number;
   durationMs: number;
 };
+type ArtistGenresSummary = {
+  genresEnriched: number;
+  stylesEnriched: number;
+  skipped: number;
+  failed: number;
+  durationMs: number;
+};
 
 const lyricsState = makePipelineState<EnrichSummary>();
 const nationalityState = makePipelineState<EnrichSummary>();
@@ -119,6 +131,9 @@ const mbReleaseEventsState = makePipelineState<MbReleaseEventsSummary>();
 const trackMusicBrainzState = makePipelineState<TrackMusicBrainzSummary>();
 const trackAcousticBrainzState = makePipelineState<TrackAcousticBrainzSummary>();
 const trackDeezerState = makePipelineState<TrackDeezerSummary>();
+const artistProfilesState = makePipelineState<EnrichSummary>();
+const artistGenresState = makePipelineState<ArtistGenresSummary>();
+const trackVersionsState = makePipelineState<EnrichSummary>();
 
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
@@ -1245,6 +1260,336 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     },
   );
 
+  fastify.post<{
+    Reply:
+      | { data: { enriched: number; skipped: number; failed: number; durationMs: number } }
+      | { error: { code: string; message: string } };
+  }>(
+    '/artist-profiles/enrich',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Enrich Artist nodes with realName and profile from the Discogs artist API',
+        description:
+          'For each Artist node not yet enriched (`profileFetched IS NULL`), fetches ' +
+          '`GET /artists/{id}` and writes `realName` and `profile`. Blocks until complete.\n\n' +
+          '**This step also runs automatically as part of `POST /api/v1/admin/ingest`.** ' +
+          'Use this endpoint to run it in isolation — e.g. after adding new artists from a re-ingest. ' +
+          'Already-enriched artists are skipped via the `profileFetched` marker; run ' +
+          '`POST /api/v1/admin/artist-profiles/reset` first to re-fetch every artist.\n\n' +
+          'Requires `DISCOGS_TOKEN` env var.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['enriched', 'skipped', 'failed', 'durationMs'],
+                properties: {
+                  enriched: { type: 'integer' },
+                  skipped: { type: 'integer' },
+                  failed: { type: 'integer' },
+                  durationMs: { type: 'integer' },
+                },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+          503: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (request, reply) => {
+      const discogsClient = buildDiscogsClientFromEnv(request.log);
+      if (!discogsClient) {
+        return reply.code(503).send({
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'DISCOGS_TOKEN not configured',
+          },
+        });
+      }
+
+      if (artistProfilesState.running) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message: 'Artist profiles enrichment already in progress',
+          },
+        });
+      }
+
+      artistProfilesState.running = true;
+      artistProfilesState.startedAt = new Date().toISOString();
+      artistProfilesState.completedAt = null;
+      artistProfilesState.durationMs = null;
+      artistProfilesState.lastResult = null;
+      try {
+        const summary = await enrichArtistProfiles(discogsClient, getDriver(), request.log);
+        artistProfilesState.lastResult = summary;
+        artistProfilesState.completedAt = new Date().toISOString();
+        artistProfilesState.durationMs = summary.durationMs;
+        return reply.send({ data: summary });
+      } finally {
+        artistProfilesState.running = false;
+      }
+    },
+  );
+
+  fastify.post<{
+    Reply: { data: { reset: number } } | { error: { code: string; message: string } };
+  }>(
+    '/artist-profiles/reset',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Reset artist profile enrichment markers for a full re-run',
+        description:
+          'Removes the `profileFetched` marker and the `realName` and `profile` properties from ' +
+          'all Artist nodes, causing the next `POST /api/v1/admin/artist-profiles/enrich` call to ' +
+          're-fetch every artist from scratch.\n\n' +
+          'This endpoint is blocked while enrichment is running.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['reset'],
+                properties: { reset: { type: 'integer' } },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => {
+      if (artistProfilesState.running) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message:
+              'Artist profiles enrichment is currently running — wait for it to finish before resetting',
+          },
+        });
+      }
+      artistProfilesState.running = true;
+      try {
+        const reset = await resetArtistProfilesEnrichment(getDriver());
+        return reply.send({ data: { reset } });
+      } finally {
+        artistProfilesState.running = false;
+      }
+    },
+  );
+
+  fastify.post<{
+    Reply:
+      | {
+          data: {
+            genresEnriched: number;
+            stylesEnriched: number;
+            skipped: number;
+            failed: number;
+            durationMs: number;
+          };
+        }
+      | { error: { code: string; message: string } };
+  }>(
+    '/artist-genres/enrich',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Aggregate genres and styles from releases onto Artist nodes',
+        description:
+          "Rolls each Artist's release genres/styles (via IN_GENRE and IN_STYLE) up onto the " +
+          'Artist node as `genres[]` and `styles[]`. Pure graph computation — no external API. ' +
+          'Blocks until complete.\n\n' +
+          '**This step also runs automatically as part of `POST /api/v1/admin/ingest`.** ' +
+          'Use this endpoint to recompute in isolation after a re-ingest adds releases.\n\n' +
+          '**No reset endpoint:** the aggregation recomputes each Artist from scratch every run, ' +
+          'so it is inherently idempotent and there is nothing to reset.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['genresEnriched', 'stylesEnriched', 'skipped', 'failed', 'durationMs'],
+                properties: {
+                  genresEnriched: { type: 'integer' },
+                  stylesEnriched: { type: 'integer' },
+                  skipped: { type: 'integer' },
+                  failed: { type: 'integer' },
+                  durationMs: { type: 'integer' },
+                },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (request, reply) => {
+      if (artistGenresState.running) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message: 'Artist genres enrichment already in progress',
+          },
+        });
+      }
+      artistGenresState.running = true;
+      artistGenresState.startedAt = new Date().toISOString();
+      artistGenresState.completedAt = null;
+      artistGenresState.durationMs = null;
+      artistGenresState.lastResult = null;
+      try {
+        const summary = await enrichArtistGenres(getDriver(), request.log);
+        artistGenresState.lastResult = summary;
+        artistGenresState.completedAt = new Date().toISOString();
+        artistGenresState.durationMs = summary.durationMs;
+        return reply.send({ data: summary });
+      } finally {
+        artistGenresState.running = false;
+      }
+    },
+  );
+
+  fastify.post<{
+    Reply:
+      | { data: { enriched: number; skipped: number; failed: number; durationMs: number } }
+      | { error: { code: string; message: string } };
+  }>(
+    '/track-versions/enrich',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Create IS_VERSION_OF relationships between Track variants',
+        description:
+          'Links Track variants that share a normalized title across releases by the same artist ' +
+          'into IS_VERSION_OF relationships pointing at the earliest pressing. Pure graph ' +
+          'computation — no external API. Blocks until complete.\n\n' +
+          '**This step also runs automatically as part of `POST /api/v1/admin/ingest`.** ' +
+          'Use this endpoint to recompute in isolation after a re-ingest. Relationships are ' +
+          're-MERGEd, so re-running is safe and never creates duplicate edges; run ' +
+          '`POST /api/v1/admin/track-versions/reset` first for a clean recompute.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['enriched', 'skipped', 'failed', 'durationMs'],
+                properties: {
+                  enriched: { type: 'integer' },
+                  skipped: { type: 'integer' },
+                  failed: { type: 'integer' },
+                  durationMs: { type: 'integer' },
+                },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (request, reply) => {
+      if (trackVersionsState.running) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message: 'Track versions enrichment already in progress',
+          },
+        });
+      }
+      trackVersionsState.running = true;
+      trackVersionsState.startedAt = new Date().toISOString();
+      trackVersionsState.completedAt = null;
+      trackVersionsState.durationMs = null;
+      trackVersionsState.lastResult = null;
+      try {
+        const summary = await enrichTrackVersions(getDriver(), request.log);
+        trackVersionsState.lastResult = summary;
+        trackVersionsState.completedAt = new Date().toISOString();
+        trackVersionsState.durationMs = summary.durationMs;
+        return reply.send({ data: summary });
+      } finally {
+        trackVersionsState.running = false;
+      }
+    },
+  );
+
+  fastify.post<{
+    Reply: { data: { reset: number } } | { error: { code: string; message: string } };
+  }>(
+    '/track-versions/reset',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Delete all IS_VERSION_OF relationships for a clean recompute',
+        description:
+          'Deletes every `IS_VERSION_OF` relationship in the graph, causing the next ' +
+          '`POST /api/v1/admin/track-versions/enrich` call to rebuild the version graph from ' +
+          'scratch. The relationships are purely derived, so this is non-destructive to source ' +
+          'data.\n\n' +
+          'This endpoint is blocked while enrichment is running.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['reset'],
+                properties: { reset: { type: 'integer' } },
+              },
+            },
+          },
+          401: errorShape,
+          409: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => {
+      if (trackVersionsState.running) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message:
+              'Track versions enrichment is currently running — wait for it to finish before resetting',
+          },
+        });
+      }
+      trackVersionsState.running = true;
+      try {
+        const reset = await resetTrackVersions(getDriver());
+        return reply.send({ data: { reset } });
+      } finally {
+        trackVersionsState.running = false;
+      }
+    },
+  );
+
   // ── Status endpoints ───────────────────────────────────────────────────────
 
   const enrichStatusSchema = (summary: Record<string, unknown>): Record<string, unknown> => ({
@@ -1419,6 +1764,60 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (_request, reply) => reply.send({ data: structuredClone(trackDeezerState) }),
   );
+
+  fastify.get(
+    '/artist-profiles/status',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Status of the most recent artist profiles enrichment run',
+        security: [{ bearerAuth: [] }],
+        response: { 200: enrichStatusSchema(standardSummarySchema), 401: errorShape },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => reply.send({ data: structuredClone(artistProfilesState) }),
+  );
+
+  fastify.get(
+    '/artist-genres/status',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Status of the most recent artist genres enrichment run',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: enrichStatusSchema({
+            type: 'object',
+            properties: {
+              genresEnriched: { type: 'integer' },
+              stylesEnriched: { type: 'integer' },
+              skipped: { type: 'integer' },
+              failed: { type: 'integer' },
+              durationMs: { type: 'integer' },
+            },
+          }),
+          401: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => reply.send({ data: structuredClone(artistGenresState) }),
+  );
+
+  fastify.get(
+    '/track-versions/status',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Status of the most recent track versions enrichment run',
+        security: [{ bearerAuth: [] }],
+        response: { 200: enrichStatusSchema(standardSummarySchema), 401: errorShape },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => reply.send({ data: structuredClone(trackVersionsState) }),
+  );
 }
 
 export function resetAllPipelineStates(): void {
@@ -1429,4 +1828,7 @@ export function resetAllPipelineStates(): void {
   Object.assign(trackMusicBrainzState, makePipelineState<TrackMusicBrainzSummary>());
   Object.assign(trackAcousticBrainzState, makePipelineState<TrackAcousticBrainzSummary>());
   Object.assign(trackDeezerState, makePipelineState<TrackDeezerSummary>());
+  Object.assign(artistProfilesState, makePipelineState<EnrichSummary>());
+  Object.assign(artistGenresState, makePipelineState<ArtistGenresSummary>());
+  Object.assign(trackVersionsState, makePipelineState<EnrichSummary>());
 }

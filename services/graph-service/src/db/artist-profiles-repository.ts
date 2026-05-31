@@ -57,3 +57,23 @@ export async function setArtistProfile(
     await session.close();
   }
 }
+
+/**
+ * Remove the profile-enrichment marker and data (profileFetched, realName,
+ * profile) from every Artist node that carries it, causing the next
+ * enrichArtistProfiles run to re-fetch all artists from scratch.
+ * Returns the number of Artist nodes reset.
+ */
+export async function resetArtistProfilesEnrichment(driver: Driver): Promise<number> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `MATCH (a:Artist) WHERE a.profileFetched IS NOT NULL
+       REMOVE a.profileFetched, a.realName, a.profile
+       RETURN count(a) AS reset`,
+    );
+    return (result.records[0]?.get('reset') as Neo4jInt | undefined)?.toNumber() ?? 0;
+  } finally {
+    await session.close();
+  }
+}
