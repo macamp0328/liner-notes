@@ -356,24 +356,22 @@ kubectl get secret -n liner-notes ecr-pull-secret    # should print "ecr-pull-se
 
 ### Step 7 — Apply the application manifests
 
-Still on your laptop, port-forward still running. Two one-time edits to the checked-in manifests, then apply with kustomize:
+Still on your laptop, port-forward still running. One one-time edit to point the Deployment at your image (plus a conditional region retarget), then apply with kustomize:
 
 ```bash
 cd infra/k8s/graph-service
 
 # 7a. If you applied Terraform with a non-default region, retarget the
-#     ClusterSecretStore and the CronJob's AWS_REGION to match.
+#     ClusterSecretStore and the CronJob's AWS_REGION to match. The CronJob
+#     derives the ECR hostname itself from AWS_REGION — nothing else to set.
 if [ "$REGION" != "us-east-1" ]; then
   sed -i.bak "s/us-east-1/$REGION/g" external-secret.yaml ecr-pull-secret-refresher.yaml
 fi
 
-# 7b. Tell the CronJob which ECR hostname to write into the dockerconfigjson.
-sed -i.bak "s|value: REPLACE_ME|value: $ECR_REGISTRY|" ecr-pull-secret-refresher.yaml
-
-# 7c. Point the Deployment at the image you just pushed.
+# 7b. Point the Deployment at the image you just pushed.
 kustomize edit set image "graph-service-image=$ECR_URL:$TAG"
 
-# 7d. Apply everything: ServiceAccount/Role/RoleBinding/CronJob/Service/Deployment/ClusterSecretStore/ExternalSecret.
+# 7c. Apply everything: ServiceAccount/Role/RoleBinding/CronJob/Service/Deployment/ClusterSecretStore/ExternalSecret.
 kubectl apply -k .
 
 cd "$(git rev-parse --show-toplevel)"
@@ -833,7 +831,7 @@ A scheduled keep-warm ping is tracked in [#103](https://github.com/macamp0328/li
 | `kubectl` from laptop hangs / times out                                                                              | The Step 4b SSM port-forward died (laptop sleep, network change). Re-run the `AWS-StartPortForwardingSession` command and retry. The k3s API is intentionally not exposed in the security group — SSM is the only path in.                                                                                                                                                                                                                                                                                                                                                                     |
 | `kubectl` returns `x509: certificate valid for 127.0.0.1, …`                                                         | The kubeconfig server URL was rewritten away from `127.0.0.1`. Re-fetch with `aws ssm start-session ... 'command=["sudo cat /etc/rancher/k3s/k3s.yaml"]'` and leave `https://127.0.0.1:6443` intact; the port-forward bridges that local address to the API server.                                                                                                                                                                                                                                                                                                                            |
 | k3s itself unhealthy                                                                                                 | In an SSM session: `sudo journalctl -u k3s -n 200`, `sudo systemctl status k3s`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| Refresher CronJob failing                                                                                            | `kubectl -n liner-notes logs job/<latest-refresher-job>` — typical failures are IMDS unreachable (pod has lost connectivity) or `ECR_REGISTRY=REPLACE_ME` (Step 7b skipped).                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Refresher CronJob failing                                                                                            | `kubectl -n liner-notes logs job/<latest-refresher-job>` — the job derives the ECR hostname from the instance role, so the usual failure is IMDS unreachable (`sts get-caller-identity` / `ecr get-login-password` can't reach the instance role — pod has lost connectivity or the metadata hop limit changed).                                                                                                                                                                                                                                                                               |
 | `pnpm power:*` fails with `AccessDenied` on `lambda:InvokeFunction`                                                  | Operator policy predates [#118](https://github.com/macamp0328/liner-notes/issues/118) — re-attach `operator-deploy-policy.json` per [`infra/iam/README.md`](iam/README.md).                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `pnpm power:*` fails with `ResourceNotFoundException`                                                                | The scheduler Lambda isn't deployed (`terraform apply`), or `project_name` was overridden — set `SCHEDULER_LAMBDA_NAME` to the `instance_scheduler_function_name` output.                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
