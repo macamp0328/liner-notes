@@ -1,0 +1,905 @@
+{
+  "id": 3883522,
+  "status": "Accepted",
+  "year": 2012,
+  "resource_url": "https://api.discogs.com/releases/3883522",
+  "uri": "https://www.discogs.com/release/3883522-Ben-Folds-Five-The-Sound-Of-The-Life-Of-The-Mind",
+  "artists": [
+    {
+      "name": "Ben Folds Five",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 103277,
+      "resource_url": "https://api.discogs.com/artists/103277",
+      "thumbnail_url": "https://i.discogs.com/1D8o8T0vJECcmC9IZy9PyfxIHFI8eK5jMG40SCmw0A0/rs:fit/g:sm/q:90/h:450/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9BLTEwMzI3/Ny0xMzczNDA4Mjkw/LTc0NzUuanBlZw.jpeg"
+    }
+  ],
+  "artists_sort": "Ben Folds Five",
+  "labels": [
+    {
+      "name": "IMA Vee Pee Records",
+      "catno": "88725464111",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 442368,
+      "resource_url": "https://api.discogs.com/labels/442368",
+      "thumbnail_url": "https://i.discogs.com/IppMXCAJHEO1wDPXdVrgfuhv1lTF-B0E2ftJx-w57OQ/rs:fit/g:sm/q:90/h:208/w:300/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTQ0MjM2/OC0xMzczNDA4MDUw/LTMyMDkuanBlZw.jpeg"
+    },
+    {
+      "name": "Sony Music",
+      "catno": "88725464111",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 25487,
+      "resource_url": "https://api.discogs.com/labels/25487",
+      "thumbnail_url": "https://i.discogs.com/O7quXBkakkeeljzb5ApIswR86acqIHTQ3qzBrCHmqzA/rs:fit/g:sm/q:90/h:571/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTI1NDg3/LTE3MDA5NDA1ODgt/MTYwNS5wbmc.jpeg"
+    }
+  ],
+  "series": [],
+  "companies": [
+    {
+      "name": "Sony Music Entertainment",
+      "catno": "",
+      "entity_type": "9",
+      "entity_type_name": "Distributed By",
+      "id": 29073,
+      "resource_url": "https://api.discogs.com/labels/29073",
+      "thumbnail_url": "https://i.discogs.com/brqxJ0_7Bid9TdPXvDixDcKsKR49S1Tu2CJbq1H6qsI/rs:fit/g:sm/q:90/h:43/w:519/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTI5MDcz/LTE3NTY5MTIzMzYt/MTIwNS5wbmc.jpeg"
+    },
+    {
+      "name": "Ben Folds",
+      "catno": "",
+      "entity_type": "13",
+      "entity_type_name": "Phonographic Copyright (p)",
+      "id": 442369,
+      "resource_url": "https://api.discogs.com/labels/442369"
+    },
+    {
+      "name": "Ben Folds",
+      "catno": "",
+      "entity_type": "14",
+      "entity_type_name": "Copyright (c)",
+      "id": 442369,
+      "resource_url": "https://api.discogs.com/labels/442369"
+    },
+    {
+      "name": "Ben's Studio",
+      "catno": "",
+      "entity_type": "23",
+      "entity_type_name": "Recorded At",
+      "id": 396674,
+      "resource_url": "https://api.discogs.com/labels/396674",
+      "thumbnail_url": "https://i.discogs.com/RQMvmKQQNPJ44tUIBBEDkqLBDtGKB-3DyciVa-n7OlI/rs:fit/g:sm/q:90/h:308/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTM5NjY3/NC0xMzcyNjEyOTY1/LTM1ODAuanBlZw.jpeg"
+    },
+    {
+      "name": "House Of Blues Studios",
+      "catno": "",
+      "entity_type": "23",
+      "entity_type_name": "Recorded At",
+      "id": 270216,
+      "resource_url": "https://api.discogs.com/labels/270216"
+    },
+    {
+      "name": "Marcussen Mastering",
+      "catno": "",
+      "entity_type": "29",
+      "entity_type_name": "Mastered At",
+      "id": 264233,
+      "resource_url": "https://api.discogs.com/labels/264233",
+      "thumbnail_url": "https://i.discogs.com/Hn23PpEeAdX8HzbtdWJ9J-EQJIHeLC7nPx8S3Q0pKnE/rs:fit/g:sm/q:90/h:127/w:393/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTI2NDIz/My0xMzIyMTI5NDM0/LmpwZWc.jpeg"
+    },
+    {
+      "name": "United Record Pressing",
+      "catno": "",
+      "entity_type": "17",
+      "entity_type_name": "Pressed By",
+      "id": 238322,
+      "resource_url": "https://api.discogs.com/labels/238322",
+      "thumbnail_url": "https://i.discogs.com/wXejTcaBZif0vNl1Wx8ZmvUBcAwkQ21T3AduA-BjUg8/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTIzODMy/Mi0xNDk3Nzk0Njg4/LTg0MzAucG5n.jpeg"
+    },
+    {
+      "name": "Free From The Man Songs, LLC",
+      "catno": "",
+      "entity_type": "21",
+      "entity_type_name": "Published By",
+      "id": 930292,
+      "resource_url": "https://api.discogs.com/labels/930292"
+    },
+    {
+      "name": "Hair Sucker Songs",
+      "catno": "",
+      "entity_type": "21",
+      "entity_type_name": "Published By",
+      "id": 439969,
+      "resource_url": "https://api.discogs.com/labels/439969"
+    }
+  ],
+  "formats": [
+    { "name": "Vinyl", "qty": "1", "descriptions": ["LP"] },
+    { "name": "Vinyl", "qty": "1", "descriptions": ["LP", "Single Sided", "Etched"] },
+    { "name": "All Media", "qty": "1", "descriptions": ["Album"] }
+  ],
+  "data_quality": "Correct",
+  "community": {
+    "have": 1617,
+    "want": 501,
+    "rating": { "count": 106, "average": 4.07 },
+    "submitter": { "username": "rafalor", "resource_url": "https://api.discogs.com/users/rafalor" },
+    "contributors": [
+      { "username": "rafalor", "resource_url": "https://api.discogs.com/users/rafalor" },
+      { "username": "tornobi", "resource_url": "https://api.discogs.com/users/tornobi" },
+      { "username": "Derby_MH", "resource_url": "https://api.discogs.com/users/Derby_MH" },
+      {
+        "username": "ShireenPeaches",
+        "resource_url": "https://api.discogs.com/users/ShireenPeaches"
+      },
+      { "username": "velove", "resource_url": "https://api.discogs.com/users/velove" },
+      { "username": "mr_mando", "resource_url": "https://api.discogs.com/users/mr_mando" },
+      { "username": "dyet", "resource_url": "https://api.discogs.com/users/dyet" },
+      { "username": "Same.Old.Me", "resource_url": "https://api.discogs.com/users/Same.Old.Me" },
+      { "username": "swbostoncd", "resource_url": "https://api.discogs.com/users/swbostoncd" },
+      { "username": "j_lit", "resource_url": "https://api.discogs.com/users/j_lit" },
+      { "username": "Thao8382", "resource_url": "https://api.discogs.com/users/Thao8382" },
+      {
+        "username": "Fuhgeddaboudit",
+        "resource_url": "https://api.discogs.com/users/Fuhgeddaboudit"
+      }
+    ],
+    "data_quality": "Correct",
+    "status": "Accepted"
+  },
+  "format_quantity": 3,
+  "date_added": "2012-09-18T12:19:57-07:00",
+  "date_changed": "2024-11-21T16:03:24-08:00",
+  "num_for_sale": 9,
+  "lowest_price": 60.84,
+  "master_id": 472211,
+  "master_url": "https://api.discogs.com/masters/472211",
+  "title": "The Sound Of The Life Of The Mind",
+  "country": "US",
+  "released": "2012-09-18",
+  "notes": "180-gram high quality 3-sided vinyl with an etching on side D.\nDeluxe gatefold jacket with custom inner sleeves (cat. #s 88725464111SV1 and 88725464111SV2) and \"Vice Presidents of Promotion\" foldout insert (cat. # 88725464111I2).\nIncludes free high quality mp3 download (cat. # 88725464111I1), valid through 12/31/2013.\nHype sticker (cat. # 88725464111S1) noting \"First new album in 13 years.\"\n\nAll songs published by Free From The Man Songs, LLC (BMI), except \"Sky High\" (A3) published by Hair Sucker Songs (BMI)",
+  "released_formatted": "18 Sep 2012",
+  "identifiers": [
+    { "type": "Barcode", "value": "8 87254 64111 7", "description": "Printed" },
+    { "type": "Barcode", "value": "0887254641117", "description": "Scanned" },
+    { "type": "Rights Society", "value": "BMI" },
+    { "type": "Matrix / Runout", "value": "887254641117A", "description": "Label side A" },
+    { "type": "Matrix / Runout", "value": "887254641117B", "description": "Label side B" },
+    { "type": "Matrix / Runout", "value": "887254641117C", "description": "Label side C" },
+    {
+      "type": "Pressing Plant ID",
+      "value": "Ⓤ [U in a circle]",
+      "description": "Etched in runouts"
+    },
+    {
+      "type": "Matrix / Runout",
+      "value": "887254641117-A Ⓤ cB",
+      "description": "Side A runout etched"
+    },
+    {
+      "type": "Matrix / Runout",
+      "value": "887254641117-B Ⓤ cB",
+      "description": "Side B runout etched"
+    },
+    {
+      "type": "Matrix / Runout",
+      "value": "887254641117-C Ⓤ cB",
+      "description": "Side C runout etched"
+    },
+    {
+      "type": "Matrix / Runout",
+      "value": "887254641117-D",
+      "description": "Side D label area etched"
+    }
+  ],
+  "videos": [
+    {
+      "uri": "https://www.youtube.com/watch?v=mEyrfFwf3rI",
+      "title": "Ben Folds Five \"DO IT ANYWAY\" f. Fraggle Rock [Official Video]",
+      "description": "Get your Boy Gorg Shirts! http://www.cafepress.com/dd/71572186\n\nA production of Nerdist Industries: http://www.nerdist.com\nBuy the album on iTunes: http://bit.ly/BF5NewAlbum\nDirected by Phil Hodges: http://philiphodges.com - @philipmhodges\nExecutive Produ",
+      "duration": 342,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=_CJV9aUTCFc",
+      "title": "Ben Folds Five - \"Sky High\" - The OFFICIAL Video",
+      "description": "The OFFICIAL music video for \"Sky High\" from the Ben Folds Five albums \"THE SOUND OF THE LIFE OF THE MIND\" and \"BEN FOLDS FIVE LIVE.\"\nWritten by Darren Jessee.\nPublished by Hair Sucker Songs (BMI).\nBen Folds on piano; Darren Jessee on drums; and Robert Sl",
+      "duration": 283,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=ClvabjI3Rsg",
+      "title": "On Being Frank",
+      "description": "Provided to YouTube by ImaVeePee Records/Sony Music\n\nOn Being Frank · Ben Folds Five\n\nThe Sound Of The Life Of The Mind\n\n℗ 2012 Ben Folds / Distributed by Sony Music Entertainment\n\nReleased on: 2012-09-14\n\nKeyboards, Piano, Vocal, Arranger, Composer, Lyri",
+      "duration": 274,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=yllzavKADpA",
+      "title": "Hold That Thought",
+      "description": "Provided to YouTube by ImaVeePee Records/Sony Music\n\nHold That Thought · Ben Folds Five\n\nThe Sound Of The Life Of The Mind\n\n℗ 2012 Ben Folds / Distributed by Sony Music Entertainment\n\nReleased on: 2012-09-14\n\nKeyboards, Piano, Vocal, Arranger, Composer, L",
+      "duration": 255,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=OCIxYJHN38w",
+      "title": "Erase Me",
+      "description": "Provided to YouTube by ImaVeePee Records/Sony Music\n\nErase Me · Ben Folds Five\n\nThe Sound Of The Life Of The Mind\n\n℗ 2012 Ben Folds / Distributed by Sony Music Entertainment\n\nReleased on: 2012-09-14\n\nKeyboards, Piano, Vocal, Arranger, Composer, Lyricist, ",
+      "duration": 316,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=sjhjpLCw2b4",
+      "title": "Ben Folds Five - The Sound of the Life of the Mind (Lyrics)",
+      "description": "Track 4 on the Ben Folds Five Album 'The Sound of the Life of the Mind'.\nThis album is due to be released on the 18th September 2012.\nThis song was written by the British author Nick Hornby. \nNick Hornby and Ben Folds also collaborated to make the album '",
+      "duration": 255,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=mEyrfFwf3rI",
+      "title": "Ben Folds Five \"DO IT ANYWAY\" f. Fraggle Rock [Official Video]",
+      "description": "Get your Boy Gorg Shirts! http://www.cafepress.com/dd/71572186\n\nA production of Nerdist Industries: http://www.nerdist.com\nBuy the album on iTunes: http://bit.ly/BF5NewAlbum\nDirected by Phil Hodges: http://philiphodges.com - @philipmhodges\nExecutive Produ",
+      "duration": 342,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=_CJV9aUTCFc",
+      "title": "Ben Folds Five - \"Sky High\" - The OFFICIAL Video",
+      "description": "The OFFICIAL music video for \"Sky High\" from the Ben Folds Five albums \"THE SOUND OF THE LIFE OF THE MIND\" and \"BEN FOLDS FIVE LIVE.\"\nWritten by Darren Jessee.\nPublished by Hair Sucker Songs (BMI).\nBen Folds on piano; Darren Jessee on drums; and Robert Sl",
+      "duration": 283,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=ClvabjI3Rsg",
+      "title": "On Being Frank",
+      "description": "Provided to YouTube by ImaVeePee Records/Sony Music\n\nOn Being Frank · Ben Folds Five\n\nThe Sound Of The Life Of The Mind\n\n℗ 2012 Ben Folds / Distributed by Sony Music Entertainment\n\nReleased on: 2012-09-14\n\nKeyboards, Piano, Vocal, Arranger, Composer, Lyri",
+      "duration": 274,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=yllzavKADpA",
+      "title": "Hold That Thought",
+      "description": "Provided to YouTube by ImaVeePee Records/Sony Music\n\nHold That Thought · Ben Folds Five\n\nThe Sound Of The Life Of The Mind\n\n℗ 2012 Ben Folds / Distributed by Sony Music Entertainment\n\nReleased on: 2012-09-14\n\nKeyboards, Piano, Vocal, Arranger, Composer, L",
+      "duration": 255,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=OCIxYJHN38w",
+      "title": "Erase Me",
+      "description": "Provided to YouTube by ImaVeePee Records/Sony Music\n\nErase Me · Ben Folds Five\n\nThe Sound Of The Life Of The Mind\n\n℗ 2012 Ben Folds / Distributed by Sony Music Entertainment\n\nReleased on: 2012-09-14\n\nKeyboards, Piano, Vocal, Arranger, Composer, Lyricist, ",
+      "duration": 316,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=sjhjpLCw2b4",
+      "title": "Ben Folds Five - The Sound of the Life of the Mind (Lyrics)",
+      "description": "Track 4 on the Ben Folds Five Album 'The Sound of the Life of the Mind'.\nThis album is due to be released on the 18th September 2012.\nThis song was written by the British author Nick Hornby. \nNick Hornby and Ben Folds also collaborated to make the album '",
+      "duration": 255,
+      "embed": true
+    }
+  ],
+  "genres": ["Rock", "Pop"],
+  "styles": ["Alternative Rock", "Power Pop", "Indie Rock"],
+  "tracklist": [
+    { "position": "A1", "type_": "track", "title": "Erase Me", "duration": "5:15" },
+    {
+      "position": "A2",
+      "type_": "track",
+      "title": "Michael Praytor, Five Years Later",
+      "duration": "4:32"
+    },
+    { "position": "A3", "type_": "track", "title": "Sky High", "duration": "4:43" },
+    {
+      "position": "B1",
+      "type_": "track",
+      "title": "The Sound Of The Life Of The Mind",
+      "duration": "4:13"
+    },
+    { "position": "B2", "type_": "track", "title": "On Being Frank", "duration": "4:33" },
+    { "position": "B3", "type_": "track", "title": "Draw A Crowd", "duration": "4:14" },
+    { "position": "C1", "type_": "track", "title": "Do It Anyway", "duration": "4:22" },
+    { "position": "C2", "type_": "track", "title": "Hold That Thought", "duration": "4:14" },
+    { "position": "C3", "type_": "track", "title": "Away When You Were Here", "duration": "3:31" },
+    {
+      "position": "C4",
+      "type_": "track",
+      "title": "Thank You For Breaking My Heart",
+      "duration": "4:50"
+    }
+  ],
+  "extraartists": [
+    {
+      "name": "Ben Folds",
+      "anv": "",
+      "join": "",
+      "role": "Arranged By [Strings]",
+      "tracks": "C3",
+      "id": 264737,
+      "resource_url": "https://api.discogs.com/artists/264737"
+    },
+    {
+      "name": "Paul Buckmaster",
+      "anv": "",
+      "join": "",
+      "role": "Arranged By [Strings]",
+      "tracks": "B2",
+      "id": 289733,
+      "resource_url": "https://api.discogs.com/artists/289733"
+    },
+    {
+      "name": "Robert Sledge",
+      "anv": "",
+      "join": "",
+      "role": "Bass",
+      "tracks": "",
+      "id": 477737,
+      "resource_url": "https://api.discogs.com/artists/477737"
+    },
+    {
+      "name": "Primary Talent International",
+      "anv": "Primary International",
+      "join": "",
+      "role": "Booking [Europe, At]",
+      "tracks": "",
+      "id": 3944086,
+      "resource_url": "https://api.discogs.com/artists/3944086"
+    },
+    {
+      "name": "Dave Chumbley",
+      "anv": "",
+      "join": "",
+      "role": "Booking [Europe]",
+      "tracks": "",
+      "id": 2002000,
+      "resource_url": "https://api.discogs.com/artists/2002000"
+    },
+    {
+      "name": "ICM (2)",
+      "anv": "",
+      "join": "",
+      "role": "Booking [North America, At]",
+      "tracks": "",
+      "id": 2985164,
+      "resource_url": "https://api.discogs.com/artists/2985164"
+    },
+    {
+      "name": "Marsha Vlasic",
+      "anv": "",
+      "join": "",
+      "role": "Booking [North America]",
+      "tracks": "",
+      "id": 1831753,
+      "resource_url": "https://api.discogs.com/artists/1831753"
+    },
+    {
+      "name": "Creative Artists Agency",
+      "anv": "CAA",
+      "join": "",
+      "role": "Booking [Pacific Rim, At]",
+      "tracks": "",
+      "id": 2623597,
+      "resource_url": "https://api.discogs.com/artists/2623597"
+    },
+    {
+      "name": "Marlene Tsuchii",
+      "anv": "",
+      "join": "",
+      "role": "Booking [Pacific Rim]",
+      "tracks": "",
+      "id": 1942060,
+      "resource_url": "https://api.discogs.com/artists/1942060"
+    },
+    {
+      "name": "John Heiden",
+      "anv": "",
+      "join": "",
+      "role": "Design",
+      "tracks": "",
+      "id": 1828836,
+      "resource_url": "https://api.discogs.com/artists/1828836"
+    },
+    {
+      "name": "Darren Jessee",
+      "anv": "",
+      "join": "",
+      "role": "Drums",
+      "tracks": "",
+      "id": 477738,
+      "resource_url": "https://api.discogs.com/artists/477738"
+    },
+    {
+      "name": "Leslie Richter",
+      "anv": "",
+      "join": "",
+      "role": "Engineer [Additional]",
+      "tracks": "",
+      "id": 680202,
+      "resource_url": "https://api.discogs.com/artists/680202"
+    },
+    {
+      "name": "Chris Wilkinson (3)",
+      "anv": "Christopher Wilkinson",
+      "join": "",
+      "role": "Engineer [Assistant]",
+      "tracks": "",
+      "id": 3325445,
+      "resource_url": "https://api.discogs.com/artists/3325445"
+    },
+    {
+      "name": "Sorrel Brigman",
+      "anv": "",
+      "join": "",
+      "role": "Engineer [Assistant]",
+      "tracks": "",
+      "id": 2922390,
+      "resource_url": "https://api.discogs.com/artists/2922390"
+    },
+    {
+      "name": "Tom Freitag",
+      "anv": "",
+      "join": "",
+      "role": "Engineer [Assistant]",
+      "tracks": "",
+      "id": 2204195,
+      "resource_url": "https://api.discogs.com/artists/2204195"
+    },
+    {
+      "name": "The Love Sponge Strings",
+      "anv": "Love Sponge Strings",
+      "join": "",
+      "role": "Ensemble",
+      "tracks": "B2, C3",
+      "id": 1753652,
+      "resource_url": "https://api.discogs.com/artists/1753652"
+    },
+    {
+      "name": "Aunt Ro",
+      "anv": "",
+      "join": "",
+      "role": "Executive-Producer",
+      "tracks": "",
+      "id": 3357267,
+      "resource_url": "https://api.discogs.com/artists/3357267"
+    },
+    {
+      "name": "Chris Bellman",
+      "anv": "CB",
+      "join": "",
+      "role": "Lacquer Cut By",
+      "tracks": "",
+      "id": 359447,
+      "resource_url": "https://api.discogs.com/artists/359447"
+    },
+    {
+      "name": "Ken Anderson (6)",
+      "anv": "",
+      "join": "",
+      "role": "Legal",
+      "tracks": "",
+      "id": 2939084,
+      "resource_url": "https://api.discogs.com/artists/2939084"
+    },
+    {
+      "name": "Sheppard Mullin Richter & Hampton, LLP",
+      "anv": "",
+      "join": "",
+      "role": "Legal [At]",
+      "tracks": "",
+      "id": 5971978,
+      "resource_url": "https://api.discogs.com/artists/5971978"
+    },
+    {
+      "name": "Alan Wolmark",
+      "anv": "",
+      "join": "",
+      "role": "Management",
+      "tracks": "",
+      "id": 1480977,
+      "resource_url": "https://api.discogs.com/artists/1480977"
+    },
+    {
+      "name": "Debbie Tirone",
+      "anv": "",
+      "join": "",
+      "role": "Management",
+      "tracks": "",
+      "id": 5971975,
+      "resource_url": "https://api.discogs.com/artists/5971975"
+    },
+    {
+      "name": "Citrin Cooperman",
+      "anv": "",
+      "join": "",
+      "role": "Management [Accountant, At]",
+      "tracks": "",
+      "id": 5971977,
+      "resource_url": "https://api.discogs.com/artists/5971977"
+    },
+    {
+      "name": "Denise Smikle",
+      "anv": "",
+      "join": "",
+      "role": "Management [Accountant]",
+      "tracks": "",
+      "id": 4715834,
+      "resource_url": "https://api.discogs.com/artists/4715834"
+    },
+    {
+      "name": "Victor Wlodingeur",
+      "anv": "",
+      "join": "",
+      "role": "Management [Accountant]",
+      "tracks": "",
+      "id": 2966139,
+      "resource_url": "https://api.discogs.com/artists/2966139"
+    },
+    {
+      "name": "CEC Management",
+      "anv": "CEC",
+      "join": "",
+      "role": "Management [For]",
+      "tracks": "",
+      "id": 3759357,
+      "resource_url": "https://api.discogs.com/artists/3759357"
+    },
+    {
+      "name": "Sharon Corbitt-House",
+      "anv": "",
+      "join": "",
+      "role": "Management [Studio]",
+      "tracks": "",
+      "id": 4910474,
+      "resource_url": "https://api.discogs.com/artists/4910474"
+    },
+    {
+      "name": "Stephen Marcussen",
+      "anv": "",
+      "join": "",
+      "role": "Mastered By",
+      "tracks": "",
+      "id": 254942,
+      "resource_url": "https://api.discogs.com/artists/254942"
+    },
+    {
+      "name": "Dan Wilson",
+      "anv": "",
+      "join": "",
+      "role": "Musical Assistance [Philosopher]",
+      "tracks": "",
+      "id": 303989,
+      "resource_url": "https://api.discogs.com/artists/303989"
+    },
+    {
+      "name": "Eric Joyner",
+      "anv": "",
+      "join": "",
+      "role": "Painting [Paintings]",
+      "tracks": "",
+      "id": 2922389,
+      "resource_url": "https://api.discogs.com/artists/2922389"
+    },
+    {
+      "name": "Ben Folds",
+      "anv": "Folds",
+      "join": "",
+      "role": "Photography By [Back Cover]",
+      "tracks": "",
+      "id": 264737,
+      "resource_url": "https://api.discogs.com/artists/264737"
+    },
+    {
+      "name": "Joe Costa",
+      "anv": "Costa",
+      "join": "",
+      "role": "Photography By [Back Cover]",
+      "tracks": "",
+      "id": 313762,
+      "resource_url": "https://api.discogs.com/artists/313762"
+    },
+    {
+      "name": "Tom Freitag",
+      "anv": "",
+      "join": "",
+      "role": "Photography By [Booklet]",
+      "tracks": "",
+      "id": 2204195,
+      "resource_url": "https://api.discogs.com/artists/2204195"
+    },
+    {
+      "name": "Ben Folds",
+      "anv": "",
+      "join": "",
+      "role": "Piano",
+      "tracks": "",
+      "id": 264737,
+      "resource_url": "https://api.discogs.com/artists/264737"
+    },
+    {
+      "name": "Ben Folds",
+      "anv": "",
+      "join": "",
+      "role": "Producer",
+      "tracks": "",
+      "id": 264737,
+      "resource_url": "https://api.discogs.com/artists/264737"
+    },
+    {
+      "name": "Joe Pisapia",
+      "anv": "",
+      "join": "",
+      "role": "Producer",
+      "tracks": "",
+      "id": 286736,
+      "resource_url": "https://api.discogs.com/artists/286736"
+    },
+    {
+      "name": "Big Hassle",
+      "anv": "",
+      "join": "",
+      "role": "Public Relations [Press, At]",
+      "tracks": "",
+      "id": 3481170,
+      "resource_url": "https://api.discogs.com/artists/3481170"
+    },
+    {
+      "name": "Ken Weinstein",
+      "anv": "",
+      "join": "",
+      "role": "Public Relations [Press]",
+      "tracks": "",
+      "id": 2001254,
+      "resource_url": "https://api.discogs.com/artists/2001254"
+    },
+    {
+      "name": "Mike Kopp",
+      "anv": "",
+      "join": "",
+      "role": "Public Relations [Social Media And Strategist]",
+      "tracks": "",
+      "id": 5971976,
+      "resource_url": "https://api.discogs.com/artists/5971976"
+    },
+    {
+      "name": "Joe Costa",
+      "anv": "",
+      "join": "",
+      "role": "Recorded By, Mixed By",
+      "tracks": "",
+      "id": 313762,
+      "resource_url": "https://api.discogs.com/artists/313762"
+    },
+    {
+      "name": "The Love Sponge Strings",
+      "anv": "Love Sponge Strings",
+      "join": "",
+      "role": "Strings",
+      "tracks": "B2, C3",
+      "id": 1753652,
+      "resource_url": "https://api.discogs.com/artists/1753652"
+    },
+    {
+      "name": "Sarighani Reist",
+      "anv": "Sari Reist",
+      "join": "",
+      "role": "Strings [Love Sponge Strings], Cello",
+      "tracks": "B2, C3",
+      "id": 586501,
+      "resource_url": "https://api.discogs.com/artists/586501"
+    },
+    {
+      "name": "Kristin Wilkinson",
+      "anv": "",
+      "join": "",
+      "role": "Strings [Love Sponge Strings], Viola",
+      "tracks": "B2, C3",
+      "id": 477740,
+      "resource_url": "https://api.discogs.com/artists/477740"
+    },
+    {
+      "name": "David Angell",
+      "anv": "",
+      "join": "",
+      "role": "Strings [Love Sponge Strings], Violin",
+      "tracks": "B2, C3",
+      "id": 506954,
+      "resource_url": "https://api.discogs.com/artists/506954"
+    },
+    {
+      "name": "David Davidson",
+      "anv": "",
+      "join": "",
+      "role": "Strings [Love Sponge Strings], Violin",
+      "tracks": "B2, C3",
+      "id": 271174,
+      "resource_url": "https://api.discogs.com/artists/271174"
+    },
+    {
+      "name": "Ben Folds",
+      "anv": "",
+      "join": "",
+      "role": "Written-By",
+      "tracks": "A1, A2, B2 to C4",
+      "id": 264737,
+      "resource_url": "https://api.discogs.com/artists/264737"
+    },
+    {
+      "name": "Darren Jessee",
+      "anv": "",
+      "join": "",
+      "role": "Written-By",
+      "tracks": "A3",
+      "id": 477738,
+      "resource_url": "https://api.discogs.com/artists/477738"
+    },
+    {
+      "name": "Nick Hornby",
+      "anv": "Hornby",
+      "join": "",
+      "role": "Written-By",
+      "tracks": "B1",
+      "id": 659573,
+      "resource_url": "https://api.discogs.com/artists/659573"
+    }
+  ],
+  "images": [
+    {
+      "type": "primary",
+      "uri": "https://i.discogs.com/lS7ajbvL9MoseybAaIQbu7ofArxD0uX_8YoeKog1NvA/rs:fit/g:sm/q:90/h:500/w:500/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTM0Nzk5NTk2/Ny01NTE4LmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/lS7ajbvL9MoseybAaIQbu7ofArxD0uX_8YoeKog1NvA/rs:fit/g:sm/q:90/h:500/w:500/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTM0Nzk5NTk2/Ny01NTE4LmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/Xr-4cMqNdg0IudoGc_YJqXxADll2ZU8C30twOLYk8zU/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTM0Nzk5NTk2/Ny01NTE4LmpwZWc.jpeg",
+      "width": 500,
+      "height": 500
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/UEtjYdjLu8p1Vc5fGDj1rsLkKfdNKMdi8RZS6HHPi6w/rs:fit/g:sm/q:90/h:282/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/Ny0yMTM3LmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/UEtjYdjLu8p1Vc5fGDj1rsLkKfdNKMdi8RZS6HHPi6w/rs:fit/g:sm/q:90/h:282/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/Ny0yMTM3LmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/tzHmth-GDp2lHHVLa-ROntPDeel1o1hEWpXTBz-W0ns/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/Ny0yMTM3LmpwZWc.jpeg",
+      "width": 600,
+      "height": 282
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/jr7j7FW82FfKg7avNrQcZfownLhQLT5VeOd-q2zSZm4/rs:fit/g:sm/q:90/h:598/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM2/NC0yMDAyLmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/jr7j7FW82FfKg7avNrQcZfownLhQLT5VeOd-q2zSZm4/rs:fit/g:sm/q:90/h:598/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM2/NC0yMDAyLmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/G5zwU8n3cBB1dkm7KkU6waMd7-3IP6iR5zhBfBj2FiA/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM2/NC0yMDAyLmpwZWc.jpeg",
+      "width": 600,
+      "height": 598
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/l8j4HLGdJiuv7v_NI-istsFBTPbZsWKXzRycN2Z0IME/rs:fit/g:sm/q:90/h:600/w:594/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ1OTQzOTI3/Ny01MTk1LmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/l8j4HLGdJiuv7v_NI-istsFBTPbZsWKXzRycN2Z0IME/rs:fit/g:sm/q:90/h:600/w:594/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ1OTQzOTI3/Ny01MTk1LmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/hbSRndSCqSElqT-mgQLpWI0mPJ0MUoqgPYY6VKmkui8/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ1OTQzOTI3/Ny01MTk1LmpwZWc.jpeg",
+      "width": 594,
+      "height": 600
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/XIZl6D7dhUe7wM3o3H_BS1fX0djTOnimy13sWkJsgog/rs:fit/g:sm/q:90/h:600/w:594/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ1OTQzOTI3/NC05ODM5LmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/XIZl6D7dhUe7wM3o3H_BS1fX0djTOnimy13sWkJsgog/rs:fit/g:sm/q:90/h:600/w:594/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ1OTQzOTI3/NC05ODM5LmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/0uZEbkg1UiLaS7bv_iZQsRE_pQO7PYb8Kdydvtt3nkk/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ1OTQzOTI3/NC05ODM5LmpwZWc.jpeg",
+      "width": 594,
+      "height": 600
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/QGTRZWm4qRjvpTVTOdMkncPmdFT83pdyBYMol3SNRls/rs:fit/g:sm/q:90/h:600/w:596/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ1OTQzOTI3/NC02NzMyLmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/QGTRZWm4qRjvpTVTOdMkncPmdFT83pdyBYMol3SNRls/rs:fit/g:sm/q:90/h:600/w:596/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ1OTQzOTI3/NC02NzMyLmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/atBm9s452NRrt45Ou-NxLl8PGcKyUKR8qqWBxmANZp8/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ1OTQzOTI3/NC02NzMyLmpwZWc.jpeg",
+      "width": 596,
+      "height": 600
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/n7viewA5UivWsIAnX9C9Ao2ChJOzSy5X-Kv_KnQXkfQ/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/Mi0zOTcyLmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/n7viewA5UivWsIAnX9C9Ao2ChJOzSy5X-Kv_KnQXkfQ/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/Mi0zOTcyLmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/EVGw6-6ljLIvIxdNfqlNfMsny9JmdQuYqcL52Uyy9PA/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/Mi0zOTcyLmpwZWc.jpeg",
+      "width": 600,
+      "height": 600
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/_Yrh0HUzQBovZn6_FxDdMqfxPi7JOROCZ1KRSbriHCk/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/My05OTczLmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/_Yrh0HUzQBovZn6_FxDdMqfxPi7JOROCZ1KRSbriHCk/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/My05OTczLmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/ZFeRiArZq_k8SCENRMHQNQko5jjmW06K1_cYMVKV0AI/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/My05OTczLmpwZWc.jpeg",
+      "width": 600,
+      "height": 600
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/yibJvGO7p_V_Zd9gv-DWtXAEuxnt53wbanKPEvLLLkU/rs:fit/g:sm/q:90/h:297/w:300/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTM0ODcwMTIz/OS00Mzg4LmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/yibJvGO7p_V_Zd9gv-DWtXAEuxnt53wbanKPEvLLLkU/rs:fit/g:sm/q:90/h:297/w:300/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTM0ODcwMTIz/OS00Mzg4LmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/yqTS2nkYkBUZpKpL5exdidMw6xyNwMWrWUC3SZSMG5k/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTM0ODcwMTIz/OS00Mzg4LmpwZWc.jpeg",
+      "width": 300,
+      "height": 297
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/IQ3QL3FrIWQFC5yYniJff941fdIdVLvLKI24Eq0kIVw/rs:fit/g:sm/q:90/h:600/w:594/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/MC0zODk1LmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/IQ3QL3FrIWQFC5yYniJff941fdIdVLvLKI24Eq0kIVw/rs:fit/g:sm/q:90/h:600/w:594/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/MC0zODk1LmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/UOmc9JvDZDVNGjErFkGSnYwWfxwZ0P6ZhD4qYm0He3o/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/MC0zODk1LmpwZWc.jpeg",
+      "width": 594,
+      "height": 600
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/WMbpGLCmkltSnABjR5D4oIS4tFpoW0bbYudhViuTS90/rs:fit/g:sm/q:90/h:567/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM2/OS01MDg3LmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/WMbpGLCmkltSnABjR5D4oIS4tFpoW0bbYudhViuTS90/rs:fit/g:sm/q:90/h:567/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM2/OS01MDg3LmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/3UXh1SVCwCEK2j9V6ZAQ3b1rRdCAUxrj9Ffh0Himag0/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM2/OS01MDg3LmpwZWc.jpeg",
+      "width": 600,
+      "height": 567
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/RzS6g1xp42M7yjEYSvjsEt1rupnbiHaN_C2owK73ZUc/rs:fit/g:sm/q:90/h:595/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM2/OC04MDQzLmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/RzS6g1xp42M7yjEYSvjsEt1rupnbiHaN_C2owK73ZUc/rs:fit/g:sm/q:90/h:595/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM2/OC04MDQzLmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/xx8LZlFTqM3zHql15PpBfKq7f6eikBobHS4fyBLgiHg/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM2/OC04MDQzLmpwZWc.jpeg",
+      "width": 600,
+      "height": 595
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/pHpaFM4gwJDYUK12zDkmABVRxurlZwm8Ucr79ZPSJ-A/rs:fit/g:sm/q:90/h:598/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/OC0zNDk0LmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/pHpaFM4gwJDYUK12zDkmABVRxurlZwm8Ucr79ZPSJ-A/rs:fit/g:sm/q:90/h:598/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/OC0zNDk0LmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/Y0N5TwNKvDOqFKspz2aOgtbTEUMYYLPpg2WTXL8dhnQ/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/OC0zNDk0LmpwZWc.jpeg",
+      "width": 600,
+      "height": 598
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/gtwKTuoxMjj9eH0P5sh20iy-mZRQA8aQHjT8BwNnmYY/rs:fit/g:sm/q:90/h:600/w:581/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/MS02ODM2LmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/gtwKTuoxMjj9eH0P5sh20iy-mZRQA8aQHjT8BwNnmYY/rs:fit/g:sm/q:90/h:600/w:581/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/MS02ODM2LmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/6d7HvdqZ-niTwoCuabBYCU-9fY1PUXs5u2CXCweJeqY/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ2NDk1OTM3/MS02ODM2LmpwZWc.jpeg",
+      "width": 581,
+      "height": 600
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/zOsqlBsjF3-2Ku0Ui95Wh3H7QzpcOeDQhv4m43r-rCU/rs:fit/g:sm/q:90/h:425/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ5NjYwOTYx/OC04NDE1LmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/zOsqlBsjF3-2Ku0Ui95Wh3H7QzpcOeDQhv4m43r-rCU/rs:fit/g:sm/q:90/h:425/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ5NjYwOTYx/OC04NDE1LmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/tFaSoBqmSFT7kSKRIl4qCAkUP-9RFbqAsbdG4lT7Zgc/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ5NjYwOTYx/OC04NDE1LmpwZWc.jpeg",
+      "width": 600,
+      "height": 425
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/d6GINrtnD1aI-sh8p10WF03nzTx8FxiyV1JrtuzJVGw/rs:fit/g:sm/q:90/h:531/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ5NjYwOTYy/NS03ODAwLmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/d6GINrtnD1aI-sh8p10WF03nzTx8FxiyV1JrtuzJVGw/rs:fit/g:sm/q:90/h:531/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ5NjYwOTYy/NS03ODAwLmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/aEMFo4uVH7AOatHhwbB1H9jwSz9A_IdyzwsrVq6l73w/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ5NjYwOTYy/NS03ODAwLmpwZWc.jpeg",
+      "width": 600,
+      "height": 531
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/bXHpoboog2lQGzUyndG2JqGBbgoB1zgnv9iNL-1k_GE/rs:fit/g:sm/q:90/h:311/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ5NjYwOTYx/Ni01NjMxLmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/bXHpoboog2lQGzUyndG2JqGBbgoB1zgnv9iNL-1k_GE/rs:fit/g:sm/q:90/h:311/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ5NjYwOTYx/Ni01NjMxLmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/jEESVjlkqPIIBx6-p56RjmdJAPKuXub2itjxWwj8-ag/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ5NjYwOTYx/Ni01NjMxLmpwZWc.jpeg",
+      "width": 600,
+      "height": 311
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/gsMlk-Jzt3N5cirhCExhervLgU9rMcPpoSefx_67mHs/rs:fit/g:sm/q:90/h:600/w:594/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ5NjYwOTYy/Ny0zMDY4LmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/gsMlk-Jzt3N5cirhCExhervLgU9rMcPpoSefx_67mHs/rs:fit/g:sm/q:90/h:600/w:594/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ5NjYwOTYy/Ny0zMDY4LmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/WJU7jptamNp55wx5Fs1XYkII1WljKqT2Lvmg9DV8Ah4/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ5NjYwOTYy/Ny0zMDY4LmpwZWc.jpeg",
+      "width": 594,
+      "height": 600
+    },
+    {
+      "type": "secondary",
+      "uri": "https://i.discogs.com/9uM5KqC8gtsMEJLg2FI5RqgxCsKC5Co4gf2Kmrstng4/rs:fit/g:sm/q:90/h:301/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ5NjYwOTYy/Ni04Nzk2LmpwZWc.jpeg",
+      "resource_url": "https://i.discogs.com/9uM5KqC8gtsMEJLg2FI5RqgxCsKC5Co4gf2Kmrstng4/rs:fit/g:sm/q:90/h:301/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ5NjYwOTYy/Ni04Nzk2LmpwZWc.jpeg",
+      "uri150": "https://i.discogs.com/8_Q_4wl77hhk_R_sp43gcpgK3pUUtBMzSx0q3E5qXz4/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTQ5NjYwOTYy/Ni04Nzk2LmpwZWc.jpeg",
+      "width": 600,
+      "height": 301
+    }
+  ],
+  "thumb": "https://i.discogs.com/Xr-4cMqNdg0IudoGc_YJqXxADll2ZU8C30twOLYk8zU/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM4ODM1/MjItMTM0Nzk5NTk2/Ny01NTE4LmpwZWc.jpeg",
+  "estimated_weight": 460,
+  "blocked_from_sale": false,
+  "is_offensive": false
+}
