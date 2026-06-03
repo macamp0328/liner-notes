@@ -143,6 +143,43 @@ describe('enrichMbReleaseEvents', () => {
     expect(mockSetFetched).toHaveBeenCalledWith(fakeDriver, 2);
   });
 
+  it('warns when masters were found but no events were written (silent no-op)', async () => {
+    mockGetMasters.mockResolvedValue([{ masterDiscogsId: 1 }, { masterDiscogsId: 2 }]);
+    const client = makeMbClient(async () => null);
+
+    const summary = await enrichMbReleaseEvents(client, fakeDriver, silentLogger);
+
+    expect(summary.eventsWritten).toBe(0);
+    expect(summary.mastersFailed).toBe(0);
+    expect(silentLogger.warn).toHaveBeenCalledWith(expect.stringContaining('No-op'));
+  });
+
+  it('does NOT warn when events were written', async () => {
+    mockGetMasters.mockResolvedValue([{ masterDiscogsId: 1 }]);
+    const events: MbReleaseEvent[] = [
+      { mbReleaseId: 'rel-001', countryCode: 'GB', date: '1969', formats: [] },
+    ];
+    const client = makeMbClient(
+      async () => 'rg-mbid',
+      async () => events,
+    );
+
+    await enrichMbReleaseEvents(client, fakeDriver, silentLogger);
+
+    expect(silentLogger.warn).not.toHaveBeenCalled();
+  });
+
+  it('does NOT warn when masters failed (already surfaced as errors)', async () => {
+    mockGetMasters.mockResolvedValue([{ masterDiscogsId: 1 }]);
+    const client = makeMbClient(async () => {
+      throw new Error('MB API timeout');
+    });
+
+    await enrichMbReleaseEvents(client, fakeDriver, silentLogger);
+
+    expect(silentLogger.warn).not.toHaveBeenCalled();
+  });
+
   it('returns early with failed=1 when fetching masters fails', async () => {
     mockGetMasters.mockRejectedValue(new Error('DB connection lost'));
     const client = makeMbClient();

@@ -235,6 +235,8 @@ Added in Task 4. Source files:
 
 6. **`anv` → `creditedAs`.** When `extraartists[n].anv` is non-empty, it is stored as `creditedAs` on the `CREDITED_ON` relationship. This captures sleeve credits where an artist used a different name (e.g. "Dom Monks" credited as "Dominic Monks"). When `anv` is empty string, `creditedAs` is `null`.
 
+7. **MusicBrainz keys the release-group relation under `release_group` (underscore), not `release-group` (hyphen).** In the `/ws/2/url` relation JSON, the embedded entity is `release_group` and `target-type` is `"release_group"` — unlike the single-word `release` / `artist` keys, which have no hyphen/underscore ambiguity. Parsing it as `release-group` silently returns `null` for every master (the #183 no-op). Relatedly, the release **browse** endpoint (`/ws/2/release?release-group=…`) returns `release-events` by default and rejects `inc=release-events` as invalid — pass `inc=media` only to populate per-release formats.
+
 **Regression guards — what breaks if you change X:**
 
 | Change                                                                | Impact                                                                                                      |

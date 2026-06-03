@@ -106,5 +106,11 @@ export async function enrichMbReleaseEvents(
     `[mb-release-events] Enrichment complete: processed=${mastersProcessed}, skipped=${mastersSkipped}, failed=${mastersFailed}, eventsWritten=${eventsWritten}, duration=${durationMs}ms`,
   );
 
+  if (masters.length > 0 && mastersFailed === 0 && eventsWritten === 0) {
+    log.warn(
+      `[mb-release-events] No-op: ${masters.length} master(s) found but 0 events written and 0 failures — every master skipped (no MusicBrainz master→release-group link resolved). Verify the MB lookup before treating this as complete.`,
+    );
+  }
+
   return { mastersProcessed, mastersSkipped, mastersFailed, eventsWritten, durationMs };
 }

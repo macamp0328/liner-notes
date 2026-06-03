@@ -41,7 +41,7 @@ interface MbUrlResponse {
     type: string;
     direction: string;
     artist?: { id: string; name: string };
-    'release-group'?: { id: string };
+    release_group?: { id: string };
     release?: { id: string };
   }>;
 }
@@ -155,9 +155,9 @@ export class MusicBrainzClient {
 
     const relation = response.relations.find(
       (r) =>
-        r.type === 'discogs' && r.direction === 'backward' && r['release-group']?.id !== undefined,
+        r.type === 'discogs' && r.direction === 'backward' && r.release_group?.id !== undefined,
     );
-    return relation?.['release-group']?.id ?? null;
+    return relation?.release_group?.id ?? null;
   }
 
   /**
@@ -171,9 +171,11 @@ export class MusicBrainzClient {
     let totalCount = Infinity;
 
     while (offset < totalCount) {
+      // release-events are returned by default on the browse endpoint; `inc=release-events`
+      // is rejected as invalid there. inc=media is only to populate per-release formats.
       const endpoint =
         `${BASE_URL}/release?release-group=${encodeURIComponent(mbid)}` +
-        `&status=official&inc=release-events&fmt=json&limit=${limit}&offset=${offset}`;
+        `&status=official&inc=media&fmt=json&limit=${limit}&offset=${offset}`;
 
       const page = await this.fetchWithBackoff<MbReleaseListResponse>(endpoint);
       totalCount = page['release-count'];
