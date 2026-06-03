@@ -129,9 +129,12 @@ export class VIAFClient {
    * - All nationality entries must resolve to the same ISO code; disagreement → null
    * - MARC codes not in the mapping table → null
    *
-   * Retries on 429, 503, and 403 (VIAF uses 403 as a soft bot-detection block) with
-   * exponential backoff. Also retries when the response body is text/html — VIAF sometimes
-   * serves HTML maintenance pages with a 200 OK status.
+   * Sends `Accept: application/json` so VIAF's SRU endpoint returns JSON rather than its
+   * HTML results page. Only 429 and 503 are retried (genuinely transient) with exponential
+   * backoff. A 403 (VIAF's soft bot-block) and a 200 + text/html body are deterministic for a
+   * given request, so they are hard-skipped — retrying the identical request cannot change the
+   * outcome and only burns wall-clock. Every path that reaches VIAF's server is paced by
+   * `delayMs` to stay within ~1 req/sec and avoid triggering more bot-blocks.
    */
   async getCountryByName(name: string): Promise<string | null> {
     // Escape CQL meta-characters that are meaningful inside a quoted phrase
@@ -146,18 +149,18 @@ export class VIAFClient {
     while (attempt <= MAX_RETRIES) {
       try {
         const response = await fetch(url, {
-          headers: { 'User-Agent': this.userAgent },
+          headers: { 'User-Agent': this.userAgent, Accept: 'application/json' },
         });
 
-        if (response.status === 429 || response.status === 503 || response.status === 403) {
+        // 429/503 are genuinely transient — retry with exponential backoff.
+        if (response.status === 429 || response.status === 503) {
           if (attempt >= MAX_RETRIES) break;
           const retryAfterHeader = response.headers.get('Retry-After');
           const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
           const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
           const waitMs = Math.max(backoffMs, retryAfterMs);
-          const label = response.status === 403 ? 'bot block' : 'rate limit/unavailable';
           this.log.warn(
-            `[viaf-client] HTTP ${response.status} (${label}) for "${name}" on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${waitMs}ms`,
+            `[viaf-client] HTTP ${response.status} (rate limit/unavailable) for "${name}" on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${waitMs}ms`,
           );
           await this.sleep(waitMs);
           backoffMs = Math.min(backoffMs * 2, 32_000);
@@ -165,21 +168,29 @@ export class VIAFClient {
           continue;
         }
 
-        if (!response.ok) {
-          this.log.warn(`[viaf-client] HTTP ${response.status} for "${name}" — skipping`);
+        // 403 is VIAF's soft bot-block — deterministic for this request, so don't retry.
+        // Must be checked before the !response.ok guard (403 is also !ok) to keep this log.
+        if (response.status === 403) {
+          this.log.warn(`[viaf-client] HTTP 403 (bot block) for "${name}" — skipping`);
+          await this.sleep(this.delayMs);
           return null;
         }
 
-        const contentType = response.headers.get('content-type') ?? '';
+        if (!response.ok) {
+          this.log.warn(`[viaf-client] HTTP ${response.status} for "${name}" — skipping`);
+          await this.sleep(this.delayMs);
+          return null;
+        }
+
+        // VIAF sometimes serves its HTML results page with a 200 OK. That is deterministic for
+        // a given request, so skip rather than retry the identical call.
+        const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
         if (contentType.includes('text/html')) {
-          if (attempt >= MAX_RETRIES) break;
           this.log.warn(
-            `[viaf-client] HTML response (status ${response.status}) for "${name}" on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${backoffMs}ms`,
+            `[viaf-client] HTML response (status ${response.status}) for "${name}" — skipping`,
           );
-          await this.sleep(backoffMs);
-          backoffMs = Math.min(backoffMs * 2, 32_000);
-          attempt++;
-          continue;
+          await this.sleep(this.delayMs);
+          return null;
         }
 
         const data = (await response.json()) as ViafSearchResponse;
@@ -193,7 +204,9 @@ export class VIAFClient {
       }
     }
 
+    // Reached only when 429/503 retries are exhausted — HTML/403 return inline above.
     this.log.warn(`[viaf-client] Exceeded max retries for "${name}" — skipping`);
+    await this.sleep(this.delayMs);
     return null;
   }
 
