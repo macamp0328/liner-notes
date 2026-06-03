@@ -241,7 +241,8 @@ describe('MusicBrainzClient', () => {
             {
               type: 'discogs',
               direction: 'backward',
-              'release-group': { id: 'rg-mbid-abc' },
+              'target-type': 'release_group',
+              release_group: { id: 'rg-mbid-abc' },
             },
           ],
         }),
@@ -340,6 +341,12 @@ describe('MusicBrainzClient', () => {
       );
 
       const events = await client.getReleaseEventsByReleaseGroupMbid('rg-mbid');
+
+      // release-events are returned by default; `inc=release-events` is rejected by the
+      // browse endpoint. inc=media supplies formats. Guards the latent #183 bug.
+      const url = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(url).toContain('inc=media');
+      expect(url).not.toContain('inc=release-events');
 
       expect(events).toHaveLength(2);
       expect(events[0]).toEqual({

@@ -106,5 +106,11 @@ export async function enrichMbReleaseEvents(
     `[mb-release-events] Enrichment complete: processed=${mastersProcessed}, skipped=${mastersSkipped}, failed=${mastersFailed}, eventsWritten=${eventsWritten}, duration=${durationMs}ms`,
   );
 
+  if (masters.length > 0 && mastersFailed === 0 && eventsWritten === 0) {
+    log.warn(
+      `[mb-release-events] No-op: ${masters.length} master(s) found, 0 failures, but 0 events written (processed=${mastersProcessed}, skipped=${mastersSkipped}). Expected >0 — verify the MusicBrainz master→release-group lookup and that resolved release groups have country-coded release events, before treating this as complete.`,
+    );
+  }
+
   return { mastersProcessed, mastersSkipped, mastersFailed, eventsWritten, durationMs };
 }
