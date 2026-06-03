@@ -111,6 +111,34 @@ const DEFAULT_BACKOFF_BASE_MS = 2_000;
 /** Minimum MusicBrainz search score to accept a fallback recording match. */
 const MIN_RECORDING_SEARCH_SCORE = 90;
 
+/** undici / Node network-level error codes that warrant a bounded retry. */
+const TRANSIENT_NETWORK_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EPIPE',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+
+/**
+ * Identify a transient network-level failure thrown by fetch (undici) — a DNS, connection, or
+ * socket error rather than an HTTP status. undici surfaces these as `TypeError: fetch failed`
+ * with the real socket error nested in `.cause`. Returns a short code/label for logging, or
+ * null when the error is not retryable.
+ */
+function transientNetworkCode(err: unknown): string | null {
+  if (!(err instanceof Error)) return null;
+  if (err.message.includes('fetch failed')) return 'fetch failed';
+  for (const candidate of [err.cause, err]) {
+    const code = (candidate as { code?: unknown } | undefined)?.code;
+    if (typeof code === 'string' && TRANSIENT_NETWORK_CODES.has(code)) return code;
+  }
+  return null;
+}
+
 /** Convert a MusicBrainz millisecond length to whole seconds; null for missing or non-positive values. */
 function msToSeconds(ms: number | null | undefined): number | null {
   if (ms === null || ms === undefined || ms <= 0) return null;
@@ -349,14 +377,30 @@ export class MusicBrainzClient {
     let currentDelay = this.backoffBaseMs;
 
     while (attempt <= MAX_RETRIES) {
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': this.userAgent,
-          Accept: 'application/json',
-        },
-      });
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          headers: {
+            'User-Agent': this.userAgent,
+            Accept: 'application/json',
+          },
+        });
+      } catch (err) {
+        const netCode = transientNetworkCode(err);
+        if (netCode === null || attempt >= MAX_RETRIES) throw err;
+        this.log.warn(
+          `[musicbrainz-client] Network error (${netCode}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${currentDelay}ms`,
+        );
+        await this.sleep(currentDelay);
+        currentDelay = Math.min(currentDelay * 2, 32_000);
+        attempt++;
+        continue;
+      }
 
       if (response.status === 429 || response.status === 503) {
+        if (attempt >= MAX_RETRIES) {
+          throw new Error(`MusicBrainz API: exceeded max retries (${MAX_RETRIES}) for ${url}`);
+        }
         const retryAfterHeader = response.headers.get('Retry-After');
         const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
         const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
