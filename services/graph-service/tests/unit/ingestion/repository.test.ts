@@ -4,6 +4,7 @@ import { hasReleases, mergeReleaseGraph, wipeGraph } from '../../../src/db/inges
 import release13570466 from '../../fixtures/release-13570466.json' with { type: 'json' };
 import release9999991 from '../../fixtures/release-9999991.json' with { type: 'json' };
 import release9999992 from '../../fixtures/release-9999992.json' with { type: 'json' };
+import release3883522 from '../../fixtures/release-3883522.json' with { type: 'json' };
 import type { DiscogsRelease } from '../../../src/ingestion/types.js';
 
 // ---------------------------------------------------------------------------
@@ -16,7 +17,17 @@ vi.mock('neo4j-driver', async (importOriginal) => {
     ...actual,
     default: {
       ...actual.default,
-      int: (n: number) => ({ toNumber: () => n, low: n, high: 0 }),
+      // Faithful to neo4j-driver: Integer.fromValue(null/undefined) is neither number, string,
+      // nor Integer, so it falls through to Integer.fromBits(value.low, ...) and throws a
+      // TypeError ("Cannot read properties of null (reading 'low')"). The throw is keyed only on
+      // int()'s argument — null *params* still flow through the session.run spy untouched. Without
+      // this the mock would silently accept null and mask the exact crash class of issue #181.
+      int: (n: number | null | undefined) => {
+        if (n == null) {
+          throw new TypeError(`Cannot read properties of ${String(n)} (reading 'low')`);
+        }
+        return { toNumber: () => n, low: n, high: 0 };
+      },
     },
   };
 });
@@ -351,6 +362,110 @@ describe('mergeReleaseGraph', () => {
     ][];
     const trackCalls = calls.filter(([q]) => q.includes('MERGE (t:Track'));
     expect(trackCalls.every(([, params]) => params['isInstrumental'] === false)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #181 — a null external id must not crash (and silently drop) a release
+//
+// During the #165 reload, release 3883522 failed base ingestion with
+// "Cannot read properties of null (reading 'low')" — neo4j.int(null) hitting an
+// unguarded artist/label/credit id, dropping the whole release. The mock above is
+// faithful (throws on null), so each of these tests fails on the unfixed code.
+// Every variant is a structuredClone of the real captured 3883522 payload.
+// ---------------------------------------------------------------------------
+describe('mergeReleaseGraph — null/0 external ids (issue #181)', () => {
+  let session: Session;
+  let driver: Driver;
+
+  beforeEach(() => {
+    const mock = makeMockSession({ records: [] });
+    session = mock.session;
+    driver = makeMockDriver(session);
+  });
+
+  function runCalls(): [string, Record<string, unknown>][] {
+    return (session.run as ReturnType<typeof vi.fn>).mock.calls as [
+      string,
+      Record<string, unknown>,
+    ][];
+  }
+
+  it('ingests the real 3883522 payload (all valid ids) without throwing', async () => {
+    await expect(
+      mergeReleaseGraph(driver, release3883522 as unknown as DiscogsRelease),
+    ).resolves.toBeUndefined();
+
+    const calls = runCalls();
+    expect(calls.some(([q]) => q.includes('MERGE (r:Release'))).toBe(true);
+    expect(calls.some(([q]) => q.includes('MERGE (a:Artist'))).toBe(true);
+    expect(calls.some(([q]) => q.includes('CREDITED_ON'))).toBe(true);
+  });
+
+  it('throws a legible error (not a cryptic null.low) when release.id is null', async () => {
+    const noId = structuredClone(release3883522) as unknown as DiscogsRelease;
+    (noId as unknown as { id: number | null }).id = null;
+
+    await expect(mergeReleaseGraph(driver, noId)).rejects.toThrow(/no id/i);
+    // The guard runs before the session opens, so nothing is written.
+    expect(session.run).not.toHaveBeenCalled();
+  });
+
+  it('routes null-id and 0-id extraartists to name-only credits instead of crashing', async () => {
+    const r = structuredClone(release3883522) as unknown as DiscogsRelease;
+    r.extraartists![0]!.id = null; // the issue #181 shape
+    r.extraartists![1]!.id = 0; // Discogs "uncatalogued person"
+    const nullName = r.extraartists![0]!.name;
+    const zeroName = r.extraartists![1]!.name;
+
+    await expect(mergeReleaseGraph(driver, r)).resolves.toBeUndefined();
+
+    const nameOnly = runCalls().filter(([q]) => q.includes('MERGE (m:Musician {name: $name})'));
+    const byId = runCalls().filter(([q]) => q.includes('MERGE (m:Musician {discogsId'));
+    // Both the null-id and the 0-id credit became name-only Musician nodes (no discogsId param)...
+    expect(nameOnly.some(([, p]) => p['name'] === nullName && p['discogsId'] === undefined)).toBe(
+      true,
+    );
+    expect(nameOnly.some(([, p]) => p['name'] === zeroName)).toBe(true);
+    // ...while the remaining valid-id credits still merged by discogsId.
+    expect(byId.length).toBeGreaterThan(0);
+  });
+
+  it('skips a primary artist with a null id and still ingests the release', async () => {
+    const r = structuredClone(release3883522) as unknown as DiscogsRelease;
+    r.artists[0]!.id = null;
+
+    await expect(mergeReleaseGraph(driver, r)).resolves.toBeUndefined();
+    // 3883522 has a single artist; nulling its id leaves no Artist node to merge.
+    expect(runCalls().some(([q]) => q.includes('MERGE (a:Artist'))).toBe(false);
+  });
+
+  it('skips a primary artist with id 0 the same way', async () => {
+    const r = structuredClone(release3883522) as unknown as DiscogsRelease;
+    r.artists[0]!.id = 0;
+
+    await expect(mergeReleaseGraph(driver, r)).resolves.toBeUndefined();
+    expect(runCalls().some(([q]) => q.includes('MERGE (a:Artist'))).toBe(false);
+  });
+
+  it('skips a null-id label while still merging the other valid label', async () => {
+    const r = structuredClone(release3883522) as unknown as DiscogsRelease;
+    const survivingLabel = r.labels[1]!.name; // 3883522 has two labels
+    r.labels[0]!.id = null;
+
+    await expect(mergeReleaseGraph(driver, r)).resolves.toBeUndefined();
+
+    const labelCalls = runCalls().filter(([q]) => q.includes('MERGE (l:Label'));
+    expect(labelCalls).toHaveLength(1);
+    expect((labelCalls[0]![1] as { name: string }).name).toBe(survivingLabel);
+  });
+
+  it('skips an id-0 label the same way', async () => {
+    const r = structuredClone(release3883522) as unknown as DiscogsRelease;
+    r.labels[0]!.id = 0;
+
+    await expect(mergeReleaseGraph(driver, r)).resolves.toBeUndefined();
+    expect(runCalls().filter(([q]) => q.includes('MERGE (l:Label'))).toHaveLength(1);
   });
 });
 

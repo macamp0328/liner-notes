@@ -7,7 +7,10 @@ export interface DiscogsArtistCredit {
   join: string;
   role: string;
   tracks: string;
-  id: number; // 0 when person is not in Discogs database (acknowledgments, catering, etc.)
+  // 0 when the person is not in the Discogs database (acknowledgments, catering, etc.);
+  // null when the API omits the id entirely on a malformed entry (see issue #181). Both are
+  // treated as "no canonical id" — the entity is merged by name only, never by id.
+  id: number | null;
   resource_url: string;
 }
 
@@ -16,7 +19,7 @@ export interface DiscogsLabel {
   catno: string;
   entity_type: string; // numeric string: "1"=Label, "23"=Recorded At, "27"=Mixed At, etc.
   entity_type_name: string;
-  id: number;
+  id: number | null; // null on malformed entries; merged by name only when absent (issue #181)
   resource_url: string;
   thumbnail_url?: string;
 }
