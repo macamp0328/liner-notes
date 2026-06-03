@@ -293,6 +293,29 @@ describe('MusicBrainzClient', () => {
         'exceeded max retries',
       );
     });
+
+    it('does not back off after the final 503 attempt before throwing', async () => {
+      const warn = vi.fn();
+      const quietClient = new MusicBrainzClient({
+        userAgent: 'liner-notes/test',
+        delayMs: 0,
+        backoffBaseMs: 0,
+        logger: { info: vi.fn(), warn, error: vi.fn(), debug: vi.fn() },
+      });
+      fetchSpy.mockResolvedValue(makeErrorResponse(503, 'Service Unavailable'));
+
+      await expect(quietClient.getReleaseGroupMbidByMasterDiscogsId(1)).rejects.toThrow(
+        'exceeded max retries',
+      );
+
+      // The final allowed attempt still fetches, but must not log/sleep before throwing:
+      // 4 total fetches, only 3 backoff warnings (none for the unreachable 4th wait).
+      expect(fetchSpy).toHaveBeenCalledTimes(4);
+      expect(warn).toHaveBeenCalledTimes(3);
+      for (const call of warn.mock.calls) {
+        expect(call[0] as string).not.toContain('attempt 4/4');
+      }
+    });
   });
 
   // -------------------------------------------------------------------------

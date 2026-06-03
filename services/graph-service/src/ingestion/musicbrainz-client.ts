@@ -398,6 +398,9 @@ export class MusicBrainzClient {
       }
 
       if (response.status === 429 || response.status === 503) {
+        if (attempt >= MAX_RETRIES) {
+          throw new Error(`MusicBrainz API: exceeded max retries (${MAX_RETRIES}) for ${url}`);
+        }
         const retryAfterHeader = response.headers.get('Retry-After');
         const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
         const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
