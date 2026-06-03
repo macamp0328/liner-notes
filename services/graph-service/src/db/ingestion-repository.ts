@@ -68,6 +68,13 @@ export async function wipeGraph(driver: Driver): Promise<number> {
  * Each MERGE is idempotent — safe to call multiple times with the same data.
  */
 export async function mergeReleaseGraph(driver: Driver, release: DiscogsRelease): Promise<void> {
+  // The release id is the primary key every node in the graph MERGEs against; a null id
+  // cannot be keyed and has no name-only fallback (unlike artists/labels/credits). Fail loud
+  // and legible here instead of letting `neo4j.int(null)` throw a cryptic "reading 'low'"
+  // deep in the merge path. The per-release try/catch in runIngestion logs and continues.
+  if (release.id == null) {
+    throw new Error(`Cannot ingest release with no id (title: "${release.title}")`);
+  }
   const session = driver.session();
   try {
     await mergeRelease(session, release);
@@ -108,7 +115,7 @@ async function mergeRelease(session: Session, release: DiscogsRelease): Promise<
   const primaryArtist = release.artists[0];
   const isVariousArtists =
     primaryArtist != null
-      ? VARIOUS_ARTISTS_IDS.includes(primaryArtist.id) ||
+      ? (primaryArtist.id != null && VARIOUS_ARTISTS_IDS.includes(primaryArtist.id)) ||
         ['various', 'various artists'].includes(primaryArtist.name.toLowerCase())
       : false;
 
@@ -164,7 +171,8 @@ async function mergeArtists(
   artists: DiscogsArtistCredit[],
 ): Promise<void> {
   for (const artist of artists) {
-    if (artist.id === 0) continue; // primary artists with id=0 are malformed data — skip
+    // id=0 (not in Discogs DB) or null (malformed/omitted, issue #181) are both unkeyable — skip.
+    if (artist.id == null || artist.id === 0) continue;
     await session.run(
       `MERGE (a:Artist {discogsId: $discogsId})
        ON CREATE SET a.name = $name
@@ -187,7 +195,7 @@ async function mergeLabels(
   labels: DiscogsLabel[],
 ): Promise<void> {
   for (const label of labels) {
-    if (label.id === 0) continue;
+    if (label.id == null || label.id === 0) continue; // unkeyable (id=0 or null) — skip
     await session.run(
       `MERGE (l:Label {discogsId: $discogsId})
        ON CREATE SET l.name = $name
@@ -316,7 +324,7 @@ async function mergeReleaseCredits(
     const displayRole = parseDisplayRole(credit.role);
     const roleCategory = parseRoleCategory(credit.role);
 
-    if (credit.id !== 0) {
+    if (credit.id != null && credit.id !== 0) {
       // Musician with a Discogs ID — merge by discogsId for deduplication
       await session.run(
         `MERGE (m:Musician {discogsId: $discogsId})
@@ -341,7 +349,7 @@ async function mergeReleaseCredits(
       // If an Artist node with the same discogsId exists, link them
       await mergeSamePersonAs(session, credit.id);
     } else {
-      // id === 0: person not in Discogs DB — merge by name only, no discogsId set
+      // id 0 or null: person not in / omitted by Discogs DB — merge by name only, no discogsId set
       await session.run(
         `MERGE (m:Musician {name: $name})
          WITH m
@@ -378,7 +386,7 @@ async function mergeTrackCredits(
       const displayRole = parseDisplayRole(credit.role);
       const roleCategory = parseRoleCategory(credit.role);
 
-      if (credit.id !== 0) {
+      if (credit.id != null && credit.id !== 0) {
         await session.run(
           `MERGE (m:Musician {discogsId: $discogsId})
            ON CREATE SET m.name = $name
@@ -402,7 +410,7 @@ async function mergeTrackCredits(
 
         await mergeSamePersonAs(session, credit.id);
       } else {
-        // id === 0: name-only musician node
+        // id 0 or null: name-only musician node
         await session.run(
           `MERGE (m:Musician {name: $name})
            WITH m
