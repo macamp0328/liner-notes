@@ -7,9 +7,10 @@ export interface DiscogsArtistCredit {
   join: string;
   role: string;
   tracks: string;
-  // 0 when the person is not in the Discogs database (acknowledgments, catering, etc.);
-  // null when the API omits the id entirely on a malformed entry (see issue #181). Both are
-  // treated as "no canonical id" — the entity is merged by name only, never by id.
+  // Canonical Discogs id, or "unkeyable": 0 when the person is not in the Discogs database
+  // (acknowledgments, catering, etc.), null when the API omits the id on a malformed entry
+  // (issue #181). Handling of an unkeyable id depends on the field (see ingestion-repository.ts):
+  // primary `artists` are skipped, while `extraartists` / track credits are merged by name only.
   id: number | null;
   resource_url: string;
 }
@@ -19,7 +20,9 @@ export interface DiscogsLabel {
   catno: string;
   entity_type: string; // numeric string: "1"=Label, "23"=Recorded At, "27"=Mixed At, etc.
   entity_type_name: string;
-  id: number | null; // null on malformed entries; merged by name only when absent (issue #181)
+  // Canonical Discogs id; 0/null is unkeyable (malformed/omitted, issue #181) — such labels are
+  // skipped in ingestion (there is no name-only Label merge path).
+  id: number | null;
   resource_url: string;
   thumbnail_url?: string;
 }
