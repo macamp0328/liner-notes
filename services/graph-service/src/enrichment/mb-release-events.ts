@@ -108,7 +108,7 @@ export async function enrichMbReleaseEvents(
 
   if (masters.length > 0 && mastersFailed === 0 && eventsWritten === 0) {
     log.warn(
-      `[mb-release-events] No-op: ${masters.length} master(s) found but 0 events written and 0 failures — every master skipped (no MusicBrainz master→release-group link resolved). Verify the MB lookup before treating this as complete.`,
+      `[mb-release-events] No-op: ${masters.length} master(s) found, 0 failures, but 0 events written (processed=${mastersProcessed}, skipped=${mastersSkipped}). Expected >0 — verify the MusicBrainz master→release-group lookup and that resolved release groups have country-coded release events, before treating this as complete.`,
     );
   }
 
