@@ -252,17 +252,25 @@ describe('VIAFClient', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
-  it('returns null after exhausting all retries on persistent 429', async () => {
+  it('returns null and logs "Exceeded max retries" after exhausting all retries on persistent 429', async () => {
+    const warnSpy = vi.fn();
+    const clientWithLogger = new VIAFClient({
+      userAgent: 'liner-notes/test',
+      delayMs: 0,
+      backoffBaseMs: 0,
+      logger: { info: vi.fn(), warn: warnSpy, error: vi.fn() },
+    });
     fetchSpy
       .mockResolvedValueOnce(makeErrorResponse(429))
       .mockResolvedValueOnce(makeErrorResponse(429))
       .mockResolvedValueOnce(makeErrorResponse(429))
       .mockResolvedValueOnce(makeErrorResponse(429));
 
-    const result = await client.getCountryByName('Someone');
+    const result = await clientWithLogger.getCountryByName('Someone');
 
     expect(result).toBeNull();
     expect(fetchSpy).toHaveBeenCalledTimes(4);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Exceeded max retries'));
   });
 
   it('returns null on network error (does not throw)', async () => {
@@ -289,6 +297,17 @@ describe('VIAFClient', () => {
     expect(headers['User-Agent']).toBe('liner-notes/test');
   });
 
+  it('sends an Accept: application/json header so VIAF returns JSON, not HTML', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      makeOkResponse(
+        makeViafResponse({ preferredName: 'Ron Carter', nationalities: [{ text: 'xxu' }] }),
+      ),
+    );
+    await client.getCountryByName('Ron Carter');
+    const headers = fetchSpy.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers['Accept']).toBe('application/json');
+  });
+
   it('handles a single-object (non-array) nationality entry', async () => {
     fetchSpy.mockResolvedValueOnce(
       makeOkResponse(
@@ -304,29 +323,7 @@ describe('VIAFClient', () => {
     expect(result).toBe('IT');
   });
 
-  it('retries on 403 (soft bot block) and succeeds', async () => {
-    fetchSpy.mockResolvedValueOnce(makeErrorResponse(403)).mockResolvedValueOnce(
-      makeOkResponse(
-        makeViafResponse({
-          preferredName: 'Tab',
-          nationalities: [{ text: 'xxu' }],
-        }),
-      ),
-    );
-
-    const result = await client.getCountryByName('Tab');
-
-    expect(result).toBe('US');
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-  });
-
-  it('returns null after exhausting all retries on persistent 403', async () => {
-    fetchSpy
-      .mockResolvedValueOnce(makeErrorResponse(403))
-      .mockResolvedValueOnce(makeErrorResponse(403))
-      .mockResolvedValueOnce(makeErrorResponse(403))
-      .mockResolvedValueOnce(makeErrorResponse(403));
-
+  it('skips on 403 (bot block) without retrying', async () => {
     const warnSpy = vi.fn();
     const clientWithLogger = new VIAFClient({
       userAgent: 'liner-notes/test',
@@ -334,15 +331,17 @@ describe('VIAFClient', () => {
       backoffBaseMs: 0,
       logger: { info: vi.fn(), warn: warnSpy, error: vi.fn() },
     });
+    fetchSpy.mockResolvedValueOnce(makeErrorResponse(403));
 
     const result = await clientWithLogger.getCountryByName('Tab');
 
     expect(result).toBeNull();
-    expect(fetchSpy).toHaveBeenCalledTimes(4);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Exceeded max retries'));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('bot block'));
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('Exceeded max retries'));
   });
 
-  it('logs "bot block" in the retry warning for 403', async () => {
+  it('skips on a 200 + text/html response without retrying', async () => {
     const warnSpy = vi.fn();
     const clientWithLogger = new VIAFClient({
       userAgent: 'liner-notes/test',
@@ -350,60 +349,17 @@ describe('VIAFClient', () => {
       backoffBaseMs: 0,
       logger: { info: vi.fn(), warn: warnSpy, error: vi.fn() },
     });
-    fetchSpy
-      .mockResolvedValueOnce(makeErrorResponse(403))
-      .mockResolvedValueOnce(makeOkResponse(makeEmptyViafResponse()));
+    fetchSpy.mockResolvedValueOnce(makeHtmlResponse(200));
 
-    await clientWithLogger.getCountryByName('Tab');
-
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('bot block'));
-  });
-
-  it('retries on HTML response (200 OK with text/html body) and succeeds on retry', async () => {
-    fetchSpy.mockResolvedValueOnce(makeHtmlResponse(200)).mockResolvedValueOnce(
-      makeOkResponse(
-        makeViafResponse({
-          preferredName: 'Budapest String Quartet',
-          nationalities: [{ text: 'hu' }],
-        }),
-      ),
-    );
-
-    const result = await client.getCountryByName('Budapest String Quartet');
-
-    expect(result).toBe('HU');
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-  });
-
-  it('returns null after exhausting retries on persistent HTML responses', async () => {
-    fetchSpy
-      .mockResolvedValueOnce(makeHtmlResponse(200))
-      .mockResolvedValueOnce(makeHtmlResponse(200))
-      .mockResolvedValueOnce(makeHtmlResponse(200))
-      .mockResolvedValueOnce(makeHtmlResponse(200));
-
-    const result = await client.getCountryByName('Budapest String Quartet');
+    const result = await clientWithLogger.getCountryByName('Budapest String Quartet');
 
     expect(result).toBeNull();
-    expect(fetchSpy).toHaveBeenCalledTimes(4);
-  });
-
-  it('logs an HTML-specific warning message for HTML responses', async () => {
-    const warnSpy = vi.fn();
-    const clientWithLogger = new VIAFClient({
-      userAgent: 'liner-notes/test',
-      delayMs: 0,
-      backoffBaseMs: 0,
-      logger: { info: vi.fn(), warn: warnSpy, error: vi.fn() },
-    });
-    fetchSpy
-      .mockResolvedValueOnce(makeHtmlResponse(200))
-      .mockResolvedValueOnce(makeOkResponse(makeEmptyViafResponse()));
-
-    await clientWithLogger.getCountryByName('Vulfmon');
-
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('HTML response'));
+    // Pin the skip path: a regressed content-type guard would return null via the catch
+    // (makeHtmlResponse rejects .json()) or via the retry-exhaustion log instead.
     expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('Network error'));
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('Exceeded max retries'));
   });
 });
 

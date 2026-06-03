@@ -24,6 +24,32 @@ function makeErrorResponse(status: number, statusText: string, retryAfterSecs?: 
   } as unknown as Response;
 }
 
+/**
+ * Build a transient network-level error like the ones undici throws. `code`, when given,
+ * is attached either as the error's `.cause.code` (the undici shape) or directly as `.code`.
+ */
+function makeNetworkError(
+  message: string,
+  code?: string,
+  attachTo: 'cause' | 'self' = 'cause',
+): Error {
+  const err = new TypeError(message);
+  if (code !== undefined) {
+    if (attachTo === 'cause') {
+      (err as Error & { cause?: unknown }).cause = Object.assign(new Error(message), { code });
+    } else {
+      (err as Error & { code?: unknown }).code = code;
+    }
+  }
+  return err;
+}
+
+const mbReleaseRelationResponse = (mbid: string) => ({
+  id: 'url-uuid',
+  resource: 'https://www.discogs.com/release/567',
+  relations: [{ type: 'discogs', direction: 'backward', release: { id: mbid } }],
+});
+
 const mbUrlResponse = (mbid: string) => ({
   id: 'url-uuid',
   resource: 'https://www.discogs.com/artist/42',
@@ -267,6 +293,29 @@ describe('MusicBrainzClient', () => {
       await expect(client.getReleaseGroupMbidByMasterDiscogsId(1)).rejects.toThrow(
         'exceeded max retries',
       );
+    });
+
+    it('does not back off after the final 503 attempt before throwing', async () => {
+      const warn = vi.fn();
+      const quietClient = new MusicBrainzClient({
+        userAgent: 'liner-notes/test',
+        delayMs: 0,
+        backoffBaseMs: 0,
+        logger: { info: vi.fn(), warn, error: vi.fn(), debug: vi.fn() },
+      });
+      fetchSpy.mockResolvedValue(makeErrorResponse(503, 'Service Unavailable'));
+
+      await expect(quietClient.getReleaseGroupMbidByMasterDiscogsId(1)).rejects.toThrow(
+        'exceeded max retries',
+      );
+
+      // The final allowed attempt still fetches, but must not log/sleep before throwing:
+      // 4 total fetches, only 3 backoff warnings (none for the unreachable 4th wait).
+      expect(fetchSpy).toHaveBeenCalledTimes(4);
+      expect(warn).toHaveBeenCalledTimes(3);
+      for (const call of warn.mock.calls) {
+        expect(call[0] as string).not.toContain('attempt 4/4');
+      }
     });
   });
 
@@ -648,6 +697,58 @@ describe('MusicBrainzClient', () => {
       fetchSpy.mockRejectedValueOnce(new Error('timeout'));
       const result = await client.searchRecording('Song', 'Artist', null);
       expect(result).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // fetchWithBackoff — transient network errors
+  // -------------------------------------------------------------------------
+  describe('transient network-error retry', () => {
+    it('retries a "fetch failed" TypeError and succeeds on the next attempt', async () => {
+      fetchSpy
+        .mockRejectedValueOnce(makeNetworkError('fetch failed'))
+        .mockResolvedValueOnce(makeOkResponse(mbReleaseRelationResponse('rel-mbid-xyz')));
+
+      const result = await client.getReleaseMbidByDiscogsReleaseId(567);
+
+      expect(result).toBe('rel-mbid-xyz');
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('retries when the transient code is nested in error.cause', async () => {
+      fetchSpy
+        .mockRejectedValueOnce(makeNetworkError('connection error', 'ECONNRESET', 'cause'))
+        .mockResolvedValueOnce(makeOkResponse(mbReleaseRelationResponse('rel-mbid-cause')));
+
+      const result = await client.getReleaseMbidByDiscogsReleaseId(567);
+
+      expect(result).toBe('rel-mbid-cause');
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('retries when the transient code is set directly on the error', async () => {
+      fetchSpy
+        .mockRejectedValueOnce(makeNetworkError('socket hang up', 'ETIMEDOUT', 'self'))
+        .mockResolvedValueOnce(makeOkResponse(mbReleaseRelationResponse('rel-mbid-direct')));
+
+      const result = await client.getReleaseMbidByDiscogsReleaseId(567);
+
+      expect(result).toBe('rel-mbid-direct');
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('gives up after MAX_RETRIES and rethrows the original network error', async () => {
+      fetchSpy.mockRejectedValue(makeNetworkError('fetch failed'));
+
+      await expect(client.getReleaseMbidByDiscogsReleaseId(567)).rejects.toThrow('fetch failed');
+      expect(fetchSpy).toHaveBeenCalledTimes(4);
+    });
+
+    it('does not retry a non-Error rejection — rethrows immediately', async () => {
+      fetchSpy.mockRejectedValueOnce('weird');
+
+      await expect(client.getReleaseMbidByDiscogsReleaseId(567)).rejects.toBe('weird');
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
   });
 
