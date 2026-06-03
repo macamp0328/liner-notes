@@ -25,6 +25,26 @@ function makeErrorResponse(status: number, statusText: string, retryAfterSecs?: 
   } as unknown as Response;
 }
 
+/**
+ * Build a transient network-level error like the ones undici throws. `code`, when given, is
+ * attached either as the error's `.cause.code` (the undici shape) or directly as `.code`.
+ */
+function makeNetworkError(
+  message: string,
+  code?: string,
+  attachTo: 'cause' | 'self' = 'cause',
+): Error {
+  const err = new TypeError(message);
+  if (code !== undefined) {
+    if (attachTo === 'cause') {
+      (err as Error & { cause?: unknown }).cause = Object.assign(new Error(message), { code });
+    } else {
+      (err as Error & { code?: unknown }).code = code;
+    }
+  }
+  return err;
+}
+
 describe('DiscogsClient', () => {
   let fetchSpy: MockInstance<typeof fetch>;
   let client: DiscogsClient;
@@ -189,6 +209,53 @@ describe('DiscogsClient', () => {
       await expect(client.getRelease(13570466)).rejects.toThrow(/exceeded max retries/);
       // Should have tried MAX_RETRIES+1 = 6 times
       expect(fetchSpy.mock.calls.length).toBe(6);
+    });
+
+    it('retries a transient network error (fetch failed) and succeeds on the next attempt', async () => {
+      fetchSpy
+        .mockRejectedValueOnce(makeNetworkError('fetch failed'))
+        .mockResolvedValueOnce(makeOkResponse(release13570466));
+
+      const result = await client.getRelease(13570466);
+
+      expect(result.id).toBe(13570466);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('gives up after MAX_RETRIES on a persistent transient network error and rethrows', async () => {
+      fetchSpy.mockRejectedValue(makeNetworkError('connection reset', 'ECONNRESET', 'cause'));
+
+      await expect(client.getRelease(13570466)).rejects.toThrow('connection reset');
+      expect(fetchSpy).toHaveBeenCalledTimes(6);
+    });
+
+    it('does not retry a non-transient error — rethrows immediately', async () => {
+      fetchSpy.mockRejectedValueOnce(new Error('boom'));
+
+      await expect(client.getRelease(13570466)).rejects.toThrow('boom');
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not back off after the final 429 attempt before throwing', async () => {
+      const warn = vi.fn();
+      const quietClient = new DiscogsClient({
+        token: 'test-token',
+        userAgent: 'liner-notes/test',
+        delayMs: 0,
+        backoffBaseMs: 0,
+        logger: { info: vi.fn(), warn, error: vi.fn() },
+      });
+      fetchSpy.mockResolvedValue(makeErrorResponse(429, 'Too Many Requests'));
+
+      await expect(quietClient.getRelease(13570466)).rejects.toThrow(/exceeded max retries/);
+
+      // The final allowed attempt still fetches, but must not log/sleep before throwing:
+      // 6 total fetches, only 5 backoff warnings (none for the unreachable 6th wait).
+      expect(fetchSpy).toHaveBeenCalledTimes(6);
+      expect(warn).toHaveBeenCalledTimes(5);
+      for (const call of warn.mock.calls) {
+        expect(call[0] as string).not.toContain('attempt 6/6');
+      }
     });
 
     it('applies exponential backoff: each retry waits roughly double the previous', async () => {

@@ -5,6 +5,7 @@ import type {
   DiscogsMasterVersionsPage,
   DiscogsRelease,
 } from './types.js';
+import { transientNetworkCode } from './network-errors.js';
 
 /** Minimal logger interface — satisfied by Fastify's app.log (pino) and by console. */
 export interface Logger {
@@ -84,15 +85,38 @@ export class DiscogsClient {
     let currentDelay = this.backoffBaseMs;
 
     while (attempt <= MAX_RETRIES) {
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `Discogs token=${this.token}`,
-          'User-Agent': this.userAgent,
-          Accept: 'application/json',
-        },
-      });
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          headers: {
+            Authorization: `Discogs token=${this.token}`,
+            'User-Agent': this.userAgent,
+            Accept: 'application/json',
+          },
+        });
+      } catch (err) {
+        // Transient network-level failure (fetch failed / ECONNRESET / ...) — not an HTTP
+        // status, so it lands here rather than in the 429 branch. Retry with backoff on the
+        // same attempt budget; rethrow non-transient errors and the final attempt unchanged.
+        const netCode = transientNetworkCode(err);
+        if (netCode === null || attempt >= MAX_RETRIES) throw err;
+        this.log.warn(
+          `[discogs-client] Network error (${netCode}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${currentDelay}ms`,
+        );
+        await this.sleep(currentDelay);
+        currentDelay = Math.min(Math.max(currentDelay, this.backoffBaseMs) * 2, MAX_BACKOFF_MS);
+        attempt++;
+        continue;
+      }
 
       if (response.status === 429) {
+        // No further fetch will follow on the final allowed attempt, so skip the wait and
+        // throw immediately instead of sleeping out a full Retry-After window for nothing.
+        if (attempt >= MAX_RETRIES) {
+          throw new Error(
+            `Discogs API: exceeded max retries (${MAX_RETRIES}) due to rate limiting for ${url}`,
+          );
+        }
         // Honour the server-specified Retry-After delay when present.
         // Validate the parsed value — a non-integer header produces NaN which Math.max
         // propagates, effectively disabling backoff. Fall back to 0 on invalid values.
