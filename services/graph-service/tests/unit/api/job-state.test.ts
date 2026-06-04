@@ -80,6 +80,24 @@ describe('job-state', () => {
     expect(state.completedAt).toBeNull();
   });
 
+  it('resetJobState returns state to the initial idle values', async () => {
+    const { getJobState, startJob, completeJob, resetJobState } =
+      await import('../../../src/ingestion/job-state.js');
+    startJob();
+    completeJob(sampleStats);
+    expect(getJobState().status).toBe('complete');
+
+    resetJobState();
+
+    const state = getJobState();
+    expect(state.status).toBe('idle');
+    expect(state.jobId).toBe('');
+    expect(state.startedAt).toBeNull();
+    expect(state.completedAt).toBeNull();
+    expect(state.durationMs).toBeNull();
+    expect(state.stats).toBeNull();
+  });
+
   it('getJobState returns a copy and mutations do not affect internal state', async () => {
     const { getJobState, startJob, completeJob } =
       await import('../../../src/ingestion/job-state.js');
