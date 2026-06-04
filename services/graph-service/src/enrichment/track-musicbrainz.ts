@@ -146,8 +146,9 @@ export function alignTracklist(
  *   2. For any track left unmatched, fall back to a direct recording search
  *      (accepted only on a high MusicBrainz score).
  *
- * Every processed track is marked musicBrainzFetched = true for idempotency, even
- * when no identifier was found. Failed releases are NOT marked, so they retry.
+ * Every processed track is stamped musicBrainzFetchedAt even when no identifier was found,
+ * so a track with no MusicBrainz match is retried at most once per staleness window. Failed
+ * releases are NOT stamped, so they retry on the next run.
  */
 export async function enrichTrackMusicBrainz(
   mbClient: MusicBrainzClient,

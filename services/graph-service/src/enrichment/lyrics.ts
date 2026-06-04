@@ -1,6 +1,6 @@
 import type { Driver } from 'neo4j-driver';
 import type { Logger } from '../ingestion/discogs-client.js';
-import { getUnenrichedTracks, setTrackLyrics } from '../db/lyrics-repository.js';
+import { getUnenrichedTracks, setTrackLyrics, markLyricsFetched } from '../db/lyrics-repository.js';
 
 export interface LyricsEnrichmentSummary {
   enriched: number;
@@ -247,6 +247,9 @@ export async function enrichLyrics(
           );
           enriched++;
         } else {
+          // Both sources came up empty — stamp the attempt so we retry at most once per
+          // staleness window, not every run.
+          await markLyricsFetched(driver, track.releaseDiscogsId, track.position);
           skipped++;
         }
       } catch (err) {
@@ -256,7 +259,16 @@ export async function enrichLyrics(
       }
     } else {
       log.debug?.('[lyrics] GENIUS_TOKEN not set — skipping Genius fallback');
-      skipped++;
+      // No Genius fallback configured and LRCLIB had nothing — stamp the attempt so we
+      // retry at most once per staleness window rather than re-hitting LRCLIB every run.
+      try {
+        await markLyricsFetched(driver, track.releaseDiscogsId, track.position);
+        skipped++;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.error(`[lyrics] Failed to mark "${track.title}" fetched: ${msg}`);
+        failed++;
+      }
     }
   }
 

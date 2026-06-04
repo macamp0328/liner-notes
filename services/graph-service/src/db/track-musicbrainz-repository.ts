@@ -1,4 +1,6 @@
 import type { Driver } from 'neo4j-driver';
+import neo4j from 'neo4j-driver';
+import { getStalenessDays } from '../enrichment/staleness.js';
 
 type Neo4jInt = { toNumber(): number };
 
@@ -27,10 +29,13 @@ export interface TrackMusicBrainzResult {
 }
 
 /**
- * Fetch every Release that has at least one Track without a musicBrainzFetched marker,
- * along with that release's full tracklist and credited artist names.
+ * Fetch every Release that still has at least one Track without a resolved `recordingMbid`
+ * whose last attempt has aged past the staleness window (issue #89), along with that
+ * release's full tracklist and credited artist names. A track that already resolved an MBID
+ * is never the reason a release is re-selected; a track MusicBrainz had no match for is
+ * retried at most once per window.
  *
- * The full tracklist (not just unfetched tracks) is returned because tracklist
+ * The full tracklist (not just unmatched tracks) is returned because tracklist
  * alignment against MusicBrainz depends on ordinal position within the release.
  */
 export async function getTracksForMusicBrainzEnrichment(
@@ -40,7 +45,12 @@ export async function getTracksForMusicBrainzEnrichment(
   try {
     const result = await session.run(
       `MATCH (r:Release)
-       WHERE EXISTS { MATCH (r)-[:HAS_TRACK]->(tx:Track) WHERE tx.musicBrainzFetched IS NULL }
+       WHERE EXISTS {
+         MATCH (r)-[:HAS_TRACK]->(tx:Track)
+         WHERE tx.recordingMbid IS NULL
+           AND (tx.musicBrainzFetchedAt IS NULL
+                OR tx.musicBrainzFetchedAt < datetime() - duration({ days: $stalenessDays }))
+       }
        MATCH (r)-[ht:HAS_TRACK]->(t:Track)
        WITH r, collect({
          elementId: elementId(t),
@@ -53,6 +63,7 @@ export async function getTracksForMusicBrainzEnrichment(
        RETURN r.discogsId AS releaseDiscogsId,
               [x IN collect(DISTINCT a.name) WHERE x IS NOT NULL | x] AS artistNames,
               tracks`,
+      { stalenessDays: neo4j.int(getStalenessDays()) },
     );
 
     return result.records.map((record) => {
@@ -84,10 +95,10 @@ export async function getTracksForMusicBrainzEnrichment(
 /**
  * Write MusicBrainz identifiers onto Track nodes and mark each as fetched.
  *
- * Every track in `results` is marked with musicBrainzFetched = true regardless of
- * whether a match was found — the marker is the idempotency guard. recordingMbid
- * and isrc are set to their (possibly null) resolved values; a null value clears
- * the property, matching the nullable-by-design contract.
+ * Every track in `results` is stamped with musicBrainzFetchedAt = datetime() regardless of
+ * whether a match was found — the timestamp throttles re-attempts to once per staleness
+ * window. recordingMbid and isrc are set to their (possibly null) resolved values; a null
+ * value clears the property, matching the nullable-by-design contract.
  */
 export async function setTrackMusicBrainzIds(
   driver: Driver,
@@ -100,7 +111,7 @@ export async function setTrackMusicBrainzIds(
     await session.run(
       `UNWIND $results AS res
        MATCH (t:Track) WHERE elementId(t) = res.elementId
-       SET t.musicBrainzFetched = true,
+       SET t.musicBrainzFetchedAt = datetime(),
            t.recordingMbid = res.recordingMbid,
            t.isrc = res.isrc`,
       { results },
@@ -122,11 +133,11 @@ export async function resetTrackMusicBrainzEnrichment(driver: Driver): Promise<n
   const session = driver.session();
   try {
     const result = await session.run(
-      `MATCH (t:Track) WHERE t.musicBrainzFetched IS NOT NULL
-       REMOVE t.musicBrainzFetched, t.recordingMbid, t.isrc,
-              t.acousticBrainzFetched, t.tempo, t.musicalKey, t.musicalScale,
+      `MATCH (t:Track) WHERE t.musicBrainzFetchedAt IS NOT NULL
+       REMOVE t.musicBrainzFetchedAt, t.recordingMbid, t.isrc,
+              t.acousticBrainzFetchedAt, t.tempo, t.musicalKey, t.musicalScale,
               t.loudnessDb, t.dynamicComplexity, t.danceabilityEstimate, t.voiceInstrumental,
-              t.deezerFetched, t.deezerBpm, t.deezerGain
+              t.deezerFetchedAt, t.deezerBpm, t.deezerGain
        RETURN count(t) AS reset`,
     );
     return (result.records[0]?.get('reset') as Neo4jInt | undefined)?.toNumber() ?? 0;

@@ -21,14 +21,15 @@ const WRITE_BATCH_SIZE = 50;
  * Enrich Track nodes with BPM and loudness data from Deezer via ISRC lookup.
  *
  * Reads every Track that carries an `isrc` (set by the track-musicbrainz enrichment) but
- * has no `deezerFetched` marker, deduplicates by ISRC — the same recording can appear on
+ * still has no Deezer data, deduplicates by ISRC — the same recording can appear on
  * multiple releases — and looks each unique ISRC up once, fanning the result out to every
- * track that shares it.
+ * track that shares it. A track with no Deezer data is retried at most once per staleness
+ * window (see getTracksForDeezerEnrichment).
  *
  * Results are flushed to Neo4j incrementally in batches of {@link WRITE_BATCH_SIZE}, so a
- * late failure only loses one batch. Every track in a successfully-written batch is marked
- * `deezerFetched = true` for idempotency, even when Deezer had no data. A track whose
- * fetch or write fails is left unmarked, so a later run retries it.
+ * late failure only loses one batch. Every track in a successfully-written batch is stamped
+ * `deezerFetchedAt` even when Deezer had no data, throttling its retries. A track whose
+ * fetch or write fails is left unstamped, so a later run retries it immediately.
  */
 export async function enrichTrackDeezer(
   deezerClient: DeezerClient,

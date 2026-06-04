@@ -12,9 +12,10 @@ export interface ArtistProfilesEnrichmentSummary {
 
 /**
  * Enrich Artist nodes with realName and profile from the Discogs artist API.
- * Fetches GET /artists/{discogsId} for each Artist where profileFetched is null
- * (the idempotency marker set by setArtistProfile on every run, regardless of
- * whether profile data was present).
+ * Fetches GET /artists/{discogsId} for each Artist that still has neither realName nor
+ * profile and whose last attempt has aged past the staleness window (see
+ * getUnenrichedArtists). setArtistProfile stamps profileFetchedAt on every attempt so a
+ * still-empty artist is retried at most once per window rather than every run.
  * Rate limiting is handled by DiscogsClient internally.
  * Per-artist errors are caught and counted — never crashes the caller.
  *
@@ -52,8 +53,8 @@ export async function enrichArtistProfiles(
       const realName = profile.realname?.trim() || null;
       const profileText = profile.profile?.trim() || null;
 
-      // Always call setArtistProfile — it sets profileFetched = true as an
-      // idempotency marker regardless of whether profile data was present.
+      // Always call setArtistProfile — it stamps profileFetchedAt regardless of whether
+      // profile data was present, throttling retries of still-empty artists.
       await setArtistProfile(driver, artist.discogsId, realName, profileText);
 
       if (realName === null && profileText === null) {

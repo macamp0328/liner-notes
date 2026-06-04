@@ -1,16 +1,25 @@
 import type { Driver } from 'neo4j-driver';
 import neo4j from 'neo4j-driver';
 import type { MbReleaseEvent } from '../ingestion/musicbrainz-client.js';
+import { getStalenessDays } from '../enrichment/staleness.js';
 
 type Neo4jInt = { toNumber(): number };
 
+// A Master is a candidate while it has no MB_RELEASED_IN relationship (the MusicBrainz
+// lookup either hasn't run or found no events) and its last attempt has aged past the
+// staleness window (issue #89). A Master that already has events is never re-fetched.
 export async function getMastersForReleaseEventEnrichment(
   driver: Driver,
 ): Promise<{ masterDiscogsId: number }[]> {
   const session = driver.session();
   try {
     const result = await session.run(
-      `MATCH (m:Master) WHERE m.mbReleaseEventsFetched IS NULL RETURN m.discogsId AS masterDiscogsId`,
+      `MATCH (m:Master)
+       WHERE NOT EXISTS { (m)-[:MB_RELEASED_IN]->() }
+         AND (m.mbReleaseEventsFetchedAt IS NULL
+              OR m.mbReleaseEventsFetchedAt < datetime() - duration({ days: $stalenessDays }))
+       RETURN m.discogsId AS masterDiscogsId`,
+      { stalenessDays: neo4j.int(getStalenessDays()) },
     );
     return result.records.map((r) => ({
       masterDiscogsId: (r.get('masterDiscogsId') as Neo4jInt).toNumber(),
@@ -58,7 +67,7 @@ export async function setMbReleaseEventsFetched(
   const session = driver.session();
   try {
     await session.run(
-      `MATCH (m:Master {discogsId: $masterDiscogsId}) SET m.mbReleaseEventsFetched = true`,
+      `MATCH (m:Master {discogsId: $masterDiscogsId}) SET m.mbReleaseEventsFetchedAt = datetime()`,
       { masterDiscogsId: neo4j.int(masterDiscogsId) },
     );
   } finally {
@@ -70,8 +79,8 @@ export async function resetMbReleaseEventsEnrichment(driver: Driver): Promise<nu
   const session = driver.session();
   try {
     const resetResult = await session.run(
-      `MATCH (m:Master) WHERE m.mbReleaseEventsFetched IS NOT NULL
-       REMOVE m.mbReleaseEventsFetched
+      `MATCH (m:Master) WHERE m.mbReleaseEventsFetchedAt IS NOT NULL
+       REMOVE m.mbReleaseEventsFetchedAt
        RETURN count(m) AS reset`,
     );
     const reset = (resetResult.records[0]?.get('reset') as Neo4jInt | undefined)?.toNumber() ?? 0;

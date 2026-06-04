@@ -39,12 +39,13 @@ function hasAnyFeature(features: AcousticBrainzFeatures): boolean {
  * Enrich Track nodes with AcousticBrainz audio features (tempo, key, loudness, etc.).
  *
  * Reads every Track that carries a `recordingMbid` (set by the track-musicbrainz
- * enrichment) but has no `acousticBrainzFetched` marker, deduplicates by MBID — the same
- * recording can appear on multiple releases — and fetches features in bulk batches.
+ * enrichment) but still has no features, deduplicates by MBID — the same recording can
+ * appear on multiple releases — and fetches features in bulk batches. A track with no
+ * features is retried at most once per staleness window (see getTracksForAcousticBrainzEnrichment).
  *
- * Every track in a successfully-processed batch is marked `acousticBrainzFetched = true`
- * for idempotency, even when AcousticBrainz had no data. A batch whose fetch or write
- * throws leaves its tracks unmarked, so a later run retries them.
+ * Every track in a successfully-processed batch is stamped `acousticBrainzFetchedAt`
+ * even when AcousticBrainz had no data, throttling its retries. A batch whose fetch or
+ * write throws leaves its tracks unstamped, so a later run retries them immediately.
  */
 export async function enrichTrackAcousticBrainz(
   abClient: AcousticBrainzClient,
