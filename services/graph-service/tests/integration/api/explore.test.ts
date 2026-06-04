@@ -216,7 +216,7 @@ describe('explore routes', () => {
       );
       expect(maiden).toBeDefined();
       expect(maiden!.countryCount).toBe(3);
-      expect([...maiden!.countries].sort()).toEqual(['France', 'Japan', 'US']);
+      expect([...maiden!.countries].sort()).toEqual(['FR', 'JP', 'US']);
     });
 
     it('rejects limit > 50 via schema', async () => {

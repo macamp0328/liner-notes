@@ -75,14 +75,15 @@ export async function seedExploreEnrichment(driver: Driver): Promise<void> {
        SET co.role = cr.role, co.displayRole = cr.role,
            co.roleCategory = 'performer', co.creditedAs = null, co.scope = 'track'`,
     );
-    // Give those three musicians distinct origin countries. The country names are
-    // synthetic test values chosen to exercise multi-country ranking — they are
-    // NOT the musicians' real nationalities.
+    // Give those three musicians distinct origin countries. ORIGIN_COUNTRY stores
+    // ISO 3166-1 alpha-2 codes (the VIAF nationality client's output), so use
+    // codes here. The specific countries are synthetic test values chosen to
+    // exercise multi-country ranking — not the musicians' real nationalities.
     await session.run(
       `UNWIND [
          {discogsId: 500001, country: 'US'},
-         {discogsId: 500003, country: 'France'},
-         {discogsId: 500004, country: 'Japan'}
+         {discogsId: 500003, country: 'FR'},
+         {discogsId: 500004, country: 'JP'}
        ] AS n
        MATCH (m:Musician {discogsId: n.discogsId})
        MERGE (c:Country {name: n.country})
@@ -93,7 +94,11 @@ export async function seedExploreEnrichment(driver: Driver): Promise<void> {
     // --- most-pressed --------------------------------------------------------
     // mergeReleaseGraph does not create Master nodes; create the Maiden Voyage
     // master (800001) released in three countries via RELEASED_IN (the rel the
-    // route matches — not MB_RELEASED_IN).
+    // route matches — not MB_RELEASED_IN). m.year is the master's original year
+    // (1965, when the album first came out), deliberately distinct from the 1966
+    // pressing carried by the release fixture. Unlike ORIGIN_COUNTRY above,
+    // RELEASED_IN countries are Discogs version.country strings (e.g. 'US', 'UK',
+    // 'Japan'), which are not ISO alpha-2 codes.
     await session.run(
       `MERGE (m:Master {discogsId: 800001})
        SET m.title = 'Maiden Voyage', m.year = 1965
