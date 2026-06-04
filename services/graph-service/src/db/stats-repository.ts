@@ -111,15 +111,18 @@ const RELEASE_QUERY = `
 
 const ARTIST_QUERY = `
   MATCH (a:Artist)
-  WITH a, (a.discogsId IS NOT NULL AND NOT a.discogsId IN [194, 355]) AS applicable
+  WITH a,
+    (a.discogsId IS NOT NULL AND NOT a.discogsId IN [194, 355]) AS applicable,
+    EXISTS { (a)<-[:RELEASED_BY]-(:Release)-[:IN_GENRE]->(:Genre) } AS genreApp,
+    EXISTS { (a)<-[:RELEASED_BY]-(:Release)-[:IN_STYLE]->(:Style) } AS styleApp
   RETURN
     count(a) AS total,
     count(CASE WHEN applicable THEN 1 END) AS profApplicable,
     count(CASE WHEN applicable AND a.profile IS NOT NULL THEN 1 END) AS profCovered,
-    count(CASE WHEN EXISTS { (a)<-[:RELEASED_BY]-(:Release)-[:IN_GENRE]->(:Genre) } THEN 1 END) AS genresApplicable,
-    count(CASE WHEN a.genres IS NOT NULL AND size(a.genres) > 0 THEN 1 END) AS genresCovered,
-    count(CASE WHEN EXISTS { (a)<-[:RELEASED_BY]-(:Release)-[:IN_STYLE]->(:Style) } THEN 1 END) AS stylesApplicable,
-    count(CASE WHEN a.styles IS NOT NULL AND size(a.styles) > 0 THEN 1 END) AS stylesCovered`;
+    count(CASE WHEN genreApp THEN 1 END) AS genresApplicable,
+    count(CASE WHEN genreApp AND a.genres IS NOT NULL AND size(a.genres) > 0 THEN 1 END) AS genresCovered,
+    count(CASE WHEN styleApp THEN 1 END) AS stylesApplicable,
+    count(CASE WHEN styleApp AND a.styles IS NOT NULL AND size(a.styles) > 0 THEN 1 END) AS stylesCovered`;
 
 const TRACK_QUERY = `
   MATCH (t:Track)
@@ -133,6 +136,9 @@ const TRACK_QUERY = `
     count(CASE WHEN t.recordingMbid IS NOT NULL AND t.tempo IS NOT NULL THEN 1 END) AS tempoCovered,
     count(CASE WHEN t.isrc IS NOT NULL AND t.deezerBpm IS NOT NULL THEN 1 END) AS deezerCovered,
     count(CASE WHEN t.isrc IS NOT NULL AND t.deezerGain IS NOT NULL THEN 1 END) AS deezerGainCovered,
+    // Undirected by intent: counts every track in a version cluster (both the variants and
+    // the earliest pressing they point at), i.e. "participates in versioning" — the signal
+    // that the track-versions stage produced output, not "has an earlier version".
     count(CASE WHEN EXISTS { (t)-[:IS_VERSION_OF]-() } THEN 1 END) AS versionsCovered`;
 
 const MASTER_QUERY = `

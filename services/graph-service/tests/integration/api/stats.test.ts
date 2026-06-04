@@ -32,8 +32,17 @@ describe('GET /api/v1/stats', () => {
          WITH a LIMIT 1 SET a.profile = 'A short bio.'`,
       );
       // Artist-genres/styles + a nationality edge tagged with its resolving source.
+      // The genres/styles coverage numerator is path-gated (it only counts an artist
+      // that also has a release→genre/style edge), so wire those edges onto one of the
+      // artist's releases to land it in both numerator and denominator.
       await session.run(
         `MATCH (a:Artist) WHERE a.profile = 'A short bio.'
+         MATCH (a)<-[:RELEASED_BY]-(r:Release)
+         WITH a, r LIMIT 1
+         MERGE (g:Genre {name: 'Jazz'})
+         MERGE (r)-[:IN_GENRE]->(g)
+         MERGE (s:Style {name: 'Hard Bop'})
+         MERGE (r)-[:IN_STYLE]->(s)
          SET a.genres = ['Jazz'], a.styles = ['Hard Bop']
          MERGE (c:Country {name: 'US'})
          MERGE (a)-[rel:ORIGIN_COUNTRY]->(c)
@@ -98,9 +107,16 @@ describe('GET /api/v1/stats', () => {
     expect(enrichment.tracksWithDeezerBpm).toEqual({ covered: 1, applicable: 1, pct: 100 });
     expect(enrichment.tracksWithDeezerGain).toEqual({ covered: 1, applicable: 1, pct: 100 });
 
-    // New per-stage coverage figures.
+    // New per-stage coverage figures. Genres/styles covered is path-gated, so it can
+    // never exceed applicable (the numerator and denominator share the same path gate).
     expect(enrichment.artistsWithGenres.covered).toBeGreaterThanOrEqual(1);
+    expect(enrichment.artistsWithGenres.covered).toBeLessThanOrEqual(
+      enrichment.artistsWithGenres.applicable,
+    );
     expect(enrichment.artistsWithStyles.covered).toBeGreaterThanOrEqual(1);
+    expect(enrichment.artistsWithStyles.covered).toBeLessThanOrEqual(
+      enrichment.artistsWithStyles.applicable,
+    );
     expect(enrichment.tracksWithVersions.covered).toBeGreaterThanOrEqual(1);
     expect(enrichment.mastersWithReleaseEvents).toEqual({ covered: 1, applicable: 1, pct: 100 });
 
