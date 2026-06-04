@@ -13,7 +13,10 @@ import {
   setProducerNationality,
   setEngineerNationality,
 } from '../db/artist-nationality-repository.js';
-import type { UnenrichedMusician } from '../db/artist-nationality-repository.js';
+import type { UnenrichedMusician, NationalitySource } from '../db/artist-nationality-repository.js';
+
+/** A resolved country plus the source that produced it, or null when unresolved. */
+type ResolvedNationality = { country: string; source: NationalitySource };
 
 export interface NationalityEnrichmentSummary {
   enriched: number;
@@ -44,7 +47,7 @@ async function resolveCountry(
   name: string,
   label: string,
   log: Logger,
-): Promise<string | null> {
+): Promise<ResolvedNationality | null> {
   if (discogsId !== null) {
     // Source 1: MB + WD by Discogs ID (parallel)
     const [mbCountry, wdCountry] = await Promise.all([
@@ -56,11 +59,11 @@ async function resolveCountry(
       log.warn(
         `[artist-nationality] Source conflict for ${label} "${name}" discogsId=${discogsId}: MB=${mbCountry} WD=${wdCountry} — using Wikidata`,
       );
-      return wdCountry;
+      return { country: wdCountry, source: 'wikidata' };
     }
 
-    const source1Result = mbCountry ?? wdCountry ?? null;
-    if (source1Result !== null) return source1Result;
+    if (mbCountry !== null) return { country: mbCountry, source: 'musicbrainz' };
+    if (wdCountry !== null) return { country: wdCountry, source: 'wikidata' };
 
     // Source 2: Wikidata via Wikipedia URL on the Discogs artist page
     if (discogsClient !== null && wdClient !== null) {
@@ -71,7 +74,7 @@ async function resolveCountry(
         );
         for (const url of wikipediaUrls) {
           const country = await wdClient.getCountryByWikipediaUrl(url);
-          if (country !== null) return country;
+          if (country !== null) return { country, source: 'wikidata' };
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -83,7 +86,8 @@ async function resolveCountry(
 
     // Source 3: VIAF name search (last resort)
     if (viafClient !== null) {
-      return viafClient.getCountryByName(name);
+      const country = await viafClient.getCountryByName(name);
+      if (country !== null) return { country, source: 'viaf' };
     }
   }
 
@@ -99,10 +103,13 @@ async function resolveCountryByName(
   mbClient: MusicBrainzClient,
   viafClient: VIAFClient | null,
   name: string,
-): Promise<string | null> {
+): Promise<ResolvedNationality | null> {
   const mbCountry = await mbClient.getCountryByName(name);
-  if (mbCountry !== null) return mbCountry;
-  if (viafClient !== null) return viafClient.getCountryByName(name);
+  if (mbCountry !== null) return { country: mbCountry, source: 'musicbrainz' };
+  if (viafClient !== null) {
+    const viafCountry = await viafClient.getCountryByName(name);
+    if (viafCountry !== null) return { country: viafCountry, source: 'viaf' };
+  }
   return null;
 }
 
@@ -157,7 +164,7 @@ export async function enrichNationality(
 
   for (const artist of artists) {
     try {
-      const countryCode = await resolveCountry(
+      const resolved = await resolveCountry(
         mbClient,
         wd,
         dc,
@@ -167,8 +174,13 @@ export async function enrichNationality(
         'Artist',
         log,
       );
-      await setArtistNationality(driver, artist.discogsId, countryCode);
-      if (countryCode !== null) {
+      await setArtistNationality(
+        driver,
+        artist.discogsId,
+        resolved?.country ?? null,
+        resolved?.source ?? null,
+      );
+      if (resolved !== null) {
         enriched++;
       } else {
         skipped++;
@@ -184,7 +196,12 @@ export async function enrichNationality(
   const personGroups: Array<{
     label: string;
     fetch: () => Promise<UnenrichedMusician[]>;
-    save: (driver: Driver, person: UnenrichedMusician, code: string | null) => Promise<void>;
+    save: (
+      driver: Driver,
+      person: UnenrichedMusician,
+      code: string | null,
+      source: NationalitySource | null,
+    ) => Promise<void>;
   }> = [
     {
       label: 'musicians',
@@ -218,10 +235,10 @@ export async function enrichNationality(
 
     for (const person of people) {
       try {
-        let countryCode: string | null = null;
+        let resolved: ResolvedNationality | null = null;
 
         if (person.discogsId !== null) {
-          countryCode = await resolveCountry(
+          resolved = await resolveCountry(
             mbClient,
             wd,
             dc,
@@ -232,12 +249,12 @@ export async function enrichNationality(
             log,
           );
         } else {
-          countryCode = await resolveCountryByName(mbClient, viaf, person.name);
+          resolved = await resolveCountryByName(mbClient, viaf, person.name);
         }
 
-        await save(driver, person, countryCode);
+        await save(driver, person, resolved?.country ?? null, resolved?.source ?? null);
 
-        if (countryCode !== null) {
+        if (resolved !== null) {
           enriched++;
         } else {
           skipped++;

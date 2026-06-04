@@ -98,7 +98,7 @@ describe('enrichNationality', () => {
     const summary = await enrichNationality(client, fakeDriver);
 
     expect(client.getCountryByDiscogsId).toHaveBeenCalledWith(1);
-    expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 1, 'US');
+    expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 1, 'US', 'musicbrainz');
     expect(summary.enriched).toBe(1);
     expect(summary.skipped).toBe(0);
   });
@@ -109,7 +109,7 @@ describe('enrichNationality', () => {
 
     const summary = await enrichNationality(client, fakeDriver);
 
-    expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 2, null);
+    expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 2, null, null);
     expect(summary.skipped).toBe(1);
     expect(summary.enriched).toBe(0);
   });
@@ -126,6 +126,7 @@ describe('enrichNationality', () => {
       fakeDriver,
       { discogsId: 10, name: 'Ron Carter' },
       'US',
+      'musicbrainz',
     );
   });
 
@@ -147,6 +148,7 @@ describe('enrichNationality', () => {
       fakeDriver,
       { discogsId: null, name: 'Jack DeJohnette' },
       'US',
+      'musicbrainz',
     );
   });
 
@@ -165,7 +167,7 @@ describe('enrichNationality', () => {
     expect(summary.failed).toBe(1);
     expect(summary.enriched).toBe(1);
     expect(mockSetArtistNationality).toHaveBeenCalledTimes(1);
-    expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 2, 'DE');
+    expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 2, 'DE', 'musicbrainz');
   });
 
   it('returns failed=1 when getUnenrichedArtistsForNationality throws', async () => {
@@ -206,6 +208,7 @@ describe('enrichNationality', () => {
         fakeDriver,
         { discogsId: 50, name: 'Rick Rubin' },
         'US',
+        'musicbrainz',
       );
       expect(summary.enriched).toBe(1);
     });
@@ -226,6 +229,7 @@ describe('enrichNationality', () => {
         fakeDriver,
         { discogsId: null, name: 'Joe Meek' },
         'GB',
+        'viaf',
       );
     });
 
@@ -240,6 +244,7 @@ describe('enrichNationality', () => {
         fakeDriver,
         { discogsId: 60, name: 'Rudy Van Gelder' },
         'US',
+        'musicbrainz',
       );
       expect(summary.enriched).toBe(1);
     });
@@ -258,6 +263,7 @@ describe('enrichNationality', () => {
         fakeDriver,
         { discogsId: null, name: 'Tom Dowd' },
         'US',
+        'musicbrainz',
       );
       expect(summary.enriched).toBe(1);
     });
@@ -271,7 +277,12 @@ describe('enrichNationality', () => {
 
       expect(summary.failed).toBe(1);
       expect(summary.enriched).toBe(1);
-      expect(mockSetProducerNationality).toHaveBeenCalledWith(fakeDriver, expect.anything(), 'US');
+      expect(mockSetProducerNationality).toHaveBeenCalledWith(
+        fakeDriver,
+        expect.anything(),
+        'US',
+        'musicbrainz',
+      );
     });
 
     it('aggregates counts across all four node types', async () => {
@@ -310,6 +321,7 @@ describe('enrichNationality', () => {
         fakeDriver,
         { discogsId: null, name: 'No ID Musician' },
         'FR',
+        'viaf',
       );
     });
 
@@ -331,6 +343,7 @@ describe('enrichNationality', () => {
         fakeDriver,
         expect.objectContaining({ discogsId: null }),
         'DE',
+        'musicbrainz',
       );
     });
 
@@ -348,6 +361,7 @@ describe('enrichNationality', () => {
         fakeDriver,
         { discogsId: null, name: 'No ID Musician' },
         null,
+        null,
       );
     });
   });
@@ -364,7 +378,7 @@ describe('enrichNationality', () => {
 
       const summary = await enrichNationality(mb, fakeDriver, undefined, wd);
 
-      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 5, 'JP');
+      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 5, 'JP', 'wikidata');
       expect(summary.enriched).toBe(1);
     });
 
@@ -375,7 +389,7 @@ describe('enrichNationality', () => {
 
       await enrichNationality(mb, fakeDriver, undefined, wd);
 
-      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 6, 'GB');
+      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 6, 'GB', 'musicbrainz');
     });
 
     it('prefers Wikidata when sources conflict and includes artist name in log', async () => {
@@ -386,7 +400,7 @@ describe('enrichNationality', () => {
 
       await enrichNationality(mb, fakeDriver, logger, wd);
 
-      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 7, 'GB');
+      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 7, 'GB', 'wikidata');
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('MB=US WD=GB'));
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('"Miles Davis"'));
     });
@@ -398,7 +412,7 @@ describe('enrichNationality', () => {
 
       const summary = await enrichNationality(mb, fakeDriver, undefined, wd);
 
-      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 8, null);
+      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 8, null, null);
       expect(summary.skipped).toBe(1);
     });
 
@@ -408,7 +422,7 @@ describe('enrichNationality', () => {
 
       const summary = await enrichNationality(mb, fakeDriver);
 
-      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 9, 'FR');
+      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 9, 'FR', 'musicbrainz');
       expect(summary.enriched).toBe(1);
     });
   });
@@ -435,7 +449,7 @@ describe('enrichNationality', () => {
       expect(wd.getCountryByWikipediaUrl).toHaveBeenCalledWith(
         'https://en.wikipedia.org/wiki/Pino_Palladino',
       );
-      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 20, 'IT');
+      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 20, 'IT', 'wikidata');
       expect(summary.enriched).toBe(1);
     });
 
@@ -448,7 +462,7 @@ describe('enrichNationality', () => {
       await enrichNationality(mb, fakeDriver, undefined, wd, dc);
 
       expect(dc.getArtist).not.toHaveBeenCalled();
-      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 21, 'GB');
+      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 21, 'GB', 'musicbrainz');
     });
 
     it('skips Wikipedia fallback when no discogsClient is provided', async () => {
@@ -459,7 +473,7 @@ describe('enrichNationality', () => {
       const summary = await enrichNationality(mb, fakeDriver, undefined, wd);
 
       expect(wd.getCountryByWikipediaUrl).not.toHaveBeenCalled();
-      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 22, null);
+      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 22, null, null);
       expect(summary.skipped).toBe(1);
     });
 
@@ -492,7 +506,7 @@ describe('enrichNationality', () => {
       await enrichNationality(mb, fakeDriver, undefined, wd, dc);
 
       expect(wd.getCountryByWikipediaUrl).toHaveBeenCalledTimes(2);
-      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 24, 'SE');
+      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 24, 'SE', 'wikidata');
     });
 
     it('proceeds to VIAF when Wikipedia lookup also returns null', async () => {
@@ -511,7 +525,7 @@ describe('enrichNationality', () => {
 
       expect(wd.getCountryByWikipediaUrl).toHaveBeenCalled();
       expect(viaf.getCountryByName).toHaveBeenCalled();
-      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 25, 'NO');
+      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 25, 'NO', 'viaf');
     });
   });
 
@@ -534,6 +548,7 @@ describe('enrichNationality', () => {
         fakeDriver,
         { discogsId: 30, name: 'Jan Garbarek' },
         'NO',
+        'viaf',
       );
       expect(summary.enriched).toBe(1);
     });
@@ -550,6 +565,7 @@ describe('enrichNationality', () => {
         fakeDriver,
         { discogsId: 31, name: 'Ron Carter' },
         'US',
+        'musicbrainz',
       );
     });
 
@@ -563,6 +579,7 @@ describe('enrichNationality', () => {
       expect(mockSetMusicianNationality).toHaveBeenCalledWith(
         fakeDriver,
         { discogsId: 32, name: 'Someone' },
+        null,
         null,
       );
     });

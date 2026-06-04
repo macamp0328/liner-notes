@@ -178,22 +178,24 @@ describe('getUnenrichedEngineersForNationality', () => {
 // setArtistNationality
 // ---------------------------------------------------------------------------
 describe('setArtistNationality', () => {
-  it('merges ORIGIN_COUNTRY when countryCode is provided', async () => {
+  it('merges ORIGIN_COUNTRY tagged with the resolving source', async () => {
     const { session, runSpy } = makeMockSession();
-    await setArtistNationality(makeMockDriver(session), 42, 'US');
+    await setArtistNationality(makeMockDriver(session), 42, 'US', 'musicbrainz');
 
     expect(runSpy).toHaveBeenCalledTimes(1);
     expect(runSpy.mock.calls[0]?.[0]).toContain('MERGE (c:Country');
-    expect(runSpy.mock.calls[0]?.[1]).toMatchObject({ countryCode: 'US' });
+    expect(runSpy.mock.calls[0]?.[0]).toContain('SET rel.source = $source');
+    expect(runSpy.mock.calls[0]?.[1]).toMatchObject({ countryCode: 'US', source: 'musicbrainz' });
     expect(session.close).toHaveBeenCalled();
   });
 
   it('only stamps nationalityFetchedAt when countryCode is null', async () => {
     const { session, runSpy } = makeMockSession();
-    await setArtistNationality(makeMockDriver(session), 42, null);
+    await setArtistNationality(makeMockDriver(session), 42, null, null);
 
     expect(runSpy).toHaveBeenCalledTimes(1);
     expect(runSpy.mock.calls[0]?.[0]).not.toContain('MERGE (c:Country');
+    expect(runSpy.mock.calls[0]?.[0]).not.toContain('rel.source');
     expect(runSpy.mock.calls[0]?.[0]).toContain('nationalityFetchedAt = datetime()');
   });
 });
@@ -202,20 +204,28 @@ describe('setArtistNationality', () => {
 // setMusicianNationality
 // ---------------------------------------------------------------------------
 describe('setMusicianNationality', () => {
-  it('matches by discogsId when present', async () => {
+  it('matches by discogsId when present and tags the source', async () => {
     const { session, runSpy } = makeMockSession();
     await setMusicianNationality(
       makeMockDriver(session),
       { discogsId: 10, name: 'Ron Carter' },
       'US',
+      'wikidata',
     );
 
     expect(runSpy.mock.calls[0]?.[0]).toContain('discogsId: $discogsId');
+    expect(runSpy.mock.calls[0]?.[0]).toContain('SET rel.source = $source');
+    expect(runSpy.mock.calls[0]?.[1]).toMatchObject({ source: 'wikidata' });
   });
 
   it('matches by name when discogsId is null', async () => {
     const { session, runSpy } = makeMockSession();
-    await setMusicianNationality(makeMockDriver(session), { discogsId: null, name: 'Anon' }, 'FR');
+    await setMusicianNationality(
+      makeMockDriver(session),
+      { discogsId: null, name: 'Anon' },
+      'FR',
+      'viaf',
+    );
 
     expect(runSpy.mock.calls[0]?.[0]).toContain('name: $name');
     expect(runSpy.mock.calls[0]?.[0]).toContain('m.discogsId IS NULL');
@@ -223,7 +233,12 @@ describe('setMusicianNationality', () => {
 
   it('sets null country without merging Country node', async () => {
     const { session, runSpy } = makeMockSession();
-    await setMusicianNationality(makeMockDriver(session), { discogsId: 10, name: 'Someone' }, null);
+    await setMusicianNationality(
+      makeMockDriver(session),
+      { discogsId: 10, name: 'Someone' },
+      null,
+      null,
+    );
 
     expect(runSpy.mock.calls[0]?.[0]).not.toContain('MERGE (c:Country');
   });
@@ -239,10 +254,12 @@ describe('setProducerNationality', () => {
       makeMockDriver(session),
       { discogsId: 50, name: 'Rick Rubin' },
       'US',
+      'musicbrainz',
     );
 
     expect(runSpy.mock.calls[0]?.[0]).toContain('MERGE (c:Country');
     expect(runSpy.mock.calls[0]?.[0]).toContain('Producer');
+    expect(runSpy.mock.calls[0]?.[0]).toContain('SET rel.source = $source');
   });
 
   it('matches by name when discogsId is null', async () => {
@@ -250,6 +267,7 @@ describe('setProducerNationality', () => {
     await setProducerNationality(
       makeMockDriver(session),
       { discogsId: null, name: 'Joe Meek' },
+      null,
       null,
     );
 
@@ -267,10 +285,12 @@ describe('setEngineerNationality', () => {
       makeMockDriver(session),
       { discogsId: 60, name: 'Rudy Van Gelder' },
       'US',
+      'viaf',
     );
 
     expect(runSpy.mock.calls[0]?.[0]).toContain('MERGE (c:Country');
     expect(runSpy.mock.calls[0]?.[0]).toContain('Engineer');
+    expect(runSpy.mock.calls[0]?.[0]).toContain('SET rel.source = $source');
   });
 
   it('matches by name when discogsId is null', async () => {
@@ -278,6 +298,7 @@ describe('setEngineerNationality', () => {
     await setEngineerNationality(
       makeMockDriver(session),
       { discogsId: null, name: 'Tom Dowd' },
+      null,
       null,
     );
 

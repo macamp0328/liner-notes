@@ -23,6 +23,20 @@ const coverageSchema = {
   },
 } as const;
 
+// A multi-source stage: the parent coverage plus a per-source split. `sources`
+// keys vary by stage (lyrics → lrclib/genius/untagged; nationality →
+// musicbrainz/wikidata/viaf/untagged), so it's an open map of CoverageMetric.
+const sourcedCoverageSchema = {
+  type: 'object',
+  required: ['covered', 'applicable', 'pct', 'sources'],
+  properties: {
+    covered: { type: 'integer' },
+    applicable: { type: 'integer' },
+    pct: { type: 'number', nullable: true },
+    sources: { type: 'object', additionalProperties: coverageSchema },
+  },
+} as const;
+
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
   let cache: { at: number; data: StatsData } | null = null;
@@ -64,20 +78,38 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
                     required: [
                       'releasesWithOriginalYear',
                       'artistsWithProfile',
+                      'artistsWithGenres',
+                      'artistsWithStyles',
+                      'artistsWithNationality',
+                      'musiciansWithNationality',
+                      'producersWithNationality',
+                      'engineersWithNationality',
                       'tracksWithLyrics',
                       'tracksWithRecordingMbid',
                       'tracksWithIsrc',
                       'tracksWithTempo',
                       'tracksWithDeezerBpm',
+                      'tracksWithDeezerGain',
+                      'tracksWithVersions',
+                      'mastersWithReleaseEvents',
                     ],
                     properties: {
                       releasesWithOriginalYear: coverageSchema,
                       artistsWithProfile: coverageSchema,
-                      tracksWithLyrics: coverageSchema,
+                      artistsWithGenres: coverageSchema,
+                      artistsWithStyles: coverageSchema,
+                      artistsWithNationality: sourcedCoverageSchema,
+                      musiciansWithNationality: sourcedCoverageSchema,
+                      producersWithNationality: sourcedCoverageSchema,
+                      engineersWithNationality: sourcedCoverageSchema,
+                      tracksWithLyrics: sourcedCoverageSchema,
                       tracksWithRecordingMbid: coverageSchema,
                       tracksWithIsrc: coverageSchema,
                       tracksWithTempo: coverageSchema,
                       tracksWithDeezerBpm: coverageSchema,
+                      tracksWithDeezerGain: coverageSchema,
+                      tracksWithVersions: coverageSchema,
+                      mastersWithReleaseEvents: coverageSchema,
                     },
                   },
                 },

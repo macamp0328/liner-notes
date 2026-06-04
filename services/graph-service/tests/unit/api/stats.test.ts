@@ -11,16 +11,46 @@ vi.mock('../../../src/db/client.js', () => ({ getDriver: vi.fn().mockReturnValue
 
 import { statsRoutes } from '../../../src/api/stats.js';
 
+const sourcedNat = {
+  covered: 12,
+  applicable: 16,
+  pct: 75,
+  sources: {
+    musicbrainz: { covered: 7, applicable: 16, pct: 43.8 },
+    wikidata: { covered: 4, applicable: 16, pct: 25 },
+    viaf: { covered: 1, applicable: 16, pct: 6.3 },
+    untagged: { covered: 0, applicable: 16, pct: 0 },
+  },
+};
+
 const STATS = {
   counts: { releases: 10, artists: 20, tracks: 100, masters: 7 },
   enrichment: {
     releasesWithOriginalYear: { covered: 6, applicable: 8, pct: 75 },
     artistsWithProfile: { covered: 12, applicable: 16, pct: 75 },
-    tracksWithLyrics: { covered: 80, applicable: 100, pct: 80 },
+    artistsWithGenres: { covered: 18, applicable: 18, pct: 100 },
+    artistsWithStyles: { covered: 9, applicable: 15, pct: 60 },
+    artistsWithNationality: sourcedNat,
+    musiciansWithNationality: sourcedNat,
+    producersWithNationality: sourcedNat,
+    engineersWithNationality: sourcedNat,
+    tracksWithLyrics: {
+      covered: 80,
+      applicable: 100,
+      pct: 80,
+      sources: {
+        lrclib: { covered: 70, applicable: 100, pct: 70 },
+        genius: { covered: 8, applicable: 100, pct: 8 },
+        untagged: { covered: 2, applicable: 100, pct: 2 },
+      },
+    },
     tracksWithRecordingMbid: { covered: 70, applicable: 100, pct: 70 },
     tracksWithIsrc: { covered: 60, applicable: 100, pct: 60 },
     tracksWithTempo: { covered: 35, applicable: 70, pct: 50 },
     tracksWithDeezerBpm: { covered: 30, applicable: 60, pct: 50 },
+    tracksWithDeezerGain: { covered: 24, applicable: 60, pct: 40 },
+    tracksWithVersions: { covered: 12, applicable: 100, pct: 12 },
+    mastersWithReleaseEvents: { covered: 5, applicable: 7, pct: 71.4 },
   },
 };
 
