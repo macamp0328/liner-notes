@@ -1,4 +1,5 @@
 import type { Logger } from './discogs-client.js';
+import { transientNetworkCode } from './network-errors.js';
 
 export interface WikidataClientConfig {
   userAgent: string;
@@ -148,9 +149,24 @@ export class WikidataClient {
         const code = binding?.['countryCode']?.value?.trim();
         return code ?? null;
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.log.warn(`[wikidata-client] Network error for ${logLabel} — ${msg}`);
-        return null;
+        // A transient network-level failure (fetch failed / ECONNRESET / ...) is worth a
+        // bounded retry on the same budget as the HTTP-status branch above. Anything else stays
+        // a soft-skip to null — this client never throws. Exhausting the retries breaks to the
+        // "Exceeded max retries" path below, which also returns null.
+        const netCode = transientNetworkCode(err);
+        if (netCode === null) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.log.warn(`[wikidata-client] Network error for ${logLabel} — ${msg}`);
+          return null;
+        }
+        if (attempt >= MAX_RETRIES) break;
+        this.log.warn(
+          `[wikidata-client] Network error (${netCode}) for ${logLabel} on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${backoffMs}ms`,
+        );
+        await this.sleep(backoffMs);
+        backoffMs = Math.min(backoffMs * 2, 32_000);
+        attempt++;
+        continue;
       }
     }
 
