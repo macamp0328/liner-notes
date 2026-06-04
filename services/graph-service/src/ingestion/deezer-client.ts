@@ -1,4 +1,5 @@
 import type { Logger } from './discogs-client.js';
+import { transientNetworkCode } from './network-errors.js';
 
 export interface DeezerClientConfig {
   /** Milliseconds to sleep after every successful request. 120ms stays well under 50 req/5s. */
@@ -74,9 +75,25 @@ export class DeezerClient {
     let currentDelay = this.backoffBaseMs;
 
     while (attempt <= MAX_RETRIES) {
-      const response = await fetch(url, {
-        headers: { Accept: 'application/json' },
-      });
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          headers: { Accept: 'application/json' },
+        });
+      } catch (err) {
+        // Transient network-level failure (fetch failed / ECONNRESET / ...) — not an HTTP
+        // status, so it lands here rather than in the 429/503 branch. Retry with backoff on
+        // the same attempt budget; rethrow non-transient errors and the final attempt unchanged.
+        const netCode = transientNetworkCode(err);
+        if (netCode === null || attempt >= MAX_RETRIES) throw err;
+        this.log.warn(
+          `[deezer-client] Network error (${netCode}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${currentDelay}ms`,
+        );
+        await this.sleep(currentDelay);
+        currentDelay = Math.min(currentDelay * 2, MAX_BACKOFF_MS);
+        attempt++;
+        continue;
+      }
 
       if (response.status === 429 || response.status === 503) {
         const retryAfterHeader = response.headers.get('Retry-After');

@@ -32,6 +32,26 @@ function makeErrorResponse(status: number, statusText: string, retryAfterSecs?: 
   } as unknown as Response;
 }
 
+/**
+ * Build a transient network-level error like the ones undici throws. `code`, when given, is
+ * attached either as the error's `.cause.code` (the undici shape) or directly as `.code`.
+ */
+function makeNetworkError(
+  message: string,
+  code?: string,
+  attachTo: 'cause' | 'self' = 'cause',
+): Error {
+  const err = new TypeError(message);
+  if (code !== undefined) {
+    if (attachTo === 'cause') {
+      (err as Error & { cause?: unknown }).cause = Object.assign(new Error(message), { code });
+    } else {
+      (err as Error & { code?: unknown }).code = code;
+    }
+  }
+  return err;
+}
+
 const MBID_A = 'aaaaaaaa-0000-0000-0000-aaaaaaaaaaaa';
 const MBID_B = 'bbbbbbbb-0000-0000-0000-bbbbbbbbbbbb';
 
@@ -221,6 +241,35 @@ describe('AcousticBrainzClient', () => {
   it('throws after exhausting max retries on repeated 429', async () => {
     fetchSpy.mockResolvedValue(makeErrorResponse(429, 'Too Many Requests'));
     await expect(client.getFeatures([MBID_A])).rejects.toThrow(/exceeded max retries/);
+  });
+
+  // ── transient network-error retry ───────────────────────────────────────────
+
+  it('retries a transient network error (fetch failed) and succeeds on the next attempt', async () => {
+    // getFeatures issues two fetches (low-level then high-level); the first low-level
+    // attempt blips, retries, then both bulk requests succeed.
+    fetchSpy
+      .mockRejectedValueOnce(makeNetworkError('fetch failed'))
+      .mockResolvedValueOnce(makeOkResponse(bulkLow(MBID_A)))
+      .mockResolvedValueOnce(makeOkResponse(bulkHigh(MBID_A)));
+
+    const result = await client.getFeatures([MBID_A]);
+    expect(result.has(MBID_A)).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it('gives up after MAX_RETRIES on a persistent transient network error and rethrows', async () => {
+    fetchSpy.mockRejectedValue(makeNetworkError('connection reset', 'ECONNRESET', 'cause'));
+
+    await expect(client.getFeatures([MBID_A])).rejects.toThrow('connection reset');
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
+  it('does not retry a non-transient error — rethrows immediately', async () => {
+    fetchSpy.mockRejectedValueOnce(new Error('boom'));
+
+    await expect(client.getFeatures([MBID_A])).rejects.toThrow('boom');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   // ── buildAcousticBrainzClientFromEnv ──────────────────────────────────────

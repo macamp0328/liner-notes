@@ -42,6 +42,26 @@ function makeTrackResponse(bpm: number, gain: number) {
   return { id: 1234567, bpm, gain };
 }
 
+/**
+ * Build a transient network-level error like the ones undici throws. `code`, when given, is
+ * attached either as the error's `.cause.code` (the undici shape) or directly as `.code`.
+ */
+function makeNetworkError(
+  message: string,
+  code?: string,
+  attachTo: 'cause' | 'self' = 'cause',
+): Error {
+  const err = new TypeError(message);
+  if (code !== undefined) {
+    if (attachTo === 'cause') {
+      (err as Error & { cause?: unknown }).cause = Object.assign(new Error(message), { code });
+    } else {
+      (err as Error & { code?: unknown }).code = code;
+    }
+  }
+  return err;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -153,6 +173,33 @@ describe('DeezerClient', () => {
   it('throws after exhausting max retries on repeated 429', async () => {
     fetchSpy.mockResolvedValue(makeErrorResponse(429, 'Too Many Requests'));
     await expect(client.getTrackByIsrc('EXHAUST00001')).rejects.toThrow(/exceeded max retries/);
+  });
+
+  // ── transient network-error retry ───────────────────────────────────────────
+
+  it('retries a transient network error (fetch failed) and succeeds on the next attempt', async () => {
+    fetchSpy
+      .mockRejectedValueOnce(makeNetworkError('fetch failed'))
+      .mockResolvedValueOnce(makeOkResponse(makeTrackResponse(95.0, -6.0)));
+
+    const result = await client.getTrackByIsrc('NETBLIP00001');
+
+    expect(result).toEqual({ bpm: 95.0, gain: -6.0 });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up after MAX_RETRIES on a persistent transient network error and rethrows', async () => {
+    fetchSpy.mockRejectedValue(makeNetworkError('connection reset', 'ECONNRESET', 'cause'));
+
+    await expect(client.getTrackByIsrc('NETDEAD00001')).rejects.toThrow('connection reset');
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
+  it('does not retry a non-transient error — rethrows immediately', async () => {
+    fetchSpy.mockRejectedValueOnce(new Error('boom'));
+
+    await expect(client.getTrackByIsrc('NONTRANS0001')).rejects.toThrow('boom');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   // ── buildDeezerClientFromEnv ───────────────────────────────────────────────
