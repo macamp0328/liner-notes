@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import type { Driver } from 'neo4j-driver';
 import { buildTestServer, initTestDriver } from '../setup.js';
 import { clearGraph } from '../../fixtures/loader.js';
-import { getDriver } from '../../../src/db/client.js';
 import { getJobState, resetJobState, type JobState } from '../../../src/ingestion/job-state.js';
 import release7000001 from '../../fixtures/releases/release-7000001.json' with { type: 'json' };
 
@@ -66,7 +66,8 @@ async function waitForJobToFinish(timeoutMs = 15_000): Promise<JobState> {
 }
 
 describe('auto-ingest on empty graph (server onReady)', () => {
-  let app: FastifyInstance;
+  let app: FastifyInstance | undefined;
+  let driver: Driver | undefined;
   let fetchSpy: ReturnType<typeof vi.spyOn>;
   const originalEnv: Record<string, string | undefined> = {};
 
@@ -92,14 +93,16 @@ describe('auto-ingest on empty graph (server onReady)', () => {
       else process.env[key] = originalEnv[key];
     }
     resetJobState();
-    await clearGraph(getDriver());
-    await app.close();
+    // The driver and app are created mid-test, so an early failure can leave
+    // either unset — guard cleanup so it never throws over the original error.
+    if (driver) await clearGraph(driver);
+    if (app) await app.close();
   });
 
   it('auto-triggers ingestion when the graph is empty and persists the release', async () => {
     // 1. Empty graph BEFORE onReady so hasReleases() returns false. The driver
     //    initialised here is the same singleton the server reuses in onReady.
-    const driver = initTestDriver();
+    driver = initTestDriver();
     await clearGraph(driver);
 
     // 2. Stub fetch BEFORE app.ready() — onReady fires runIngestion fire-and-forget,
