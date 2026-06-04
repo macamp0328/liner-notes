@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildTestServer } from '../setup.js';
-import { seedGraph, clearGraph } from '../../fixtures/loader.js';
+import { seedGraph, clearGraph, seedExploreEnrichment } from '../../fixtures/loader.js';
 import { getDriver } from '../../../src/db/client.js';
 
 const SEED_RELEASE_ID = 7000001; // Maiden Voyage — Herbie Hancock, Blue Note, US, 1966
@@ -13,6 +13,7 @@ describe('explore routes', () => {
     app = await buildTestServer();
     await clearGraph(getDriver());
     await seedGraph(getDriver());
+    await seedExploreEnrichment(getDriver());
   });
 
   afterAll(async () => {
@@ -198,13 +199,24 @@ describe('explore routes', () => {
   });
 
   describe('GET /api/v1/explore/tracks/most-international', () => {
-    it('returns an array (likely empty without nationality enrichment)', async () => {
+    it('ranks a track by the number of distinct origin countries of its credited musicians', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/explore/tracks/most-international?limit=5',
       });
       expect(res.statusCode).toBe(200);
-      expect(Array.isArray(JSON.parse(res.payload))).toBe(true);
+      const body = JSON.parse(res.payload) as {
+        trackTitle: string;
+        releaseDiscogsId: number;
+        countryCount: number;
+        countries: string[];
+      }[];
+      const maiden = body.find(
+        (t) => t.trackTitle === 'Maiden Voyage' && t.releaseDiscogsId === SEED_RELEASE_ID,
+      );
+      expect(maiden).toBeDefined();
+      expect(maiden!.countryCount).toBe(3);
+      expect([...maiden!.countries].sort()).toEqual(['FR', 'JP', 'US']);
     });
 
     it('rejects limit > 50 via schema', async () => {
@@ -217,13 +229,23 @@ describe('explore routes', () => {
   });
 
   describe('GET /api/v1/explore/releases/most-pressed', () => {
-    it('returns an array (likely empty without master-data enrichment)', async () => {
+    it('ranks a master by the number of distinct pressing countries', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/explore/releases/most-pressed?limit=5',
       });
       expect(res.statusCode).toBe(200);
-      expect(Array.isArray(JSON.parse(res.payload))).toBe(true);
+      const body = JSON.parse(res.payload) as {
+        masterDiscogsId: number;
+        albumTitle: string;
+        countryCount: number;
+        countries: string[];
+      }[];
+      const master = body.find((m) => m.masterDiscogsId === 800001);
+      expect(master).toBeDefined();
+      expect(master!.albumTitle).toBe('Maiden Voyage');
+      expect(master!.countryCount).toBe(3);
+      expect([...master!.countries].sort()).toEqual(['Japan', 'UK', 'US']);
     });
 
     it('rejects limit > 50 via schema', async () => {
@@ -236,13 +258,45 @@ describe('explore routes', () => {
   });
 
   describe('GET /api/v1/explore/tracks/by-audio-features', () => {
-    it('returns an array with no filters', async () => {
+    it('returns the seeded enriched tracks when unfiltered', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/explore/tracks/by-audio-features',
       });
       expect(res.statusCode).toBe(200);
-      expect(Array.isArray(JSON.parse(res.payload))).toBe(true);
+      const body = JSON.parse(res.payload) as { trackTitle: string }[];
+      const titles = body.map((t) => t.trackTitle);
+      // Only the three seeded tracks carry tempo or deezerBpm, so only they pass
+      // the route's base "(tempo IS NOT NULL OR deezerBpm IS NOT NULL)" filter.
+      expect(titles).toEqual(
+        expect.arrayContaining(['Maiden Voyage', 'The Eye of the Hurricane', 'Little One']),
+      );
+    });
+
+    it('filters by scale=minor to the expected subset', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/tracks/by-audio-features?scale=minor',
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as { trackTitle: string; musicalScale: string }[];
+      expect(body.every((t) => t.musicalScale === 'minor')).toBe(true);
+      const titles = body.map((t) => t.trackTitle);
+      expect(titles).toContain('The Eye of the Hurricane'); // A minor
+      expect(titles).not.toContain('Maiden Voyage'); // C major
+    });
+
+    it('filters by minTempo across both AcousticBrainz tempo and deezerBpm', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/tracks/by-audio-features?minTempo=100',
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as { trackTitle: string }[];
+      const titles = body.map((t) => t.trackTitle);
+      expect(titles).toContain('The Eye of the Hurricane'); // tempo 140
+      expect(titles).toContain('Little One'); // deezerBpm 120, no AcousticBrainz tempo
+      expect(titles).not.toContain('Maiden Voyage'); // tempo 90
     });
 
     it('rejects an out-of-range minDanceability', async () => {
