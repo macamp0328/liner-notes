@@ -78,15 +78,19 @@ describe('getUnenrichedMasters', () => {
     expect(result).toEqual([]);
   });
 
-  it('sends a query that filters by masterFetched IS NULL', async () => {
+  it('selects releases still missing originalYear, gated by the staleness window', async () => {
     const { session, runSpy } = makeMockSession({ records: [] });
     const driver = makeMockDriver(session);
 
     await getUnenrichedMasters(driver);
 
     const query: string = runSpy.mock.calls[0]?.[0] ?? '';
-    expect(query).toContain('masterFetched IS NULL');
+    const params = runSpy.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(query).toContain('masterDiscogsId IS NOT NULL');
+    expect(query).toContain('r.originalYear IS NULL');
+    expect(query).toContain('r.masterFetchedAt IS NULL');
+    expect(query).toContain('duration({ days: $stalenessDays })');
+    expect(params).toHaveProperty('stalenessDays');
   });
 
   it('closes session even when run throws', async () => {
@@ -166,14 +170,14 @@ describe('setMasterFetchedAndOriginalYear', () => {
     vi.clearAllMocks();
   });
 
-  it('runs SET query that sets both masterFetched and originalYear', async () => {
+  it('runs SET query that stamps masterFetchedAt and sets originalYear', async () => {
     const { session, runSpy } = makeMockSession({ records: [] });
     const driver = makeMockDriver(session);
 
     await setMasterFetchedAndOriginalYear(driver, [13570466, 9999991], 1976);
 
     const query: string = runSpy.mock.calls[0]?.[0] ?? '';
-    expect(query).toContain('masterFetched');
+    expect(query).toContain('masterFetchedAt = datetime()');
     expect(query).toContain('originalYear');
 
     const params = runSpy.mock.calls[0]?.[1] as Record<string, unknown>;
@@ -204,14 +208,14 @@ describe('setMasterFetched', () => {
     vi.clearAllMocks();
   });
 
-  it('sets only masterFetched without touching originalYear', async () => {
+  it('stamps only masterFetchedAt without touching originalYear', async () => {
     const { session, runSpy } = makeMockSession({ records: [] });
     const driver = makeMockDriver(session);
 
     await setMasterFetched(driver, [13570466]);
 
     const query: string = runSpy.mock.calls[0]?.[0] ?? '';
-    expect(query).toContain('masterFetched');
+    expect(query).toContain('masterFetchedAt = datetime()');
     expect(query).not.toContain('originalYear');
 
     const params = runSpy.mock.calls[0]?.[1] as Record<string, unknown>;

@@ -63,6 +63,18 @@ describe('getMastersForReleaseEventEnrichment', () => {
     expect(masters).toEqual([]);
   });
 
+  it('selects masters with no MB_RELEASED_IN, gated by the staleness window', async () => {
+    const { session, runSpy } = makeMockSession({ records: [] } as unknown as Result);
+
+    await getMastersForReleaseEventEnrichment(makeMockDriver(session));
+
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('NOT EXISTS { (m)-[:MB_RELEASED_IN]->() }');
+    expect(query).toContain('m.mbReleaseEventsFetchedAt IS NULL');
+    expect(query).toContain('duration({ days: $stalenessDays })');
+    expect(params).toHaveProperty('stalenessDays');
+  });
+
   it('closes the session even when run throws', async () => {
     const { session } = makeMockSession();
     (session.run as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('DB error'));
@@ -138,7 +150,7 @@ describe('setMbReleaseEventsFetched', () => {
 
     expect(runSpy).toHaveBeenCalledOnce();
     const [query] = runSpy.mock.calls[0] as [string, unknown];
-    expect(query).toContain('mbReleaseEventsFetched');
+    expect(query).toContain('mbReleaseEventsFetchedAt = datetime()');
     expect(session.close).toHaveBeenCalledOnce();
   });
 

@@ -64,9 +64,12 @@ describe('getTracksForAcousticBrainzEnrichment', () => {
       { elementId: '4:abc:1', recordingMbid: 'aaaaaaaa-0000-0000-0000-000000000001' },
     ]);
 
-    const [query] = runSpy.mock.calls[0] as [string];
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(query).toContain('recordingMbid IS NOT NULL');
-    expect(query).toContain('acousticBrainzFetched IS NULL');
+    expect(query).toContain('t.tempo IS NULL');
+    expect(query).toContain('t.acousticBrainzFetchedAt IS NULL');
+    expect(query).toContain('duration({ days: $stalenessDays })');
+    expect(params).toHaveProperty('stalenessDays');
   });
 
   it('closes the session after a successful query', async () => {
@@ -92,7 +95,7 @@ describe('setTrackAcousticBrainzFeatures', () => {
     expect(runSpy).not.toHaveBeenCalled();
   });
 
-  it('runs an UNWIND statement that sets acousticBrainzFetched and all feature props', async () => {
+  it('runs an UNWIND statement that stamps acousticBrainzFetchedAt and all feature props', async () => {
     const { session, runSpy } = makeMockSession();
     const results: TrackAcousticBrainzResult[] = [
       {
@@ -110,7 +113,7 @@ describe('setTrackAcousticBrainzFeatures', () => {
 
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(query).toContain('UNWIND $results');
-    expect(query).toContain('acousticBrainzFetched = true');
+    expect(query).toContain('acousticBrainzFetchedAt = datetime()');
     expect(query).toContain('t.tempo = res.tempo');
     expect(query).toContain('t.musicalKey = res.musicalKey');
     expect(query).toContain('t.voiceInstrumental = res.voiceInstrumental');
@@ -153,7 +156,7 @@ describe('resetTrackAcousticBrainzEnrichment', () => {
 
     expect(count).toBe(42);
     const [query] = runSpy.mock.calls[0] as [string];
-    expect(query).toContain('acousticBrainzFetched IS NOT NULL');
+    expect(query).toContain('acousticBrainzFetchedAt IS NOT NULL');
     expect(query).toContain('REMOVE');
   });
 
