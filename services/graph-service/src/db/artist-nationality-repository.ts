@@ -4,6 +4,15 @@ import { getStalenessDays } from '../enrichment/staleness.js';
 
 type Neo4jInt = { toNumber(): number };
 
+/**
+ * Which upstream source resolved an ORIGIN_COUNTRY relationship. Stored as a
+ * `source` property on the relationship so /api/v1/stats can split nationality
+ * coverage per source and a dead source (e.g. VIAF) is visible at a glance.
+ * Edges written before this property existed carry no source — surfaced as an
+ * `untagged` bucket in the stats split until the next full re-run tags them.
+ */
+export type NationalitySource = 'musicbrainz' | 'wikidata' | 'viaf';
+
 export interface UnenrichedArtist {
   discogsId: number;
   name: string;
@@ -125,7 +134,8 @@ export async function getUnenrichedEngineersForNationality(
 
 /**
  * Set the ORIGIN_COUNTRY relationship on an Artist node identified by discogsId.
- * When countryCode is non-null, merges a Country node and creates the relationship.
+ * When countryCode is non-null, merges a Country node and creates the relationship,
+ * tagging it with the `source` that resolved the country (musicbrainz/wikidata/viaf).
  * Always stamps nationalityFetchedAt = datetime() regardless of whether a country was
  * found — the timestamp throttles re-attempts of still-uncountried nodes to once per
  * staleness window (issue #89).
@@ -138,6 +148,7 @@ export async function setArtistNationality(
   driver: Driver,
   discogsId: number,
   countryCode: string | null,
+  source: NationalitySource | null,
 ): Promise<void> {
   const session = driver.session();
   try {
@@ -148,9 +159,9 @@ export async function setArtistNationality(
          DELETE old
          WITH a
          MERGE (c:Country {name: $countryCode})
-         MERGE (a)-[:ORIGIN_COUNTRY]->(c)
-         SET a.nationalityFetchedAt = datetime()`,
-        { discogsId: neo4j.int(discogsId), countryCode },
+         MERGE (a)-[rel:ORIGIN_COUNTRY]->(c)
+         SET rel.source = $source, a.nationalityFetchedAt = datetime()`,
+        { discogsId: neo4j.int(discogsId), countryCode, source },
       );
     } else {
       await session.run(
@@ -176,6 +187,7 @@ export async function setMusicianNationality(
   driver: Driver,
   musician: UnenrichedMusician,
   countryCode: string | null,
+  source: NationalitySource | null,
 ): Promise<void> {
   const session = driver.session();
   try {
@@ -191,12 +203,13 @@ export async function setMusicianNationality(
          DELETE old
          WITH m
          MERGE (c:Country {name: $countryCode})
-         MERGE (m)-[:ORIGIN_COUNTRY]->(c)
-         SET m.nationalityFetchedAt = datetime()`,
+         MERGE (m)-[rel:ORIGIN_COUNTRY]->(c)
+         SET rel.source = $source, m.nationalityFetchedAt = datetime()`,
         {
           discogsId: musician.discogsId !== null ? neo4j.int(musician.discogsId) : null,
           name: musician.name,
           countryCode,
+          source,
         },
       );
     } else {
@@ -223,6 +236,7 @@ export async function setProducerNationality(
   driver: Driver,
   producer: UnenrichedMusician,
   countryCode: string | null,
+  source: NationalitySource | null,
 ): Promise<void> {
   const session = driver.session();
   try {
@@ -238,12 +252,13 @@ export async function setProducerNationality(
          DELETE old
          WITH m
          MERGE (c:Country {name: $countryCode})
-         MERGE (m)-[:ORIGIN_COUNTRY]->(c)
-         SET m.nationalityFetchedAt = datetime()`,
+         MERGE (m)-[rel:ORIGIN_COUNTRY]->(c)
+         SET rel.source = $source, m.nationalityFetchedAt = datetime()`,
         {
           discogsId: producer.discogsId !== null ? neo4j.int(producer.discogsId) : null,
           name: producer.name,
           countryCode,
+          source,
         },
       );
     } else {
@@ -270,6 +285,7 @@ export async function setEngineerNationality(
   driver: Driver,
   engineer: UnenrichedMusician,
   countryCode: string | null,
+  source: NationalitySource | null,
 ): Promise<void> {
   const session = driver.session();
   try {
@@ -285,12 +301,13 @@ export async function setEngineerNationality(
          DELETE old
          WITH m
          MERGE (c:Country {name: $countryCode})
-         MERGE (m)-[:ORIGIN_COUNTRY]->(c)
-         SET m.nationalityFetchedAt = datetime()`,
+         MERGE (m)-[rel:ORIGIN_COUNTRY]->(c)
+         SET rel.source = $source, m.nationalityFetchedAt = datetime()`,
         {
           discogsId: engineer.discogsId !== null ? neo4j.int(engineer.discogsId) : null,
           name: engineer.name,
           countryCode,
+          source,
         },
       );
     } else {
