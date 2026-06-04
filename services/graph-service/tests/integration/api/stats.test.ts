@@ -31,13 +31,35 @@ describe('GET /api/v1/stats', () => {
         `MATCH (a:Artist) WHERE a.discogsId IS NOT NULL AND NOT a.discogsId IN [194, 355]
          WITH a LIMIT 1 SET a.profile = 'A short bio.'`,
       );
+      // Artist-genres/styles + a nationality edge tagged with its resolving source.
+      await session.run(
+        `MATCH (a:Artist) WHERE a.profile = 'A short bio.'
+         SET a.genres = ['Jazz'], a.styles = ['Hard Bop']
+         MERGE (c:Country {name: 'US'})
+         MERGE (a)-[rel:ORIGIN_COUNTRY]->(c)
+         SET rel.source = 'viaf'`,
+      );
       await session.run(
         `MATCH (t:Track) WITH t LIMIT 1
          SET t.lyrics = 'la la la', t.lyricsSource = 'lrclib',
              t.recordingMbid = 'mbid-1', t.isrc = 'ISRC0001',
-             t.tempo = 120.0, t.deezerBpm = 121.0`,
+             t.tempo = 120.0, t.deezerBpm = 121.0, t.deezerGain = -7.5`,
+      );
+      // A cross-track version edge so tracksWithVersions has a covered count.
+      await session.run(
+        `MATCH (t:Track) WITH t LIMIT 2
+         WITH collect(t) AS ts
+         WITH ts[0] AS a, ts[1] AS b
+         MERGE (a)-[:IS_VERSION_OF]->(b)`,
       );
       await session.run(`MERGE (m:Master {discogsId: 555555})`);
+      // mb-release-events output on the master.
+      await session.run(
+        `MATCH (m:Master {discogsId: 555555})
+         MERGE (c:Country {name: 'US'})
+         MERGE (m)-[r:MB_RELEASED_IN {mbReleaseId: 'mb-rel-1'}]->(c)
+         SET r.date = '1959', r.formats = ['Vinyl']`,
+      );
     } finally {
       await session.close();
     }
@@ -74,6 +96,21 @@ describe('GET /api/v1/stats', () => {
     // tempo/deezer denominators are the upstream mbid/isrc gates (1 each here).
     expect(enrichment.tracksWithTempo).toEqual({ covered: 1, applicable: 1, pct: 100 });
     expect(enrichment.tracksWithDeezerBpm).toEqual({ covered: 1, applicable: 1, pct: 100 });
+    expect(enrichment.tracksWithDeezerGain).toEqual({ covered: 1, applicable: 1, pct: 100 });
+
+    // New per-stage coverage figures.
+    expect(enrichment.artistsWithGenres.covered).toBeGreaterThanOrEqual(1);
+    expect(enrichment.artistsWithStyles.covered).toBeGreaterThanOrEqual(1);
+    expect(enrichment.tracksWithVersions.covered).toBeGreaterThanOrEqual(1);
+    expect(enrichment.mastersWithReleaseEvents).toEqual({ covered: 1, applicable: 1, pct: 100 });
+
+    // The lyrics track came from LRCLIB; the per-source split reflects it.
+    expect(enrichment.tracksWithLyrics.sources.lrclib!.covered).toBe(1);
+    expect(enrichment.tracksWithLyrics.sources.genius!.covered).toBe(0);
+
+    // The one nationality edge is tagged viaf; the split attributes it there.
+    expect(enrichment.artistsWithNationality.covered).toBeGreaterThanOrEqual(1);
+    expect(enrichment.artistsWithNationality.sources.viaf!.covered).toBeGreaterThanOrEqual(1);
   });
 
   it('exposes the endpoint without an admin token', async () => {
