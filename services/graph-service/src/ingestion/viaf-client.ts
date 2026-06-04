@@ -1,4 +1,5 @@
 import type { Logger } from './discogs-client.js';
+import { transientNetworkCode } from './network-errors.js';
 
 export interface VIAFClientConfig {
   userAgent: string;
@@ -198,13 +199,28 @@ export class VIAFClient {
 
         return this.extractCountry(name, data);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.log.warn(`[viaf-client] Network error for "${name}" — ${msg}`);
-        return null;
+        // A transient network-level failure (fetch failed / ECONNRESET / ...) is worth a
+        // bounded retry on the same budget as the 429/503 branch above. Anything else stays a
+        // soft-skip to null — this client never throws (see #189). Exhausting the retries
+        // breaks to the "Exceeded max retries" path below, which also returns null.
+        const netCode = transientNetworkCode(err);
+        if (netCode === null) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.log.warn(`[viaf-client] Network error for "${name}" — ${msg}`);
+          return null;
+        }
+        if (attempt >= MAX_RETRIES) break;
+        this.log.warn(
+          `[viaf-client] Network error (${netCode}) for "${name}" on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${backoffMs}ms`,
+        );
+        await this.sleep(backoffMs);
+        backoffMs = Math.min(backoffMs * 2, 32_000);
+        attempt++;
+        continue;
       }
     }
 
-    // Reached only when 429/503 retries are exhausted — HTML/403 return inline above.
+    // Reached when 429/503 or transient-network retries are exhausted — HTML/403 return inline above.
     this.log.warn(`[viaf-client] Exceeded max retries for "${name}" — skipping`);
     await this.sleep(this.delayMs);
     return null;

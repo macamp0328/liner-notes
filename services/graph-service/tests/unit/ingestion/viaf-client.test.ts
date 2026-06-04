@@ -69,6 +69,26 @@ function makeHtmlResponse(status: number): Response {
   } as unknown as Response;
 }
 
+/**
+ * Build a transient network-level error like the ones undici throws. `code`, when given, is
+ * attached either as the error's `.cause.code` (the undici shape) or directly as `.code`.
+ */
+function makeNetworkError(
+  message: string,
+  code?: string,
+  attachTo: 'cause' | 'self' = 'cause',
+): Error {
+  const err = new TypeError(message);
+  if (code !== undefined) {
+    if (attachTo === 'cause') {
+      (err as Error & { cause?: unknown }).cause = Object.assign(new Error(message), { code });
+    } else {
+      (err as Error & { code?: unknown }).code = code;
+    }
+  }
+  return err;
+}
+
 describe('VIAFClient', () => {
   let fetchSpy: MockInstance<typeof fetch>;
   let client: VIAFClient;
@@ -277,6 +297,46 @@ describe('VIAFClient', () => {
     fetchSpy.mockRejectedValueOnce(new Error('network failure'));
     const result = await client.getCountryByName('Someone');
     expect(result).toBeNull();
+  });
+
+  it('retries a transient network error (fetch failed) and succeeds on the next attempt', async () => {
+    fetchSpy.mockRejectedValueOnce(makeNetworkError('fetch failed')).mockResolvedValueOnce(
+      makeOkResponse(
+        makeViafResponse({
+          preferredName: 'Jan Garbarek',
+          nationalities: [{ text: 'no' }],
+        }),
+      ),
+    );
+
+    const result = await client.getCountryByName('Jan Garbarek');
+
+    expect(result).toBe('NO');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns null after exhausting retries on a persistent transient network error', async () => {
+    const warnSpy = vi.fn();
+    const clientWithLogger = new VIAFClient({
+      userAgent: 'liner-notes/test',
+      delayMs: 0,
+      backoffBaseMs: 0,
+      logger: { info: vi.fn(), warn: warnSpy, error: vi.fn() },
+    });
+    fetchSpy.mockRejectedValue(makeNetworkError('connection reset', 'ECONNRESET', 'cause'));
+
+    const result = await clientWithLogger.getCountryByName('Someone');
+
+    expect(result).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Exceeded max retries'));
+  });
+
+  it('does not retry a non-transient error — returns null after a single attempt', async () => {
+    fetchSpy.mockRejectedValueOnce(new Error('boom'));
+    const result = await client.getCountryByName('Someone');
+    expect(result).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   it('returns null on non-retryable HTTP error', async () => {
