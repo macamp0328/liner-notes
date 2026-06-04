@@ -21,17 +21,27 @@ export interface JobState {
   stats: IngestionStats | null;
 }
 
-let state: JobState = {
-  status: 'idle',
-  jobId: '',
-  startedAt: null,
-  completedAt: null,
-  durationMs: null,
-  stats: null,
-};
+/** The idle state a job sits in before the first run and after a reset. */
+function initialJobState(): JobState {
+  return {
+    status: 'idle',
+    jobId: '',
+    startedAt: null,
+    completedAt: null,
+    durationMs: null,
+    stats: null,
+  };
+}
+
+let state: JobState = initialJobState();
 
 export function getJobState(): JobState {
   return structuredClone(state);
+}
+
+/** Reset back to the initial idle state. Used by tests to clear job state between runs. */
+export function resetJobState(): void {
+  state = initialJobState();
 }
 
 export function startJob(): string {
