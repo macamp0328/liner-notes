@@ -1,5 +1,6 @@
 import type { Driver } from 'neo4j-driver';
 import neo4j from 'neo4j-driver';
+import { getStalenessDays } from '../enrichment/staleness.js';
 
 type Neo4jInt = { toNumber(): number };
 
@@ -8,12 +9,13 @@ export interface UnenrichedArtist {
 }
 
 /**
- * Return Artist nodes that have a discogsId but have not yet been enriched
- * with profile data. Various-artists placeholder nodes (id 194, 355) are excluded.
- *
- * Uses profileFetched as an explicit enrichment marker rather than checking
- * profile IS NULL — Neo4j removes null properties on SET, so a null profile
- * would otherwise cause the artist to be re-fetched every run.
+ * Return Artist nodes that have a discogsId but still no profile data (neither realName
+ * nor profile), and whose last attempt has aged past the staleness window (issue #89).
+ * Various-artists placeholder nodes (id 194, 355) are excluded. An artist that already has
+ * a realName or profile is never re-fetched; one Discogs had nothing for is retried at most
+ * once per window. `profileFetchedAt` throttles those retries (Discogs returns "" / null for
+ * absent fields, which Neo4j stores as a removed property, so the data check alone would
+ * re-fetch every run).
  */
 export async function getUnenrichedArtists(driver: Driver): Promise<UnenrichedArtist[]> {
   const session = driver.session();
@@ -21,9 +23,12 @@ export async function getUnenrichedArtists(driver: Driver): Promise<UnenrichedAr
     const result = await session.run(
       `MATCH (a:Artist)
        WHERE a.discogsId IS NOT NULL
-         AND a.profileFetched IS NULL
+         AND a.realName IS NULL AND a.profile IS NULL
          AND NOT a.discogsId IN [194, 355]
+         AND (a.profileFetchedAt IS NULL
+              OR a.profileFetchedAt < datetime() - duration({ days: $stalenessDays }))
        RETURN a.discogsId AS discogsId`,
+      { stalenessDays: neo4j.int(getStalenessDays()) },
     );
     return result.records.map((r) => ({
       discogsId: (r.get('discogsId') as Neo4jInt).toNumber(),
@@ -35,10 +40,10 @@ export async function getUnenrichedArtists(driver: Driver): Promise<UnenrichedAr
 
 /**
  * Set realName and profile on an Artist node identified by discogsId.
- * Also sets profileFetched = true as an idempotency marker — this ensures
- * getUnenrichedArtists will not return this artist again even when profile is
- * absent (Neo4j removes null properties on SET, so profile IS NULL is
- * indistinguishable from never having been fetched).
+ * Also stamps profileFetchedAt = datetime() — when Discogs had neither field, this
+ * timestamp throttles the next retry to one per staleness window rather than every run
+ * (Neo4j removes null properties on SET, so an absent profile is indistinguishable from
+ * never having been fetched without the timestamp).
  */
 export async function setArtistProfile(
   driver: Driver,
@@ -50,7 +55,7 @@ export async function setArtistProfile(
   try {
     await session.run(
       `MATCH (a:Artist {discogsId: $discogsId})
-       SET a.realName = $realName, a.profile = $profile, a.profileFetched = true`,
+       SET a.realName = $realName, a.profile = $profile, a.profileFetchedAt = datetime()`,
       { discogsId: neo4j.int(discogsId), realName, profile },
     );
   } finally {
@@ -59,7 +64,7 @@ export async function setArtistProfile(
 }
 
 /**
- * Remove the profile-enrichment marker and data (profileFetched, realName,
+ * Remove the profile-enrichment marker and data (profileFetchedAt, realName,
  * profile) from every Artist node that carries it, causing the next
  * enrichArtistProfiles run to re-fetch all artists from scratch.
  * Returns the number of Artist nodes reset.
@@ -68,8 +73,8 @@ export async function resetArtistProfilesEnrichment(driver: Driver): Promise<num
   const session = driver.session();
   try {
     const result = await session.run(
-      `MATCH (a:Artist) WHERE a.profileFetched IS NOT NULL
-       REMOVE a.profileFetched, a.realName, a.profile
+      `MATCH (a:Artist) WHERE a.profileFetchedAt IS NOT NULL
+       REMOVE a.profileFetchedAt, a.realName, a.profile
        RETURN count(a) AS reset`,
     );
     return (result.records[0]?.get('reset') as Neo4jInt | undefined)?.toNumber() ?? 0;

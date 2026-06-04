@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Driver, Session, Result, Record as Neo4jRecord } from 'neo4j-driver';
-import { resetArtistProfilesEnrichment } from '../../../src/db/artist-profiles-repository.js';
+import {
+  getUnenrichedArtists,
+  setArtistProfile,
+  resetArtistProfilesEnrichment,
+} from '../../../src/db/artist-profiles-repository.js';
 
 // ---------------------------------------------------------------------------
 // Helpers — mock neo4j-driver sessions; assert on the Cypher that is sent.
@@ -32,6 +36,46 @@ function makeNeo4jRecord(fields: Record<string, unknown>): Neo4jRecord {
 const int = (n: number) => ({ toNumber: () => n, low: n, high: 0 });
 
 // ---------------------------------------------------------------------------
+// getUnenrichedArtists
+// ---------------------------------------------------------------------------
+describe('getUnenrichedArtists', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('selects artists still missing realName and profile, gated by the staleness window', async () => {
+    const { session, runSpy } = makeMockSession();
+    await getUnenrichedArtists(makeMockDriver(session));
+
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('a.realName IS NULL AND a.profile IS NULL');
+    expect(query).toContain('a.profileFetchedAt IS NULL');
+    expect(query).toContain('duration({ days: $stalenessDays })');
+    expect(query).toContain('NOT a.discogsId IN [194, 355]');
+    expect(params).toHaveProperty('stalenessDays');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setArtistProfile
+// ---------------------------------------------------------------------------
+describe('setArtistProfile', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('stamps profileFetchedAt alongside realName and profile', async () => {
+    const { session, runSpy } = makeMockSession();
+    await setArtistProfile(makeMockDriver(session), 42, 'Real Name', 'A profile');
+
+    const [query] = runSpy.mock.calls[0] as [string];
+    expect(query).toContain('a.realName = $realName');
+    expect(query).toContain('a.profile = $profile');
+    expect(query).toContain('a.profileFetchedAt = datetime()');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // resetArtistProfilesEnrichment
 // ---------------------------------------------------------------------------
 describe('resetArtistProfilesEnrichment', () => {
@@ -47,8 +91,8 @@ describe('resetArtistProfilesEnrichment', () => {
 
     expect(reset).toBe(31);
     const [query] = runSpy.mock.calls[0] as [string];
-    expect(query).toContain('a.profileFetched IS NOT NULL');
-    expect(query).toContain('REMOVE a.profileFetched, a.realName, a.profile');
+    expect(query).toContain('a.profileFetchedAt IS NOT NULL');
+    expect(query).toContain('REMOVE a.profileFetchedAt, a.realName, a.profile');
   });
 
   it('returns 0 when the query yields no records', async () => {

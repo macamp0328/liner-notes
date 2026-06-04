@@ -64,6 +64,19 @@ describe('getUnenrichedArtistsForNationality', () => {
     expect(session.close).toHaveBeenCalled();
   });
 
+  it('selects artists with no ORIGIN_COUNTRY, gated by the staleness window', async () => {
+    const { session, runSpy } = makeMockSession({ records: [] });
+
+    await getUnenrichedArtistsForNationality(makeMockDriver(session));
+
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('NOT EXISTS { (a)-[:ORIGIN_COUNTRY]->() }');
+    expect(query).toContain('a.nationalityFetchedAt IS NULL');
+    expect(query).toContain('duration({ days: $stalenessDays })');
+    expect(query).toContain('NOT a.discogsId IN [194, 355]');
+    expect(params).toHaveProperty('stalenessDays');
+  });
+
   it('returns empty array when no unenriched artists', async () => {
     const { session } = makeMockSession({ records: [] });
     const driver = makeMockDriver(session);
@@ -175,13 +188,13 @@ describe('setArtistNationality', () => {
     expect(session.close).toHaveBeenCalled();
   });
 
-  it('only sets nationalityFetched when countryCode is null', async () => {
+  it('only stamps nationalityFetchedAt when countryCode is null', async () => {
     const { session, runSpy } = makeMockSession();
     await setArtistNationality(makeMockDriver(session), 42, null);
 
     expect(runSpy).toHaveBeenCalledTimes(1);
     expect(runSpy.mock.calls[0]?.[0]).not.toContain('MERGE (c:Country');
-    expect(runSpy.mock.calls[0]?.[0]).toContain('nationalityFetched = true');
+    expect(runSpy.mock.calls[0]?.[0]).toContain('nationalityFetchedAt = datetime()');
   });
 });
 

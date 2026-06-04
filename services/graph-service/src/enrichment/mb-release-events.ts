@@ -22,8 +22,9 @@ export interface MbReleaseEventsEnrichmentSummary {
  * paginated official releases → release events. Writes one MB_RELEASED_IN relationship
  * per event that has an ISO-3166-1 country code, keyed on mbReleaseId for idempotency.
  *
- * Sets mbReleaseEventsFetched = true on every successfully processed Master,
- * including those with no MB link. Failed masters are NOT marked so they are retried.
+ * Stamps mbReleaseEventsFetchedAt on every successfully processed Master, including those
+ * with no MB link — so a master with no events is retried at most once per staleness window.
+ * Failed masters are NOT stamped so they are retried on the next run.
  */
 export async function enrichMbReleaseEvents(
   mbClient: MusicBrainzClient,

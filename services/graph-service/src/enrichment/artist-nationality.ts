@@ -118,9 +118,10 @@ async function resolveCountryByName(
  * 1. MusicBrainz name search (score ≥ 90)
  * 2. VIAF name search
  *
- * Sets nationalityFetched = true on every node where a result (country code or null)
- * is successfully determined. Nodes that throw an exception are counted as failed and
- * are NOT marked as fetched, so the next enrichment run will retry them.
+ * Stamps nationalityFetchedAt on every node where a result (country code or null) is
+ * successfully determined — so a node no source could resolve is retried at most once per
+ * staleness window rather than every run. Nodes that throw an exception are counted as
+ * failed and are NOT stamped, so the next enrichment run will retry them immediately.
  * Per-node errors are caught and never crash the caller.
  */
 export async function enrichNationality(

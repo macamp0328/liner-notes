@@ -67,13 +67,16 @@ describe('getTracksForMusicBrainzEnrichment', () => {
     ]);
   });
 
-  it('filters on tracks without a musicBrainzFetched marker', async () => {
+  it('selects releases with tracks still missing a recordingMbid, gated by the staleness window', async () => {
     const { session, runSpy } = makeMockSession();
     await getTracksForMusicBrainzEnrichment(makeMockDriver(session));
 
-    const [query] = runSpy.mock.calls[0] as [string];
-    expect(query).toContain('tx.musicBrainzFetched IS NULL');
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('tx.recordingMbid IS NULL');
+    expect(query).toContain('tx.musicBrainzFetchedAt IS NULL');
+    expect(query).toContain('duration({ days: $stalenessDays })');
     expect(query).toContain('HAS_TRACK');
+    expect(params).toHaveProperty('stalenessDays');
   });
 
   it('returns an empty array when no releases need enrichment', async () => {
@@ -106,7 +109,7 @@ describe('setTrackMusicBrainzIds', () => {
     expect(runSpy).not.toHaveBeenCalled();
   });
 
-  it('sends an UNWIND query that sets the marker and both identifiers', async () => {
+  it('sends an UNWIND query that stamps the timestamp marker and both identifiers', async () => {
     const { session, runSpy } = makeMockSession();
     const results = [
       { elementId: 'n1', recordingMbid: 'r1', isrc: 'I1' },
@@ -117,7 +120,7 @@ describe('setTrackMusicBrainzIds', () => {
 
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(query).toContain('UNWIND $results AS res');
-    expect(query).toContain('t.musicBrainzFetched = true');
+    expect(query).toContain('t.musicBrainzFetchedAt = datetime()');
     expect(query).toContain('t.recordingMbid = res.recordingMbid');
     expect(query).toContain('t.isrc = res.isrc');
     expect(params['results']).toBe(results);
@@ -151,8 +154,8 @@ describe('resetTrackMusicBrainzEnrichment', () => {
 
     expect(reset).toBe(42);
     const [query] = runSpy.mock.calls[0] as [string];
-    expect(query).toContain('REMOVE t.musicBrainzFetched, t.recordingMbid, t.isrc');
-    expect(query).toContain('t.acousticBrainzFetched, t.tempo, t.musicalKey');
+    expect(query).toContain('REMOVE t.musicBrainzFetchedAt, t.recordingMbid, t.isrc');
+    expect(query).toContain('t.acousticBrainzFetchedAt, t.tempo, t.musicalKey');
   });
 
   it('returns 0 when the query yields no records', async () => {

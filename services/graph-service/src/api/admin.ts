@@ -471,8 +471,10 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           '**Conflict resolution:** when MB and WD disagree on source 1, Wikidata is preferred and the discrepancy is logged.\n\n' +
           'For musicians without a Discogs ID, MusicBrainz name search is used instead ' +
           '(score ≥ 90 only). Sources 2 and 3 are skipped for these musicians.\n\n' +
-          'Uses `nationalityFetched = true` as an idempotency marker — already-processed nodes are skipped. ' +
-          'Run `POST /api/v1/admin/nationality/reset` first to re-process all nodes with updated source data.\n\n' +
+          'Selects nodes that still have no `ORIGIN_COUNTRY` and whose last attempt has aged past ' +
+          '`ENRICHMENT_STALENESS_DAYS` (default 30), stamping `nationalityFetchedAt` after each attempt — so a ' +
+          'node no source could resolve is retried at most once per window while already-countried nodes are ' +
+          'skipped. Run `POST /api/v1/admin/nationality/reset` to force a full re-run.\n\n' +
           'Requires `MUSICBRAINZ_USER_AGENT` env var.',
         security: [{ bearerAuth: [] }],
         response: {
@@ -556,7 +558,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['admin'],
         summary: 'Reset nationality enrichment markers for a full re-run',
         description:
-          'Removes the `nationalityFetched` property from all Artist and Musician nodes, ' +
+          'Removes the `nationalityFetchedAt` property from all Artist and Musician nodes, ' +
           'causing the next `POST /api/v1/admin/nationality/enrich` call to re-process every node from scratch.\n\n' +
           'Use this when:\n' +
           '- You have added or updated enrichment sources (e.g. added Wikidata)\n' +
@@ -698,8 +700,10 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           'all official releases → release events, writing `MB_RELEASED_IN` relationships to `Country` ' +
           'nodes with ISO-3166-1 alpha-2 codes and release dates. Blocks until complete.\n\n' +
           '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n' +
-          'Uses `mbReleaseEventsFetched = true` as an idempotency marker — already-processed Master nodes ' +
-          'are skipped. Run `POST /api/v1/admin/mb-release-events/reset` first to re-process all nodes.\n\n' +
+          'Selects Master nodes that still have no `MB_RELEASED_IN` relationship and whose last attempt has ' +
+          'aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `mbReleaseEventsFetchedAt` after each ' +
+          'attempt — so a master MusicBrainz had no events for is retried at most once per window while ' +
+          'already-populated masters are skipped. Run `POST /api/v1/admin/mb-release-events/reset` to force a full re-run.\n\n' +
           'Events without a country code are skipped (only ISO-coded events can be linked to Country nodes). ' +
           'Same country with different release IDs creates separate relationships, enabling `min(r.date)` ' +
           'queries for first-release-per-country.\n\n' +
@@ -782,7 +786,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['admin'],
         summary: 'Reset MusicBrainz release event enrichment markers for a full re-run',
         description:
-          'Removes the `mbReleaseEventsFetched` property from all Master nodes and deletes all ' +
+          'Removes the `mbReleaseEventsFetchedAt` property from all Master nodes and deletes all ' +
           '`MB_RELEASED_IN` relationships, causing the next ' +
           '`POST /api/v1/admin/mb-release-events/enrich` call to re-process every master from scratch.\n\n' +
           'This endpoint is blocked while enrichment is running.',
@@ -854,8 +858,10 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           'identifiers downstream AcousticBrainz and Deezer enrichment depend on. Tracklist alignment ' +
           'validates title similarity and duration proximity before writing; a mismatched track is ' +
           'skipped rather than assigned a guessed MBID.\n\n' +
-          'Uses `musicBrainzFetched = true` as an idempotency marker — already-processed Track nodes ' +
-          'are skipped. Run `POST /api/v1/admin/track-musicbrainz/reset` first to re-process all tracks.\n\n' +
+          'Re-selects a release while any of its tracks still has no `recordingMbid` and that track’s last ' +
+          'attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `musicBrainzFetchedAt` after ' +
+          'each attempt — so a track with no MusicBrainz match is retried at most once per window while ' +
+          'already-resolved tracks are skipped. Run `POST /api/v1/admin/track-musicbrainz/reset` to force a full re-run.\n\n' +
           'Requires `MUSICBRAINZ_USER_AGENT` env var.',
         security: [{ bearerAuth: [] }],
         response: {
@@ -937,14 +943,14 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['admin'],
         summary: 'Reset MusicBrainz track enrichment markers for a full re-run',
         description:
-          'Removes MusicBrainz fields (`musicBrainzFetched`, `recordingMbid`, `isrc`) from all ' +
+          'Removes MusicBrainz fields (`musicBrainzFetchedAt`, `recordingMbid`, `isrc`) from all ' +
           'Track nodes, causing the next `POST /api/v1/admin/track-musicbrainz/enrich` call to ' +
           're-process every track from scratch.\n\n' +
           '**Cascade:** because AcousticBrainz enrichment depends on `recordingMbid` and Deezer ' +
           'enrichment depends on `isrc`, this reset also clears all AcousticBrainz fields ' +
-          '(`acousticBrainzFetched`, `tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, ' +
+          '(`acousticBrainzFetchedAt`, `tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, ' +
           '`dynamicComplexity`, `danceabilityEstimate`, `voiceInstrumental`) and all Deezer fields ' +
-          '(`deezerFetched`, `deezerBpm`, `deezerGain`) from the same nodes.\n\n' +
+          '(`deezerFetchedAt`, `deezerBpm`, `deezerGain`) from the same nodes.\n\n' +
           'This endpoint is blocked while enrichment is running.',
         security: [{ bearerAuth: [] }],
         response: {
@@ -1015,9 +1021,11 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           'own estimates and must never be presented as Spotify-equivalent values. No time signature ' +
           'is provided: AcousticBrainz does not expose a reliable categorical time signature.\n\n' +
           'All fields are nullable and best-effort — AcousticBrainz coverage is crowd-sourced and ' +
-          'frozen at 2022. Uses `acousticBrainzFetched = true` as an idempotency marker; ' +
-          'already-processed Track nodes are skipped. Run `POST /api/v1/admin/track-acousticbrainz/reset` ' +
-          'first to re-process all tracks.',
+          'frozen at 2022. Re-selects a track that still has no features (null `tempo`) once its last ' +
+          'attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `acousticBrainzFetchedAt` ' +
+          'after each attempt — so a track with no AcousticBrainz data is retried at most once per window ' +
+          'while already-featured tracks are skipped. Run `POST /api/v1/admin/track-acousticbrainz/reset` ' +
+          'to force a full re-run.',
         security: [{ bearerAuth: [] }],
         response: {
           200: {
@@ -1080,7 +1088,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['admin'],
         summary: 'Reset AcousticBrainz track enrichment markers for a full re-run',
         description:
-          'Removes the `acousticBrainzFetched` marker and every audio-feature property ' +
+          'Removes the `acousticBrainzFetchedAt` marker and every audio-feature property ' +
           '(`tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, `dynamicComplexity`, ' +
           '`danceabilityEstimate`, `voiceInstrumental`) from all Track nodes, causing the next ' +
           '`POST /api/v1/admin/track-acousticbrainz/enrich` call to re-process every track from ' +
@@ -1152,9 +1160,11 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           'distinct property names rather than overwriting the AcousticBrainz `tempo`/`loudnessDb` ' +
           'fields, so the source stays traceable and the two BPM figures can be compared. Deezer ' +
           'returns `0` for unknown values — those are stored as null.\n\n' +
-          'All fields are nullable and best-effort. Uses `deezerFetched = true` as an idempotency ' +
-          'marker; already-processed Track nodes are skipped. Run ' +
-          '`POST /api/v1/admin/track-deezer/reset` first to re-process all tracks.',
+          'All fields are nullable and best-effort. Re-selects a track that still has no Deezer data ' +
+          '(null `deezerBpm` and `deezerGain`) once its last attempt has aged past `ENRICHMENT_STALENESS_DAYS` ' +
+          '(default 30), stamping `deezerFetchedAt` after each attempt — so a track Deezer had nothing for is ' +
+          'retried at most once per window while already-populated tracks are skipped. Run ' +
+          '`POST /api/v1/admin/track-deezer/reset` to force a full re-run.',
         security: [{ bearerAuth: [] }],
         response: {
           200: {
@@ -1217,7 +1227,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['admin'],
         summary: 'Reset Deezer track enrichment markers for a full re-run',
         description:
-          'Removes the `deezerFetched` marker and the `deezerBpm` and `deezerGain` properties ' +
+          'Removes the `deezerFetchedAt` marker and the `deezerBpm` and `deezerGain` properties ' +
           'from all Track nodes, causing the next `POST /api/v1/admin/track-deezer/enrich` call ' +
           'to re-process every track from scratch.\n\n' +
           'This endpoint is blocked while enrichment is running.',
@@ -1271,11 +1281,13 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['admin'],
         summary: 'Enrich Artist nodes with realName and profile from the Discogs artist API',
         description:
-          'For each Artist node not yet enriched (`profileFetched IS NULL`), fetches ' +
-          '`GET /artists/{id}` and writes `realName` and `profile`. Blocks until complete.\n\n' +
+          'For each Artist node that still has neither `realName` nor `profile` and whose last attempt ' +
+          'has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), fetches `GET /artists/{id}` and writes ' +
+          '`realName` and `profile`, stamping `profileFetchedAt`. Blocks until complete.\n\n' +
           '**This step also runs automatically as part of `POST /api/v1/admin/ingest`.** ' +
           'Use this endpoint to run it in isolation — e.g. after adding new artists from a re-ingest. ' +
-          'Already-enriched artists are skipped via the `profileFetched` marker; run ' +
+          'Artists that already have a realName or profile are skipped; one Discogs had nothing for is ' +
+          'retried at most once per window via the `profileFetchedAt` marker; run ' +
           '`POST /api/v1/admin/artist-profiles/reset` first to re-fetch every artist.\n\n' +
           'Requires `DISCOGS_TOKEN` env var.',
         security: [{ bearerAuth: [] }],
@@ -1349,7 +1361,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['admin'],
         summary: 'Reset artist profile enrichment markers for a full re-run',
         description:
-          'Removes the `profileFetched` marker and the `realName` and `profile` properties from ' +
+          'Removes the `profileFetchedAt` marker and the `realName` and `profile` properties from ' +
           'all Artist nodes, causing the next `POST /api/v1/admin/artist-profiles/enrich` call to ' +
           're-fetch every artist from scratch.\n\n' +
           'This endpoint is blocked while enrichment is running.',

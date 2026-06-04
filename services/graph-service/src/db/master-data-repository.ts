@@ -1,5 +1,6 @@
 import type { Driver } from 'neo4j-driver';
 import neo4j from 'neo4j-driver';
+import { getStalenessDays } from '../enrichment/staleness.js';
 
 type Neo4jInt = { toNumber(): number };
 
@@ -13,13 +14,20 @@ export interface CountryWithFormats {
   formats: string[];
 }
 
+// A Release is a candidate while it still lacks an originalYear (the master lookup either
+// hasn't run or found no year), and only once its last attempt has aged past the staleness
+// window (issue #89). Releases that already carry an originalYear are never re-fetched.
 export async function getUnenrichedMasters(driver: Driver): Promise<UnenrichedMaster[]> {
   const session = driver.session();
   try {
     const result = await session.run(
       `MATCH (r:Release)
-       WHERE r.masterDiscogsId IS NOT NULL AND r.masterFetched IS NULL
+       WHERE r.masterDiscogsId IS NOT NULL
+         AND r.originalYear IS NULL
+         AND (r.masterFetchedAt IS NULL
+              OR r.masterFetchedAt < datetime() - duration({ days: $stalenessDays }))
        RETURN r.masterDiscogsId AS masterDiscogsId, collect(r.discogsId) AS releaseIds`,
+      { stalenessDays: neo4j.int(getStalenessDays()) },
     );
     return result.records.map((r) => ({
       masterDiscogsId: (r.get('masterDiscogsId') as Neo4jInt).toNumber(),
@@ -72,7 +80,7 @@ export async function setMasterFetchedAndOriginalYear(
   try {
     await session.run(
       `MATCH (r:Release) WHERE r.discogsId IN $releaseIds
-       SET r.masterFetched = true, r.originalYear = $originalYear`,
+       SET r.masterFetchedAt = datetime(), r.originalYear = $originalYear`,
       {
         releaseIds: releaseIds.map((id) => neo4j.int(id)),
         originalYear: neo4j.int(originalYear),
@@ -83,14 +91,16 @@ export async function setMasterFetchedAndOriginalYear(
   }
 }
 
-// Used when originalYear is unknown (year=0 on master): marks releases as fetched
+// Used when originalYear is unknown (year=0 on master): stamps the attempt timestamp
 // without overwriting originalYear so coalesce(r.originalYear, r.pressingYear) still works.
+// The release stays a candidate (originalYear still null) and is retried once per staleness
+// window in case the master gains a year later.
 export async function setMasterFetched(driver: Driver, releaseIds: number[]): Promise<void> {
   const session = driver.session();
   try {
     await session.run(
       `MATCH (r:Release) WHERE r.discogsId IN $releaseIds
-       SET r.masterFetched = true`,
+       SET r.masterFetchedAt = datetime()`,
       { releaseIds: releaseIds.map((id) => neo4j.int(id)) },
     );
   } finally {

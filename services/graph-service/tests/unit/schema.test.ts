@@ -24,9 +24,9 @@ describe('applySchema', () => {
     } as unknown as Driver;
   });
 
-  it('opens and closes a fresh session for each of the 26 statements', async () => {
+  it('opens and closes a fresh session for each of the 39 statements', async () => {
     await applySchema(driver);
-    expect(sessions).toHaveLength(26);
+    expect(sessions).toHaveLength(39);
     for (const s of sessions) {
       expect(s.run).toHaveBeenCalledTimes(1);
       expect(s.close).toHaveBeenCalledTimes(1);
@@ -59,13 +59,25 @@ describe('applySchema', () => {
     const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
     expect(stmts.some((s) => s.includes('track_recording_mbid'))).toBe(true);
     expect(stmts.some((s) => s.includes('track_isrc'))).toBe(true);
-    expect(stmts.some((s) => s.includes('track_musicbrainz_fetched'))).toBe(true);
+    expect(
+      stmts.some(
+        (s) =>
+          s.includes('CREATE INDEX track_musicbrainz_fetched_at') &&
+          s.includes('musicBrainzFetchedAt'),
+      ),
+    ).toBe(true);
   });
 
   it('creates the track AcousticBrainz indexes', async () => {
     await applySchema(driver);
     const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
-    expect(stmts.some((s) => s.includes('track_acousticbrainz_fetched'))).toBe(true);
+    expect(
+      stmts.some(
+        (s) =>
+          s.includes('CREATE INDEX track_acousticbrainz_fetched_at') &&
+          s.includes('acousticBrainzFetchedAt'),
+      ),
+    ).toBe(true);
     expect(stmts.some((s) => s.includes('track_tempo'))).toBe(true);
     expect(stmts.some((s) => s.includes('track_musical_scale'))).toBe(true);
   });
@@ -73,7 +85,42 @@ describe('applySchema', () => {
   it('creates the track Deezer index', async () => {
     await applySchema(driver);
     const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
-    expect(stmts.some((s) => s.includes('track_deezer_fetched'))).toBe(true);
+    expect(
+      stmts.some(
+        (s) => s.includes('CREATE INDEX track_deezer_fetched_at') && s.includes('deezerFetchedAt'),
+      ),
+    ).toBe(true);
+  });
+
+  it('drops the superseded boolean-marker indexes and creates the lyrics timestamp index', async () => {
+    await applySchema(driver);
+    const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
+    expect(stmts.some((s) => s.includes('DROP INDEX track_musicbrainz_fetched IF EXISTS'))).toBe(
+      true,
+    );
+    expect(stmts.some((s) => s.includes('DROP INDEX artist_nationality_fetched IF EXISTS'))).toBe(
+      true,
+    );
+    expect(
+      stmts.some(
+        (s) => s.includes('CREATE INDEX track_lyrics_fetched_at') && s.includes('lyricsFetchedAt'),
+      ),
+    ).toBe(true);
+  });
+
+  it('runs one-time cleanup migrations removing the old boolean markers', async () => {
+    await applySchema(driver);
+    const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
+    expect(
+      stmts.some((s) => s.includes('REMOVE n.nationalityFetched') && !s.includes('FetchedAt')),
+    ).toBe(true);
+    expect(
+      stmts.some(
+        (s) =>
+          s.includes('REMOVE t.musicBrainzFetched, t.acousticBrainzFetched, t.deezerFetched') &&
+          !s.includes('FetchedAt'),
+      ),
+    ).toBe(true);
   });
 
   it('closes the session even when run() throws', async () => {

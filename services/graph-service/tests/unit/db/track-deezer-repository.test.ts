@@ -62,9 +62,12 @@ describe('getTracksForDeezerEnrichment', () => {
 
     expect(tracks).toEqual([{ elementId: '4:abc:1', isrc: 'USUM71703861' }]);
 
-    const [query] = runSpy.mock.calls[0] as [string];
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(query).toContain('isrc IS NOT NULL');
-    expect(query).toContain('deezerFetched IS NULL');
+    expect(query).toContain('t.deezerBpm IS NULL AND t.deezerGain IS NULL');
+    expect(query).toContain('t.deezerFetchedAt IS NULL');
+    expect(query).toContain('duration({ days: $stalenessDays })');
+    expect(params).toHaveProperty('stalenessDays');
   });
 
   it('closes the session after a successful query', async () => {
@@ -89,7 +92,7 @@ describe('setTrackDeezerData', () => {
     expect(runSpy).not.toHaveBeenCalled();
   });
 
-  it('runs an UNWIND statement that sets deezerFetched, deezerBpm, and deezerGain', async () => {
+  it('runs an UNWIND statement that stamps deezerFetchedAt and sets deezerBpm and deezerGain', async () => {
     const { session, runSpy } = makeMockSession();
     const results: TrackDeezerResult[] = [
       { elementId: '4:abc:1', deezerBpm: 128.5, deezerGain: -8.3 },
@@ -98,7 +101,7 @@ describe('setTrackDeezerData', () => {
 
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(query).toContain('UNWIND $results');
-    expect(query).toContain('deezerFetched = true');
+    expect(query).toContain('deezerFetchedAt = datetime()');
     expect(query).toContain('t.deezerBpm = res.deezerBpm');
     expect(query).toContain('t.deezerGain = res.deezerGain');
     expect(params).toHaveProperty('results', results);
@@ -133,9 +136,9 @@ describe('resetTrackDeezerEnrichment', () => {
 
     expect(count).toBe(15);
     const [query] = runSpy.mock.calls[0] as [string];
-    expect(query).toContain('deezerFetched IS NOT NULL');
+    expect(query).toContain('deezerFetchedAt IS NOT NULL');
     expect(query).toContain('REMOVE');
-    expect(query).toContain('deezerFetched');
+    expect(query).toContain('deezerFetchedAt');
     expect(query).toContain('deezerBpm');
     expect(query).toContain('deezerGain');
   });

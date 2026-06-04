@@ -7,10 +7,12 @@ import { enrichLyrics } from '../../../src/enrichment/lyrics.js';
 // ---------------------------------------------------------------------------
 const mockGetUnenrichedTracks = vi.hoisted(() => vi.fn());
 const mockSetTrackLyrics = vi.hoisted(() => vi.fn());
+const mockMarkLyricsFetched = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/db/lyrics-repository.js', () => ({
   getUnenrichedTracks: mockGetUnenrichedTracks,
   setTrackLyrics: mockSetTrackLyrics,
+  markLyricsFetched: mockMarkLyricsFetched,
 }));
 
 // ---------------------------------------------------------------------------
@@ -61,6 +63,7 @@ describe('enrichLyrics', () => {
 
     mockGetUnenrichedTracks.mockResolvedValue([]);
     mockSetTrackLyrics.mockResolvedValue(undefined);
+    mockMarkLyricsFetched.mockResolvedValue(undefined);
 
     fetchSpy = vi.spyOn(globalThis, 'fetch');
   });
@@ -145,6 +148,8 @@ describe('enrichLyrics', () => {
 
     expect(summary.failed).toBe(1);
     expect(mockSetTrackLyrics).not.toHaveBeenCalled();
+    // Transient error must NOT stamp the attempt — the track retries next run.
+    expect(mockMarkLyricsFetched).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
@@ -173,6 +178,8 @@ describe('enrichLyrics', () => {
       'Hello\nWorld',
       'genius',
     );
+    // Success writes via setTrackLyrics (which stamps) — no separate mark call.
+    expect(mockMarkLyricsFetched).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
@@ -192,6 +199,13 @@ describe('enrichLyrics', () => {
     expect(summary.skipped).toBe(1);
     expect(summary.enriched).toBe(0);
     expect(mockSetTrackLyrics).not.toHaveBeenCalled();
+    // Both sources empty — stamp the attempt so it's throttled, not retried every run.
+    expect(mockMarkLyricsFetched).toHaveBeenCalledOnce();
+    expect(mockMarkLyricsFetched).toHaveBeenCalledWith(
+      fakeDriver,
+      sampleTrack.releaseDiscogsId,
+      sampleTrack.position,
+    );
     // No third fetch — no page to scrape when there are no hits
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
@@ -207,6 +221,8 @@ describe('enrichLyrics', () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(summary.skipped).toBe(1);
+    // No Genius fallback and LRCLIB empty — still stamp the attempt to throttle retries.
+    expect(mockMarkLyricsFetched).toHaveBeenCalledOnce();
   });
 
   // -------------------------------------------------------------------------
@@ -224,6 +240,8 @@ describe('enrichLyrics', () => {
     expect(summary.failed).toBe(1);
     expect(summary.enriched).toBe(0);
     expect(mockSetTrackLyrics).not.toHaveBeenCalled();
+    // Genius threw — transient error path must not stamp; the track retries next run.
+    expect(mockMarkLyricsFetched).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
