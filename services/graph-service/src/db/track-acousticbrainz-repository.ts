@@ -20,9 +20,12 @@ export type TrackAcousticBrainzResult = AcousticBrainzFeatures & { elementId: st
 /**
  * Fetch every Track that has a `recordingMbid` but still no AcousticBrainz features, plus
  * any such track whose last attempt has aged past the staleness window (issue #89).
- * `tempo` stands in for "has features" — every feature is written together, so a null
- * `tempo` means the lookup found nothing. A track that already has features is never
- * re-fetched; a track AcousticBrainz had no data for is retried at most once per window.
+ * "No features" means ALL seven feature properties are null — the low-level and high-level
+ * documents are fetched independently and merged, so a recording can carry e.g. a key/scale
+ * but no tempo (and `bpm: 0` is itself coerced to null), making any single field an unsafe
+ * sentinel. The `coalesce(...) IS NULL` mirrors the enrichment's own "≥1 feature = processed"
+ * rule, so a track that already has any feature is never re-fetched; one AcousticBrainz had
+ * nothing for is retried at most once per window.
  *
  * AcousticBrainz is keyed purely by recording MBID, so — unlike the MusicBrainz
  * identifier enrichment — no release context or tracklist alignment is needed.
@@ -35,7 +38,8 @@ export async function getTracksForAcousticBrainzEnrichment(
     const result = await session.run(
       `MATCH (t:Track)
        WHERE t.recordingMbid IS NOT NULL
-         AND t.tempo IS NULL
+         AND coalesce(t.tempo, t.musicalKey, t.musicalScale, t.loudnessDb,
+                      t.dynamicComplexity, t.danceabilityEstimate, t.voiceInstrumental) IS NULL
          AND (t.acousticBrainzFetchedAt IS NULL
               OR t.acousticBrainzFetchedAt < datetime() - duration({ days: $stalenessDays }))
        RETURN elementId(t) AS elementId, t.recordingMbid AS recordingMbid`,

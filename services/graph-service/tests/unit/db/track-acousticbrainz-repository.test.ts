@@ -66,7 +66,10 @@ describe('getTracksForAcousticBrainzEnrichment', () => {
 
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(query).toContain('recordingMbid IS NOT NULL');
-    expect(query).toContain('t.tempo IS NULL');
+    // "No features" must be ALL features null, not just tempo — low/high-level docs are
+    // independent and bpm:0 coerces to null, so tempo alone is an unsafe sentinel.
+    expect(query).toContain('coalesce(t.tempo, t.musicalKey, t.musicalScale, t.loudnessDb');
+    expect(query).toContain('t.voiceInstrumental) IS NULL');
     expect(query).toContain('t.acousticBrainzFetchedAt IS NULL');
     expect(query).toContain('duration({ days: $stalenessDays })');
     expect(params).toHaveProperty('stalenessDays');
