@@ -34,6 +34,18 @@ export function getJobState(): JobState {
   return structuredClone(state);
 }
 
+/** Reset back to the initial idle state. Used by tests to clear job state between runs. */
+export function resetJobState(): void {
+  state = {
+    status: 'idle',
+    jobId: '',
+    startedAt: null,
+    completedAt: null,
+    durationMs: null,
+    stats: null,
+  };
+}
+
 export function startJob(): string {
   const jobId = randomUUID();
   state = {
