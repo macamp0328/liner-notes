@@ -170,6 +170,12 @@ export class AcousticBrainzClient {
       }
 
       if (response.status === 429 || response.status === 503) {
+        // No further fetch will follow on the final allowed attempt, so throw immediately
+        // instead of sleeping out a full backoff / Retry-After window for nothing —
+        // matching the short-circuit in musicbrainz-client.ts / discogs-client.ts.
+        if (attempt >= MAX_RETRIES) {
+          throw new Error(`AcousticBrainz API: exceeded max retries (${MAX_RETRIES}) for ${url}`);
+        }
         const retryAfterHeader = response.headers.get('Retry-After');
         const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
         const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;

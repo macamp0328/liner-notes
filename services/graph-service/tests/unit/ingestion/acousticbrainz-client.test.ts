@@ -241,6 +241,8 @@ describe('AcousticBrainzClient', () => {
   it('throws after exhausting max retries on repeated 429', async () => {
     fetchSpy.mockResolvedValue(makeErrorResponse(429, 'Too Many Requests'));
     await expect(client.getFeatures([MBID_A])).rejects.toThrow(/exceeded max retries/);
+    // All MAX_RETRIES + 1 fetches still happen; the final attempt throws without sleeping.
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
   });
 
   // ── transient network-error retry ───────────────────────────────────────────
