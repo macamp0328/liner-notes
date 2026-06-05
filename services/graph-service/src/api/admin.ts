@@ -40,6 +40,8 @@ import {
   findResumableReloadJob,
   getLatestReloadJob,
 } from '../db/job-repository.js';
+import type { PersistedJob, PersistedStage } from '../db/job-repository.js';
+import { getLiveProgress, type LiveStageProgress } from '../ingestion/reload-progress.js';
 
 const errorShape = {
   type: 'object',
@@ -110,11 +112,53 @@ const reloadJobShape = {
           completedAt: { type: 'string', nullable: true },
           counts: { type: 'object', additionalProperties: { type: 'number' } },
           error: { type: 'string', nullable: true },
+          // Live overlay (#179): present only on the stage currently running, sourced from the
+          // in-memory progress registry. `etaMs` is a rough linear extrapolation for that stage.
+          processed: { type: 'number', nullable: true },
+          total: { type: 'number', nullable: true },
+          etaMs: { type: 'number', nullable: true },
         },
       },
     },
   },
 } as const;
+
+/** A persisted stage plus the live overlay fields the /reload/status handler may attach. */
+type StageView = PersistedStage & {
+  processed?: number;
+  total?: number;
+  etaMs?: number | null;
+};
+
+/** The /reload/status payload: the persisted job with live progress overlaid on its running stage. */
+type ReloadJobView = (Omit<PersistedJob, 'stages'> & { stages: StageView[] }) | null;
+
+/**
+ * Overlay the live in-memory progress (processed/total + a rough ETA) onto the running stage of
+ * a persisted reload job. Pure so the ETA math is unit-testable without a Fastify app. Returns
+ * the job unchanged unless it's `running` and the live registry matches its jobId; ETA is null
+ * when it can't be extrapolated (no progress yet, or the stage is effectively done).
+ */
+export function overlayLiveProgress(
+  job: PersistedJob | null,
+  live: LiveStageProgress | null,
+  nowMs: number,
+): ReloadJobView {
+  if (job === null) return null;
+  if (job.status !== 'running' || live === null || live.jobId !== job.jobId) return job;
+  return {
+    ...job,
+    stages: job.stages.map((s) => {
+      if (s.stage !== live.stage || s.status !== 'running') return s;
+      const remaining = live.total - live.processed;
+      const etaMs =
+        live.processed > 0 && live.total > 0 && remaining > 0
+          ? Math.round(((nowMs - live.stageStartedAtMs) / live.processed) * remaining)
+          : null;
+      return { ...s, processed: live.processed, total: live.total, etaMs };
+    }),
+  };
+}
 
 interface PipelineState<T> {
   running: boolean;
@@ -1978,6 +2022,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         description:
           'Returns the latest reload job with each stage’s status ' +
           '(`pending`/`running`/`complete`/`skipped`/`failed`), counts, and error. ' +
+          'While a reload is running, the active stage also carries live `processed`/`total` ' +
+          'and a rough `etaMs` (linear extrapolation for that stage only). ' +
           '`null` if no reload has ever run.',
         security: [{ bearerAuth: [] }],
         response: {
@@ -1994,7 +2040,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (_request, reply) => {
       const job = await getLatestReloadJob(getDriver());
-      return reply.send({ data: job });
+      return reply.send({ data: overlayLiveProgress(job, getLiveProgress(), Date.now()) });
     },
   );
 }
