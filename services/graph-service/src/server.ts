@@ -2,6 +2,7 @@ import 'dotenv-flow/config';
 import Fastify, { FastifyInstance } from 'fastify';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
+import rateLimit from '@fastify/rate-limit';
 import { healthRoutes } from './api/health.js';
 import { adminRoutes } from './api/admin.js';
 import { collectionRoutes } from './api/collection.js';
@@ -39,6 +40,24 @@ const OPENAPI_CONFIG = {
   },
 };
 
+const DEFAULT_RATE_LIMIT_MAX = 100;
+const RATE_LIMIT_TIME_WINDOW = '1 minute';
+
+/**
+ * Resolve the per-IP request cap for the global rate limiter.
+ *
+ * Precedence: explicit option > test bypass > RATE_LIMIT_MAX env > default. The
+ * whole suite runs with NODE_ENV=test, where an unbounded cap keeps multi-request
+ * test files from throttling themselves; pass an explicit `rateLimitMax` to exercise
+ * throttling. A non-positive or unparseable env value falls back to the default.
+ */
+export function resolveRateLimitMax(option?: number): number {
+  if (option !== undefined) return option;
+  if (process.env['NODE_ENV'] === 'test') return Number.MAX_SAFE_INTEGER;
+  const fromEnv = Number.parseInt(process.env['RATE_LIMIT_MAX'] ?? '', 10);
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : DEFAULT_RATE_LIMIT_MAX;
+}
+
 /**
  * Minimal server for OpenAPI spec generation — registers swagger + routes but
  * skips the onReady DB hook, so it runs without a Neo4j connection.
@@ -46,6 +65,7 @@ const OPENAPI_CONFIG = {
  */
 export async function buildDocsServer(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+  await app.register(rateLimit, { max: resolveRateLimitMax(), timeWindow: RATE_LIMIT_TIME_WINDOW });
   await app.register(swagger, OPENAPI_CONFIG);
   await app.register(swaggerUi, {
     routePrefix: '/api/docs',
@@ -67,11 +87,27 @@ export interface BuildServerOptions {
    * so seeding is fully controlled by the fixture loader. Defaults to true.
    */
   autoIngest?: boolean;
+  /**
+   * Per-IP request cap for the global rate limiter. Defaults via resolveRateLimitMax
+   * (RATE_LIMIT_MAX env, or 100; unbounded under NODE_ENV=test). Tests pass a small
+   * value to assert throttling.
+   */
+  rateLimitMax?: number;
 }
 
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
   const autoIngest = options.autoIngest ?? true;
   const app = Fastify({ logger: true });
+
+  // Global rate limiting (CodeQL js/missing-rate-limiting). Registered before routes so
+  // its onRequest hook covers every endpoint. The cap is per client IP (request.ip) — note
+  // that behind a proxy/NodePort that SNATs the source address, callers can share a bucket
+  // unless Fastify `trustProxy` + X-Forwarded-For are configured; the planned Cloudflare
+  // layer is the primary edge defence, this is an in-app backstop.
+  await app.register(rateLimit, {
+    max: resolveRateLimitMax(options.rateLimitMax),
+    timeWindow: RATE_LIMIT_TIME_WINDOW,
+  });
 
   if (process.env['NODE_ENV'] !== 'production') {
     await app.register(swagger, OPENAPI_CONFIG);
