@@ -41,6 +41,13 @@ export const AURA_PAUSE_WINDOW_MS = 72 * 60 * 60 * 1000;
 export const MAX_SNAPSHOT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * Cadence used while an orchestrated reload is running (issue #179): frequent enough that the
+ * #169 dashboard's coverage bars visibly move during a multi-hour reload, still cheap. Shorter
+ * than the idle interval, so it only ever tightens the keep-warm window — never relaxes it.
+ */
+export const ACTIVE_SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000;
+
+/**
  * Fetch whole-graph stats and emit them as one structured log line. fluent-bit
  * ships this to CloudWatch, where Logs Insights bar charts plot `data.stats.*`
  * over time (collection size, enrichment coverage %). Bars, not lines: these
@@ -81,22 +88,58 @@ export function resolveSnapshotIntervalMs(env: NodeJS.ProcessEnv = process.env):
 
 /**
  * Emit one snapshot now, then every `intervalMs`. Returns a stop function that
- * cancels the timer. The interval is unref'd so it never keeps the process
- * alive on its own — shutdown still drains cleanly.
+ * cancels the timer. The timer is unref'd so it never keeps the process alive on
+ * its own — shutdown still drains cleanly.
+ *
+ * When `opts.isActive` is supplied (the production wiring), the timer becomes
+ * reload-aware: it re-checks `isActive()` on a short tick and emits whenever the
+ * elapsed time since the last snapshot reaches the *current* cadence —
+ * `opts.activeIntervalMs` while a reload is running, `intervalMs` otherwise. The
+ * elapsed-gate (rather than just shortening the next delay) is what makes it
+ * responsive to a reload that *starts* mid-interval: an already-scheduled long
+ * idle delay would otherwise leave up to `intervalMs` of lag. Omitting `opts`
+ * keeps the plain fixed-interval behaviour.
  */
 export function startStatsSnapshots(
   driver: Driver,
   logger: SnapshotLogger,
   intervalMs: number,
+  opts?: { activeIntervalMs?: number; isActive?: () => boolean },
 ): () => void {
   void logStatsSnapshot(driver, logger);
-  const timer = setInterval(() => {
-    void logStatsSnapshot(driver, logger);
-  }, intervalMs);
-  // `unref` exists on Node's Timeout but not on the value some environments
-  // (e.g. test fake timers) return — guard it.
+
+  // No reload-awareness requested — plain fixed-interval timer.
+  if (!opts?.isActive) {
+    const timer = setInterval(() => {
+      void logStatsSnapshot(driver, logger);
+    }, intervalMs);
+    timer.unref?.();
+    return () => {
+      clearInterval(timer);
+    };
+  }
+
+  const isActive = opts.isActive;
+  const activeIntervalMs = opts.activeIntervalMs ?? intervalMs;
+  let lastEmitMs = Date.now(); // the immediate emit above
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout>;
+
+  const tick = (): void => {
+    if (stopped) return;
+    const dueMs = isActive() ? activeIntervalMs : intervalMs;
+    if (Date.now() - lastEmitMs >= dueMs) {
+      void logStatsSnapshot(driver, logger);
+      lastEmitMs = Date.now();
+    }
+    timer = setTimeout(tick, activeIntervalMs); // re-check on the short cadence
+    timer.unref?.();
+  };
+
+  timer = setTimeout(tick, activeIntervalMs);
   timer.unref?.();
   return () => {
-    clearInterval(timer);
+    stopped = true;
+    clearTimeout(timer);
   };
 }

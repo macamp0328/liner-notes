@@ -12,6 +12,7 @@ import {
   DEFAULT_SNAPSHOT_INTERVAL_MS,
   MAX_SNAPSHOT_INTERVAL_MS,
   AURA_PAUSE_WINDOW_MS,
+  ACTIVE_SNAPSHOT_INTERVAL_MS,
 } from '../../../src/observability/stats-snapshot.js';
 
 const STATS = {
@@ -120,6 +121,57 @@ describe('startStatsSnapshots', () => {
 
     stop();
     await vi.advanceTimersByTimeAsync(5000); // nothing after the timer is cleared
+    expect(log.info).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe('startStatsSnapshots — reload-aware cadence', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  // Shortening while active only ever tightens the keep-warm window, never relaxes it.
+  it('uses an active interval safely under the keep-warm cap', () => {
+    expect(ACTIVE_SNAPSHOT_INTERVAL_MS).toBeLessThan(MAX_SNAPSHOT_INTERVAL_MS);
+    expect(ACTIVE_SNAPSHOT_INTERVAL_MS).toBe(5 * 60 * 1000);
+  });
+
+  it('emits on the active cadence while active and the idle cadence otherwise', async () => {
+    mockGetStats.mockResolvedValue(STATS);
+    const log = makeLogger();
+    let active = false;
+
+    const stop = startStatsSnapshots(driver, log, 60_000, {
+      activeIntervalMs: 1_000,
+      isActive: () => active,
+    });
+
+    await vi.advanceTimersByTimeAsync(0); // immediate emit
+    expect(log.info).toHaveBeenCalledTimes(1);
+
+    // Idle: the short tick fires, but nothing is due until 60s elapse.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(log.info).toHaveBeenCalledTimes(1);
+
+    // A reload starts mid-interval — the very next short tick is due (>1s elapsed) and emits,
+    // i.e. it does not wait out the remaining idle interval.
+    active = true;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(log.info).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(2_000); // two more active ticks → two more emits
+    expect(log.info).toHaveBeenCalledTimes(4);
+
+    // Reload ends — back to the 60s gate, short ticks stop emitting.
+    active = false;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(log.info).toHaveBeenCalledTimes(4);
+
+    stop();
+    await vi.advanceTimersByTimeAsync(10_000); // nothing after stop
     expect(log.info).toHaveBeenCalledTimes(4);
   });
 });
