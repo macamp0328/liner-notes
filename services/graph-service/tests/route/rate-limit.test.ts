@@ -25,7 +25,9 @@ vi.mock('../../src/db/ingestion-repository.js', () => ({
 }));
 
 describe('global rate limiting', () => {
-  let app: FastifyInstance;
+  // Optional + guarded close: if buildServer/ready throws, app stays undefined and the
+  // cleanup hook is a no-op instead of throwing and masking the original failure.
+  let app: FastifyInstance | undefined;
 
   beforeEach(() => {
     process.env['NEO4J_URI'] = 'bolt://localhost:7687';
@@ -35,7 +37,7 @@ describe('global rate limiting', () => {
   });
 
   afterEach(async () => {
-    await app.close();
+    await app?.close();
   });
 
   it('returns 429 once a client exceeds the configured per-window cap', async () => {

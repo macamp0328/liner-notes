@@ -85,14 +85,18 @@ function decodeHtmlEntities(text: string): string {
 // Converts an HTML fragment to plain text: drops <script>/<style> blocks (content
 // and all), turns <br> into newlines, then strips remaining tags.
 //
-// Tags are stripped in a fixpoint loop and any leftover angle brackets are removed,
-// so a single removal can't reconstruct a new tag (e.g. `<scr<script>ipt>`) and no
-// `<script` fragment survives (CodeQL js/incomplete-multi-character-sanitization).
-// Stripping runs *before* decodeHtmlEntities, so a literal `<`/`>` here is always
-// broken markup — genuine angle brackets in lyrics arrive encoded (`&lt;`/`&gt;`)
-// and are restored by the decode step.
+// Order matters for sanitization. Entities are decoded *first* so an entity-encoded
+// tag (e.g. `&lt;script&gt;…&lt;/script&gt;`) becomes a real tag and is removed by the
+// stripping below — decoding last would reconstruct that markup *after* stripping and
+// hand it back as output (CodeQL js/incomplete-multi-character-sanitization). Tags are
+// then stripped in a fixpoint loop so a single removal can't reconstruct a new tag
+// (e.g. `<scr<script>ipt>`), and any leftover angle brackets are dropped so no
+// `<script` fragment can survive. A genuine literal `<`/`>` in lyric text is a rare
+// casualty of that final cleanup — an acceptable trade for plain-text output that can
+// never carry markup.
 function htmlToText(html: string): string {
-  let text = html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
+  let text = decodeHtmlEntities(html);
+  text = text.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
   text = text.replace(/<br\s*\/?>/gi, '\n');
 
   let previous: string;
@@ -102,7 +106,7 @@ function htmlToText(html: string): string {
   } while (text !== previous);
 
   text = text.replace(/[<>]/g, '');
-  return decodeHtmlEntities(text).trim();
+  return text.trim();
 }
 
 // Extracts plain text from <div data-lyrics-container> elements using a

@@ -538,6 +538,32 @@ describe('enrichLyrics', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Genius — entity-encoded script block cannot be reconstructed after decode
+  // -------------------------------------------------------------------------
+  it('drops an entity-encoded <script> block (no markup after decoding)', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+
+    // Entities are decoded BEFORE tags are stripped, so `&lt;script&gt;…&lt;/script&gt;`
+    // becomes a real <script> block and is removed — rather than surviving the strip and
+    // being reconstructed as markup by a trailing decode.
+    const html =
+      '<div data-lyrics-container="true">Safe&lt;script&gt;alert(1)&lt;/script&gt; lyrics</div>';
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
+      .mockResolvedValueOnce(makeHtmlResponse(html));
+
+    const summary = await enrichLyrics(fakeDriver);
+
+    expect(summary.enriched).toBe(1);
+    const stored = mockSetTrackLyrics.mock.calls[0]?.[3] as string;
+    expect(stored).toBe('Safe lyrics');
+    expect(stored).not.toContain('<script');
+    expect(stored).not.toContain('alert');
+  });
+
+  // -------------------------------------------------------------------------
   // Initial query failure — returns a failed summary instead of throwing (#151)
   // -------------------------------------------------------------------------
   it('returns a failed summary (does not throw) when the initial track query fails', async () => {
