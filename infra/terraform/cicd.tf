@@ -6,9 +6,13 @@
 # port-forward to the k3s node (#120's deploy model: tunnel to the API server,
 # then roll out with a scoped in-cluster service-account token).
 #
-# Bootstrap is manual: the operator applies this from the primary checkout with
-# the `default` profile and local state, never in CI. See the "CD — IAM
-# bootstrap" section of infra/RUNBOOK.md.
+# Bootstrap is manual: applied from the primary checkout with the admin `root`
+# profile and local state, never in CI. The admin profile is required because
+# aws_iam_openid_connect_provider.github is an account-wide OIDC provider and
+# iam:CreateOpenIDConnectProvider is outside the scoped operator's permissions
+# (operator-iam-policy.json scopes the operator's IAM actions to role + instance-
+# profile resources under liner-notes-*, with no OIDC-provider actions). See the
+# "CD — IAM bootstrap" section of infra/RUNBOOK.md.
 
 # --- GitHub OIDC identity provider ----------------------------------------
 #
