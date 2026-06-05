@@ -11,9 +11,9 @@ const stageMocks = vi.hoisted(() => ({
 
 vi.mock('../../../src/ingestion/stages.js', () => ({
   RELOAD_STAGES: [
-    { name: 'releases', run: stageMocks.releasesRun },
-    { name: 'lyrics', run: stageMocks.lyricsRun },
-    { name: 'master-data', run: stageMocks.masterRun },
+    { name: 'releases', deps: [], resources: [], run: stageMocks.releasesRun },
+    { name: 'lyrics', deps: [], resources: [], run: stageMocks.lyricsRun },
+    { name: 'master-data', deps: [], resources: [], run: stageMocks.masterRun },
   ],
 }));
 
@@ -165,6 +165,31 @@ describe('runReload — skip', () => {
     expect(repo.markStageComplete).toHaveBeenCalledWith(driver, 'job-new', 'master-data', {}, true);
     expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'complete');
     expect(result).toMatchObject({ status: 'complete', stagesRun: 2, stagesSkipped: 1 });
+  });
+});
+
+describe('runReload — concurrency', () => {
+  it('with concurrency 1, runs stages strictly in array (priority) order', async () => {
+    const order: string[] = [];
+    repo.markStageRunning.mockImplementation((_driver, _jobId, stage: string) => {
+      order.push(stage);
+      return Promise.resolve();
+    });
+
+    const result = await runReload(driver, { username: 'tester', logger: log, concurrency: 1 });
+
+    expect(order).toEqual(['releases', 'lyrics', 'master-data']);
+    expect(result).toMatchObject({ status: 'complete', stagesRun: 3 });
+  });
+
+  it('runs every stage exactly once and finishes complete under the default cap', async () => {
+    const result = await runReload(driver, { username: 'tester', logger: log });
+
+    expect(stageMocks.releasesRun).toHaveBeenCalledOnce();
+    expect(stageMocks.lyricsRun).toHaveBeenCalledOnce();
+    expect(stageMocks.masterRun).toHaveBeenCalledOnce();
+    expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'complete');
+    expect(result).toMatchObject({ status: 'complete', stagesRun: 3 });
   });
 });
 
