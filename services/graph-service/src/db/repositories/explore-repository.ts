@@ -1,4 +1,5 @@
 import neo4j, { Driver } from 'neo4j-driver';
+import type { RoleCategory } from '../../ingestion/transforms.js';
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -140,7 +141,7 @@ export async function getReleasesByMusician(
 export async function getReleasesByCredit(
   driver: Driver,
   name: string,
-  roleCategory: string,
+  roleCategory: RoleCategory,
 ): Promise<MusicianRelease[]> {
   const session = driver.session();
   try {
