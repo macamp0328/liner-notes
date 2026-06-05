@@ -335,6 +335,29 @@ pnpm test              # run all tests
 pnpm test:coverage     # with coverage report
 ```
 
+### Running integration tests locally
+
+`pnpm --filter graph-service test:integration` runs `tests/integration/**` against
+a **real** Neo4j instance (via `vitest.integration.config.ts`). It requires three
+env vars — there is **no `NEO4J_*` fallback**, so a missing one fails the suite
+fast, naming the var. An explicitly-set empty value is honored.
+
+| Var                   | Local value (docker-compose Neo4j)                                                       |
+| --------------------- | ---------------------------------------------------------------------------------------- |
+| `NEO4J_TEST_URI`      | `bolt://localhost:7687`                                                                  |
+| `NEO4J_TEST_USER`     | `neo4j`                                                                                  |
+| `NEO4J_TEST_PASSWORD` | empty — the compose Neo4j runs `NEO4J_AUTH=none`, and an explicitly-set empty is honored |
+
+**dotenv-flow quirk:** Vitest sets `NODE_ENV=test`, and dotenv-flow deliberately
+skips `.env.local` in that mode. Put the vars in `.env.test.local` (gitignored) or
+export them in your shell — values in `.env.local` never reach the suite.
+
+**Isolation:** both the CI `neo4j:5` image (Community edition) and Neo4j Aura Free
+support only the single default database — `CREATE DATABASE test` is unsupported on
+either. Tests isolate by instance plus a full graph wipe
+(`MATCH (n) DETACH DELETE n`) between files, so point `NEO4J_TEST_*` at a database
+you don't mind being cleared (the local docker-compose one is fine).
+
 ---
 
 ## Docker Build & Local Run
