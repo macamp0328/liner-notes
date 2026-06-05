@@ -3,6 +3,7 @@ import type { DeezerClient } from '../ingestion/deezer-client.js';
 import type { Logger } from '../ingestion/discogs-client.js';
 import { getTracksForDeezerEnrichment, setTrackDeezerData } from '../db/track-deezer-repository.js';
 import type { TrackDeezerResult } from '../db/track-deezer-repository.js';
+import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 
 export interface TrackDeezerEnrichmentSummary {
   /** Tracks that received a non-null bpm or gain. */
@@ -35,6 +36,7 @@ export async function enrichTrackDeezer(
   deezerClient: DeezerClient,
   driver: Driver,
   logger?: Logger,
+  onProgress: ProgressReporter = NOOP_PROGRESS,
 ): Promise<TrackDeezerEnrichmentSummary> {
   const log: Logger = logger ?? console;
   const startTime = Date.now();
@@ -70,9 +72,9 @@ export async function enrichTrackDeezer(
   }
 
   const uniqueIsrcs = [...elementIdsByIsrc.keys()];
-  log.info(
-    `[track-deezer] Found ${tracks.length} unenriched tracks across ${uniqueIsrcs.length} unique ISRCs`,
-  );
+  const total = uniqueIsrcs.length;
+  log.info(`[track-deezer] Found ${tracks.length} unenriched tracks across ${total} unique ISRCs`);
+  onProgress(0, total);
 
   // Pending buffer — accumulated results not yet written. Counts are applied only after a
   // successful flush, so a failed write leaves the affected tracks uncounted and unmarked.
@@ -103,8 +105,9 @@ export async function enrichTrackDeezer(
   for (const isrc of uniqueIsrcs) {
     if (i > 0 && i % 50 === 0) {
       log.info(
-        `[track-deezer] Progress: ${i}/${uniqueIsrcs.length} ISRCs — processed=${tracksProcessed}, skipped=${tracksSkipped}, failed=${tracksFailed}`,
+        `[track-deezer] Progress: ${i}/${total} ISRCs — processed=${tracksProcessed}, skipped=${tracksSkipped}, failed=${tracksFailed}`,
       );
+      onProgress(i, total);
     }
     i++;
 
@@ -141,6 +144,7 @@ export async function enrichTrackDeezer(
 
   await flush();
 
+  onProgress(total, total);
   const durationMs = Date.now() - startTime;
   log.info(
     `[track-deezer] Enrichment complete: processed=${tracksProcessed}, skipped=${tracksSkipped}, failed=${tracksFailed}, duration=${durationMs}ms`,

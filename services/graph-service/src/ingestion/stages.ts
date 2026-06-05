@@ -16,6 +16,7 @@ import { enrichTrackMusicBrainz } from '../enrichment/track-musicbrainz.js';
 import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
 import { enrichTrackDeezer } from '../enrichment/track-deezer.js';
 import { enrichNationality } from '../enrichment/artist-nationality.js';
+import type { ProgressReporter } from '../enrichment/progress.js';
 
 /**
  * Stage names in the orchestrated reload, in #154 dependency order. `verify` is a no-op
@@ -58,8 +59,14 @@ export interface StageDescriptor {
    * Run the stage. Returns a flat counts map on success, or `null` to signal "skipped"
    * (a required client was not configured). A throw is caught by the orchestrator and
    * recorded as `failed` without aborting later stages.
+   *
+   * `onProgress` is optional: the orchestrator passes a reporter that feeds the live
+   * reload-progress registry (#179); stages with no per-item loop ignore it.
    */
-  run: (ctx: ReloadContext) => Promise<Record<string, number> | null>;
+  run: (
+    ctx: ReloadContext,
+    onProgress?: ProgressReporter,
+  ) => Promise<Record<string, number> | null>;
 }
 
 /**
@@ -72,9 +79,9 @@ export interface StageDescriptor {
 export const RELOAD_STAGES: readonly StageDescriptor[] = [
   {
     name: 'releases',
-    run: async (ctx): Promise<Record<string, number> | null> => {
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.discogs) return null;
-      const s = await ingestReleases(ctx.discogs, ctx.driver, ctx.username, ctx.log);
+      const s = await ingestReleases(ctx.discogs, ctx.driver, ctx.username, ctx.log, onProgress);
       return {
         releasesProcessed: s.releasesProcessed,
         releasesFailed: s.releasesFailed,
@@ -84,13 +91,13 @@ export const RELOAD_STAGES: readonly StageDescriptor[] = [
   },
   {
     name: 'lyrics',
-    run: async (ctx) => ({ ...(await enrichLyrics(ctx.driver, ctx.log)) }),
+    run: async (ctx, onProgress) => ({ ...(await enrichLyrics(ctx.driver, ctx.log, onProgress)) }),
   },
   {
     name: 'master-data',
-    run: async (ctx): Promise<Record<string, number> | null> => {
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.discogs) return null;
-      return { ...(await enrichMasterData(ctx.discogs, ctx.driver, ctx.log)) };
+      return { ...(await enrichMasterData(ctx.discogs, ctx.driver, ctx.log, onProgress)) };
     },
   },
   {
@@ -99,42 +106,48 @@ export const RELOAD_STAGES: readonly StageDescriptor[] = [
   },
   {
     name: 'artist-profiles',
-    run: async (ctx): Promise<Record<string, number> | null> => {
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.discogs) return null;
-      return { ...(await enrichArtistProfiles(ctx.discogs, ctx.driver, ctx.log)) };
+      return { ...(await enrichArtistProfiles(ctx.discogs, ctx.driver, ctx.log, onProgress)) };
     },
   },
   {
     name: 'track-versions',
-    run: async (ctx) => ({ ...(await enrichTrackVersions(ctx.driver, ctx.log)) }),
+    run: async (ctx, onProgress) => ({
+      ...(await enrichTrackVersions(ctx.driver, ctx.log, onProgress)),
+    }),
   },
   {
     name: 'mb-release-events',
-    run: async (ctx): Promise<Record<string, number> | null> => {
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.musicbrainz) return null;
-      return { ...(await enrichMbReleaseEvents(ctx.musicbrainz, ctx.driver, ctx.log)) };
+      return { ...(await enrichMbReleaseEvents(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)) };
     },
   },
   {
     name: 'track-musicbrainz',
-    run: async (ctx): Promise<Record<string, number> | null> => {
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.musicbrainz) return null;
-      return { ...(await enrichTrackMusicBrainz(ctx.musicbrainz, ctx.driver, ctx.log)) };
+      return {
+        ...(await enrichTrackMusicBrainz(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)),
+      };
     },
   },
   {
     name: 'track-acousticbrainz',
-    run: async (ctx) => ({
-      ...(await enrichTrackAcousticBrainz(ctx.acousticbrainz, ctx.driver, ctx.log)),
+    run: async (ctx, onProgress) => ({
+      ...(await enrichTrackAcousticBrainz(ctx.acousticbrainz, ctx.driver, ctx.log, onProgress)),
     }),
   },
   {
     name: 'track-deezer',
-    run: async (ctx) => ({ ...(await enrichTrackDeezer(ctx.deezer, ctx.driver, ctx.log)) }),
+    run: async (ctx, onProgress) => ({
+      ...(await enrichTrackDeezer(ctx.deezer, ctx.driver, ctx.log, onProgress)),
+    }),
   },
   {
     name: 'nationality',
-    run: async (ctx): Promise<Record<string, number> | null> => {
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.musicbrainz) return null;
       return {
         ...(await enrichNationality(
@@ -144,6 +157,7 @@ export const RELOAD_STAGES: readonly StageDescriptor[] = [
           ctx.wikidata ?? undefined,
           ctx.discogs ?? undefined,
           ctx.viaf ?? undefined,
+          onProgress,
         )),
       };
     },

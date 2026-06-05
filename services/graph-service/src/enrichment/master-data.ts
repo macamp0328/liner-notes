@@ -8,6 +8,7 @@ import {
   setMasterFetched,
 } from '../db/master-data-repository.js';
 import type { CountryWithFormats } from '../db/master-data-repository.js';
+import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 
 export interface MasterDataEnrichmentSummary {
   enriched: number;
@@ -20,6 +21,7 @@ export async function enrichMasterData(
   client: DiscogsClient,
   driver: Driver,
   logger?: Logger,
+  onProgress: ProgressReporter = NOOP_PROGRESS,
 ): Promise<MasterDataEnrichmentSummary> {
   const log: Logger = logger ?? console;
   const startTime = Date.now();
@@ -38,9 +40,14 @@ export async function enrichMasterData(
     return { enriched: 0, skipped: 0, failed: 1, durationMs: Date.now() - startTime };
   }
 
-  log.info(`[master-data] Found ${masters.length} masters to enrich`);
+  const total = masters.length;
+  log.info(`[master-data] Found ${total} masters to enrich`);
+  onProgress(0, total);
 
+  let processed = 0;
   for (const master of masters) {
+    processed++;
+    if (processed % 10 === 0) onProgress(processed, total);
     try {
       // Step 1: Get originalYear from master endpoint
       const masterRelease = await client.getMaster(master.masterDiscogsId);
@@ -104,6 +111,7 @@ export async function enrichMasterData(
     }
   }
 
+  onProgress(total, total);
   const durationMs = Date.now() - startTime;
   log.info(
     `[master-data] Enrichment complete: enriched=${enriched}, skipped=${skipped}, failed=${failed}, duration=${durationMs}ms`,

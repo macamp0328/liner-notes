@@ -108,23 +108,34 @@ describe('RELOAD_STAGES order', () => {
 });
 
 describe('stage run() delegates to the right enrich function', () => {
-  it('releases → ingestReleases, returning numeric counts only', async () => {
-    const result = await stage('releases').run(makeCtx());
+  it('releases → ingestReleases, forwarding onProgress and returning numeric counts only', async () => {
+    const onProgress = vi.fn();
+    const result = await stage('releases').run(makeCtx(), onProgress);
     expect(ingestReleases).toHaveBeenCalledOnce();
+    const ctx = makeCtx();
+    expect(ingestReleases).toHaveBeenCalledWith(
+      ctx.discogs,
+      ctx.driver,
+      ctx.username,
+      ctx.log,
+      onProgress,
+    );
     expect(result).toEqual({ releasesProcessed: 3, releasesFailed: 1, releaseErrors: 1 });
   });
 
-  it('lyrics → enrichLyrics(driver, log)', async () => {
+  it('lyrics → enrichLyrics(driver, log, onProgress)', async () => {
     const ctx = makeCtx();
-    const result = await stage('lyrics').run(ctx);
-    expect(enrichLyrics).toHaveBeenCalledWith(ctx.driver, ctx.log);
+    const onProgress = vi.fn();
+    const result = await stage('lyrics').run(ctx, onProgress);
+    expect(enrichLyrics).toHaveBeenCalledWith(ctx.driver, ctx.log, onProgress);
     expect(result).toEqual(COUNTS);
   });
 
-  it('master-data → enrichMasterData(discogs, driver, log)', async () => {
+  it('master-data → enrichMasterData(discogs, driver, log, onProgress)', async () => {
     const ctx = makeCtx();
-    await stage('master-data').run(ctx);
-    expect(enrichMasterData).toHaveBeenCalledWith(ctx.discogs, ctx.driver, ctx.log);
+    const onProgress = vi.fn();
+    await stage('master-data').run(ctx, onProgress);
+    expect(enrichMasterData).toHaveBeenCalledWith(ctx.discogs, ctx.driver, ctx.log, onProgress);
   });
 
   it('artist-genres → enrichArtistGenres', async () => {
@@ -132,44 +143,67 @@ describe('stage run() delegates to the right enrich function', () => {
     expect(enrichArtistGenres).toHaveBeenCalledOnce();
   });
 
-  it('artist-profiles → enrichArtistProfiles(discogs, ...)', async () => {
+  it('artist-profiles → enrichArtistProfiles(discogs, ..., onProgress)', async () => {
     const ctx = makeCtx();
-    await stage('artist-profiles').run(ctx);
-    expect(enrichArtistProfiles).toHaveBeenCalledWith(ctx.discogs, ctx.driver, ctx.log);
+    const onProgress = vi.fn();
+    await stage('artist-profiles').run(ctx, onProgress);
+    expect(enrichArtistProfiles).toHaveBeenCalledWith(ctx.discogs, ctx.driver, ctx.log, onProgress);
   });
 
-  it('track-versions → enrichTrackVersions', async () => {
-    await stage('track-versions').run(makeCtx());
-    expect(enrichTrackVersions).toHaveBeenCalledOnce();
+  it('track-versions → enrichTrackVersions(driver, log, onProgress)', async () => {
+    const ctx = makeCtx();
+    const onProgress = vi.fn();
+    await stage('track-versions').run(ctx, onProgress);
+    expect(enrichTrackVersions).toHaveBeenCalledWith(ctx.driver, ctx.log, onProgress);
   });
 
-  it('mb-release-events → enrichMbReleaseEvents(musicbrainz, ...)', async () => {
+  it('mb-release-events → enrichMbReleaseEvents(musicbrainz, ..., onProgress)', async () => {
     const ctx = makeCtx();
-    await stage('mb-release-events').run(ctx);
-    expect(enrichMbReleaseEvents).toHaveBeenCalledWith(ctx.musicbrainz, ctx.driver, ctx.log);
+    const onProgress = vi.fn();
+    await stage('mb-release-events').run(ctx, onProgress);
+    expect(enrichMbReleaseEvents).toHaveBeenCalledWith(
+      ctx.musicbrainz,
+      ctx.driver,
+      ctx.log,
+      onProgress,
+    );
   });
 
-  it('track-musicbrainz → enrichTrackMusicBrainz(musicbrainz, ...)', async () => {
+  it('track-musicbrainz → enrichTrackMusicBrainz(musicbrainz, ..., onProgress)', async () => {
     const ctx = makeCtx();
-    await stage('track-musicbrainz').run(ctx);
-    expect(enrichTrackMusicBrainz).toHaveBeenCalledWith(ctx.musicbrainz, ctx.driver, ctx.log);
+    const onProgress = vi.fn();
+    await stage('track-musicbrainz').run(ctx, onProgress);
+    expect(enrichTrackMusicBrainz).toHaveBeenCalledWith(
+      ctx.musicbrainz,
+      ctx.driver,
+      ctx.log,
+      onProgress,
+    );
   });
 
-  it('track-acousticbrainz → enrichTrackAcousticBrainz(acousticbrainz, ...)', async () => {
+  it('track-acousticbrainz → enrichTrackAcousticBrainz(acousticbrainz, ..., onProgress)', async () => {
     const ctx = makeCtx();
-    await stage('track-acousticbrainz').run(ctx);
-    expect(enrichTrackAcousticBrainz).toHaveBeenCalledWith(ctx.acousticbrainz, ctx.driver, ctx.log);
+    const onProgress = vi.fn();
+    await stage('track-acousticbrainz').run(ctx, onProgress);
+    expect(enrichTrackAcousticBrainz).toHaveBeenCalledWith(
+      ctx.acousticbrainz,
+      ctx.driver,
+      ctx.log,
+      onProgress,
+    );
   });
 
-  it('track-deezer → enrichTrackDeezer(deezer, ...)', async () => {
+  it('track-deezer → enrichTrackDeezer(deezer, ..., onProgress)', async () => {
     const ctx = makeCtx();
-    await stage('track-deezer').run(ctx);
-    expect(enrichTrackDeezer).toHaveBeenCalledWith(ctx.deezer, ctx.driver, ctx.log);
+    const onProgress = vi.fn();
+    await stage('track-deezer').run(ctx, onProgress);
+    expect(enrichTrackDeezer).toHaveBeenCalledWith(ctx.deezer, ctx.driver, ctx.log, onProgress);
   });
 
-  it('nationality → enrichNationality with optional clients passed through', async () => {
+  it('nationality → enrichNationality with optional clients + onProgress passed through', async () => {
     const ctx = makeCtx();
-    await stage('nationality').run(ctx);
+    const onProgress = vi.fn();
+    await stage('nationality').run(ctx, onProgress);
     expect(enrichNationality).toHaveBeenCalledWith(
       ctx.musicbrainz,
       ctx.driver,
@@ -177,12 +211,14 @@ describe('stage run() delegates to the right enrich function', () => {
       ctx.wikidata,
       ctx.discogs,
       ctx.viaf,
+      onProgress,
     );
   });
 
   it('nationality passes undefined for null optional clients', async () => {
     const ctx = makeCtx({ wikidata: null, viaf: null });
-    await stage('nationality').run(ctx);
+    const onProgress = vi.fn();
+    await stage('nationality').run(ctx, onProgress);
     expect(enrichNationality).toHaveBeenCalledWith(
       ctx.musicbrainz,
       ctx.driver,
@@ -190,6 +226,7 @@ describe('stage run() delegates to the right enrich function', () => {
       undefined,
       ctx.discogs,
       undefined,
+      onProgress,
     );
   });
 

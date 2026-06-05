@@ -6,6 +6,7 @@ import {
   mergeMbReleaseEvents,
   setMbReleaseEventsFetched,
 } from '../db/mb-release-events-repository.js';
+import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 
 export interface MbReleaseEventsEnrichmentSummary {
   mastersProcessed: number;
@@ -30,6 +31,7 @@ export async function enrichMbReleaseEvents(
   mbClient: MusicBrainzClient,
   driver: Driver,
   logger?: Logger,
+  onProgress: ProgressReporter = NOOP_PROGRESS,
 ): Promise<MbReleaseEventsEnrichmentSummary> {
   const log: Logger = logger ?? console;
   const startTime = Date.now();
@@ -55,14 +57,17 @@ export async function enrichMbReleaseEvents(
     };
   }
 
-  log.info(`[mb-release-events] Found ${masters.length} masters without release events`);
+  const total = masters.length;
+  log.info(`[mb-release-events] Found ${total} masters without release events`);
+  onProgress(0, total);
 
   let i = 0;
   for (const { masterDiscogsId } of masters) {
     if (i > 0 && i % 10 === 0) {
       log.info(
-        `[mb-release-events] Progress: ${i}/${masters.length} — processed=${mastersProcessed}, skipped=${mastersSkipped}, failed=${mastersFailed}, eventsWritten=${eventsWritten}`,
+        `[mb-release-events] Progress: ${i}/${total} — processed=${mastersProcessed}, skipped=${mastersSkipped}, failed=${mastersFailed}, eventsWritten=${eventsWritten}`,
       );
+      onProgress(i, total);
     }
     i++;
 
@@ -102,6 +107,7 @@ export async function enrichMbReleaseEvents(
     }
   }
 
+  onProgress(total, total);
   const durationMs = Date.now() - startTime;
   log.info(
     `[mb-release-events] Enrichment complete: processed=${mastersProcessed}, skipped=${mastersSkipped}, failed=${mastersFailed}, eventsWritten=${eventsWritten}, duration=${durationMs}ms`,

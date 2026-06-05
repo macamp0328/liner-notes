@@ -2,6 +2,7 @@ import type { Driver } from 'neo4j-driver';
 import type { DiscogsClient } from '../ingestion/discogs-client.js';
 import type { Logger } from '../ingestion/discogs-client.js';
 import { getUnenrichedArtists, setArtistProfile } from '../db/artist-profiles-repository.js';
+import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 
 export interface ArtistProfilesEnrichmentSummary {
   enriched: number;
@@ -26,6 +27,7 @@ export async function enrichArtistProfiles(
   client: DiscogsClient,
   driver: Driver,
   logger?: Logger,
+  onProgress: ProgressReporter = NOOP_PROGRESS,
 ): Promise<ArtistProfilesEnrichmentSummary> {
   const log: Logger = logger ?? console;
   const startTime = Date.now();
@@ -44,9 +46,14 @@ export async function enrichArtistProfiles(
     return { enriched: 0, skipped: 0, failed: 1, durationMs: Date.now() - startTime };
   }
 
-  log.info(`[artist-profiles] Found ${artists.length} artists without profile`);
+  const total = artists.length;
+  log.info(`[artist-profiles] Found ${total} artists without profile`);
+  onProgress(0, total);
 
+  let i = 0;
   for (const artist of artists) {
+    i++;
+    if (i % 25 === 0) onProgress(i, total);
     try {
       const profile = await client.getArtist(artist.discogsId);
 
@@ -69,6 +76,7 @@ export async function enrichArtistProfiles(
     }
   }
 
+  onProgress(total, total);
   const durationMs = Date.now() - startTime;
   log.info(
     `[artist-profiles] Enrichment complete: enriched=${enriched}, skipped=${skipped}, failed=${failed}, duration=${durationMs}ms`,

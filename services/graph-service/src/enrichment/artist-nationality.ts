@@ -10,6 +10,7 @@ import {
   setMusicianNationality,
 } from '../db/artist-nationality-repository.js';
 import type { UnenrichedMusician, NationalitySource } from '../db/artist-nationality-repository.js';
+import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 
 /** A resolved country plus the source that produced it, or null when unresolved. */
 type ResolvedNationality = { country: string; source: NationalitySource };
@@ -134,6 +135,7 @@ export async function enrichNationality(
   wdClient?: WikidataClient,
   discogsClient?: DiscogsClient,
   viafClient?: VIAFClient,
+  onProgress: ProgressReporter = NOOP_PROGRESS,
 ): Promise<NationalityEnrichmentSummary> {
   const log: Logger = logger ?? console;
   const wd = wdClient ?? null;
@@ -156,9 +158,17 @@ export async function enrichNationality(
     return { enriched: 0, skipped: 0, failed: 1, durationMs: Date.now() - startTime };
   }
 
-  log.info(`[artist-nationality] Found ${artists.length} artists without nationality`);
+  // `total` grows once per person group: the musician count isn't known until its fetch
+  // runs below, so the denominator jumps up when the musician phase begins. `processed`
+  // spans both loops so the bar advances continuously across the phase boundary.
+  let total = artists.length;
+  let processed = 0;
+  log.info(`[artist-nationality] Found ${total} artists without nationality`);
+  onProgress(processed, total);
 
   for (const artist of artists) {
+    processed++;
+    if (processed % 25 === 0) onProgress(processed, total);
     try {
       const resolved = await resolveCountry(
         mbClient,
@@ -218,9 +228,13 @@ export async function enrichNationality(
       continue;
     }
 
+    total += people.length;
     log.info(`[artist-nationality] Found ${people.length} ${label} without nationality`);
+    onProgress(processed, total);
 
     for (const person of people) {
+      processed++;
+      if (processed % 25 === 0) onProgress(processed, total);
       try {
         let resolved: ResolvedNationality | null = null;
 
@@ -256,6 +270,7 @@ export async function enrichNationality(
     }
   }
 
+  onProgress(processed, total);
   const durationMs = Date.now() - startTime;
   log.info(
     `[artist-nationality] Enrichment complete: enriched=${enriched}, skipped=${skipped}, failed=${failed}, duration=${durationMs}ms`,
