@@ -148,9 +148,14 @@ const MASTER_QUERY = `
     count(CASE WHEN EXISTS { (m)-[:MB_RELEASED_IN]->() } THEN 1 END) AS releaseEventsCovered`;
 
 // Nationality (ORIGIN_COUNTRY) coverage for one people-label, split by the
-// `source` stored on the relationship. One scan per label (Artist/Musician/
-// Producer/Engineer); the applicable gate mirrors that label's enrichment
-// selector. `label` and `applicableExpr` are hardcoded literals — no injection.
+// `source` stored on the relationship. One scan per label; the applicable gate
+// mirrors that label's enrichment selector. `label` and `applicableExpr` are
+// hardcoded literals — no injection.
+//
+// Producers and engineers are not their own node labels — every credited person
+// is a Musician, with the role on CREDITED_ON.roleCategory. So those two metrics
+// scan Musician with a role gate and therefore OVERLAP musiciansWithNationality
+// by design (a person can hold multiple roles); the buckets do not partition.
 function nationalityQuery(label: string, applicableExpr: string): string {
   return `
     MATCH (p:${label})
@@ -168,8 +173,14 @@ const ARTIST_NATIONALITY_QUERY = nationalityQuery(
   'p.discogsId IS NOT NULL AND NOT p.discogsId IN [194, 355]',
 );
 const MUSICIAN_NATIONALITY_QUERY = nationalityQuery('Musician', 'true');
-const PRODUCER_NATIONALITY_QUERY = nationalityQuery('Producer', 'true');
-const ENGINEER_NATIONALITY_QUERY = nationalityQuery('Engineer', 'true');
+const PRODUCER_NATIONALITY_QUERY = nationalityQuery(
+  'Musician',
+  "EXISTS { MATCH (p)-[c:CREDITED_ON]->() WHERE c.roleCategory = 'producer' }",
+);
+const ENGINEER_NATIONALITY_QUERY = nationalityQuery(
+  'Musician',
+  "EXISTS { MATCH (p)-[c:CREDITED_ON]->() WHERE c.roleCategory = 'engineer' }",
+);
 
 async function runCounts(driver: Driver, cypher: string): Promise<Map<string, number>> {
   const session = driver.session();

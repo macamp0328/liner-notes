@@ -24,9 +24,10 @@ function makeRecord(fields: Record<string, unknown>): unknown {
 /**
  * Build a mock driver whose session().run(cypher) returns the record matching
  * the queried label. getStats fires eight label queries via Promise.all, each on
- * its own session, so we route by a substring of the MATCH clause. The four
- * nationality queries match on `(p:<Label>)` and must be checked before the
- * Release/Artist/Track/Master routes so they don't fall through to master.
+ * its own session, so we route by a substring of the MATCH clause. The producer/
+ * engineer nationality queries scan `(p:Musician)` too (role lives on CREDITED_ON,
+ * not a label), so they're routed by their `roleCategory` gate — checked before the
+ * generic `(p:Musician)` and the Release/Artist/Track/Master routes.
  */
 function makeDriver(byLabel: {
   release: Record<string, unknown>;
@@ -41,9 +42,9 @@ function makeDriver(byLabel: {
   const run = vi.fn(async (cypher: string) => {
     let fields: Record<string, unknown>;
     if (cypher.includes('(p:Artist)')) fields = byLabel.natArtist;
+    else if (cypher.includes("roleCategory = 'producer'")) fields = byLabel.natProducer;
+    else if (cypher.includes("roleCategory = 'engineer'")) fields = byLabel.natEngineer;
     else if (cypher.includes('(p:Musician)')) fields = byLabel.natMusician;
-    else if (cypher.includes('(p:Producer)')) fields = byLabel.natProducer;
-    else if (cypher.includes('(p:Engineer)')) fields = byLabel.natEngineer;
     else if (cypher.includes('(r:Release)')) fields = byLabel.release;
     else if (cypher.includes('(a:Artist)')) fields = byLabel.artist;
     else if (cypher.includes('(t:Track)')) fields = byLabel.track;
