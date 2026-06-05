@@ -10,7 +10,8 @@
 # profile and local state, never in CI. The admin profile is required because
 # aws_iam_openid_connect_provider.github is an account-wide OIDC provider and
 # iam:CreateOpenIDConnectProvider is outside the scoped operator's permissions
-# (operator-iam-policy.json grants only role/liner-notes-* IAM actions). See the
+# (operator-iam-policy.json scopes the operator's IAM actions to role + instance-
+# profile resources under liner-notes-*, with no OIDC-provider actions). See the
 # "CD — IAM bootstrap" section of infra/RUNBOOK.md.
 
 # --- GitHub OIDC identity provider ----------------------------------------
