@@ -15,6 +15,7 @@
     "test:unit:coverage": "vitest run --coverage tests/unit tests/route",
     "test:integration": "vitest run --config vitest.integration.config.ts --passWithNoTests",
     "test:coverage": "vitest run --coverage",
+    "test:load": "tsx tests/load/api.load.ts",
     "lint": "eslint src --ext .ts --max-warnings 0",
     "docs:generate": "tsx scripts/generate-openapi.ts && prettier --write docs/openapi.json"
   },
@@ -29,6 +30,7 @@
   "devDependencies": {
     "@types/node": "^25.9.1",
     "@vitest/coverage-v8": "^4.1.8",
+    "autocannon": "^8.0.0",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vite": "^8.0.16",

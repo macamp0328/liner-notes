@@ -93,11 +93,16 @@ export interface BuildServerOptions {
    * value to assert throttling.
    */
   rateLimitMax?: number;
+  /**
+   * Fastify logger configuration. Defaults to true unless NODE_ENV=test.
+   */
+  logger?: boolean | object;
 }
 
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
   const autoIngest = options.autoIngest ?? true;
-  const app = Fastify({ logger: true });
+  const enableLogger = options.logger ?? process.env['NODE_ENV'] !== 'test';
+  const app = Fastify({ logger: enableLogger });
 
   // Global rate limiting (CodeQL js/missing-rate-limiting). Registered before routes so
   // its onRequest hook covers every endpoint. The cap is per client IP (request.ip) — note
