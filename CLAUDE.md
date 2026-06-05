@@ -301,7 +301,7 @@ Internet
 [AWS CloudWatch]        — logs + alerts
 ```
 
-**k3s** on EC2 t3.small instead of EKS (~$72/month). Scale-to-zero is implemented via a scheduler Lambda + EventBridge schedules ([`infra/terraform/scheduler.tf`](infra/terraform/scheduler.tf)): a nightly stop/start cost-saver plus a `pnpm power:on|off|auto|status` switch (~$0/month when stopped). It is opt-in — the nightly schedule ships DISABLED; see the "Instance power switch" section of [`infra/RUNBOOK.md`](infra/RUNBOOK.md). t3.micro (1 GB) thrashes under k3s + ESO + graph-service; see [`infra/terraform/variables.tf`](infra/terraform/variables.tf) for the sizing rationale.
+**k3s** on EC2 t3.small instead of EKS (~$72/month). Scale-to-zero is implemented via a scheduler Lambda + EventBridge schedules ([`infra/terraform/scheduler.tf`](infra/terraform/scheduler.tf)): a nightly stop/start cost-saver plus a `pnpm power:on|off|auto|status` switch (~$0/month when stopped). It is opt-in — the nightly schedule ships DISABLED; see the "Instance power switch" section of [`infra/RUNBOOK.md`](infra/RUNBOOK.md). t3.micro (1 GB) thrashes under k3s + ESO + graph-service; see [`infra/terraform/variables.tf`](infra/terraform/variables.tf) for the sizing rationale. The Neo4j Aura Free instance auto-pauses after 72h idle; the graph-service stats-snapshot timer doubles as a keep-warm (real Cypher every 6h, capped <72h) that holds it open while the node is up — aligned to the EC2 uptime window by design, so a long `power:off` lets Aura pause as part of the same "asleep" state. See the "Keeping Aura warm" section of [`infra/RUNBOOK.md`](infra/RUNBOOK.md).
 
 Operator-facing deploy, redeploy, and recovery procedures live in [`infra/RUNBOOK.md`](infra/RUNBOOK.md).
 
