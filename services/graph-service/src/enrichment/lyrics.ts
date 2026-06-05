@@ -1,6 +1,7 @@
 import type { Driver } from 'neo4j-driver';
 import type { Logger } from '../ingestion/discogs-client.js';
 import { getUnenrichedTracks, setTrackLyrics, markLyricsFetched } from '../db/lyrics-repository.js';
+import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 
 export interface LyricsEnrichmentSummary {
   enriched: number;
@@ -232,6 +233,7 @@ async function fetchGenius(
 export async function enrichLyrics(
   driver: Driver,
   logger?: Logger,
+  onProgress: ProgressReporter = NOOP_PROGRESS,
 ): Promise<LyricsEnrichmentSummary> {
   const log: Logger = logger ?? console;
   const startTime = Date.now();
@@ -249,11 +251,16 @@ export async function enrichLyrics(
     log.error(`[lyrics] Failed to fetch unenriched tracks: ${msg}`);
     return { enriched: 0, skipped: 0, failed: 1, durationMs: Date.now() - startTime };
   }
-  log.info(`[lyrics] Found ${tracks.length} tracks without lyrics`);
+  const total = tracks.length;
+  log.info(`[lyrics] Found ${total} tracks without lyrics`);
+  onProgress(0, total);
 
   const geniusToken = process.env['GENIUS_TOKEN'];
 
+  let i = 0;
   for (const track of tracks) {
+    i++;
+    if (i % 25 === 0) onProgress(i, total);
     let lrclibResult: string | null = null;
     let lrclibFailed = false;
 
@@ -325,6 +332,7 @@ export async function enrichLyrics(
     }
   }
 
+  onProgress(total, total);
   const durationMs = Date.now() - startTime;
   log.info(
     `[lyrics] Enrichment complete: enriched=${enriched}, skipped=${skipped}, failed=${failed}, duration=${durationMs}ms`,

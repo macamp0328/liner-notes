@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { getDriver } from '../db/client.js';
 import { getStats, type StatsData } from '../db/stats-repository.js';
+import { isReloadActive } from '../ingestion/reload-progress.js';
 
 interface StatsReply {
   data: StatsData;
@@ -12,6 +13,11 @@ interface StatsReply {
 // (declared inside the plugin) so each built server — including each test app —
 // starts with a clean cache.
 const CACHE_TTL_MS = 60_000;
+
+// While an orchestrated reload is running, coverage moves fast and an operator is watching it.
+// Drop to a short TTL so /stats is near-real-time, but not 0 — the in-flight coalescing plus a
+// few-second window still shield the graph from a per-request scan storm during the reload.
+const ACTIVE_CACHE_TTL_MS = 5_000;
 
 const coverageSchema = {
   type: 'object',
@@ -53,7 +59,8 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
         summary: 'Public graph + enrichment coverage stats',
         description:
           'Unauthenticated node counts and per-enrichment coverage (covered/applicable/pct). ' +
-          'Cached for 60s. Leaks only collection size — all underlying data is already public.',
+          'Cached for 60s, shortened to ~5s while an orchestrated reload is running so coverage ' +
+          'is near-real-time. Leaks only collection size — all underlying data is already public.',
         response: {
           200: {
             type: 'object',
@@ -121,7 +128,8 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (): Promise<StatsReply> => {
       const now = Date.now();
-      if (cache && now - cache.at <= CACHE_TTL_MS) {
+      const ttl = isReloadActive() ? ACTIVE_CACHE_TTL_MS : CACHE_TTL_MS;
+      if (cache && now - cache.at <= ttl) {
         return { data: cache.data };
       }
       // Cache miss or expiry — start a refresh if none is running, then await

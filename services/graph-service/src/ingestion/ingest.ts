@@ -2,6 +2,7 @@ import type { Driver } from 'neo4j-driver';
 import { DiscogsClient } from './discogs-client.js';
 import type { Logger } from './discogs-client.js';
 import { mergeReleaseGraph } from '../db/ingestion-repository.js';
+import { NOOP_PROGRESS, type ProgressReporter } from '../enrichment/progress.js';
 import { enrichLyrics } from '../enrichment/lyrics.js';
 import type { LyricsEnrichmentSummary } from '../enrichment/lyrics.js';
 import { enrichMasterData } from '../enrichment/master-data.js';
@@ -101,6 +102,7 @@ export async function ingestReleases(
   driver: Driver,
   username: string,
   log: Logger,
+  onProgress: ProgressReporter = NOOP_PROGRESS,
 ): Promise<ReleasesIngestSummary> {
   const errors: string[] = [];
   let releasesProcessed = 0;
@@ -125,6 +127,7 @@ export async function ingestReleases(
 
   const total = releaseIds.length;
   log.info(`[ingest] Found ${total} releases to process`);
+  onProgress(0, total);
 
   // Step 2: Fetch and MERGE each release
   for (const releaseId of releaseIds) {
@@ -135,6 +138,7 @@ export async function ingestReleases(
 
       if (releasesProcessed % PROGRESS_INTERVAL === 0) {
         log.info(`[ingest] Progress: ${releasesProcessed}/${total} releases processed`);
+        onProgress(releasesProcessed, total);
       }
     } catch (err) {
       releasesFailed++;
@@ -144,6 +148,7 @@ export async function ingestReleases(
     }
   }
 
+  onProgress(total, total);
   return { releasesProcessed, releasesFailed, errors };
 }
 

@@ -10,6 +10,7 @@ import type {
   TrackForMusicBrainz,
   TrackMusicBrainzResult,
 } from '../db/track-musicbrainz-repository.js';
+import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 
 export interface TrackMusicBrainzEnrichmentSummary {
   releasesProcessed: number;
@@ -154,6 +155,7 @@ export async function enrichTrackMusicBrainz(
   mbClient: MusicBrainzClient,
   driver: Driver,
   logger?: Logger,
+  onProgress: ProgressReporter = NOOP_PROGRESS,
 ): Promise<TrackMusicBrainzEnrichmentSummary> {
   const log: Logger = logger ?? console;
   const startTime = Date.now();
@@ -181,14 +183,17 @@ export async function enrichTrackMusicBrainz(
     };
   }
 
-  log.info(`[track-musicbrainz] Found ${releases.length} releases with unenriched tracks`);
+  const total = releases.length;
+  log.info(`[track-musicbrainz] Found ${total} releases with unenriched tracks`);
+  onProgress(0, total);
 
   let i = 0;
   for (const release of releases) {
     if (i > 0 && i % 10 === 0) {
       log.info(
-        `[track-musicbrainz] Progress: ${i}/${releases.length} — processed=${releasesProcessed}, skipped=${releasesSkipped}, failed=${releasesFailed}, matched=${tracksMatched}`,
+        `[track-musicbrainz] Progress: ${i}/${total} — processed=${releasesProcessed}, skipped=${releasesSkipped}, failed=${releasesFailed}, matched=${tracksMatched}`,
       );
+      onProgress(i, total);
     }
     i++;
 
@@ -249,6 +254,7 @@ export async function enrichTrackMusicBrainz(
     }
   }
 
+  onProgress(total, total);
   const durationMs = Date.now() - startTime;
   log.info(
     `[track-musicbrainz] Enrichment complete: processed=${releasesProcessed}, skipped=${releasesSkipped}, failed=${releasesFailed}, tracksMatched=${tracksMatched}, tracksUnmatched=${tracksUnmatched}, duration=${durationMs}ms`,

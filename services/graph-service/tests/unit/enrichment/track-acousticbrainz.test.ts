@@ -135,7 +135,8 @@ describe('enrichTrackAcousticBrainz', () => {
     mockGetTracks.mockResolvedValue([makeTrack('e1', mbid), makeTrack('e2', mbid)]);
 
     const { client, getFeaturesSpy } = makeAbClient(async () => new Map([[mbid, FULL_FEATURES]]));
-    const summary = await enrichTrackAcousticBrainz(client, fakeDriver, silentLogger);
+    const onProgress = vi.fn();
+    const summary = await enrichTrackAcousticBrainz(client, fakeDriver, silentLogger, onProgress);
 
     expect(getFeaturesSpy).toHaveBeenCalledOnce();
     expect(getFeaturesSpy).toHaveBeenCalledWith([mbid]);
@@ -144,6 +145,10 @@ describe('enrichTrackAcousticBrainz', () => {
     const [[, results]] = mockSetFeatures.mock.calls as [[Driver, Array<{ elementId: string }>]];
     const written = results.map((r) => r.elementId).sort();
     expect(written).toEqual(['e1', 'e2'].sort());
+
+    // Progress is reported in unique-recording (MBID) units (1), not track count (2).
+    expect(onProgress).toHaveBeenCalledWith(0, 1);
+    expect(onProgress).toHaveBeenLastCalledWith(1, 1);
   });
 
   it('splits into multiple batches when unique MBIDs exceed MAX_RECORDING_IDS_PER_CALL', async () => {
@@ -153,13 +158,19 @@ describe('enrichTrackAcousticBrainz', () => {
     mockGetTracks.mockResolvedValue(tracks);
 
     const { client, getFeaturesSpy } = makeAbClient(async () => new Map());
-    await enrichTrackAcousticBrainz(client, fakeDriver, silentLogger);
+    const onProgress = vi.fn();
+    await enrichTrackAcousticBrainz(client, fakeDriver, silentLogger, onProgress);
 
     expect(getFeaturesSpy).toHaveBeenCalledTimes(2);
     const firstBatchCall = getFeaturesSpy.mock.calls[0] as [string[]];
     const secondBatchCall = getFeaturesSpy.mock.calls[1] as [string[]];
     expect(firstBatchCall[0]).toHaveLength(MAX_RECORDING_IDS_PER_CALL);
     expect(secondBatchCall[0]).toHaveLength(1);
+
+    // Per-batch progress advances in MBID units and is clamped to the total.
+    const total = MAX_RECORDING_IDS_PER_CALL + 1;
+    expect(onProgress).toHaveBeenCalledWith(MAX_RECORDING_IDS_PER_CALL, total); // after batch 0
+    expect(onProgress).toHaveBeenLastCalledWith(total, total); // after batch 1 + final
   });
 
   it('counts batch tracks as failed when getFeatures throws, and does not write them', async () => {

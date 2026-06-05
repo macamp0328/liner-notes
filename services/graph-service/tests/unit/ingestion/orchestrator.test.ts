@@ -28,6 +28,16 @@ const repo = vi.hoisted(() => ({
 
 vi.mock('../../../src/db/job-repository.js', () => repo);
 
+const progress = vi.hoisted(() => ({
+  markReloadActive: vi.fn(),
+  markReloadInactive: vi.fn(),
+  beginStage: vi.fn(),
+  reportStageProgress: vi.fn(),
+  clearStage: vi.fn(),
+}));
+
+vi.mock('../../../src/ingestion/reload-progress.js', () => progress);
+
 const log = {
   info: vi.fn(),
   warn: vi.fn(),
@@ -75,6 +85,36 @@ describe('runReload — fresh run', () => {
       stagesSkipped: 0,
       stagesFailed: 0,
     });
+  });
+});
+
+describe('runReload — live progress wiring', () => {
+  it('marks the reload active, begins each run stage, and clears the active flag at the end', async () => {
+    await runReload(driver, { username: 'tester', logger: log });
+
+    expect(progress.markReloadActive).toHaveBeenCalledExactlyOnceWith('job-new');
+    expect(progress.beginStage).toHaveBeenCalledTimes(3);
+    expect(progress.beginStage).toHaveBeenCalledWith('job-new', 'releases');
+    expect(progress.clearStage).toHaveBeenCalledTimes(3);
+    expect(progress.markReloadInactive).toHaveBeenCalledExactlyOnceWith('job-new');
+  });
+
+  it('passes each stage a reporter that forwards to reportStageProgress', async () => {
+    await runReload(driver, { username: 'tester', logger: log });
+
+    // The reporter is the second arg the orchestrator hands each stage's run().
+    const reporter = stageMocks.releasesRun.mock.calls[0]?.[1] as (p: number, t: number) => void;
+    expect(typeof reporter).toBe('function');
+    reporter(7, 42);
+    expect(progress.reportStageProgress).toHaveBeenCalledWith('job-new', 'releases', 7, 42);
+  });
+
+  it('clears the active flag even when a stage throws', async () => {
+    stageMocks.lyricsRun.mockRejectedValue(new Error('boom'));
+
+    await runReload(driver, { username: 'tester', logger: log });
+
+    expect(progress.markReloadInactive).toHaveBeenCalledExactlyOnceWith('job-new');
   });
 });
 

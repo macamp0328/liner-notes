@@ -95,8 +95,9 @@ describe('enrichTrackDeezer', () => {
     mockGetTracks.mockResolvedValue([makeTrack('e1', isrc), makeTrack('e2', isrc)]);
     const getTrackSpy = vi.fn().mockResolvedValue({ bpm: 120.0, gain: -5.0 });
     const client = { getTrackByIsrc: getTrackSpy } as unknown as DeezerClient;
+    const onProgress = vi.fn();
 
-    const summary = await enrichTrackDeezer(client, fakeDriver, silentLogger);
+    const summary = await enrichTrackDeezer(client, fakeDriver, silentLogger, onProgress);
 
     expect(getTrackSpy).toHaveBeenCalledOnce();
     expect(getTrackSpy).toHaveBeenCalledWith(isrc);
@@ -104,6 +105,10 @@ describe('enrichTrackDeezer', () => {
 
     const [[, results]] = mockSetData.mock.calls as [[Driver, Array<{ elementId: string }>]];
     expect(results.map((r) => r.elementId).sort()).toEqual(['e1', 'e2'].sort());
+
+    // Progress is reported in unique-ISRC units (1), not track count (2).
+    expect(onProgress).toHaveBeenCalledWith(0, 1);
+    expect(onProgress).toHaveBeenLastCalledWith(1, 1);
   });
 
   it('counts a fetch error against all tracks sharing that ISRC and does not write them', async () => {
@@ -178,15 +183,18 @@ describe('enrichTrackDeezer', () => {
     expect(client.getTrackByIsrc).not.toHaveBeenCalled();
   });
 
-  it('logs a progress message every 50 unique ISRCs processed', async () => {
+  it('logs a progress message and reports onProgress every 50 unique ISRCs processed', async () => {
     const tracks = Array.from({ length: 51 }, (_, i) =>
       makeTrack(`e${i}`, `ISRC${String(i).padStart(7, '0')}`),
     );
     mockGetTracks.mockResolvedValue(tracks);
     const client = makeDeezerClient(async () => null);
+    const onProgress = vi.fn();
 
-    await enrichTrackDeezer(client, fakeDriver, silentLogger);
+    await enrichTrackDeezer(client, fakeDriver, silentLogger, onProgress);
 
     expect(silentLogger.info).toHaveBeenCalledWith(expect.stringContaining('Progress:'));
+    expect(onProgress).toHaveBeenCalledWith(50, 51); // mid-loop report at the 50-ISRC cadence
+    expect(onProgress).toHaveBeenLastCalledWith(51, 51);
   });
 });

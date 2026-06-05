@@ -3364,7 +3364,7 @@
       "get": {
         "summary": "Per-stage status of the most recent orchestrated reload",
         "tags": ["admin"],
-        "description": "Returns the latest reload job with each stage’s status (`pending`/`running`/`complete`/`skipped`/`failed`), counts, and error. `null` if no reload has ever run.",
+        "description": "Returns the latest reload job with each stage’s status (`pending`/`running`/`complete`/`skipped`/`failed`), counts, and error. While a reload is running, the active stage also carries live `processed`/`total` and a rough `etaMs` (linear extrapolation for that stage only). `null` if no reload has ever run.",
         "security": [
           {
             "bearerAuth": []
@@ -3435,6 +3435,18 @@
                               },
                               "error": {
                                 "type": "string",
+                                "nullable": true
+                              },
+                              "processed": {
+                                "type": "number",
+                                "nullable": true
+                              },
+                              "total": {
+                                "type": "number",
+                                "nullable": true
+                              },
+                              "etaMs": {
+                                "type": "number",
                                 "nullable": true
                               }
                             }
@@ -5460,7 +5472,7 @@
       "get": {
         "summary": "Public graph + enrichment coverage stats",
         "tags": ["ops"],
-        "description": "Unauthenticated node counts and per-enrichment coverage (covered/applicable/pct). Cached for 60s. Leaks only collection size — all underlying data is already public.",
+        "description": "Unauthenticated node counts and per-enrichment coverage (covered/applicable/pct). Cached for 60s, shortened to ~5s while an orchestrated reload is running so coverage is near-real-time. Leaks only collection size — all underlying data is already public.",
         "responses": {
           "200": {
             "description": "Default Response",

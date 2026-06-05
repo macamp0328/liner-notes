@@ -5,9 +5,13 @@ import Fastify, { type FastifyInstance } from 'fastify';
 // Mock the repository + driver so the route is tested in isolation.
 // ---------------------------------------------------------------------------
 const mockGetStats = vi.hoisted(() => vi.fn());
+const mockIsReloadActive = vi.hoisted(() => vi.fn(() => false));
 
 vi.mock('../../../src/db/stats-repository.js', () => ({ getStats: mockGetStats }));
 vi.mock('../../../src/db/client.js', () => ({ getDriver: vi.fn().mockReturnValue({}) }));
+vi.mock('../../../src/ingestion/reload-progress.js', () => ({
+  isReloadActive: mockIsReloadActive,
+}));
 
 import { statsRoutes } from '../../../src/api/stats.js';
 
@@ -64,6 +68,7 @@ async function buildApp(): Promise<FastifyInstance> {
 describe('GET /api/v1/stats route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsReloadActive.mockReturnValue(false);
   });
 
   it('returns the stats payload under a data envelope', async () => {
@@ -106,6 +111,49 @@ describe('GET /api/v1/stats route', () => {
       expect(mockGetStats).toHaveBeenCalledTimes(1);
     } finally {
       await app.close();
+    }
+  });
+
+  it('shortens the cache TTL to ~5s while a reload is active', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0); // pin the clock so cache.at starts at a known 0
+    try {
+      mockGetStats.mockResolvedValue(STATS);
+      mockIsReloadActive.mockReturnValue(true);
+      const app = await buildApp();
+      try {
+        await app.inject({ method: 'GET', url: '/api/v1/stats' }); // miss → query #1, cached at t=0
+        vi.setSystemTime(3_000);
+        await app.inject({ method: 'GET', url: '/api/v1/stats' }); // 3s < 5s → cache hit
+        expect(mockGetStats).toHaveBeenCalledTimes(1);
+        vi.setSystemTime(6_000);
+        await app.inject({ method: 'GET', url: '/api/v1/stats' }); // 6s > 5s → re-query
+        expect(mockGetStats).toHaveBeenCalledTimes(2);
+      } finally {
+        await app.close();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the full 60s TTL when no reload is active', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0); // pin the clock so cache.at starts at a known 0
+    try {
+      mockGetStats.mockResolvedValue(STATS);
+      mockIsReloadActive.mockReturnValue(false);
+      const app = await buildApp();
+      try {
+        await app.inject({ method: 'GET', url: '/api/v1/stats' }); // miss → query #1, cached at t=0
+        vi.setSystemTime(30_000); // 30s — would be a miss under the 5s active TTL
+        await app.inject({ method: 'GET', url: '/api/v1/stats' });
+        expect(mockGetStats).toHaveBeenCalledTimes(1); // still cached under the 60s idle TTL
+      } finally {
+        await app.close();
+      }
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

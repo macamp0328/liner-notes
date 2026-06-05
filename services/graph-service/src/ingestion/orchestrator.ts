@@ -17,6 +17,14 @@ import {
   finishReloadJob,
 } from '../db/job-repository.js';
 import type { PersistedJob } from '../db/job-repository.js';
+import {
+  markReloadActive,
+  markReloadInactive,
+  beginStage,
+  reportStageProgress,
+  clearStage,
+} from './reload-progress.js';
+import type { ProgressReporter } from '../enrichment/progress.js';
 
 export interface RunReloadOptions {
   username: string;
@@ -102,30 +110,42 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
   let stagesSkipped = 0;
   let stagesFailed = 0;
 
-  for (const descriptor of RELOAD_STAGES) {
-    if (doneStages.has(descriptor.name)) {
-      log.info(`[reload] stage "${descriptor.name}" already done — skipping`);
-      continue;
-    }
-
-    await markStageRunning(driver, jobId, descriptor.name);
-    try {
-      const counts = await descriptor.run(ctx);
-      if (counts === null) {
-        await markStageComplete(driver, jobId, descriptor.name, {}, true);
-        stagesSkipped++;
-        log.info(`[reload] stage "${descriptor.name}" skipped — required client not configured`);
-      } else {
-        await markStageComplete(driver, jobId, descriptor.name, counts);
-        stagesRun++;
-        log.info(`[reload] stage "${descriptor.name}" complete`);
+  // Flag the run active for the /stats cache + snapshot timer. The `finally` guarantees the
+  // flag (and any live stage progress) is cleared even if a transition write throws.
+  markReloadActive(jobId);
+  try {
+    for (const descriptor of RELOAD_STAGES) {
+      if (doneStages.has(descriptor.name)) {
+        log.info(`[reload] stage "${descriptor.name}" already done — skipping`);
+        continue;
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await markStageFailed(driver, jobId, descriptor.name, msg);
-      stagesFailed++;
-      log.error(`[reload] stage "${descriptor.name}" failed (recorded; continuing): ${msg}`);
+
+      await markStageRunning(driver, jobId, descriptor.name);
+      beginStage(jobId, descriptor.name);
+      const onProgress: ProgressReporter = (processed, total) =>
+        reportStageProgress(jobId, descriptor.name, processed, total);
+      try {
+        const counts = await descriptor.run(ctx, onProgress);
+        if (counts === null) {
+          await markStageComplete(driver, jobId, descriptor.name, {}, true);
+          stagesSkipped++;
+          log.info(`[reload] stage "${descriptor.name}" skipped — required client not configured`);
+        } else {
+          await markStageComplete(driver, jobId, descriptor.name, counts);
+          stagesRun++;
+          log.info(`[reload] stage "${descriptor.name}" complete`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await markStageFailed(driver, jobId, descriptor.name, msg);
+        stagesFailed++;
+        log.error(`[reload] stage "${descriptor.name}" failed (recorded; continuing): ${msg}`);
+      }
+      // Drop live progress between stages so the overlay reports a position only mid-stage.
+      clearStage();
     }
+  } finally {
+    markReloadInactive(jobId);
   }
 
   const status = stagesFailed > 0 ? 'failed' : 'complete';
