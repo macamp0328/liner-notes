@@ -15,6 +15,10 @@ vi.mock('../../src/db/schema.js', () => ({
   applySchema: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('../../src/db/job-repository.js', () => ({
+  findResumableReloadJob: vi.fn().mockResolvedValue(null),
+}));
+
 // onReady calls hasReleases() after applySchema; pretend the graph is populated
 // so the default autoIngest path short-circuits without touching Discogs.
 vi.mock('../../src/db/ingestion-repository.js', () => ({

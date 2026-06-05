@@ -11,6 +11,7 @@ import {
   startStatsSnapshots,
   DEFAULT_SNAPSHOT_INTERVAL_MS,
   MAX_SNAPSHOT_INTERVAL_MS,
+  AURA_PAUSE_WINDOW_MS,
 } from '../../../src/observability/stats-snapshot.js';
 
 const STATS = {
@@ -80,11 +81,18 @@ describe('resolveSnapshotIntervalMs', () => {
     );
   });
 
-  it('caps an oversized interval at the 32-bit max (Node setInterval overflow guard)', () => {
+  it('caps an oversized interval at MAX_SNAPSHOT_INTERVAL_MS (24h keep-warm bound)', () => {
     expect(resolveSnapshotIntervalMs({ STATS_SNAPSHOT_INTERVAL_MS: '999999999999' })).toBe(
       MAX_SNAPSHOT_INTERVAL_MS,
     );
-    expect(MAX_SNAPSHOT_INTERVAL_MS).toBe(2_147_483_647);
+    expect(MAX_SNAPSHOT_INTERVAL_MS).toBe(24 * 60 * 60 * 1000);
+  });
+
+  // The snapshot doubles as the Aura keep-warm ping, so its interval must stay
+  // under the 72h auto-pause window. Guard the cap so it can't be raised away.
+  it('keeps the snapshot/keep-warm cap safely under the 72h Aura auto-pause window', () => {
+    expect(MAX_SNAPSHOT_INTERVAL_MS).toBeLessThan(AURA_PAUSE_WINDOW_MS);
+    expect(AURA_PAUSE_WINDOW_MS).toBe(72 * 60 * 60 * 1000);
   });
 });
 

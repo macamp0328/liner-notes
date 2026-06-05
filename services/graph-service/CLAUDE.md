@@ -156,12 +156,15 @@ Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
 
 ### Admin & Ops
 
-| Method | Path                          | Description                                |
-| ------ | ----------------------------- | ------------------------------------------ |
-| `POST` | `/api/v1/admin/ingest`        | Trigger ingestion (requires `ADMIN_TOKEN`) |
-| `GET`  | `/api/v1/admin/ingest/status` | Last ingestion stats                       |
-| `GET`  | `/api/v1/health`              | Service + Neo4j status                     |
-| `GET`  | `/api/docs`                   | Swagger UI                                 |
+| Method | Path                           | Description                                             |
+| ------ | ------------------------------ | ------------------------------------------------------- |
+| `POST` | `/api/v1/admin/ingest`         | Trigger first-5-stage ingestion (in-memory job state)   |
+| `GET`  | `/api/v1/admin/ingest/status`  | Last ingestion stats                                    |
+| `POST` | `/api/v1/admin/reload`         | Orchestrated reload — all stages, resumable (see below) |
+| `GET`  | `/api/v1/admin/reload/status`  | Per-stage reload status/counts (DB-backed)              |
+| `POST` | `/api/v1/admin/<stage>/enrich` | Run a single enrichment stage (10 stages; see admin.ts) |
+| `GET`  | `/api/v1/health`               | Service + Neo4j status                                  |
+| `GET`  | `/api/docs`                    | Swagger UI                                              |
 
 ### Response Shapes
 
@@ -206,6 +209,47 @@ Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
 - Manual via `POST /api/v1/admin/ingest` (requires `ADMIN_TOKEN` header)
 
 **Idempotency:** All writes use Cypher `MERGE`. Safe to re-run. New collection additions are picked up on re-run.
+
+---
+
+### Orchestrated Reload (issue #175)
+
+`POST /api/v1/admin/ingest` and the empty-graph auto-trigger only run the **first 5** stages
+(lyrics, master-data, artist-genres, track-versions, artist-profiles) and track state
+**in memory** (`src/ingestion/job-state.ts`) — a pod crash loses it. The **orchestrated
+reload** (`POST /api/v1/admin/reload`) owns the **whole** sequence and persists per-stage
+state to Neo4j so it survives a restart.
+
+Source files:
+
+- `src/ingestion/stages.ts` — `RELOAD_STAGES`: the single ordered definition of the sequence
+  (the sequence source of truth). Each descriptor's `run` delegates to the existing `enrichX`
+  function, so there is **one definition per stage**. Stage order follows #154:
+  `releases → lyrics → master-data → artist-genres → artist-profiles → track-versions →
+mb-release-events → track-musicbrainz → track-acousticbrainz → track-deezer → nationality →
+verify`. `verify` is a no-op slot for #178.
+- `src/ingestion/orchestrator.ts` — `runReload(driver, { username, logger?, resumeJobId? })`
+  and `buildReloadContext()`. Iterates `RELOAD_STAGES`, skipping stages already
+  `complete`/`skipped`, and persists each transition.
+- `src/db/job-repository.ts` — `ReloadJob`/`ReloadStage` persistence (one job per run;
+  `findResumableReloadJob` returns the latest still-`running` job — the resume signal).
+- `src/db/schema.ts` — `ReloadJob` constraint + indexes.
+
+**Semantics:**
+
+- **Resume, not restart.** On `POST /reload` and on **cold start** (`server.ts` onReady, after
+  the `autoIngest` guard), a still-`running` job is resumed from the last completed stage. A
+  killed-mid-reload pod continues; it does **not** re-wipe or skip-because-non-empty.
+- **Stage outcomes:** a `run` returning a counts map → `complete`; returning `null` (its
+  client was unconfigured) → `skipped`; throwing → `failed`, logged, and the run continues
+  (failure isolation). The job ends `failed` if any stage failed, else `complete` — only a
+  still-`running` job auto-resumes, so a `failed`/`complete` job never retries on every boot.
+- **Wipe stays separate.** The reload never wipes; run `POST /reset?confirm=wipe-all` first for
+  a from-scratch reload. It picks up from empty-or-partial.
+- **Coarse 409 only.** `/reload` 409s if a reload is already running; full mutual exclusion
+  against the standalone `/<stage>/enrich` routes is #177.
+- **`ingestReleases`** (in `ingest.ts`) is the shared release fetch/MERGE loop used by both the
+  legacy `runIngestion` and the reload's `releases` stage — one definition, no drift.
 
 ---
 
@@ -282,12 +326,37 @@ Use `@fastify/swagger` + `@fastify/swagger-ui`. Define JSON schemas on all route
 
 **Fixtures:** `tests/fixtures/` — JSON fixtures for mocked Discogs responses and seed data
 
+**Shared helpers:** `tests/helpers/` — cross-suite test utilities (e.g. `env.ts`'s `snapshotEnv(keys)` for save/restore of `process.env` around a suite). Lives under `tests/`, never imported by `src/`.
+
 **Run tests:**
 
 ```bash
 pnpm test              # run all tests
 pnpm test:coverage     # with coverage report
 ```
+
+### Running integration tests locally
+
+`pnpm --filter graph-service test:integration` runs `tests/integration/**` against
+a **real** Neo4j instance (via `vitest.integration.config.ts`). It requires three
+env vars — there is **no `NEO4J_*` fallback**, so a missing one fails the suite
+fast, naming the var. An explicitly-set empty value is honored.
+
+| Var                   | Local value (docker-compose Neo4j)                                                       |
+| --------------------- | ---------------------------------------------------------------------------------------- |
+| `NEO4J_TEST_URI`      | `bolt://localhost:7687`                                                                  |
+| `NEO4J_TEST_USER`     | `neo4j`                                                                                  |
+| `NEO4J_TEST_PASSWORD` | empty — the compose Neo4j runs `NEO4J_AUTH=none`, and an explicitly-set empty is honored |
+
+**dotenv-flow quirk:** Vitest sets `NODE_ENV=test`, and dotenv-flow deliberately
+skips `.env.local` in that mode. Put the vars in `.env.test.local` (gitignored) or
+export them in your shell — values in `.env.local` never reach the suite.
+
+**Isolation:** both the CI `neo4j:5` image (Community edition) and Neo4j Aura Free
+support only the single default database — `CREATE DATABASE test` is unsupported on
+either. Tests isolate by instance plus a full graph wipe
+(`MATCH (n) DETACH DELETE n`) between files, so point `NEO4J_TEST_*` at a database
+you don't mind being cleared (the local docker-compose one is fine).
 
 ---
 
@@ -345,4 +414,5 @@ Route handler → Repository (Cypher) → Neo4j driver
 - **`formats[].qty` is a string in the API.** The Discogs API returns `qty` as a string (e.g. `"1"`), not a number. Always `parseInt` before storing. Do not assume it is numeric.
 - **Track `duration` is frequently empty string.** The API returns `""` for tracks without listed duration. Treat `""` as null — do not store the empty string.
 - **`basic_information` in collection responses is incomplete.** The collection endpoint's `basic_information` object omits `country`, `extraartists`, and other fields. Always fetch the full release via `GET /releases/{id}` before ingesting.
+- **The stats-snapshot timer doubles as the Aura keep-warm (issue #103).** `startStatsSnapshots` (`src/observability/stats-snapshot.ts`) runs real Cypher (`getStats`) on pod startup and every 6h, which is what holds AuraDB Free open — a connectivity check does not reset its 72h auto-pause timer, a real query does. `MAX_SNAPSHOT_INTERVAL_MS` is capped below `AURA_PAUSE_WINDOW_MS` (72h) with a guarding unit test so the interval can't be configured out of the window. Keep-warm rides the pod, so it only runs while the k3s node is up; a long `power:off` intentionally lets Aura pause (manual resume — see infra/RUNBOOK.md "Keeping Aura warm").
 - **`CREDITED_ON` deduplication on re-run.** Because MERGE on a relationship between two nodes does not have a separate key — it matches by the full (from, type, to) pattern — re-running ingest updates relationship properties in-place. This is correct and intentional.

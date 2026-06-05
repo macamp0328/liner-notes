@@ -12,6 +12,7 @@ This is the operator's guide to standing up, redeploying, and recovering the pro
 - [CD — workflow setup](#cd--workflow-setup)
 - [Full reload from scratch](#full-reload-from-scratch)
 - [Instance power switch — scale-to-zero](#instance-power-switch--scale-to-zero)
+- [Keeping Aura warm](#keeping-aura-warm)
 - [Resuming a paused Aura instance](#resuming-a-paused-aura-instance)
 - [Where to look when things break](#where-to-look-when-things-break)
 - [Tear-down](#tear-down)
@@ -817,7 +818,9 @@ The `KUBECONFIG_B64` **secret** was set in [CD — cluster bootstrap](#cd--clust
 
 Use this to discard the entire graph and rebuild it from Discogs — e.g. after a schema change, to clear stale nodes that `MERGE` can't remove (releases deleted from the collection), or to validate the ingestion + enrichment pipeline end-to-end on an empty graph.
 
-> **The graph is fully reconstructable from Discogs.** There is no separate backup to restore; a wipe is safe by design. The only data that does _not_ come back automatically is the manual track-level enrichment (MusicBrainz/AcousticBrainz/Deezer), which you re-run explicitly in step 4.
+> **The graph is fully reconstructable from Discogs.** There is no separate backup to restore; a wipe is safe by design.
+
+Since [#175](https://github.com/macamp0328/liner-notes/issues/175) this is **two steps**: an explicit wipe, then **one** orchestrated reload that owns the whole sequence — ingest **and every enrichment**, including the track-level/nationality stages (`mb-release-events`, `track-musicbrainz`, `track-acousticbrainz`, `track-deezer`, `nationality`) that `POST /ingest` does _not_ run. The reload checkpoints per-stage state to Neo4j, so **if the pod is killed mid-reload — a deploy roll, an OOM, a node reboot — the replacement pod resumes from the last completed stage on startup**: it does not restart, re-wipe, or skip because the graph is non-empty. There is no longer a separate `pnpm enrich:bootstrap` step.
 
 **Prereqs.** Set `GRAPH_SERVICE_URL` and `ADMIN_TOKEN` once (the `pnpm` admin scripts read them from a gitignored `.env.local`, or export inline):
 
@@ -834,7 +837,7 @@ export ADMIN_TOKEN="$(aws secretsmanager get-secret-value \
 curl -s "$GRAPH_SERVICE_URL/api/v1/stats" | jq .
 ```
 
-**2. Wipe the graph.** Double-gated (admin token + explicit confirm); see the [reset endpoint](../services/graph-service/src/api/admin.ts):
+**2. Wipe the graph.** Double-gated (admin token + explicit confirm); see the [reset endpoint](../services/graph-service/src/api/admin.ts). **Run this _before_ the reload trigger** — the reload picks up from an empty (or partial) graph and never wipes on its own:
 
 ```bash
 pnpm db:wipe
@@ -843,44 +846,45 @@ pnpm db:wipe
 
 > **Requires the reset endpoint** (`POST /api/v1/admin/reset` + the `pnpm db:wipe` script) added in [#163](https://github.com/macamp0328/liner-notes/pull/163). Confirm the running image includes it before relying on this step. On an older build without the endpoint, wipe directly instead — `cypher-shell -a "$NEO4J_URI" -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" "MATCH (n) DETACH DELETE n"` (creds from the prod secret).
 
-**3. Re-ingest.** An empty graph auto-triggers ingestion on pod start, so the cleanest trigger is a rollout restart (runs base ingestion + the in-pipeline enrichments: lyrics, master-data/originalYear, artist genres, track versions, artist profiles):
+**3. Trigger the orchestrated reload.** One call runs the whole sequence — fetch & MERGE all releases, then every enrichment stage in #154 dependency order. Returns `202` immediately and runs in the background; a second trigger while one is in flight returns `409`:
 
 ```bash
-# Needs the Step 4b SSM port-forward running and KUBECONFIG set (see First-time deploy).
-kubectl -n liner-notes rollout restart deployment/graph-service
-aws logs tail /liner-notes/graph-service --follow   # watch enrichment stages; ~4 min for ~200 releases
+curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "$GRAPH_SERVICE_URL/api/v1/admin/reload"
+# → 202 { "data": { "jobId": "...", "message": "Reload started" } }
 ```
 
-Alternatively, trigger without a restart: `curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "$GRAPH_SERVICE_URL/api/v1/admin/ingest"` (returns 202; poll `pnpm status:lyrics` etc.).
+Poll per-stage progress (each stage is `pending` / `running` / `complete` / `skipped` / `failed`):
 
-> **Changed a secret value (e.g. `GENIUS_TOKEN`) before this reload?** Force an ESO sync _before_ the rollout restart, or the new pod comes up with the stale value and that enrichment silently degrades (e.g. lyrics falls back to LRCLIB-only). ESO refreshes `graph-service-secrets` hourly; the pod reads env only at start:
+```bash
+curl -s -H "Authorization: Bearer $ADMIN_TOKEN" "$GRAPH_SERVICE_URL/api/v1/admin/reload/status" \
+  | jq '.data.stages[] | { stage, status, counts }'
+```
+
+A stage whose upstream client is unconfigured (e.g. MusicBrainz creds absent) is recorded `skipped`, not `failed`; a stage that throws is `failed` and the reload **continues past it** (failure isolation), ending the job `failed` so the gap is visible in the status. MusicBrainz is 1 req/sec, so the `track-musicbrainz` pass for ~2000 tracks dominates the runtime (~30 min).
+
+> **Resume is automatic.** If the pod rolls mid-reload, the replacement pod resumes the _same_ job on startup — do **not** re-trigger (a second `/reload` would 409 while it's still running, or start a redundant job once it's done). The persisted job is the source of truth. (The empty-graph auto-ingest safety net still runs only the first-5 in-pipeline enrichments; the full reload is operator-triggered via `/admin/reload`.)
+
+> **Changed a secret value (e.g. `GENIUS_TOKEN`) before this reload?** Force an ESO sync _before_ triggering the reload, or the pod runs with the stale value and that enrichment silently degrades (e.g. lyrics falls back to LRCLIB-only). ESO refreshes `graph-service-secrets` hourly; the pod reads env only at start, so also roll the pod if you changed a value it reads once:
 >
 > ```bash
 > kubectl -n liner-notes annotate externalsecret graph-service-secrets force-sync=$(date +%s) --overwrite
 > ```
 
-**4. Run the manual track-level enrichments** — these are admin-only and **not** part of `runIngestion`, so they stay null after a reload until kicked off (MusicBrainz is 1 req/sec → the track-musicbrainz pass for ~2000 tracks takes ~30 min):
-
-```bash
-pnpm enrich:bootstrap
-# mb-release-events → track-musicbrainz → (track-acousticbrainz ‖ track-deezer) → nationality
-```
-
-**5. Verify coverage** against the targets:
+**4. Verify coverage** against the targets (a dedicated `verify` reload stage is tracked in [#178](https://github.com/macamp0328/liner-notes/issues/178); until then, check `/stats` by hand):
 
 ```bash
 curl -s "$GRAPH_SERVICE_URL/api/v1/stats" | jq .data.enrichment
 ```
 
-| Metric                     | Target                | Filled by                                      |
-| -------------------------- | --------------------- | ---------------------------------------------- |
-| `releasesWithOriginalYear` | ≥ 90%                 | step 3 (master-data)                           |
-| `artistsWithProfile`       | ≥ 80%                 | step 3 (artist-profiles)                       |
-| `tracksWithLyrics`         | best-effort           | step 3 (LRCLIB + Genius if `GENIUS_TOKEN` set) |
-| `tracksWithRecordingMbid`  | high                  | step 4 (`track-musicbrainz`)                   |
-| `tracksWithIsrc`           | high                  | step 4 (`track-musicbrainz`)                   |
-| `tracksWithTempo`          | of those with an mbid | step 4 (`track-acousticbrainz`)                |
-| `tracksWithDeezerBpm`      | of those with an isrc | step 4 (`track-deezer`)                        |
+| Metric                     | Target                | Filled by reload stage                  |
+| -------------------------- | --------------------- | --------------------------------------- |
+| `releasesWithOriginalYear` | ≥ 90%                 | `master-data`                           |
+| `artistsWithProfile`       | ≥ 80%                 | `artist-profiles`                       |
+| `tracksWithLyrics`         | best-effort           | `lyrics` (LRCLIB + Genius if token set) |
+| `tracksWithRecordingMbid`  | high                  | `track-musicbrainz`                     |
+| `tracksWithIsrc`           | high                  | `track-musicbrainz`                     |
+| `tracksWithTempo`          | of those with an mbid | `track-acousticbrainz`                  |
+| `tracksWithDeezerBpm`      | of those with an isrc | `track-deezer`                          |
 
 > `tracksWithLyrics` is LRCLIB-only (~70%) unless `GENIUS_TOKEN` is present in the prod secret — the Genius fallback is skipped when it's unset.
 
@@ -921,14 +925,33 @@ Each command prints the resulting state, e.g.:
 
 - Give the node ~1–2 minutes; k3s restarts the graph-service pod automatically.
 - The ECR pull-secret CronJob refreshes every 6h; after a long stop the in-cluster `ecr-pull-secret` may be stale until the next fire. If the pod is stuck `ImagePullBackOff` with `unauthorized`, force a refresh: `kubectl -n liner-notes create job --from=cronjob/ecr-pull-secret-refresher refresh-now`, then `kubectl -n liner-notes rollout restart deployment/graph-service`.
-- The first request is slow: the pod settles and **Aura resumes from its own pause** if it has been idle ≥72h (see below).
+- The first request is slow while the pod settles. If the node was stopped ≥72h, Aura will have auto-paused and does **not** resume on its own — resume it manually first (see "Resuming a paused Aura instance" below).
 - The two transient alarms are re-enabled automatically — no manual alarm steps.
+
+---
+
+## Keeping Aura warm
+
+AuraDB Free auto-pauses after **72 hours of inactivity**, and only a _real query_ resets that idle timer — a bare connectivity check (what `GET /api/v1/health` runs, and what the Route 53 health check hits every 30s) does **not**. So the keep-warm has to issue actual Cypher.
+
+We don't run a separate keep-warm job: **the graph-service stats-snapshot timer already is one.** On every pod start and then every 6h (`STATS_SNAPSHOT_INTERVAL_MS`, default 6h, capped at 24h), it runs `getStats` — real count queries against Aura — to feed the "Collection over time" dashboard. That real query keeps Aura warm as a side effect. The cap guarantees the cadence can never be configured outside the 72h window ([`stats-snapshot.ts`](../services/graph-service/src/observability/stats-snapshot.ts) `MAX_SNAPSHOT_INTERVAL_MS` / `AURA_PAUSE_WINDOW_MS`, enforced by a unit test).
+
+**The scale-to-zero design tension** (from [#103](https://github.com/macamp0328/liner-notes/issues/103)): when the node is stopped via `power:off`, nothing on it can reach Aura. The options were (a) keep the node always-on, (b) run an independent keep-warm (e.g. a Lambda) that hits Aura directly regardless of node state, or (c) align keep-warm to the node's uptime. **We chose (c).** The snapshot timer rides the graph-service pod, so it keeps Aura warm exactly while the node is up. When you `power:off` for >72h, the timer doesn't run, Aura pauses — and a stopped node plus a paused Aura is the intended coherent "asleep" state at ~$0/month. The cost is one manual resume on the way back up (next section); for a personal collection that's the right trade.
+
+### Verifying keep-warm
+
+```bash
+# Confirm the snapshot/keep-warm is firing (one line on startup, then every 6h):
+kubectl -n liner-notes logs deployment/graph-service | grep "stats snapshot"
+```
+
+To confirm it actually prevents the pause, leave the node up and idle (no other traffic) for >72h, then check the Aura console shows the instance **running** and no `liner-notes-neo4j-disconnects` alarm fired.
 
 ---
 
 ## Resuming a paused Aura instance
 
-AuraDB Free auto-pauses after **72 hours of inactivity**. Traffic does **not** auto-resume a paused instance.
+AuraDB Free auto-pauses after **72 hours of inactivity**. Traffic does **not** auto-resume a paused instance. This happens by design only after a long `power:off` — while the node is up, keep-warm prevents it (previous section).
 
 1. Sign in to [console.neo4j.io](https://console.neo4j.io)
 2. Open the project, click the paused instance, click **Resume**
@@ -938,7 +961,7 @@ AuraDB Free auto-pauses after **72 hours of inactivity**. Traffic does **not** a
    kubectl -n liner-notes rollout restart deployment/graph-service
    ```
 
-A scheduled keep-warm ping is tracked in [#103](https://github.com/macamp0328/liner-notes/issues/103).
+To avoid getting here in the first place while the node is up, see "Keeping Aura warm" above ([#103](https://github.com/macamp0328/liner-notes/issues/103)).
 
 ---
 

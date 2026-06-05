@@ -24,9 +24,9 @@ describe('applySchema', () => {
     } as unknown as Driver;
   });
 
-  it('opens and closes a fresh session for each of the 39 statements', async () => {
+  it('opens and closes a fresh session for each of the 42 statements', async () => {
     await applySchema(driver);
-    expect(sessions).toHaveLength(39);
+    expect(sessions).toHaveLength(42);
     for (const s of sessions) {
       expect(s.run).toHaveBeenCalledTimes(1);
       expect(s.close).toHaveBeenCalledTimes(1);
@@ -105,6 +105,18 @@ describe('applySchema', () => {
       stmts.some(
         (s) => s.includes('CREATE INDEX track_lyrics_fetched_at') && s.includes('lyricsFetchedAt'),
       ),
+    ).toBe(true);
+  });
+
+  it('creates the ReloadJob constraint and ReloadStage/ReloadJob indexes (issue #175)', async () => {
+    await applySchema(driver);
+    const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
+    expect(stmts.some((s) => s.includes('reload_job_id') && s.includes('j.jobId IS UNIQUE'))).toBe(
+      true,
+    );
+    expect(stmts.some((s) => s.includes('reload_stage_job') && s.includes('s.jobId'))).toBe(true);
+    expect(
+      stmts.some((s) => s.includes('reload_job_started_at') && s.includes('j.startedAt')),
     ).toBe(true);
   });
 

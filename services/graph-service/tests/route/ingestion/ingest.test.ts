@@ -39,6 +39,10 @@ vi.mock('../../../src/db/schema.js', () => ({
   applySchema: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('../../../src/db/job-repository.js', () => ({
+  findResumableReloadJob: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock('../../../src/db/ingestion-repository.js', () => ({
   hasReleases: mockHasReleases,
   mergeReleaseGraph: mockMergeReleaseGraph,
