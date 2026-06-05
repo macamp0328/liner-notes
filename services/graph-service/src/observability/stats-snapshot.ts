@@ -14,17 +14,31 @@ export interface SnapshotLogger {
  * Default cadence: every 6 hours. Frequent enough to trend enrichment coverage
  * within the 30-day CloudWatch log retention, cheap enough to be background
  * noise (four count scans + one log line). Overridable via
- * `STATS_SNAPSHOT_INTERVAL_MS`.
+ * `STATS_SNAPSHOT_INTERVAL_MS`. Doubles as the Aura keep-warm cadence — see
+ * `logStatsSnapshot` and `MAX_SNAPSHOT_INTERVAL_MS`.
  */
 export const DEFAULT_SNAPSHOT_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /**
- * Upper bound. `setInterval` delays above the 32-bit signed-int max overflow and
- * Node clamps them to 1ms — turning a "very long interval" into a tight loop. Cap
- * here so a large `STATS_SNAPSHOT_INTERVAL_MS` degrades gracefully (24.8 days is
- * already well past the 30-day retention horizon).
+ * AuraDB Free auto-pauses after 72h of inactivity, and only a *real query* (not
+ * a connectivity check) resets that idle timer. Each snapshot runs real Cypher
+ * (`getStats`), so the snapshot timer is also our Aura keep-warm ping — see
+ * `logStatsSnapshot`. This constant is the hard window the snapshot interval
+ * must stay under, asserted in the unit tests so the keep-warm guarantee can't
+ * be silently raised away. See infra/RUNBOOK.md "Keeping Aura warm".
  */
-export const MAX_SNAPSHOT_INTERVAL_MS = 2_147_483_647;
+export const AURA_PAUSE_WINDOW_MS = 72 * 60 * 60 * 1000;
+
+/**
+ * Upper bound on the snapshot interval. Because the snapshot doubles as the Aura
+ * keep-warm ping (see `AURA_PAUSE_WINDOW_MS`), the binding constraint is the 72h
+ * auto-pause window, not Node's `setInterval` overflow: 24h leaves ≥3 keep-warm
+ * pings per window while still allowing a daily-cadence snapshot to cut log
+ * volume, and is trivially under the 32-bit-max overflow point.
+ * `resolveSnapshotIntervalMs` clamps to this, so `STATS_SNAPSHOT_INTERVAL_MS`
+ * can never push the keep-warm out past the pause window. The default stays 6h.
+ */
+export const MAX_SNAPSHOT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Fetch whole-graph stats and emit them as one structured log line. fluent-bit
@@ -32,6 +46,12 @@ export const MAX_SNAPSHOT_INTERVAL_MS = 2_147_483_647;
  * over time (collection size, enrichment coverage %). Bars, not lines: these
  * snapshots are sparse (6h cadence on a scale-to-zero host), and a line widget
  * errors on a window with fewer than two points.
+ *
+ * Doubles as the Aura keep-warm ping: `getStats` runs real Cypher, which is what
+ * resets AuraDB Free's 72h auto-pause timer (a connectivity check does not). The
+ * timer rides the graph-service pod, so it keeps Aura warm exactly while the k3s
+ * node is up — when the node is intentionally stopped (`power:off`) past 72h,
+ * Aura pauses by design. See infra/RUNBOOK.md "Keeping Aura warm".
  *
  * Never throws: a failed snapshot is a missed data point, not an incident, so
  * it logs at `warn` (not `error`) to avoid tripping the ERROR-rate alarm.
