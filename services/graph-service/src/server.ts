@@ -124,7 +124,12 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     const resumable = await findResumableReloadJob(driver);
     if (resumable) {
       const username = process.env['DISCOGS_USERNAME'];
-      if (username) {
+      // Guard on Discogs creds the same way the empty-graph path does: without a usable
+      // client the `releases` stage (and other Discogs stages) would resolve to `skipped`
+      // and the job could finish without ever ingesting. Better to leave it `running` and
+      // resume once creds are present than to silently complete an empty reload.
+      const discogsClient = buildDiscogsClientFromEnv(app.log);
+      if (discogsClient && username) {
         app.log.warn(
           { jobId: resumable.jobId },
           'Interrupted reload detected — resuming from the last completed stage',
@@ -137,7 +142,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
       } else {
         app.log.warn(
           { jobId: resumable.jobId },
-          'Interrupted reload detected but DISCOGS_USERNAME not set — cannot resume',
+          'Interrupted reload detected but DISCOGS_TOKEN or DISCOGS_USERNAME not set — cannot resume',
         );
       }
       return; // do not also run the empty-graph safety net

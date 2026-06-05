@@ -124,7 +124,7 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
       const msg = err instanceof Error ? err.message : String(err);
       await markStageFailed(driver, jobId, descriptor.name, msg);
       stagesFailed++;
-      log.error(`[reload] stage "${descriptor.name}" failed and was skipped: ${msg}`);
+      log.error(`[reload] stage "${descriptor.name}" failed (recorded; continuing): ${msg}`);
     }
   }
 

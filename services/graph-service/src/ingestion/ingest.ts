@@ -155,7 +155,10 @@ export async function runIngestion(
   const log: Logger = config.logger ?? console;
   const startTime = Date.now();
 
-  log.info(`[ingest] Starting ingestion for user: ${config.username}`);
+  // Don't interpolate config.username (sourced from the DISCOGS_USERNAME env var) into the
+  // log — CodeQL flags env-derived values in log messages as clear-text logging, and the
+  // repo treats the username as personal data (CLAUDE.md "no hardcoded usernames").
+  log.info('[ingest] Starting ingestion');
 
   // Steps 1-2: fetch the collection and MERGE each release (shared with the reload's
   // `releases` stage via ingestReleases — issue #175).

@@ -22,7 +22,15 @@ const CRASH_STAGE = 'mb-release-events';
 const STAGE_NAMES = RELOAD_STAGES.map((s) => s.name);
 const DONE_BEFORE_CRASH = STAGE_NAMES.slice(0, STAGE_NAMES.indexOf(CRASH_STAGE));
 
-const ENV_KEYS = ['DISCOGS_TOKEN', 'DISCOGS_USERNAME', 'DISCOGS_USER_AGENT'] as const;
+// MUSICBRAINZ_USER_AGENT is included so beforeAll can deterministically unset it (its
+// presence would make buildMusicBrainzClientFromEnv non-null, so the mb-release-events /
+// track-musicbrainz / nationality stages would run instead of skip) and afterAll restores it.
+const ENV_KEYS = [
+  'DISCOGS_TOKEN',
+  'DISCOGS_USERNAME',
+  'DISCOGS_USER_AGENT',
+  'MUSICBRAINZ_USER_AGENT',
+] as const;
 
 function make404Router(): Response {
   return {
@@ -54,9 +62,10 @@ describe('reload resume after a simulated crash (real Neo4j)', () => {
     process.env['DISCOGS_TOKEN'] = 'test-token';
     process.env['DISCOGS_USERNAME'] = 'integration-test-user';
     process.env['DISCOGS_USER_AGENT'] = 'liner-notes/test';
-    // MusicBrainz creds are deliberately left unset so the musicbrainz client is null and
-    // its stages (mb-release-events / track-musicbrainz / nationality) resolve to `skipped`
-    // — deterministic regardless of CI's configured tokens.
+    // Explicitly unset so the musicbrainz client is null and its stages (mb-release-events /
+    // track-musicbrainz / nationality) resolve to `skipped` — deterministic regardless of
+    // any MUSICBRAINZ_USER_AGENT the dev/CI environment happens to export.
+    delete process.env['MUSICBRAINZ_USER_AGENT'];
     driver = initTestDriver();
   });
 

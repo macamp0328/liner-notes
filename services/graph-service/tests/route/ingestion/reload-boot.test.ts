@@ -22,10 +22,11 @@ vi.mock('../../../src/db/ingestion-repository.js', () => ({
 }));
 
 const mockRunIngestion = vi.hoisted(() => vi.fn());
+const mockBuildDiscogsClient = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/ingestion/ingest.js', () => ({
   runIngestion: mockRunIngestion,
   ingestReleases: vi.fn(),
-  buildDiscogsClientFromEnv: vi.fn().mockReturnValue({ getCollectionReleases: vi.fn() }),
+  buildDiscogsClientFromEnv: mockBuildDiscogsClient,
 }));
 
 const mockRunReload = vi.hoisted(() => vi.fn());
@@ -66,6 +67,7 @@ describe('cold-start reload resume (onReady)', () => {
     mockRunIngestion.mockResolvedValue(completeSummary);
     mockRunReload.mockResolvedValue({ jobId: 'job-9', status: 'complete' });
     mockFindResumable.mockResolvedValue(null);
+    mockBuildDiscogsClient.mockReturnValue({ getCollectionReleases: vi.fn() });
 
     process.env['NEO4J_URI'] = 'bolt://localhost:7687';
     process.env['NEO4J_USER'] = 'neo4j';
@@ -99,6 +101,18 @@ describe('cold-start reload resume (onReady)', () => {
   it('does not resume when DISCOGS_USERNAME is unset (and does not fall through to ingest)', async () => {
     mockFindResumable.mockResolvedValue({ jobId: 'job-9', status: 'running', stages: [] });
     delete process.env['DISCOGS_USERNAME'];
+
+    app = await buildServer();
+    await app.ready();
+    await tick();
+
+    expect(mockRunReload).not.toHaveBeenCalled();
+    expect(mockRunIngestion).not.toHaveBeenCalled();
+  });
+
+  it('does not resume when the Discogs client is unusable (e.g. DISCOGS_TOKEN unset)', async () => {
+    mockFindResumable.mockResolvedValue({ jobId: 'job-9', status: 'running', stages: [] });
+    mockBuildDiscogsClient.mockReturnValue(null);
 
     app = await buildServer();
     await app.ready();
