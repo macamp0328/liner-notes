@@ -470,6 +470,74 @@ describe('enrichLyrics', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Genius — no double-unescaping (CodeQL js/double-escaping)
+  // -------------------------------------------------------------------------
+  it('does not double-unescape entities that decode to ampersands', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+
+    // `&#38;` decodes to `&`. A naive chained decode would then read the resulting
+    // `&lt;`/`&gt;` and turn them into `<`/`>`, reconstructing markup. A single-pass
+    // decode consumes each entity once, so the text stays literal.
+    const html = '<div data-lyrics-container="true">&#38;lt;b&#38;gt; stays text</div>';
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
+      .mockResolvedValueOnce(makeHtmlResponse(html));
+
+    const summary = await enrichLyrics(fakeDriver);
+
+    expect(summary.enriched).toBe(1);
+    const stored = mockSetTrackLyrics.mock.calls[0]?.[3] as string;
+    expect(stored).toBe('&lt;b&gt; stays text');
+    expect(stored).not.toContain('<b>');
+  });
+
+  // -------------------------------------------------------------------------
+  // Genius — strips script content (CodeQL js/incomplete-multi-character-sanitization)
+  // -------------------------------------------------------------------------
+  it('drops <script> blocks and their content from extracted lyrics', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+
+    const html = '<div data-lyrics-container="true">Hello<script>alert(\'x\')</script> World</div>';
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
+      .mockResolvedValueOnce(makeHtmlResponse(html));
+
+    const summary = await enrichLyrics(fakeDriver);
+
+    expect(summary.enriched).toBe(1);
+    const stored = mockSetTrackLyrics.mock.calls[0]?.[3] as string;
+    expect(stored).toBe('Hello World');
+    expect(stored).not.toContain('<script');
+    expect(stored).not.toContain('alert');
+  });
+
+  // -------------------------------------------------------------------------
+  // Genius — neutralises unterminated tag fragments (no <script left behind)
+  // -------------------------------------------------------------------------
+  it('strips a stray "<script" fragment with no closing bracket', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+
+    const html = '<div data-lyrics-container="true">lyrics here <script and more</div>';
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
+      .mockResolvedValueOnce(makeHtmlResponse(html));
+
+    const summary = await enrichLyrics(fakeDriver);
+
+    expect(summary.enriched).toBe(1);
+    const stored = mockSetTrackLyrics.mock.calls[0]?.[3] as string;
+    expect(stored).not.toContain('<script');
+    expect(stored).not.toContain('<');
+    expect(stored).toContain('lyrics here');
+  });
+
+  // -------------------------------------------------------------------------
   // Initial query failure — returns a failed summary instead of throwing (#151)
   // -------------------------------------------------------------------------
   it('returns a failed summary (does not throw) when the initial track query fails', async () => {
