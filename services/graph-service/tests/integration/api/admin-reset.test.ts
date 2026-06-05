@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildTestServer } from '../setup.js';
 import { seedGraph, clearGraph } from '../../fixtures/loader.js';
 import { getDriver } from '../../../src/db/client.js';
+import { snapshotEnv, type EnvSnapshot } from '../../helpers/env.js';
 
 const TEST_TOKEN = 'test-admin-token-reset';
 
@@ -18,17 +19,16 @@ async function nodeCount(): Promise<number> {
 
 describe('POST /api/v1/admin/reset', () => {
   let app: FastifyInstance;
-  let originalToken: string | undefined;
+  let envSnapshot: EnvSnapshot;
 
   beforeAll(async () => {
     app = await buildTestServer();
-    originalToken = process.env['ADMIN_TOKEN'];
+    envSnapshot = snapshotEnv(['ADMIN_TOKEN']);
     process.env['ADMIN_TOKEN'] = TEST_TOKEN;
   });
 
   afterAll(async () => {
-    if (originalToken === undefined) delete process.env['ADMIN_TOKEN'];
-    else process.env['ADMIN_TOKEN'] = originalToken;
+    envSnapshot.restore();
     await clearGraph(getDriver());
     await app.close();
   });
