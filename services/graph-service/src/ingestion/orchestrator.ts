@@ -80,13 +80,20 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
   }
 
   const jobId = existing?.jobId ?? (await createReloadJob(driver, stageNames));
-  log.info(existing ? `[reload] resuming job ${jobId}` : `[reload] starting new job ${jobId}`);
 
   // Stages already settled on a prior run are skipped on resume.
   const doneStages = new Set(
     (existing?.stages ?? [])
       .filter((s) => s.status === 'complete' || s.status === 'skipped')
       .map((s) => s.stage),
+  );
+
+  // Accurate whether the job is brand-new (pre-created by the route with all stages pending)
+  // or a genuine resume after a crash (some stages already settled).
+  log.info(
+    doneStages.size > 0
+      ? `[reload] resuming job ${jobId} — ${doneStages.size} stage(s) already done`
+      : `[reload] starting job ${jobId}`,
   );
 
   const ctx = buildReloadContext(driver, options.username, log);
