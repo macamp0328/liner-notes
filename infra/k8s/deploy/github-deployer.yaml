@@ -11,9 +11,12 @@
 # "CD — cluster bootstrap". Keeping it out of that kustomization also means
 # `kustomize build infra/k8s/graph-service` renders unchanged.
 #
-# The RBAC below grants EXACTLY the verbs/resources `kubectl apply -k` touches —
-# verbs get/list/watch/create/update/patch (NO delete: apply without --prune never
-# deletes). It is least-privilege, not cluster-admin.
+# The RBAC below is least-privilege, not cluster-admin: full apply verbs
+# (get/list/watch/create/update/patch, NO delete — apply without --prune never
+# deletes) on the kinds `kubectl apply -k` actually creates, and read-only
+# (get/list/watch) on Pods/ReplicaSets/Jobs, which the Deployment/CronJob
+# controllers create under their own service accounts and `rollout status` only
+# reads.
 
 apiVersion: v1
 kind: ServiceAccount
@@ -41,26 +44,25 @@ metadata:
   name: github-deployer
   namespace: liner-notes
 rules:
+  # --- Kinds the kustomization creates/updates: full apply verbs. ---
   # core/v1 — Service (NodePort), ServiceAccount + Secret (ecr refresher /
-  # ExternalSecret targets), ConfigMap (forward-looking), Pod (rollout status /
-  # debugging). `secrets` write is load-bearing twice over: it applies the
-  # graph-service-secrets / ecr-pull-secret objects AND satisfies k8s'
-  # privilege-escalation rule when this SA creates the ecr-pull-secret-refresher
-  # Role (which itself grants secrets get/create/update/patch) and its
-  # RoleBinding — the actor must already hold a superset of the granted perms.
-  # Because this Role's secret verbs are a superset, NO `bind`/`escalate` verb is
-  # required.
+  # ExternalSecret targets), ConfigMap (forward-looking). `secrets` write is
+  # load-bearing twice over: it applies the graph-service-secrets / ecr-pull-secret
+  # objects AND satisfies k8s' privilege-escalation rule when this SA creates the
+  # ecr-pull-secret-refresher Role (which itself grants secrets get/create/update/
+  # patch) and its RoleBinding — the actor must already hold a superset of the
+  # granted perms. Because this Role's secret verbs are a superset, NO
+  # `bind`/`escalate` verb is required.
   - apiGroups: ['']
-    resources: ['services', 'serviceaccounts', 'configmaps', 'secrets', 'pods']
+    resources: ['services', 'serviceaccounts', 'configmaps', 'secrets']
     verbs: ['get', 'list', 'watch', 'create', 'update', 'patch']
-  # apps/v1 — Deployment; ReplicaSets are read by `rollout status` and useful for
-  # debugging a stuck rollout.
+  # apps/v1 — Deployment.
   - apiGroups: ['apps']
-    resources: ['deployments', 'replicasets']
+    resources: ['deployments']
     verbs: ['get', 'list', 'watch', 'create', 'update', 'patch']
-  # batch/v1 — the ecr-pull-secret-refresher CronJob (and the Jobs it spawns).
+  # batch/v1 — the ecr-pull-secret-refresher CronJob.
   - apiGroups: ['batch']
-    resources: ['cronjobs', 'jobs']
+    resources: ['cronjobs']
     verbs: ['get', 'list', 'watch', 'create', 'update', 'patch']
   # rbac.authorization.k8s.io/v1 — the ecr-pull-secret-refresher Role +
   # RoleBinding (see the secrets-escalation note above).
@@ -71,6 +73,19 @@ rules:
   - apiGroups: ['external-secrets.io']
     resources: ['externalsecrets']
     verbs: ['get', 'list', 'watch', 'create', 'update', 'patch']
+  # --- Kinds the controllers create, not the deployer: read-only. ---
+  # Pods/ReplicaSets/Jobs are spawned by the Deployment/CronJob controllers under
+  # their own service accounts. `rollout status` and debugging only read them, so
+  # the deployer never needs create/update/patch here.
+  - apiGroups: ['']
+    resources: ['pods']
+    verbs: ['get', 'list', 'watch']
+  - apiGroups: ['apps']
+    resources: ['replicasets']
+    verbs: ['get', 'list', 'watch']
+  - apiGroups: ['batch']
+    resources: ['jobs']
+    verbs: ['get', 'list', 'watch']
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

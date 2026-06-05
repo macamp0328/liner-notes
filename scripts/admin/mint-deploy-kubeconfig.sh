@@ -63,8 +63,11 @@ if [ -z "$token_b64" ]; then
   exit 1
 fi
 
-# --decode is the one base64 flag spelling accepted by both GNU and BSD/macOS.
-token="$(printf '%s' "$token_b64" | base64 --decode)"
+# Decode the token cluster-side with kubectl's go-template `base64decode` so the
+# script never depends on the platform's `base64` decode flag (GNU/newer-macOS
+# accept `-d`/`--decode`, but older BSD/macOS `base64` only accepts `-D`).
+token="$(kubectl -n "$NAMESPACE" get secret "$TOKEN_SECRET" \
+  -o go-template='{{ .data.token | base64decode }}')"
 
 # certificate-authority-data straight from the admin kubeconfig (already base64,
 # already proven correct for https://127.0.0.1:6443).
