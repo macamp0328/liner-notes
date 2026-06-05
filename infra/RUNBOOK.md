@@ -9,6 +9,7 @@ This is the operator's guide to standing up, redeploying, and recovering the pro
 - [Redeploy procedure](#redeploy-procedure)
 - [CD — IAM bootstrap](#cd--iam-bootstrap)
 - [CD — cluster bootstrap](#cd--cluster-bootstrap)
+- [CD — workflow setup](#cd--workflow-setup)
 - [Full reload from scratch](#full-reload-from-scratch)
 - [Instance power switch — scale-to-zero](#instance-power-switch--scale-to-zero)
 - [Resuming a paused Aura instance](#resuming-a-paused-aura-instance)
@@ -773,6 +774,42 @@ gh secret list --repo macamp0328/liner-notes    # KUBECONFIG_B64 should now be l
 ```
 
 > **Why `https://127.0.0.1:6443`, and why the admin CA?** The k3s API serving cert is signed only for `127.0.0.1` and the node's local IPs, so the kubeconfig must target the loopback address — the CD workflow (#120) reaches the API exactly as this runbook does, by opening its own SSM port-forward to `6443` before running `kubectl`. The minter takes `certificate-authority-data` from the admin kubeconfig rather than the SA token Secret's `ca.crt` because the admin config's CA is the trust anchor already proven (Step 4) to validate this server.
+
+---
+
+## CD — workflow setup
+
+Final one-time wiring that turns the two bootstraps above into an automated pipeline. [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) ([#120](https://github.com/macamp0328/liner-notes/issues/120)) runs on every merge to `main` that touches `services/graph-service/**` or `infra/k8s/**` (and on manual `workflow_dispatch`): it assumes the deploy role via OIDC, builds + pushes the image to ECR, opens its own SSM port-forward to `6443`, then `kustomize edit set image` + `kubectl apply -k` + `rollout status` (auto-`rollout undo` on failure), and finally asserts `/api/v1/health` returns 200. The build + push live **inside** the gated deploy job — `ci.yml`'s `docker-build` stays build-only.
+
+**1. Create the `production` GitHub environment with required reviewers.** This is the manual-approval gate: the deploy role's trust policy only mints the `:environment:production` OIDC sub claim _after_ a reviewer approves, so the role is unassumable until then.
+
+```bash
+# Settings → Environments → New environment → "production" → enable
+# "Required reviewers" and add yourself. (No CLI for the reviewer gate.)
+gh api -X PUT repos/macamp0328/liner-notes/environments/production >/dev/null   # creates it; set reviewers in the UI
+```
+
+**2. Set the repo variables** the workflow reads (all non-secret — ARNs, IDs, and URLs are not sensitive). `AWS_DEPLOY_ROLE_ARN` was set in [CD — IAM bootstrap](#cd--iam-bootstrap) Step 3; the rest come from `terraform output`:
+
+```bash
+cd infra/terraform
+gh variable set AWS_REGION         --body "$(terraform output -raw aws_region)"
+gh variable set EC2_INSTANCE_ID    --body "$(terraform output -raw ec2_instance_id)"
+gh variable set ECR_REPOSITORY_URL --body "$(terraform output -raw ecr_repository_url)"
+gh variable set SERVICE_URL        --body "$(terraform output -raw service_url)"
+cd "$(git rev-parse --show-toplevel)"
+
+gh variable list   # AWS_DEPLOY_ROLE_ARN, AWS_REGION, EC2_INSTANCE_ID, ECR_REPOSITORY_URL, SERVICE_URL
+```
+
+The `KUBECONFIG_B64` **secret** was set in [CD — cluster bootstrap](#cd--cluster-bootstrap) Step 3 — that's the only secret the workflow needs.
+
+**3. Verify on the first deploy.** Merge a graph-service change (or run the workflow manually from the **Actions** tab), approve the `production` gate, and watch: the image lands in ECR under the short-SHA tag, `rollout status` completes, and the health gate goes green. To confirm the rollback path, once push a deliberately broken image (e.g. a bad start command) and check that the failed `rollout status` triggers `rollout undo` and the previous revision keeps serving.
+
+> **Two caveats.**
+>
+> - **Health gate reachability.** The final step curls `SERVICE_URL` (`:30080`) from the GitHub runner. That works because `allow_app_cidr` defaults to `0.0.0.0/0` (open). If you've narrowed it (see `terraform.tfvars.example`) to your own IP, the runner can't reach `:30080` and the gate will fail — either keep `:30080` open or drop the health-gate step.
+> - **Asleep node.** If the node is stopped (scale-to-zero), the pre-flight step fails fast with a "power on" message rather than hanging. Run `pnpm power:on`, wait for the SSM agent to register, then re-run the workflow from the **Actions** tab (`workflow_dispatch`) — no dummy commit needed.
 
 ---
 
