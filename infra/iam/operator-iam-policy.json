@@ -39,6 +39,12 @@
       "Resource": "arn:aws:iam::123456789012:instance-profile/liner-notes-*"
     },
     {
+      "Sid": "RefreshGitHubOidcProvider",
+      "Effect": "Allow",
+      "Action": "iam:GetOpenIDConnectProvider",
+      "Resource": "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    },
+    {
       "Sid": "ManageLinerNotesLogGroups",
       "Effect": "Allow",
       "Action": [

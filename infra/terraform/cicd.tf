@@ -9,10 +9,11 @@
 # Bootstrap is manual: applied from the primary checkout with the admin `root`
 # profile and local state, never in CI. The admin profile is required because
 # aws_iam_openid_connect_provider.github is an account-wide OIDC provider and
-# iam:CreateOpenIDConnectProvider is outside the scoped operator's permissions
-# (operator-iam-policy.json scopes the operator's IAM actions to role + instance-
-# profile resources under liner-notes-*, with no OIDC-provider actions). See the
-# "CD — IAM bootstrap" section of infra/RUNBOOK.md.
+# iam:CreateOpenIDConnectProvider is outside the scoped operator's permissions.
+# The operator's IAM actions are scoped to role + instance-profile resources
+# under liner-notes-*, plus read-only iam:GetOpenIDConnectProvider so its
+# day-to-day terraform applies can refresh this provider — but not Create. See
+# the "CD — IAM bootstrap" section of infra/RUNBOOK.md.
 
 # --- GitHub OIDC identity provider ----------------------------------------
 #
