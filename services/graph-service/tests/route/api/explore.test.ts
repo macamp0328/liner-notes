@@ -18,6 +18,9 @@ const mockGetReleasesByDecade = vi.hoisted(() => vi.fn());
 const mockGetReleasesByYear = vi.hoisted(() => vi.fn());
 const mockGetConnections = vi.hoisted(() => vi.fn());
 const mockGetSharedMusicians = vi.hoisted(() => vi.fn());
+const mockGetMostInternationalTracks = vi.hoisted(() => vi.fn());
+const mockGetMostPressedReleases = vi.hoisted(() => vi.fn());
+const mockGetTracksByAudioFeatures = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/db/client.js', () => ({
   initDriver: vi.fn().mockReturnValue({ verifyConnectivity: mockVerifyConnectivity }),
@@ -50,6 +53,9 @@ vi.mock('../../../src/db/repositories/explore-repository.js', () => ({
   getReleasesByYear: mockGetReleasesByYear,
   getConnections: mockGetConnections,
   getSharedMusicians: mockGetSharedMusicians,
+  getMostInternationalTracks: mockGetMostInternationalTracks,
+  getMostPressedReleases: mockGetMostPressedReleases,
+  getTracksByAudioFeatures: mockGetTracksByAudioFeatures,
 }));
 
 // ---------------------------------------------------------------------------
@@ -333,6 +339,113 @@ describe('explore routes', () => {
       });
       expect(response.statusCode).toBe(200);
       expect(JSON.parse(response.payload)).toEqual([]);
+    });
+  });
+
+  // GET /api/v1/explore/tracks/most-international
+  describe('GET /api/v1/explore/tracks/most-international', () => {
+    it('returns 200 and uses default limit when query param is omitted', async () => {
+      mockGetMostInternationalTracks.mockResolvedValue([
+        {
+          trackTitle: 'UFOF',
+          albumTitle: 'U.F.O.F.',
+          releaseDiscogsId: 13570466,
+          countryCount: 3,
+          countries: ['US', 'GB', 'FR'],
+        },
+      ]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/tracks/most-international',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockGetMostInternationalTracks).toHaveBeenCalledWith(expect.anything(), 10);
+    });
+
+    it('returns 200 and forwards explicit limit', async () => {
+      mockGetMostInternationalTracks.mockResolvedValue([]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/tracks/most-international?limit=5',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockGetMostInternationalTracks).toHaveBeenCalledWith(expect.anything(), 5);
+    });
+  });
+
+  // GET /api/v1/explore/releases/most-pressed
+  describe('GET /api/v1/explore/releases/most-pressed', () => {
+    it('returns 200 and uses default limit when query param is omitted', async () => {
+      mockGetMostPressedReleases.mockResolvedValue([
+        {
+          albumTitle: 'U.F.O.F.',
+          masterDiscogsId: 12345,
+          countryCount: 4,
+          countries: ['US', 'GB', 'FR', 'JP'],
+        },
+      ]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/releases/most-pressed',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockGetMostPressedReleases).toHaveBeenCalledWith(expect.anything(), 10);
+    });
+
+    it('returns 200 and forwards explicit limit', async () => {
+      mockGetMostPressedReleases.mockResolvedValue([]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/releases/most-pressed?limit=7',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockGetMostPressedReleases).toHaveBeenCalledWith(expect.anything(), 7);
+    });
+  });
+
+  // GET /api/v1/explore/tracks/by-audio-features
+  describe('GET /api/v1/explore/tracks/by-audio-features', () => {
+    it('returns 200 and calls repository with empty filters and default limit', async () => {
+      mockGetTracksByAudioFeatures.mockResolvedValue([]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/tracks/by-audio-features',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockGetTracksByAudioFeatures).toHaveBeenCalledWith(expect.anything(), {}, 20);
+    });
+
+    it('returns 200 and forwards all provided filters and custom limit', async () => {
+      mockGetTracksByAudioFeatures.mockResolvedValue([]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/tracks/by-audio-features?minTempo=90&maxTempo=120&key=C&scale=major&voiceInstrumental=voice&minDanceability=0.5&limit=12',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockGetTracksByAudioFeatures).toHaveBeenCalledWith(
+        expect.anything(),
+        {
+          minTempo: 90,
+          maxTempo: 120,
+          key: 'C',
+          scale: 'major',
+          voiceInstrumental: 'voice',
+          minDanceability: 0.5,
+        },
+        12,
+      );
     });
   });
 });
