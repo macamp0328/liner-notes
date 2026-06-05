@@ -31,6 +31,12 @@ on:
       - 'scripts/diagrams/**'
       - '.github/workflows/diagrams.yml'
 
+# Least-privilege default for the GITHUB_TOKEN (CodeQL actions/missing-workflow-permissions).
+# The single job only reads the checkout and compares regenerated artifacts (fail-on-drift);
+# it never pushes, so read-only is sufficient.
+permissions:
+  contents: read
+
 jobs:
   regenerate:
     name: Regenerate diagrams
