@@ -25,6 +25,12 @@ describe('coercions — the Neo4j value boundary', () => {
       expect(toInt(neo4j.int(0))).toBe(0);
     });
 
+    it('returns null for non-finite numbers (consistent with toFloat)', () => {
+      expect(toInt(NaN)).toBeNull();
+      expect(toInt(Infinity)).toBeNull();
+      expect(toInt(-Infinity)).toBeNull();
+    });
+
     it('returns null for null and undefined', () => {
       expect(toInt(null)).toBeNull();
       expect(toInt(undefined)).toBeNull();
