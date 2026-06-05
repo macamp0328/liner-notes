@@ -16,7 +16,7 @@ resources:
 #   kustomize edit set image graph-service-image=<ECR_URL>:<TAG>
 #   kubectl apply -k .
 #
-# The CD pipeline (deferred follow-up) will run the same kustomize edit.
+# The CD pipeline runs the same kustomize edit — see .github/workflows/deploy.yml.
 images:
   - name: graph-service-image
     newName: graph-service

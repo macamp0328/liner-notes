@@ -1,21 +1,257 @@
 name: Deploy
 
+# Continuous deployment for graph-service (issue #120).
+#
+# On a merge to main that touches the service or its k8s manifests, this builds
+# and pushes the image to ECR, then rolls it out to the private single-node k3s
+# cluster reached over an AWS SSM port-forward — there is no public path to the
+# API server (:6443 is firewalled; SSM is the only way in).
+#
+# Auth has two scoped identities, neither a long-lived key:
+#   - AWS: GitHub OIDC assumes the `liner-notes-github-deploy` role (infra/terraform/cicd.tf).
+#           The role can only push to ECR + open the one SSM port-forward.
+#   - k8s: a scoped `github-deployer` ServiceAccount token (infra/k8s/deploy/github-deployer.yaml),
+#           supplied as the base64 KUBECONFIG_B64 secret — never the cluster-admin kubeconfig.
+#
+# The `environment: production` job gate is the manual-approval wall: the role's
+# trust policy only mints the `:environment:production` sub claim after a human
+# approves, so the deploy is unassumable until then.
+#
+# One-time operator setup (GitHub environment, repo variables, KUBECONFIG_B64
+# secret) is documented in the "CD — workflow setup" section of infra/RUNBOOK.md.
+
 on:
   push:
     branches: [main]
+    paths:
+      - 'services/graph-service/**'
+      - 'infra/k8s/**'
+      - '.github/workflows/deploy.yml'
+  # Manual re-deploy of the current main from the Actions UI — same approval gate.
+  # Use this to retry after a pre-flight failure (power the node on, then re-run).
+  workflow_dispatch: {}
 
-# TODO (Task 5 — infra sprint):
-#   1. Build and push graph-service image to AWS ECR
-#   2. Apply rolling k8s update on EC2 k3s cluster
-#   3. Add Terraform plan/apply with manual approval gate
+# Serialize deploys; never cancel one mid-apply — a queued run waits its turn.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # assume the deploy role via OIDC
+  contents: read # checkout
+
 jobs:
   deploy:
-    name: Deploy (stub — not implemented)
-    # Task 5 (infra sprint) will implement the real pipeline.
-    # if: false prevents this job from running and emitting a misleading green status.
-    if: false
+    name: Deploy graph-service
     runs-on: ubuntu-latest
+    # Manual-approval gate. Also mints the OIDC sub claim the role trust requires.
+    environment: production
+    timeout-minutes: 20
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      KUBECONFIG: ${{ runner.temp }}/deploy-kubeconfig
     steps:
       - uses: actions/checkout@v6
-      - name: Placeholder
-        run: echo "Deploy pipeline — implementation pending (Task 5)"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          # The SSM session id is prefixed with this, so the deploy role's
+          # `session/${aws:userid}-*`-scoped TerminateSession authorizes teardown.
+          role-session-name: github-deploy
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # session-manager-plugin (for `aws ssm start-session`) and standalone
+      # kustomize (kubectl's built-in cannot do `edit set image`) are NOT on the
+      # runner; kubectl is but drifts. Pin all three from their official sources.
+      - name: Install pinned deploy tooling
+        env:
+          SMP_VERSION: 1.2.707.0
+          KUBECTL_VERSION: v1.36.1
+          KUSTOMIZE_VERSION: v5.4.3
+        run: |
+          set -euo pipefail
+
+          curl -fsSL -o /tmp/session-manager-plugin.deb \
+            "https://s3.amazonaws.com/session-manager-downloads/plugin/${SMP_VERSION}/ubuntu_64bit/session-manager-plugin.deb"
+          sudo dpkg -i /tmp/session-manager-plugin.deb
+          session-manager-plugin --version
+
+          curl -fsSL -o /tmp/kubectl \
+            "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          sudo install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+          kubectl version --client
+
+          curl -fsSL -o /tmp/kustomize.tar.gz \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          tar -xzf /tmp/kustomize.tar.gz -C /tmp
+          sudo install -m 0755 /tmp/kustomize /usr/local/bin/kustomize
+          kustomize version
+
+      # Fail fast before the build if the node is asleep (scale-to-zero) — there
+      # is no point building an image we can't roll out.
+      - name: Pre-flight — node running and SSM-reachable
+        env:
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+
+          state=$(aws ec2 describe-instances \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].State.Name' --output text)
+          echo "Instance state: $state"
+          if [ "$state" != "running" ]; then
+            echo "::error::k3s node $EC2_INSTANCE_ID is '$state', not 'running'. Power it on (pnpm power:on) and re-run." >&2
+            exit 1
+          fi
+
+          ping=$(aws ssm describe-instance-information \
+            --filters "Key=InstanceIds,Values=$EC2_INSTANCE_ID" \
+            --query 'InstanceInformationList[0].PingStatus' --output text)
+          echo "SSM PingStatus: $ping"
+          if [ "$ping" != "Online" ]; then
+            echo "::error::SSM agent on $EC2_INSTANCE_ID is '$ping', not 'Online'. Wait for it to register, then re-run." >&2
+            exit 1
+          fi
+
+      - name: Compute image tag (short SHA)
+        id: meta
+        run: echo "tag=${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push graph-service image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./services/graph-service/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ vars.ECR_REPOSITORY_URL }}:${{ steps.meta.outputs.tag }}
+          # Reuse the warm main-branch buildx cache ci.yml's docker-build writes.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Write kubeconfig from secret
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$KUBECONFIG_B64" | base64 -d > "$KUBECONFIG"
+          # Mask the decoded bearer token so it can never surface in later logs.
+          token=$(kubectl config view --raw -o jsonpath='{.users[0].user.token}')
+          [ -n "$token" ] && echo "::add-mask::$token"
+          echo "Context: $(kubectl config current-context)"
+
+      # The manifests pin AWS_REGION/ECR host to us-east-1; retarget if deployed
+      # elsewhere. Mirrors RUNBOOK Step 7a. Ephemeral runner — never committed.
+      - name: Retarget region in manifests (non-us-east-1 only)
+        run: |
+          set -euo pipefail
+          if [ "$AWS_REGION" != "us-east-1" ]; then
+            sed -i.bak "s/us-east-1/$AWS_REGION/g" \
+              infra/k8s/graph-service/external-secret.yaml \
+              infra/k8s/graph-service/ecr-pull-secret-refresher.yaml
+          fi
+
+      - name: Open SSM port-forward to the k3s API
+        env:
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+          aws ssm start-session \
+            --target "$EC2_INSTANCE_ID" \
+            --document-name AWS-StartPortForwardingSession \
+            --parameters '{"portNumber":["6443"],"localPortNumber":["6443"]}' \
+            > "$RUNNER_TEMP/ssm.log" 2>&1 &
+          echo "SSM_PID=$!" >> "$GITHUB_ENV"
+
+          # Poll until the tunnel carries TLS. /livez answers 200, or 401 before
+          # auth — either means the tunnel is up (curl without -f ignores status).
+          for i in $(seq 1 30); do
+            if curl -sk --max-time 5 -o /dev/null https://127.0.0.1:6443/livez; then
+              echo "Tunnel up after attempt ${i}."
+              sid=$(grep -oE 'SessionId: [A-Za-z0-9._-]+' "$RUNNER_TEMP/ssm.log" | head -1 | awk '{print $2}')
+              echo "SSM_SID=${sid}" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::SSM port-forward to 127.0.0.1:6443 never became reachable." >&2
+          cat "$RUNNER_TEMP/ssm.log" >&2 || true
+          exit 1
+
+      - name: Deploy — set image and apply manifests
+        env:
+          IMAGE: ${{ vars.ECR_REPOSITORY_URL }}:${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cd infra/k8s/graph-service
+          kustomize edit set image "graph-service-image=${IMAGE}"
+          kubectl apply -k .
+
+      - name: Roll out (undo on failure)
+        run: |
+          set -euo pipefail
+          if kubectl -n liner-notes rollout status deployment/graph-service --timeout=180s; then
+            echo "Rollout succeeded."
+          else
+            echo "::error::Rollout failed — rolling back to the previous revision." >&2
+            # `|| true` tolerates the first-ever deploy (no prior revision to undo).
+            kubectl -n liner-notes rollout undo deployment/graph-service || true
+            kubectl -n liner-notes rollout status deployment/graph-service --timeout=120s || true
+            exit 1
+          fi
+
+      # Asserts the service answers 200 over the public NodePort. Polls through
+      # the ~30s Recreate downtime gap + kube-proxy programming. A 503 means the
+      # pod is up but Neo4j/Aura is unreachable — a real failure, but not one a
+      # rollback fixes, so we fail the job without undoing.
+      - name: Health gate — assert /api/v1/health is 200
+        env:
+          SERVICE_URL: ${{ vars.SERVICE_URL }}
+        run: |
+          set -euo pipefail
+          url="${SERVICE_URL%/}/api/v1/health"
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || echo 000)
+            echo "Attempt ${i}: HTTP ${code}"
+            if [ "$code" = "200" ]; then
+              echo "Service is healthy."
+              exit 0
+            fi
+            if [ "$code" = "503" ]; then
+              echo "::error::/api/v1/health returned 503 — service up but Neo4j/Aura unreachable." >&2
+              exit 1
+            fi
+            sleep 6
+          done
+          echo "::error::/api/v1/health did not return 200 within the retry budget (last: ${code})." >&2
+          exit 1
+
+      # Always release the tunnel. terminate-session by id frees one of the two
+      # allowed concurrent SSM sessions so a re-run isn't blocked. Prefer the id
+      # captured at open time; fall back to re-parsing the session log if it
+      # wasn't (output races / format change), and warn rather than silently
+      # skip if it still can't be resolved — the killed local process already
+      # drops the tunnel, and the server-side session then idles out on its own.
+      - name: Tear down SSM port-forward
+        if: always()
+        run: |
+          [ -n "${SSM_PID:-}" ] && kill "$SSM_PID" 2>/dev/null || true
+          sid="${SSM_SID:-}"
+          if [ -z "$sid" ] && [ -f "$RUNNER_TEMP/ssm.log" ]; then
+            sid=$(grep -oE 'SessionId: [A-Za-z0-9._-]+' "$RUNNER_TEMP/ssm.log" | head -1 | awk '{print $2}' || true)
+          fi
+          if [ -n "$sid" ]; then
+            aws ssm terminate-session --session-id "$sid" 2>/dev/null || true
+          else
+            echo "::warning::SSM SessionId unresolved — terminate-session skipped. The killed local process drops the tunnel; the server-side session idles out on its own."
+          fi
+          true
