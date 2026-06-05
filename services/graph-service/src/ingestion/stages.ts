@@ -52,8 +52,36 @@ export interface ReloadContext {
   viaf: VIAFClient | null;
 }
 
+/**
+ * A rate-limited / contention lane a stage holds while running. Two stages sharing any resource
+ * never run concurrently (see `scheduleStages`). Tags fall into two kinds:
+ *
+ * - `discogs` / `musicbrainz` — the shared HTTP client's rate limiter. The Discogs/MusicBrainz
+ *   clients are built once and shared via `ctx`, and their limiters have no shared queue, so two
+ *   concurrent stages on one client would double the request rate. Every stage that touches a
+ *   client carries its tag.
+ * - `track` — a Neo4j node-lock lane for **batched** Track writers. A deadlock needs two
+ *   transactions that each hold-and-wait on ≥2 nodes, so it is only possible between two *batched*
+ *   writers of the same label. The four batched Track writers (`track-versions`,
+ *   `track-musicbrainz`, `track-acousticbrainz`, `track-deezer`) carry `track` and serialise.
+ *   `lyrics` writes one Track per transaction (`setTrackLyrics`) — a single-node tx can't be half
+ *   of a lock cycle, so it is deadlock-immune and intentionally untagged, free to overlap the
+ *   batched Track lane. **If `lyrics` (or any per-node writer) ever moves to a batched write, give
+ *   it the `track` tag.** There is no `artist` lane because `artist-genres` is the only batched
+ *   Artist writer (`artist-profiles`/`nationality` write one Artist per tx), so no Artist-axis
+ *   deadlock is possible.
+ */
+export type ReloadResource = 'discogs' | 'musicbrainz' | 'track';
+
 export interface StageDescriptor {
   name: ReloadStageName;
+  /**
+   * Ordering prerequisites: this stage starts only once every dep has settled (any terminal
+   * state — complete/skipped/failed), so a dep is an ordering edge, not a success gate.
+   */
+  deps: readonly ReloadStageName[];
+  /** Mutual-exclusion lanes held while this stage runs. See {@link ReloadResource}. */
+  resources: readonly ReloadResource[];
   /**
    * Run the stage. Returns a flat counts map on success, or `null` to signal "skipped"
    * (a required client was not configured). A throw is caught by the orchestrator and
@@ -63,15 +91,24 @@ export interface StageDescriptor {
 }
 
 /**
- * The single ordered definition of the reload sequence. The orchestrator iterates this and
- * each enrich function is referenced exactly once, so there is one definition per stage.
- * Order follows #154: track-musicbrainz must precede acousticbrainz/deezer (it sets the
- * recordingMbid + isrc they depend on); acousticbrainz/deezer run sequentially here
- * (parallelising them is a future optimisation). nationality is independent.
+ * Every stage except `verify`, in priority order — when several stages are eligible for one free
+ * slot the earlier one wins. Ordering is governed by `deps` (not array position), so this list is
+ * tuned for *priority*: cheap + #165-gate stages (`master-data`, `artist-profiles`, the pure-Cypher
+ * `artist-genres`/`track-versions`) lead, ahead of the slow `track-musicbrainz` and `lyrics`, so the
+ * gate metrics reach threshold without waiting on the multi-hour stages. The list is also a valid
+ * topological sort (every dep appears earlier), which keeps the persisted stage ordinals sensible.
+ *
+ * Dependency edges: every enrichment deps `releases` (else its candidate query runs on an empty
+ * graph and marks complete, permanently missing data); `mb-release-events` deps `master-data`
+ * (its candidate query `MATCH (m:Master)` needs the Master nodes only `master-data` creates);
+ * `track-acousticbrainz`/`track-deezer` dep `track-musicbrainz` (they need the recordingMbid/isrc
+ * it writes).
  */
-export const RELOAD_STAGES: readonly StageDescriptor[] = [
+const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
   {
     name: 'releases',
+    deps: [],
+    resources: ['discogs'],
     run: async (ctx): Promise<Record<string, number> | null> => {
       if (!ctx.discogs) return null;
       const s = await ingestReleases(ctx.discogs, ctx.driver, ctx.username, ctx.log);
@@ -83,57 +120,77 @@ export const RELOAD_STAGES: readonly StageDescriptor[] = [
     },
   },
   {
-    name: 'lyrics',
-    run: async (ctx) => ({ ...(await enrichLyrics(ctx.driver, ctx.log)) }),
-  },
-  {
     name: 'master-data',
+    deps: ['releases'],
+    resources: ['discogs'],
     run: async (ctx): Promise<Record<string, number> | null> => {
       if (!ctx.discogs) return null;
       return { ...(await enrichMasterData(ctx.discogs, ctx.driver, ctx.log)) };
     },
   },
   {
-    name: 'artist-genres',
-    run: async (ctx) => ({ ...(await enrichArtistGenres(ctx.driver, ctx.log)) }),
-  },
-  {
     name: 'artist-profiles',
+    deps: ['releases'],
+    resources: ['discogs'],
     run: async (ctx): Promise<Record<string, number> | null> => {
       if (!ctx.discogs) return null;
       return { ...(await enrichArtistProfiles(ctx.discogs, ctx.driver, ctx.log)) };
     },
   },
   {
+    name: 'artist-genres',
+    deps: ['releases'],
+    resources: [],
+    run: async (ctx) => ({ ...(await enrichArtistGenres(ctx.driver, ctx.log)) }),
+  },
+  {
     name: 'track-versions',
+    deps: ['releases'],
+    resources: ['track'],
     run: async (ctx) => ({ ...(await enrichTrackVersions(ctx.driver, ctx.log)) }),
   },
   {
-    name: 'mb-release-events',
-    run: async (ctx): Promise<Record<string, number> | null> => {
-      if (!ctx.musicbrainz) return null;
-      return { ...(await enrichMbReleaseEvents(ctx.musicbrainz, ctx.driver, ctx.log)) };
-    },
-  },
-  {
     name: 'track-musicbrainz',
+    deps: ['releases'],
+    resources: ['musicbrainz', 'track'],
     run: async (ctx): Promise<Record<string, number> | null> => {
       if (!ctx.musicbrainz) return null;
       return { ...(await enrichTrackMusicBrainz(ctx.musicbrainz, ctx.driver, ctx.log)) };
     },
   },
   {
+    name: 'mb-release-events',
+    deps: ['master-data'],
+    resources: ['musicbrainz'],
+    run: async (ctx): Promise<Record<string, number> | null> => {
+      if (!ctx.musicbrainz) return null;
+      return { ...(await enrichMbReleaseEvents(ctx.musicbrainz, ctx.driver, ctx.log)) };
+    },
+  },
+  {
+    name: 'lyrics',
+    deps: ['releases'],
+    resources: [],
+    run: async (ctx) => ({ ...(await enrichLyrics(ctx.driver, ctx.log)) }),
+  },
+  {
     name: 'track-acousticbrainz',
+    deps: ['track-musicbrainz'],
+    resources: ['track'],
     run: async (ctx) => ({
       ...(await enrichTrackAcousticBrainz(ctx.acousticbrainz, ctx.driver, ctx.log)),
     }),
   },
   {
     name: 'track-deezer',
+    deps: ['track-musicbrainz'],
+    resources: ['track'],
     run: async (ctx) => ({ ...(await enrichTrackDeezer(ctx.deezer, ctx.driver, ctx.log)) }),
   },
   {
     name: 'nationality',
+    deps: ['releases'],
+    resources: ['discogs', 'musicbrainz'],
     run: async (ctx): Promise<Record<string, number> | null> => {
       if (!ctx.musicbrainz) return null;
       return {
@@ -148,10 +205,21 @@ export const RELOAD_STAGES: readonly StageDescriptor[] = [
       };
     },
   },
+];
+
+/**
+ * The single ordered definition of the reload sequence — the source of truth the orchestrator
+ * iterates. `verify` runs strictly last: its deps are derived from every other stage, so adding a
+ * stage to {@link RELOAD_STAGES_BEFORE_VERIFY} automatically keeps `verify` as the final gate.
+ */
+export const RELOAD_STAGES: readonly StageDescriptor[] = [
+  ...RELOAD_STAGES_BEFORE_VERIFY,
   {
-    // Placeholder for #178 — a no-op that always completes. Implementing verification
-    // (coverage assertions, sane-counts gates) is tracked separately.
+    // Placeholder for #178 — a no-op that always completes after everything else. Implementing
+    // verification (coverage assertions, sane-counts gates) is tracked separately.
     name: 'verify',
+    deps: RELOAD_STAGES_BEFORE_VERIFY.map((s) => s.name),
+    resources: [],
     run: async () => Promise.resolve({}),
   },
 ];
