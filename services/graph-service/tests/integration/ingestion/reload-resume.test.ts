@@ -16,11 +16,23 @@ import release7000001 from '../../fixtures/releases/release-7000001.json' with {
 
 const RELEASE_ID = 7000001;
 
-// The crash point: stages before this were "already done"; this one was mid-flight
-// when the pod died (left `running`); everything after is `pending`.
-const CRASH_STAGE = 'mb-release-events';
+// The crash point: stages before this were "already done" (complete); this one was mid-flight
+// when the pod died (left `running`); everything after is `pending`. track-musicbrainz is chosen
+// deliberately: its track-acousticbrainz/track-deezer dependents must resume after it re-runs and
+// settles as `skipped` (musicbrainz client unset) — exercising "a dep is satisfied by ANY terminal
+// state", not just `complete`.
+const CRASH_STAGE = 'track-musicbrainz';
 const STAGE_NAMES = RELOAD_STAGES.map((s) => s.name);
-const DONE_BEFORE_CRASH = STAGE_NAMES.slice(0, STAGE_NAMES.indexOf(CRASH_STAGE));
+const DONE_BEFORE_CRASH: string[] = STAGE_NAMES.slice(0, STAGE_NAMES.indexOf(CRASH_STAGE));
+
+// Stages whose run() returns null (→ `skipped`) because the musicbrainz client is unset (see
+// beforeAll). One that actually runs settles `skipped`; one pre-marked complete stays `complete`.
+const MUSICBRAINZ_STAGES = new Set(['track-musicbrainz', 'mb-release-events', 'nationality']);
+
+function expectedStatus(name: string): 'complete' | 'skipped' {
+  if (DONE_BEFORE_CRASH.includes(name)) return 'complete';
+  return MUSICBRAINZ_STAGES.has(name) ? 'skipped' : 'complete';
+}
 
 // MUSICBRAINZ_USER_AGENT is included so beforeAll can deterministically unset it (its
 // presence would make buildMusicBrainzClientFromEnv non-null, so the mb-release-events /
@@ -118,21 +130,20 @@ describe('reload resume after a simulated crash (real Neo4j)', () => {
       false,
     );
 
-    // 7. Every stage is terminal exactly once: the pre-done stages stay complete, the
-    //    musicbrainz-dependent stages are skipped (client unconfigured), and the rest complete.
+    // 7. Every stage is terminal exactly once, derived from the schedule (not hard-coded
+    //    positions): pre-done stages stay complete, the musicbrainz stages skip (client unset),
+    //    the rest complete. Crucially track-acousticbrainz/track-deezer complete even though their
+    //    track-musicbrainz dependency settled as `skipped`.
     const job = await getReloadJob(driver, jobId);
     expect(job).not.toBeNull();
     const byName = Object.fromEntries((job?.stages ?? []).map((s) => [s.stage, s.status]));
 
-    for (const name of DONE_BEFORE_CRASH) {
-      expect(byName[name]).toBe('complete');
+    for (const name of STAGE_NAMES) {
+      expect(byName[name], `stage ${name}`).toBe(expectedStatus(name));
     }
-    expect(byName['mb-release-events']).toBe('skipped');
     expect(byName['track-musicbrainz']).toBe('skipped');
-    expect(byName['nationality']).toBe('skipped');
     expect(byName['track-acousticbrainz']).toBe('complete');
     expect(byName['track-deezer']).toBe('complete');
-    expect(byName['verify']).toBe('complete');
 
     // No stage left pending or running.
     const statuses = (job?.stages ?? []).map((s) => s.status);

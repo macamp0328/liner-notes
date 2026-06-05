@@ -154,6 +154,18 @@ describe('runReload — failure isolation', () => {
     expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'failed');
     expect(result).toMatchObject({ status: 'failed', stagesRun: 2, stagesFailed: 1 });
   });
+
+  it('does not abort the schedule when recording a failure also throws', async () => {
+    stageMocks.masterRun.mockRejectedValue(new Error('stage boom'));
+    repo.markStageFailed.mockRejectedValue(new Error('db down'));
+
+    const result = await runReload(driver, { username: 'tester', logger: log });
+
+    // The other stages still complete — a rejected checkpoint write can't wedge the run.
+    expect(stageMocks.releasesRun).toHaveBeenCalledOnce();
+    expect(stageMocks.lyricsRun).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ status: 'failed', stagesFailed: 1 });
+  });
 });
 
 describe('runReload — skip', () => {

@@ -222,14 +222,17 @@ state to Neo4j so it survives a restart.
 
 Source files:
 
-- `src/ingestion/stages.ts` — `RELOAD_STAGES`: the single ordered definition of the sequence
-  (the sequence source of truth). Each descriptor's `run` delegates to the existing `enrichX`
-  function, so there is **one definition per stage**. Stage order follows #154:
-  `releases → lyrics → master-data → artist-genres → artist-profiles → track-versions →
-mb-release-events → track-musicbrainz → track-acousticbrainz → track-deezer → nationality →
-verify`. `verify` is a no-op slot for #178.
-- `src/ingestion/orchestrator.ts` — `runReload(driver, { username, logger?, resumeJobId? })`
-  and `buildReloadContext()`. Iterates `RELOAD_STAGES`, skipping stages already
+- `src/ingestion/stages.ts` — `RELOAD_STAGES`: the single source-of-truth definition. Each
+  descriptor's `run` delegates to the existing `enrichX` function (one definition per stage) and
+  declares `deps` (ordering prerequisites) + `resources` (mutual-exclusion lanes). The array is in
+  **priority** order (cheap + #165-gate stages first), which is also a valid topological sort;
+  actual run order is governed by `deps`, not array position. `verify` is a no-op slot for #178
+  whose deps are derived from every other stage so it always runs last.
+- `src/ingestion/scheduler.ts` — `scheduleStages`: the generic bounded-concurrency, dependency- and
+  resource-aware scheduler (no Neo4j/job-repo imports) plus `validateStageGraph` (test-only DAG
+  guard). See "Scheduling (#176)" below.
+- `src/ingestion/orchestrator.ts` — `runReload(driver, { username, logger?, resumeJobId?, concurrency? })`
+  and `buildReloadContext()`. Drives `scheduleStages` over `RELOAD_STAGES`, skipping stages already
   `complete`/`skipped`, and persists each transition.
 - `src/db/job-repository.ts` — `ReloadJob`/`ReloadStage` persistence (one job per run;
   `findResumableReloadJob` returns the latest still-`running` job — the resume signal).
@@ -237,9 +240,29 @@ verify`. `verify` is a no-op slot for #178.
 
 **Semantics:**
 
+- **Scheduling (#176).** Stages run with **bounded concurrency** (`RELOAD_STAGE_CONCURRENCY`, env;
+  default 2, clamped to `[1, stage count]`; `1` = legacy strictly-sequential). Two ordering rules
+  govern the schedule, both data on `StageDescriptor`:
+  - **`deps`** — a stage starts only once every dep has reached a terminal state (complete/skipped/
+    failed; an ordering edge, not a success gate). Load-bearing edges: every enrichment deps
+    `releases`; `mb-release-events` deps `master-data` (it `MATCH`es the Master nodes only
+    master-data creates); `track-acousticbrainz`/`track-deezer` dep `track-musicbrainz`.
+  - **`resources`** — stages sharing a lane never overlap. `discogs`/`musicbrainz` guard the
+    **shared HTTP client's rate limiter** (the clients have no shared request queue, so two
+    concurrent stages on one would double the request rate — every client user carries its tag).
+    `track` serialises the four **batched** Track writers (`track-versions`, `track-musicbrainz`,
+    `track-acousticbrainz`, `track-deezer`): a Neo4j deadlock needs two transactions each holding-
+    and-waiting on ≥2 nodes, so it is only possible between two batched writers of the same label.
+    **`lyrics` writes one Track per transaction (deadlock-immune) and is intentionally untagged**,
+    free to overlap the batched lane — _if it ever moves to a batched write, give it the `track`
+    tag._ There is no `artist` lane: `artist-genres` is the only batched Artist writer, so no
+    Artist-axis deadlock is possible. Net effect: the #165 gate stages finish in the first minutes
+    while the slow `lyrics`/`track-musicbrainz` run on their own lanes.
 - **Resume, not restart.** On `POST /reload` and on **cold start** (`server.ts` onReady, after
-  the `autoIngest` guard), a still-`running` job is resumed from the last completed stage. A
-  killed-mid-reload pod continues; it does **not** re-wipe or skip-because-non-empty.
+  the `autoIngest` guard), a still-`running` job is resumed from where it left off. A
+  killed-mid-reload pod continues; it does **not** re-wipe or skip-because-non-empty. With
+  concurrency > 1 a crash can leave **several** stages `running` — all re-run idempotently (each
+  stage's candidate filters pick up only unfinished work).
 - **Stage outcomes:** a `run` returning a counts map → `complete`; returning `null` (its
   client was unconfigured) → `skipped`; throwing → `failed`, logged, and the run continues
   (failure isolation). The job ends `failed` if any stage failed, else `complete` — only a
