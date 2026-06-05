@@ -4,30 +4,32 @@ import { buildServer } from '../../src/server.js';
 import { initDriver } from '../../src/db/client.js';
 
 /**
- * Resolve a test-DB env var, falling back to its NEO4J_* equivalent.
- * Locally, integration tests run against the docker-compose Neo4j (NEO4J_*);
- * in CI they target the service container via NEO4J_TEST_*.
+ * Read a required test-DB connection var (NEO4J_TEST_*), throwing a pointed error
+ * if it is unset. There is no NEO4J_* fallback — the test vars must be set
+ * explicitly so a missing local config surfaces instead of silently borrowing the
+ * app's NEO4J_* values. An explicitly-set empty string is honored (e.g. the empty
+ * password of a NEO4J_AUTH=none database), so the check is `=== undefined`, not `!value`.
  */
-function resolveTestEnv(testKey: string, fallbackKey: string): string {
-  const value = process.env[testKey] ?? process.env[fallbackKey];
-  if (!value) {
-    throw new Error(`Integration tests require ${testKey} (or ${fallbackKey}) — see .env.example`);
+function resolveTestEnv(testKey: string): string {
+  const value = process.env[testKey];
+  if (value === undefined) {
+    throw new Error(`${testKey} is not set — add it to .env.test.local (see .env.example)`);
   }
   return value;
 }
 
 /**
- * Map the test-DB connection vars (NEO4J_TEST_*, falling back to NEO4J_*) onto the
- * NEO4J_* vars that buildServer's onReady hook and initDriver read, returning the
- * resolved values so callers can initialise a driver without re-reading env.
+ * Map the required test-DB connection vars (NEO4J_TEST_*) onto the NEO4J_* vars
+ * that buildServer's onReady hook and initDriver read, returning the resolved
+ * values so callers can initialise a driver without re-reading env.
  *
  * This process.env mutation is safe: the integration suite runs single-threaded
  * (fileParallelism: false), so no other server build observes the change.
  */
 function applyTestDbEnv(): { uri: string; user: string; password: string } {
-  const uri = resolveTestEnv('NEO4J_TEST_URI', 'NEO4J_URI');
-  const user = resolveTestEnv('NEO4J_TEST_USER', 'NEO4J_USER');
-  const password = resolveTestEnv('NEO4J_TEST_PASSWORD', 'NEO4J_PASSWORD');
+  const uri = resolveTestEnv('NEO4J_TEST_URI');
+  const user = resolveTestEnv('NEO4J_TEST_USER');
+  const password = resolveTestEnv('NEO4J_TEST_PASSWORD');
   process.env['NEO4J_URI'] = uri;
   process.env['NEO4J_USER'] = user;
   process.env['NEO4J_PASSWORD'] = password;
