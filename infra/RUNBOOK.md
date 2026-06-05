@@ -682,16 +682,16 @@ The Deployment uses `strategy: Recreate` — there will be ~30 seconds of downti
 
 One-time setup that lets the CD workflow ([#120](https://github.com/macamp0328/liner-notes/issues/120)) deploy without long-lived AWS keys. [`infra/terraform/cicd.tf`](terraform/cicd.tf) declares a GitHub Actions OIDC identity provider and a scoped `github-deploy` IAM role; a hosted runner assumes the role via `sts:AssumeRoleWithWebIdentity`. The role can push images to ECR and open an SSM port-forward to the k3s API server — nothing more.
 
-> **Run this manually, from the primary checkout, never in CI.** Terraform uses local state that lives in the **primary checkout** (not a worktree). Apply with your **`default` AWS profile** (`liner-notes-cli`); CI has no Terraform credentials and must never run `apply`. The role this creates is exactly what CI later _assumes_ — bootstrapping it from CI would be circular.
+> **Run this manually, from the primary checkout, never in CI.** Terraform uses local state that lives in the **primary checkout** (not a worktree). Apply with your **admin `root` AWS profile** (`liner-notes-admin`) — _not_ the scoped `default`/`liner-notes-cli` operator profile. This bootstrap creates an **account-wide** GitHub Actions OIDC provider (`aws_iam_openid_connect_provider.github`), and `iam:CreateOpenIDConnectProvider` is deliberately outside the operator's scope: [`operator-iam-policy.json`](iam/operator-iam-policy.json) grants only `iam:CreateRole`/`PutRolePolicy`/`PassRole` on `role/liner-notes-*`, with no OIDC-provider actions. Run with the operator profile and even the `aws iam list-open-id-connect-providers` pre-check below returns `AccessDenied`. CI has no Terraform credentials and must never run `apply`. The role this creates is exactly what CI later _assumes_ — bootstrapping it from CI would be circular.
 
 ### Step 1 — Check for an existing OIDC provider
 
-AWS permits exactly **one** OIDC provider per URL per account. If your account already has one for GitHub (e.g. from another project), reuse it instead of creating a second:
+AWS permits exactly **one** OIDC provider per URL per account. If your account already has one for GitHub (e.g. from another project), reuse it instead of creating a second. Use the admin `root` profile — the scoped operator lacks `iam:ListOpenIDConnectProviders` / `iam:GetOpenIDConnectProvider` and returns `AccessDenied` here (same reason the apply needs it; see the callout above):
 
 ```bash
-aws iam list-open-id-connect-providers
+aws --profile root iam list-open-id-connect-providers
 # Then inspect any ARN that looks like a GitHub provider:
-aws iam get-open-id-connect-provider \
+aws --profile root iam get-open-id-connect-provider \
   --open-id-connect-provider-arn arn:aws:iam::<account-id>:oidc-provider/token.actions.githubusercontent.com
 ```
 
@@ -699,23 +699,23 @@ If `token.actions.githubusercontent.com` is **already present**, edit `cicd.tf` 
 
 ### Step 2 — Apply
 
-From the **primary checkout**:
+From the **primary checkout**, with the admin `root` profile (creating the account-wide OIDC provider is outside the operator's scope — see the callout above):
 
 ```bash
 cd infra/terraform
-terraform apply         # type `yes` to confirm
+AWS_PROFILE=root terraform apply         # type `yes` to confirm
 ```
 
 On an established deployment, scope the apply to just the new resources so an unrelated drift elsewhere can't sneak in:
 
 ```bash
-terraform apply \
+AWS_PROFILE=root terraform apply \
   -target=aws_iam_openid_connect_provider.github \
   -target=aws_iam_role.github_deploy \
   -target=aws_iam_role_policy.github_deploy
 ```
 
-> **Reuse mode:** if you switched to the data source in Step 1 (account already has the GitHub OIDC provider), the `aws_iam_openid_connect_provider.github` resource is commented out — **drop its `-target` line**, since the data source is only read, never applied. Keep the two role targets.
+> **Reuse mode:** if you switched to the data source in Step 1 (account already has the GitHub OIDC provider), the `aws_iam_openid_connect_provider.github` resource is commented out — **drop its `-target` line**, since the data source is only read, never applied. Keep the two role targets. Still apply with `AWS_PROFILE=root`: reading the data source calls `iam:GetOpenIDConnectProvider`, which the scoped operator also lacks.
 
 > **Forks:** the trust policy's `sub` claim defaults to `repo:macamp0328/liner-notes:environment:production`. Set `github_repository = "your-org/your-fork"` in `terraform.tfvars` (see `terraform.tfvars.example`) before applying, or the role will refuse your runner's token.
 
