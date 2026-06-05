@@ -34,9 +34,9 @@ export const AURA_PAUSE_WINDOW_MS = 72 * 60 * 60 * 1000;
  * keep-warm ping (see `AURA_PAUSE_WINDOW_MS`), the binding constraint is the 72h
  * auto-pause window, not Node's `setInterval` overflow: 24h leaves ≥3 keep-warm
  * pings per window while still allowing a daily-cadence snapshot to cut log
- * volume, and is trivially under the 32-bit-max overflow point. `resolveSnapshot
- * IntervalMs` clamps to this, so `STATS_SNAPSHOT_INTERVAL_MS` can never push the
- * keep-warm out past the pause window. The default stays 6h.
+ * volume, and is trivially under the 32-bit-max overflow point.
+ * `resolveSnapshotIntervalMs` clamps to this, so `STATS_SNAPSHOT_INTERVAL_MS`
+ * can never push the keep-warm out past the pause window. The default stays 6h.
  */
 export const MAX_SNAPSHOT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
