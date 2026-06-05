@@ -40,6 +40,38 @@ describe('explore routes', () => {
     });
   });
 
+  describe('GET /api/v1/explore/producer/:name', () => {
+    it('returns releases for a known producer', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/producer/Butch%20Vig' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as { discogsId: number; role: string | null }[];
+      expect(body.length).toBeGreaterThan(0);
+      expect(body.every((r) => r.role === 'producer')).toBe(true);
+    });
+
+    it('returns an empty array for a name not credited as a producer', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/producer/__nobody__' });
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.payload)).toEqual([]);
+    });
+  });
+
+  describe('GET /api/v1/explore/engineer/:name', () => {
+    it('returns releases for a known engineer', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/engineer/Bill%20Price' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as { discogsId: number; role: string | null }[];
+      expect(body.length).toBeGreaterThan(0);
+      expect(body.every((r) => r.role === 'engineer')).toBe(true);
+    });
+
+    it('returns an empty array for a name not credited as an engineer', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/engineer/__nobody__' });
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.payload)).toEqual([]);
+    });
+  });
+
   describe('GET /api/v1/explore/studio/:name', () => {
     it('returns releases for a known studio', async () => {
       const res = await app.inject({

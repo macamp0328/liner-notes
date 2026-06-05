@@ -76,31 +76,27 @@ Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At)
 | `Style`    | `name` (unique)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `Country`  | `name` (unique)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `Studio`   | `name`, `location`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `Musician` | `discogsId` (if available), `name`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `Producer` | `discogsId` (if available), `name`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `Engineer` | `discogsId` (if available), `name`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `Musician` | `discogsId` (if available), `name` — the generic "credited person" node. Every credited contributor (performers, producers, engineers, …) is a `Musician`; the specific role lives on the `CREDITED_ON` edge (`roleCategory` / `displayRole`), not on a distinct node label.                                                                                                                                                                                                                                                                             |
 
 > `pressingYear` is the year this specific pressing was manufactured (from Discogs `release.year`). `originalYear` is the year the album was first released anywhere, fetched from the Discogs master release endpoint and stored as a post-ingestion enrichment step. Queries that order or filter by release date should prefer `coalesce(r.originalYear, r.pressingYear)`.
 
 ### Relationships
 
-| Relationship     | From → To                   | Properties                                                              |
-| ---------------- | --------------------------- | ----------------------------------------------------------------------- |
-| `RELEASED_BY`    | Release → Artist            | `role`                                                                  |
-| `CREDITED_ON`    | Musician → Release or Track | `role`, `displayRole`, `creditedAs`, `scope` (`"release"` or `"track"`) |
-| `PRODUCED_BY`    | Release → Producer          |                                                                         |
-| `ENGINEERED_BY`  | Release → Engineer          |                                                                         |
-| `ON_LABEL`       | Release → Label             | `catalogNumber`                                                         |
-| `IN_GENRE`       | Release → Genre             |                                                                         |
-| `IN_STYLE`       | Release → Style             |                                                                         |
-| `FROM_COUNTRY`   | Release → Country           |                                                                         |
-| `RECORDED_AT`    | Release → Studio            |                                                                         |
-| `HAS_TRACK`      | Release → Track             | `trackNumber`                                                           |
-| `PERFORMED_BY`   | Track → Artist              | `role`                                                                  |
-| `SAME_PERSON_AS` | Musician → Artist           |                                                                         |
-| `MEMBER_OF`      | Artist → Artist             | `startYear`, `endYear`                                                  |
-| `SUBSIDIARY_OF`  | Label → Label               |                                                                         |
-| `VERSION_OF`     | Release → Release           |                                                                         |
+| Relationship     | From → To                   | Properties                                                                                                                          |
+| ---------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `RELEASED_BY`    | Release → Artist            | `role`                                                                                                                              |
+| `CREDITED_ON`    | Musician → Release or Track | `role`, `displayRole`, `roleCategory` (`"performer"`/`"producer"`/`"engineer"`/…), `creditedAs`, `scope` (`"release"` or `"track"`) |
+| `ON_LABEL`       | Release → Label             | `catalogNumber`                                                                                                                     |
+| `IN_GENRE`       | Release → Genre             |                                                                                                                                     |
+| `IN_STYLE`       | Release → Style             |                                                                                                                                     |
+| `FROM_COUNTRY`   | Release → Country           |                                                                                                                                     |
+| `RECORDED_AT`    | Release → Studio            |                                                                                                                                     |
+| `HAS_TRACK`      | Release → Track             | `trackNumber`                                                                                                                       |
+| `PERFORMED_BY`   | Track → Artist              | `role`                                                                                                                              |
+| `SAME_PERSON_AS` | Musician → Artist           |                                                                                                                                     |
+| `MEMBER_OF`      | Artist → Artist             | `startYear`, `endYear`                                                                                                              |
+| `SUBSIDIARY_OF`  | Label → Label               |                                                                                                                                     |
+| `VERSION_OF`     | Release → Release           |                                                                                                                                     |
 
 ### Constraints & Indexes
 
@@ -139,6 +135,8 @@ Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
 | Method | Path                                     | Description                             |
 | ------ | ---------------------------------------- | --------------------------------------- |
 | `GET`  | `/api/v1/explore/musician/:name`         | Releases featuring this musician        |
+| `GET`  | `/api/v1/explore/producer/:name`         | Releases this person produced           |
+| `GET`  | `/api/v1/explore/engineer/:name`         | Releases this person engineered         |
 | `GET`  | `/api/v1/explore/studio/:name`           | Releases at this studio                 |
 | `GET`  | `/api/v1/explore/decade/:decade`         | Releases from this decade               |
 | `GET`  | `/api/v1/explore/year/:year`             | Releases from this exact year           |

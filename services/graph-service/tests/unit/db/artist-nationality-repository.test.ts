@@ -3,12 +3,8 @@ import type { Driver, Session, Record as Neo4jRecord } from 'neo4j-driver';
 import {
   getUnenrichedArtistsForNationality,
   getUnenrichedMusiciansForNationality,
-  getUnenrichedProducersForNationality,
-  getUnenrichedEngineersForNationality,
   setArtistNationality,
   setMusicianNationality,
-  setProducerNationality,
-  setEngineerNationality,
   resetNationalityEnrichment,
 } from '../../../src/db/artist-nationality-repository.js';
 
@@ -131,50 +127,6 @@ describe('getUnenrichedMusiciansForNationality', () => {
 });
 
 // ---------------------------------------------------------------------------
-// getUnenrichedProducersForNationality
-// ---------------------------------------------------------------------------
-describe('getUnenrichedProducersForNationality', () => {
-  it('returns producer with discogsId', async () => {
-    const record = makeRecord({ discogsId: makeNeo4jInt(50), name: 'Rick Rubin' });
-    const { session } = makeMockSession({ records: [record] });
-
-    const result = await getUnenrichedProducersForNationality(makeMockDriver(session));
-
-    expect(result).toEqual([{ discogsId: 50, name: 'Rick Rubin' }]);
-  });
-
-  it('queries the Producer label', async () => {
-    const { session, runSpy } = makeMockSession({ records: [] });
-
-    await getUnenrichedProducersForNationality(makeMockDriver(session));
-
-    expect(runSpy.mock.calls[0]?.[0]).toContain('Producer');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// getUnenrichedEngineersForNationality
-// ---------------------------------------------------------------------------
-describe('getUnenrichedEngineersForNationality', () => {
-  it('returns engineer with discogsId', async () => {
-    const record = makeRecord({ discogsId: makeNeo4jInt(60), name: 'Rudy Van Gelder' });
-    const { session } = makeMockSession({ records: [record] });
-
-    const result = await getUnenrichedEngineersForNationality(makeMockDriver(session));
-
-    expect(result).toEqual([{ discogsId: 60, name: 'Rudy Van Gelder' }]);
-  });
-
-  it('queries the Engineer label', async () => {
-    const { session, runSpy } = makeMockSession({ records: [] });
-
-    await getUnenrichedEngineersForNationality(makeMockDriver(session));
-
-    expect(runSpy.mock.calls[0]?.[0]).toContain('Engineer');
-  });
-});
-
-// ---------------------------------------------------------------------------
 // setArtistNationality
 // ---------------------------------------------------------------------------
 describe('setArtistNationality', () => {
@@ -245,68 +197,6 @@ describe('setMusicianNationality', () => {
 });
 
 // ---------------------------------------------------------------------------
-// setProducerNationality
-// ---------------------------------------------------------------------------
-describe('setProducerNationality', () => {
-  it('merges ORIGIN_COUNTRY when countryCode is provided', async () => {
-    const { session, runSpy } = makeMockSession();
-    await setProducerNationality(
-      makeMockDriver(session),
-      { discogsId: 50, name: 'Rick Rubin' },
-      'US',
-      'musicbrainz',
-    );
-
-    expect(runSpy.mock.calls[0]?.[0]).toContain('MERGE (c:Country');
-    expect(runSpy.mock.calls[0]?.[0]).toContain('Producer');
-    expect(runSpy.mock.calls[0]?.[0]).toContain('SET rel.source = $source');
-  });
-
-  it('matches by name when discogsId is null', async () => {
-    const { session, runSpy } = makeMockSession();
-    await setProducerNationality(
-      makeMockDriver(session),
-      { discogsId: null, name: 'Joe Meek' },
-      null,
-      null,
-    );
-
-    expect(runSpy.mock.calls[0]?.[0]).toContain('m.discogsId IS NULL');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// setEngineerNationality
-// ---------------------------------------------------------------------------
-describe('setEngineerNationality', () => {
-  it('merges ORIGIN_COUNTRY when countryCode is provided', async () => {
-    const { session, runSpy } = makeMockSession();
-    await setEngineerNationality(
-      makeMockDriver(session),
-      { discogsId: 60, name: 'Rudy Van Gelder' },
-      'US',
-      'viaf',
-    );
-
-    expect(runSpy.mock.calls[0]?.[0]).toContain('MERGE (c:Country');
-    expect(runSpy.mock.calls[0]?.[0]).toContain('Engineer');
-    expect(runSpy.mock.calls[0]?.[0]).toContain('SET rel.source = $source');
-  });
-
-  it('matches by name when discogsId is null', async () => {
-    const { session, runSpy } = makeMockSession();
-    await setEngineerNationality(
-      makeMockDriver(session),
-      { discogsId: null, name: 'Tom Dowd' },
-      null,
-      null,
-    );
-
-    expect(runSpy.mock.calls[0]?.[0]).toContain('m.discogsId IS NULL');
-  });
-});
-
-// ---------------------------------------------------------------------------
 // resetNationalityEnrichment
 // ---------------------------------------------------------------------------
 describe('resetNationalityEnrichment', () => {
@@ -327,12 +217,14 @@ describe('resetNationalityEnrichment', () => {
     expect(count).toBe(0);
   });
 
-  it('includes Producer and Engineer in the reset query', async () => {
+  it('resets Artist and Musician nodes', async () => {
     const { session, runSpy } = makeMockSession({ records: [] });
 
     await resetNationalityEnrichment(makeMockDriver(session));
 
-    expect(runSpy.mock.calls[0]?.[0]).toContain('n:Producer');
-    expect(runSpy.mock.calls[0]?.[0]).toContain('n:Engineer');
+    expect(runSpy.mock.calls[0]?.[0]).toContain('n:Artist');
+    expect(runSpy.mock.calls[0]?.[0]).toContain('n:Musician');
+    expect(runSpy.mock.calls[0]?.[0]).not.toContain('n:Producer');
+    expect(runSpy.mock.calls[0]?.[0]).not.toContain('n:Engineer');
   });
 });
