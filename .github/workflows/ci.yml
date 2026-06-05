@@ -274,3 +274,29 @@ jobs:
         uses: github/codeql-action/analyze@v4
         with:
           wait-for-processing: false
+
+  actionlint:
+    name: Actionlint
+    # Lints .github/workflows/*.yml: expression syntax, context availability, action
+    # input schemas, and shellcheck over every `run:` block. Catches errors a plain
+    # YAML parse can't — e.g. using the `runner` context in a job-level `env:`, which
+    # GitHub rejects at validation time and which startup-failed deploy.yml on the
+    # merge to main (#213, fixed in #214). Independent of source correctness, so it
+    # runs in parallel with no `needs:` — same group as audit/secrets-scan/codeql.
+    # Fix locally: `brew install actionlint` (or download the pinned binary), then
+    # run `actionlint` from the repo root. shellcheck is preinstalled on ubuntu-latest
+    # and on most dev machines; actionlint invokes it automatically.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run actionlint
+        # Pinned to a release version for reproducibility — same convention as the
+        # trufflehog/inframap pins above. Bump ACTIONLINT_VERSION to update.
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+        run: |
+          curl -fsSL -o /tmp/actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          # No path args: actionlint auto-discovers every workflow under .github/workflows/.
+          /tmp/actionlint
