@@ -41,7 +41,7 @@
     {
       "Sid": "RefreshGitHubOidcProvider",
       "Effect": "Allow",
-      "Action": "iam:GetOpenIDConnectProvider",
+      "Action": ["iam:GetOpenIDConnectProvider", "iam:ListOpenIDConnectProviderTags"],
       "Resource": "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
     },
     {

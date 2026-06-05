@@ -11,9 +11,10 @@
 # aws_iam_openid_connect_provider.github is an account-wide OIDC provider and
 # iam:CreateOpenIDConnectProvider is outside the scoped operator's permissions.
 # The operator's IAM actions are scoped to role + instance-profile resources
-# under liner-notes-*, plus read-only iam:GetOpenIDConnectProvider so its
-# day-to-day terraform applies can refresh this provider — but not Create. See
-# the "CD — IAM bootstrap" section of infra/RUNBOOK.md.
+# under liner-notes-*, plus read-only iam:GetOpenIDConnectProvider +
+# iam:ListOpenIDConnectProviderTags (default_tags is on, so refresh reads the
+# provider's tags) so its day-to-day terraform applies can refresh this provider
+# — but not Create. See the "CD — IAM bootstrap" section of infra/RUNBOOK.md.
 
 # --- GitHub OIDC identity provider ----------------------------------------
 #
