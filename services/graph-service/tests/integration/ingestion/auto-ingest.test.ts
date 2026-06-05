@@ -5,6 +5,7 @@ import { buildTestServer, initTestDriver } from '../setup.js';
 import { clearGraph } from '../../fixtures/loader.js';
 import { getJobState, resetJobState, type JobState } from '../../../src/ingestion/job-state.js';
 import release7000001 from '../../fixtures/releases/release-7000001.json' with { type: 'json' };
+import { snapshotEnv, type EnvSnapshot } from '../../helpers/env.js';
 
 const RELEASE_ID = 7000001;
 
@@ -69,10 +70,10 @@ describe('auto-ingest on empty graph (server onReady)', () => {
   let app: FastifyInstance | undefined;
   let driver: Driver | undefined;
   let fetchSpy: ReturnType<typeof vi.spyOn>;
-  const originalEnv: Record<string, string | undefined> = {};
+  let envSnapshot: EnvSnapshot;
 
   beforeAll(() => {
-    for (const key of ENV_KEYS) originalEnv[key] = process.env[key];
+    envSnapshot = snapshotEnv(ENV_KEYS);
     process.env['DISCOGS_TOKEN'] = 'test-token';
     process.env['DISCOGS_USERNAME'] = 'integration-test-user';
     process.env['DISCOGS_USER_AGENT'] = 'liner-notes/test';
@@ -88,10 +89,7 @@ describe('auto-ingest on empty graph (server onReady)', () => {
   });
 
   afterAll(async () => {
-    for (const key of ENV_KEYS) {
-      if (originalEnv[key] === undefined) delete process.env[key];
-      else process.env[key] = originalEnv[key];
-    }
+    envSnapshot.restore();
     resetJobState();
     // The driver and app are created mid-test, so an early failure can leave
     // either unset — guard cleanup so it never throws over the original error.

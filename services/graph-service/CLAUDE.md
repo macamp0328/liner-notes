@@ -326,6 +326,8 @@ Use `@fastify/swagger` + `@fastify/swagger-ui`. Define JSON schemas on all route
 
 **Fixtures:** `tests/fixtures/` — JSON fixtures for mocked Discogs responses and seed data
 
+**Shared helpers:** `tests/helpers/` — cross-suite test utilities (e.g. `env.ts`'s `snapshotEnv(keys)` for save/restore of `process.env` around a suite). Lives under `tests/`, never imported by `src/`.
+
 **Run tests:**
 
 ```bash
