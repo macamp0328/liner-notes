@@ -1,0 +1,115 @@
+# Scoped CD identity for GitHub Actions.
+#
+# The CD workflow (issue #120) runs `kubectl apply -k infra/k8s/graph-service`
+# + `kubectl -n liner-notes rollout status deployment/graph-service` against the
+# private k3s API over an SSM port-forward. It must authenticate as THIS scoped
+# ServiceAccount — never the cluster-admin /etc/rancher/k3s/k3s.yaml.
+#
+# This manifest is DELIBERATELY NOT part of infra/k8s/graph-service/kustomization.yaml:
+# the deployer cannot create the identity it authenticates as, so the operator
+# applies it once, out-of-band, with the admin kubeconfig. See infra/RUNBOOK.md
+# "CD — cluster bootstrap". Keeping it out of that kustomization also means
+# `kustomize build infra/k8s/graph-service` renders unchanged.
+#
+# The RBAC below grants EXACTLY the verbs/resources `kubectl apply -k` touches —
+# verbs get/list/watch/create/update/patch (NO delete: apply without --prune never
+# deletes). It is least-privilege, not cluster-admin.
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: github-deployer
+  namespace: liner-notes
+---
+# Long-lived (non-expiring) token for the SA. k8s >=1.24 no longer auto-mints a
+# token Secret for a ServiceAccount, so we declare one explicitly. The token
+# controller populates `.data.token` and `.data['ca.crt']` shortly after this is
+# created (the minter polls for it). k3s persists it in etcd-on-EBS, so it
+# survives instance stop/start.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-deployer-token
+  namespace: liner-notes
+  annotations:
+    kubernetes.io/service-account.name: github-deployer
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: github-deployer
+  namespace: liner-notes
+rules:
+  # core/v1 — Service (NodePort), ServiceAccount + Secret (ecr refresher /
+  # ExternalSecret targets), ConfigMap (forward-looking), Pod (rollout status /
+  # debugging). `secrets` write is load-bearing twice over: it applies the
+  # graph-service-secrets / ecr-pull-secret objects AND satisfies k8s'
+  # privilege-escalation rule when this SA creates the ecr-pull-secret-refresher
+  # Role (which itself grants secrets get/create/update/patch) and its
+  # RoleBinding — the actor must already hold a superset of the granted perms.
+  # Because this Role's secret verbs are a superset, NO `bind`/`escalate` verb is
+  # required.
+  - apiGroups: ['']
+    resources: ['services', 'serviceaccounts', 'configmaps', 'secrets', 'pods']
+    verbs: ['get', 'list', 'watch', 'create', 'update', 'patch']
+  # apps/v1 — Deployment; ReplicaSets are read by `rollout status` and useful for
+  # debugging a stuck rollout.
+  - apiGroups: ['apps']
+    resources: ['deployments', 'replicasets']
+    verbs: ['get', 'list', 'watch', 'create', 'update', 'patch']
+  # batch/v1 — the ecr-pull-secret-refresher CronJob (and the Jobs it spawns).
+  - apiGroups: ['batch']
+    resources: ['cronjobs', 'jobs']
+    verbs: ['get', 'list', 'watch', 'create', 'update', 'patch']
+  # rbac.authorization.k8s.io/v1 — the ecr-pull-secret-refresher Role +
+  # RoleBinding (see the secrets-escalation note above).
+  - apiGroups: ['rbac.authorization.k8s.io']
+    resources: ['roles', 'rolebindings']
+    verbs: ['get', 'list', 'watch', 'create', 'update', 'patch']
+  # external-secrets.io — the namespaced ExternalSecret (graph-service-secrets).
+  - apiGroups: ['external-secrets.io']
+    resources: ['externalsecrets']
+    verbs: ['get', 'list', 'watch', 'create', 'update', 'patch']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-deployer
+  namespace: liner-notes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: github-deployer
+subjects:
+  - kind: ServiceAccount
+    name: github-deployer
+    namespace: liner-notes
+---
+# Sole cluster-scoped grant. external-secret.yaml defines a cluster-scoped
+# ClusterSecretStore (aws-secrets-prod); every other object the kustomization
+# applies is namespaced. No `namespaces` grant (the namespace pre-exists from the
+# bootstrap) and no `customresourcedefinitions` grant (the external-secrets.io
+# CRDs are installed by the ESO Helm chart, not by `apply -k`). This is one
+# resource, not cluster-admin.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: github-deployer-clustersecretstores
+rules:
+  - apiGroups: ['external-secrets.io']
+    resources: ['clustersecretstores']
+    verbs: ['get', 'list', 'watch', 'create', 'update', 'patch']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: github-deployer-clustersecretstores
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: github-deployer-clustersecretstores
+subjects:
+  - kind: ServiceAccount
+    name: github-deployer
+    namespace: liner-notes
