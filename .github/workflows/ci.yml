@@ -274,3 +274,55 @@ jobs:
         uses: github/codeql-action/analyze@v4
         with:
           wait-for-processing: false
+
+  actionlint:
+    name: Actionlint
+    # Lints .github/workflows/*.yml: expression syntax, context availability, action
+    # input schemas, and shellcheck over every `run:` block. Catches errors a plain
+    # YAML parse can't — e.g. using the `runner` context in a job-level `env:`, which
+    # GitHub rejects at validation time and which startup-failed deploy.yml on the
+    # merge to main (#213, fixed in #214). Independent of source correctness, so it
+    # runs in parallel with no `needs:` — same group as audit/secrets-scan/codeql.
+    # Fix locally: `brew install actionlint shellcheck` (or download the pinned
+    # binaries), then run `actionlint` from the repo root.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run actionlint
+        # Pin BOTH actionlint and shellcheck for reproducibility — same convention
+        # as the trufflehog/inframap/graphviz pins. actionlint shellchecks every
+        # `run:` block using whatever shellcheck is on PATH, and the runner image's
+        # shellcheck version drifts (older versions flag info-level nits newer ones
+        # dropped), so an unpinned shellcheck makes this gate non-deterministic.
+        # Bump the *_VERSION envs to update.
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          # From the release's actionlint_1.7.12_checksums.txt (linux_amd64).
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+          SHELLCHECK_VERSION: 0.11.0
+          # SHA256 of the official GitHub release asset (shellcheck ships no
+          # checksums file); recompute and update this when bumping the version.
+          SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+        run: |
+          # Each binary is downloaded over HTTPS and verified against a pinned
+          # SHA256 before it's extracted or run — a tampered/unexpected asset
+          # fails the checksum and the job stops. Same integrity-pinning intent
+          # as the sha256-digest-pinned graphviz image in diagrams.yml.
+
+          # Pinned shellcheck → /usr/local/bin, which precedes the image's
+          # /usr/bin on PATH, so actionlint discovers this version.
+          curl -fsSL -o /tmp/shellcheck.tar.xz \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  /tmp/shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/shellcheck.tar.xz -C /tmp
+          sudo install -m 0755 "/tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version
+
+          # Pinned actionlint.
+          curl -fsSL -o /tmp/actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  /tmp/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+
+          # No path args: actionlint auto-discovers every workflow under .github/workflows/.
+          /tmp/actionlint
