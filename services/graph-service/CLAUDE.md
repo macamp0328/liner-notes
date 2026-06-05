@@ -227,10 +227,14 @@ Source files:
   function, so there is **one definition per stage**. Stage order follows #154:
   `releases → lyrics → master-data → artist-genres → artist-profiles → track-versions →
 mb-release-events → track-musicbrainz → track-acousticbrainz → track-deezer → nationality →
-verify`. `verify` is a no-op slot for #178.
+verify`. `verify` is the final **coverage gate** (#178) — its descriptor `run` is a no-op; the
+  gate logic lives in the orchestrator's `runVerifyGate` (it needs cross-stage `ranStages`).
 - `src/ingestion/orchestrator.ts` — `runReload(driver, { username, logger?, resumeJobId? })`
   and `buildReloadContext()`. Iterates `RELOAD_STAGES`, skipping stages already
   `complete`/`skipped`, and persists each transition.
+- `src/ingestion/reload-verify.ts` — the coverage-gate thresholds and pure comparison logic.
+  `RELOAD_COVERAGE_THRESHOLDS` is the one place the bars live; `evaluateCoverage(stats,
+ranStages)` produces a structured per-metric pass/fail report reused by the gate and its tests.
 - `src/db/job-repository.ts` — `ReloadJob`/`ReloadStage` persistence (one job per run;
   `findResumableReloadJob` returns the latest still-`running` job — the resume signal).
 - `src/db/schema.ts` — `ReloadJob` constraint + indexes.
@@ -244,6 +248,12 @@ verify`. `verify` is a no-op slot for #178.
   client was unconfigured) → `skipped`; throwing → `failed`, logged, and the run continues
   (failure isolation). The job ends `failed` if any stage failed, else `complete` — only a
   still-`running` job auto-resumes, so a `failed`/`complete` job never retries on every boot.
+- **Verify gate (#178).** The final `verify` stage compares graph coverage (via `getStats`)
+  against `RELOAD_COVERAGE_THRESHOLDS`, gating a metric only when its producing stage actually
+  ran this job (so a skipped stage's metric is exempt, not a false silently-zero). A metric that
+  is silently-zero (`applicable>0, covered=0`) or below its floor fails the reload `failed` and
+  logs at pino level ≥ 50; the per-metric report is persisted on the verify stage's `counts`
+  (and `error` on failure), surfaced by `/admin/reload/status`. An empty graph fails the gate.
 - **Wipe stays separate.** The reload never wipes; run `POST /reset?confirm=wipe-all` first for
   a from-scratch reload. It picks up from empty-or-partial.
 - **Coarse 409 only.** `/reload` 409s if a reload is already running; full mutual exclusion
