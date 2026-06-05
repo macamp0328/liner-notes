@@ -705,7 +705,7 @@ cd infra/terraform
 terraform apply         # type `yes` to confirm
 ```
 
-On an established deployment, scope the apply to just the three new resources so an unrelated drift elsewhere can't sneak in:
+On an established deployment, scope the apply to just the new resources so an unrelated drift elsewhere can't sneak in:
 
 ```bash
 terraform apply \
@@ -713,6 +713,8 @@ terraform apply \
   -target=aws_iam_role.github_deploy \
   -target=aws_iam_role_policy.github_deploy
 ```
+
+> **Reuse mode:** if you switched to the data source in Step 1 (account already has the GitHub OIDC provider), the `aws_iam_openid_connect_provider.github` resource is commented out — **drop its `-target` line**, since the data source is only read, never applied. Keep the two role targets.
 
 > **Forks:** the trust policy's `sub` claim defaults to `repo:macamp0328/liner-notes:environment:production`. Set `github_repository = "your-org/your-fork"` in `terraform.tfvars` (see `terraform.tfvars.example`) before applying, or the role will refuse your runner's token.
 
