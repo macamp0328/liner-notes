@@ -13,6 +13,8 @@ import { applySchema } from './db/schema.js';
 import { hasReleases } from './db/ingestion-repository.js';
 import { buildDiscogsClientFromEnv, runIngestion } from './ingestion/ingest.js';
 import { startJob, completeJob, failJob, type IngestionStats } from './ingestion/job-state.js';
+import { findResumableReloadJob } from './db/job-repository.js';
+import { runReload } from './ingestion/orchestrator.js';
 
 const OPENAPI_CONFIG = {
   openapi: {
@@ -112,6 +114,33 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     if (!autoIngest) {
       app.log.info('Auto-ingestion disabled — skipping empty-graph check');
       return;
+    }
+
+    // Cold-start recovery (issue #175): if a reload was interrupted — its job is still
+    // `running` because the pod died before it finished — resume it from the last completed
+    // stage. This is what makes a deploy/pod-roll mid-reload safe: the persisted job is the
+    // source of truth, so the replacement pod continues rather than skipping (the graph is
+    // non-empty) or re-wiping. Fire-and-forget — must not block onReady.
+    const resumable = await findResumableReloadJob(driver);
+    if (resumable) {
+      const username = process.env['DISCOGS_USERNAME'];
+      if (username) {
+        app.log.warn(
+          { jobId: resumable.jobId },
+          'Interrupted reload detected — resuming from the last completed stage',
+        );
+        void runReload(driver, { username, logger: app.log, resumeJobId: resumable.jobId }).catch(
+          (err: unknown) => {
+            app.log.error({ err }, 'Reload resume failed');
+          },
+        );
+      } else {
+        app.log.warn(
+          { jobId: resumable.jobId },
+          'Interrupted reload detected but DISCOGS_USERNAME not set — cannot resume',
+        );
+      }
+      return; // do not also run the empty-graph safety net
     }
 
     // Auto-trigger ingestion when the graph is empty (first run).
