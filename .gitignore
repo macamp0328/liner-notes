@@ -38,6 +38,9 @@ tfplan
 # The committed terraform.tfvars.example documents the available knobs.
 *.tfvars
 !*.tfvars.example
+# Backend bucket name carries the account id — supplied at `terraform init` via
+# -backend-config; the committed backend.config.example documents the format.
+infra/terraform/backend.config
 # Lambda deployment package — built from lambda/*.py by archive_file on plan.
 infra/terraform/lambda/*.zip
 __pycache__/
