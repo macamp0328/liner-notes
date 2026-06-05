@@ -49,7 +49,6 @@ jobs:
     timeout-minutes: 20
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
-      KUBECONFIG: ${{ runner.temp }}/deploy-kubeconfig
     steps:
       - uses: actions/checkout@v6
 
@@ -143,6 +142,11 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
+          # Set KUBECONFIG here (not in job-level env) — the `runner` context is
+          # unavailable at jobs.<id>.env and using it there fails workflow
+          # validation. Export for this step + persist for later steps.
+          export KUBECONFIG="$RUNNER_TEMP/deploy-kubeconfig"
+          echo "KUBECONFIG=$KUBECONFIG" >> "$GITHUB_ENV"
           printf '%s' "$KUBECONFIG_B64" | base64 -d > "$KUBECONFIG"
           # Mask the decoded bearer token so it can never surface in later logs.
           token=$(kubectl config view --raw -o jsonpath='{.users[0].user.token}')
