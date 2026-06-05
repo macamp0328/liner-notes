@@ -207,6 +207,15 @@
         "scheduler:UntagResource"
       ],
       "Resource": "arn:aws:scheduler:*:123456789012:schedule/default/liner-notes-*"
+    },
+    {
+      "Sid": "TerraformRemoteState",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": [
+        "arn:aws:s3:::liner-notes-tfstate-123456789012",
+        "arn:aws:s3:::liner-notes-tfstate-123456789012/graph-service/*"
+      ]
     }
   ]
 }
