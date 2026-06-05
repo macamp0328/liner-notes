@@ -235,11 +235,23 @@ jobs:
           echo "::error::/api/v1/health did not return 200 within the retry budget (last: ${code})." >&2
           exit 1
 
-      # Always release the tunnel — terminate-session by id frees one of the two
-      # allowed concurrent SSM sessions so a re-run isn't blocked.
+      # Always release the tunnel. terminate-session by id frees one of the two
+      # allowed concurrent SSM sessions so a re-run isn't blocked. Prefer the id
+      # captured at open time; fall back to re-parsing the session log if it
+      # wasn't (output races / format change), and warn rather than silently
+      # skip if it still can't be resolved — the killed local process already
+      # drops the tunnel, and the server-side session then idles out on its own.
       - name: Tear down SSM port-forward
         if: always()
         run: |
           [ -n "${SSM_PID:-}" ] && kill "$SSM_PID" 2>/dev/null || true
-          [ -n "${SSM_SID:-}" ] && aws ssm terminate-session --session-id "$SSM_SID" 2>/dev/null || true
+          sid="${SSM_SID:-}"
+          if [ -z "$sid" ] && [ -f "$RUNNER_TEMP/ssm.log" ]; then
+            sid=$(grep -oE 'SessionId: [A-Za-z0-9._-]+' "$RUNNER_TEMP/ssm.log" | head -1 | awk '{print $2}' || true)
+          fi
+          if [ -n "$sid" ]; then
+            aws ssm terminate-session --session-id "$sid" 2>/dev/null || true
+          else
+            echo "::warning::SSM SessionId unresolved — terminate-session skipped. The killed local process drops the tunnel; the server-side session idles out on its own."
+          fi
           true
