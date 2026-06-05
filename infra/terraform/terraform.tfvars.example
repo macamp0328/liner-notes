@@ -39,3 +39,9 @@
 # scheduler_timezone   = "America/New_York"
 # scheduler_stop_cron  = "cron(0 23 * * ? *)"
 # scheduler_start_cron = "cron(0 8 * * ? *)"
+
+# CD deploy role (infra/terraform/cicd.tf). owner/repo whose `production`
+# environment may assume the GitHub-OIDC deploy role. Forks MUST override this
+# — the default points at the upstream repo, and the trust policy won't match a
+# fork's OIDC `sub` claim until you set it.
+# github_repository = "your-org/your-fork"

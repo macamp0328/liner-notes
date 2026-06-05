@@ -59,3 +59,9 @@ variable "scheduler_start_cron" {
   type        = string
   default     = "cron(0 8 * * ? *)"
 }
+
+variable "github_repository" {
+  description = "owner/repo allowed to assume the CD deploy role via GitHub OIDC. Used in the trust policy's `sub` claim (repo:<owner/repo>:environment:production). Override for forks."
+  type        = string
+  default     = "macamp0328/liner-notes"
+}

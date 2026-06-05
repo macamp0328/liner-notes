@@ -7,6 +7,7 @@ This is the operator's guide to standing up, redeploying, and recovering the pro
 - [First-time deploy — step by step](#first-time-deploy--step-by-step)
 - [Observability — fluent-bit and alarms](#observability--fluent-bit-and-alarms)
 - [Redeploy procedure](#redeploy-procedure)
+- [CD — IAM bootstrap](#cd--iam-bootstrap)
 - [Full reload from scratch](#full-reload-from-scratch)
 - [Instance power switch — scale-to-zero](#instance-power-switch--scale-to-zero)
 - [Resuming a paused Aura instance](#resuming-a-paused-aura-instance)
@@ -673,6 +674,61 @@ The Deployment uses `strategy: Recreate` — there will be ~30 seconds of downti
 > kubectl -n liner-notes annotate externalsecret graph-service-secrets force-sync=$(date +%s) --overwrite
 > kubectl -n liner-notes get externalsecret graph-service-secrets   # LAST SYNC resets to a few seconds
 > ```
+
+---
+
+## CD — IAM bootstrap
+
+One-time setup that lets the CD workflow ([#120](https://github.com/macamp0328/liner-notes/issues/120)) deploy without long-lived AWS keys. [`infra/terraform/cicd.tf`](terraform/cicd.tf) declares a GitHub Actions OIDC identity provider and a scoped `github-deploy` IAM role; a hosted runner assumes the role via `sts:AssumeRoleWithWebIdentity`. The role can push images to ECR and open an SSM port-forward to the k3s API server — nothing more.
+
+> **Run this manually, from the primary checkout, never in CI.** Terraform uses local state that lives in the **primary checkout** (not a worktree). Apply with your **`default` AWS profile** (`liner-notes-cli`); CI has no Terraform credentials and must never run `apply`. The role this creates is exactly what CI later _assumes_ — bootstrapping it from CI would be circular.
+
+### Step 1 — Check for an existing OIDC provider
+
+AWS permits exactly **one** OIDC provider per URL per account. If your account already has one for GitHub (e.g. from another project), reuse it instead of creating a second:
+
+```bash
+aws iam list-open-id-connect-providers
+# Then inspect any ARN that looks like a GitHub provider:
+aws iam get-open-id-connect-provider \
+  --open-id-connect-provider-arn arn:aws:iam::<account-id>:oidc-provider/token.actions.githubusercontent.com
+```
+
+If `token.actions.githubusercontent.com` is **already present**, edit `cicd.tf` before applying: comment out the `aws_iam_openid_connect_provider.github` resource, uncomment the `data "aws_iam_openid_connect_provider" "github"` block, and flip `local.github_oidc_provider_arn` to `data.aws_iam_openid_connect_provider.github.arn`. The role trust policy reads the local, so nothing else changes. If there is **no** GitHub provider, leave `cicd.tf` as shipped — the resource form creates it.
+
+### Step 2 — Apply
+
+From the **primary checkout**:
+
+```bash
+cd infra/terraform
+terraform apply         # type `yes` to confirm
+```
+
+On an established deployment, scope the apply to just the three new resources so an unrelated drift elsewhere can't sneak in:
+
+```bash
+terraform apply \
+  -target=aws_iam_openid_connect_provider.github \
+  -target=aws_iam_role.github_deploy \
+  -target=aws_iam_role_policy.github_deploy
+```
+
+> **Forks:** the trust policy's `sub` claim defaults to `repo:macamp0328/liner-notes:environment:production`. Set `github_repository = "your-org/your-fork"` in `terraform.tfvars` (see `terraform.tfvars.example`) before applying, or the role will refuse your runner's token.
+
+### Step 3 — Record the role ARN for CI
+
+The workflow reads the role ARN from an `AWS_DEPLOY_ROLE_ARN` GitHub Actions **variable** (not a secret — a role ARN is not sensitive). Capture and set it:
+
+```bash
+ROLE_ARN=$(terraform output -raw github_deploy_role_arn)
+echo "$ROLE_ARN"
+
+# From the repo root, with the gh CLI authenticated:
+gh variable set AWS_DEPLOY_ROLE_ARN --body "$ROLE_ARN"
+```
+
+Or set it via the GitHub UI under **Settings → Secrets and variables → Actions → Variables**. This unblocks #120.
 
 ---
 

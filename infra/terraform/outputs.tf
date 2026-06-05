@@ -69,3 +69,8 @@ output "instance_schedule_names" {
   description = "Names of the nightly stop/start EventBridge schedules toggled by `pnpm power:auto`/`off`."
   value       = [aws_scheduler_schedule.stop.name, aws_scheduler_schedule.start.name]
 }
+
+output "github_deploy_role_arn" {
+  description = "ARN of the role the CD workflow (#120) assumes via GitHub OIDC. Record as the AWS_DEPLOY_ROLE_ARN GitHub Actions variable — see the 'CD — IAM bootstrap' section of infra/RUNBOOK.md."
+  value       = aws_iam_role.github_deploy.arn
+}
