@@ -13,7 +13,6 @@ async function runLoadTest() {
     // but users might run this against the dev db, so let's allow overriding.
     // Use test setup only if NEO4J_TEST_URI is present, otherwise assume it's running
     // with dev settings (NEO4J_URI) or whatever is in process.env
-    let app: FastifyInstance | undefined;
     if (process.env.NEO4J_TEST_URI) {
       initTestDriver();
       await clearGraph(getDriver());
