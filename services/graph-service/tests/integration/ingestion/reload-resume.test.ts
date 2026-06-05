@@ -1,0 +1,133 @@
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
+import type { Driver } from 'neo4j-driver';
+import { initTestDriver } from '../setup.js';
+import { clearGraph } from '../../fixtures/loader.js';
+import { mergeReleaseGraph } from '../../../src/db/ingestion-repository.js';
+import { runReload } from '../../../src/ingestion/orchestrator.js';
+import { RELOAD_STAGES } from '../../../src/ingestion/stages.js';
+import {
+  createReloadJob,
+  markStageComplete,
+  markStageRunning,
+  getReloadJob,
+} from '../../../src/db/job-repository.js';
+import type { DiscogsRelease } from '../../../src/ingestion/types.js';
+import release7000001 from '../../fixtures/releases/release-7000001.json' with { type: 'json' };
+
+const RELEASE_ID = 7000001;
+
+// The crash point: stages before this were "already done"; this one was mid-flight
+// when the pod died (left `running`); everything after is `pending`.
+const CRASH_STAGE = 'mb-release-events';
+const STAGE_NAMES = RELOAD_STAGES.map((s) => s.name);
+const DONE_BEFORE_CRASH = STAGE_NAMES.slice(0, STAGE_NAMES.indexOf(CRASH_STAGE));
+
+const ENV_KEYS = ['DISCOGS_TOKEN', 'DISCOGS_USERNAME', 'DISCOGS_USER_AGENT'] as const;
+
+function make404Router(): Response {
+  return {
+    ok: false,
+    status: 404,
+    statusText: 'Not Found',
+    headers: { get: () => null },
+    json: vi.fn().mockResolvedValue({ message: 'Not Found' }),
+  } as unknown as Response;
+}
+
+async function countReleases(driver: Driver): Promise<number> {
+  const session = driver.session();
+  try {
+    const res = await session.run('MATCH (r:Release) RETURN count(r) AS n');
+    return (res.records[0]?.get('n') as { toNumber(): number }).toNumber();
+  } finally {
+    await session.close();
+  }
+}
+
+describe('reload resume after a simulated crash (real Neo4j)', () => {
+  let driver: Driver;
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  const originalEnv: Record<string, string | undefined> = {};
+
+  beforeAll(() => {
+    for (const key of ENV_KEYS) originalEnv[key] = process.env[key];
+    process.env['DISCOGS_TOKEN'] = 'test-token';
+    process.env['DISCOGS_USERNAME'] = 'integration-test-user';
+    process.env['DISCOGS_USER_AGENT'] = 'liner-notes/test';
+    // MusicBrainz creds are deliberately left unset so the musicbrainz client is null and
+    // its stages (mb-release-events / track-musicbrainz / nationality) resolve to `skipped`
+    // — deterministic regardless of CI's configured tokens.
+    driver = initTestDriver();
+  });
+
+  afterEach(() => {
+    fetchSpy?.mockRestore();
+  });
+
+  afterAll(async () => {
+    for (const key of ENV_KEYS) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+    await clearGraph(driver);
+  });
+
+  it('skips completed stages, resumes the rest, and never re-wipes the graph', async () => {
+    // 1. A non-empty graph (the `releases` stage already ran before the crash).
+    await clearGraph(driver);
+    await mergeReleaseGraph(driver, release7000001 as unknown as DiscogsRelease);
+    expect(await countReleases(driver)).toBe(1);
+
+    // 2. A persisted job mid-reload: everything up to the crash stage is complete, the
+    //    crash stage is `running`, the rest are `pending` (as createReloadJob leaves them).
+    const jobId = await createReloadJob(driver, STAGE_NAMES);
+    for (const name of DONE_BEFORE_CRASH) {
+      await markStageComplete(driver, jobId, name, { enriched: 0 });
+    }
+    await markStageRunning(driver, jobId, CRASH_STAGE);
+
+    // 3. Any stage that does run hits a 404-everything fetch, so nothing touches the network.
+    fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(() => Promise.resolve(make404Router()));
+
+    // 4. Resume the interrupted job.
+    const result = await runReload(driver, {
+      username: 'integration-test-user',
+      resumeJobId: jobId,
+    });
+
+    // 5. The job finishes cleanly and the same jobId is continued (not a new one).
+    expect(result.jobId).toBe(jobId);
+    expect(result.status).toBe('complete');
+
+    // 6. The graph was NOT re-wiped — the seeded release survives — and the `releases`
+    //    stage was never re-run (its collection endpoint was never fetched).
+    expect(await countReleases(driver)).toBe(1);
+    const fetchedUrls = fetchSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(fetchedUrls.some((u: string) => u.includes('/collection/folders/0/releases'))).toBe(
+      false,
+    );
+
+    // 7. Every stage is terminal exactly once: the pre-done stages stay complete, the
+    //    musicbrainz-dependent stages are skipped (client unconfigured), and the rest complete.
+    const job = await getReloadJob(driver, jobId);
+    expect(job).not.toBeNull();
+    const byName = Object.fromEntries((job?.stages ?? []).map((s) => [s.stage, s.status]));
+
+    for (const name of DONE_BEFORE_CRASH) {
+      expect(byName[name]).toBe('complete');
+    }
+    expect(byName['mb-release-events']).toBe('skipped');
+    expect(byName['track-musicbrainz']).toBe('skipped');
+    expect(byName['nationality']).toBe('skipped');
+    expect(byName['track-acousticbrainz']).toBe('complete');
+    expect(byName['track-deezer']).toBe('complete');
+    expect(byName['verify']).toBe('complete');
+
+    // No stage left pending or running.
+    const statuses = (job?.stages ?? []).map((s) => s.status);
+    expect(statuses).not.toContain('pending');
+    expect(statuses).not.toContain('running');
+  });
+});
