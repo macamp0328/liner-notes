@@ -1,4 +1,5 @@
 import neo4j, { Driver } from 'neo4j-driver';
+import { toInt, toStr, toFloat } from '../coercions.js';
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -119,32 +120,6 @@ export interface LabelFull {
   profile: string | null;
   contactInfo: string | null;
   releases: LabelRelease[];
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function toInt(v: unknown): number | null {
-  if (v === null || v === undefined) return null;
-  if (typeof (v as { toNumber?: () => number }).toNumber === 'function') {
-    return (v as { toNumber: () => number }).toNumber();
-  }
-  return v as number;
-}
-
-function toStr(v: unknown): string | null {
-  if (v === null || v === undefined) return null;
-  return v as string;
-}
-
-function toFloat(v: unknown): number | null {
-  if (v === null || v === undefined) return null;
-  if (typeof (v as { toNumber?: () => number }).toNumber === 'function') {
-    return (v as { toNumber: () => number }).toNumber();
-  }
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-  return null;
 }
 
 // ---------------------------------------------------------------------------

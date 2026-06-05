@@ -1,15 +1,5 @@
 import type { Driver } from 'neo4j-driver';
-
-type Neo4jInt = { toNumber(): number };
-
-/** Coerce a Neo4j count (Integer or plain number) to a JS number. */
-function toNumber(raw: unknown): number {
-  if (raw === null || raw === undefined) return 0;
-  if (typeof raw === 'number') return raw;
-  if (typeof (raw as Neo4jInt).toNumber === 'function') return (raw as Neo4jInt).toNumber();
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : 0;
-}
+import { toInt } from './coercions.js';
 
 /**
  * Coverage of a single enrichment, expressed as covered/applicable.
@@ -190,7 +180,8 @@ async function runCounts(driver: Driver, cypher: string): Promise<Map<string, nu
     const out = new Map<string, number>();
     if (record) {
       for (const key of record.keys as string[]) {
-        out.set(key, toNumber(record.get(key)));
+        // Count columns are always Neo4j Integers; ?? 0 preserves the prior 0-default.
+        out.set(key, toInt(record.get(key)) ?? 0);
       }
     }
     return out;
