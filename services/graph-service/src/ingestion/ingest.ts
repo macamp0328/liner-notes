@@ -81,18 +81,30 @@ async function runStage<T>(
  * The DiscogsClient handles rate limiting and 429 backoff internally.
  * Call this asynchronously from server.ts onReady — do not await it there.
  */
-export async function runIngestion(
+export interface ReleasesIngestSummary {
+  releasesProcessed: number;
+  releasesFailed: number;
+  errors: string[];
+}
+
+/**
+ * Fetch the user's full Discogs collection and MERGE every release into Neo4j.
+ *
+ * Extracted from runIngestion (issue #175) so the orchestrated reload's `releases` stage
+ * and the legacy /ingest path share one definition. Per-release failures are caught,
+ * logged, and collected — one bad release must not abort the rest. Every write is a MERGE,
+ * so a re-run is idempotent: already-loaded releases are no-ops and an interrupted run
+ * resumes safely (the reload's `releases` stage re-fetches the whole collection on resume).
+ */
+export async function ingestReleases(
   client: DiscogsClient,
   driver: Driver,
-  config: IngestionConfig,
-): Promise<IngestionSummary> {
-  const log: Logger = config.logger ?? console;
-  const startTime = Date.now();
+  username: string,
+  log: Logger,
+): Promise<ReleasesIngestSummary> {
   const errors: string[] = [];
   let releasesProcessed = 0;
   let releasesFailed = 0;
-
-  log.info(`[ingest] Starting ingestion for user: ${config.username}`);
 
   // Step 1: Collect all release IDs from the paginated collection endpoint
   const releaseIds: number[] = [];
@@ -101,7 +113,7 @@ export async function runIngestion(
 
   do {
     log.info(`[ingest] Fetching collection page ${page}/${totalPages}`);
-    const collectionPage = await client.getCollectionReleases(config.username, page, PER_PAGE);
+    const collectionPage = await client.getCollectionReleases(username, page, PER_PAGE);
     totalPages = collectionPage.pagination.pages;
 
     for (const entry of collectionPage.releases) {
@@ -127,11 +139,29 @@ export async function runIngestion(
     } catch (err) {
       releasesFailed++;
       const msg = err instanceof Error ? err.message : String(err);
-      const errorEntry = `Release ${releaseId}: ${msg}`;
-      errors.push(errorEntry);
+      errors.push(`Release ${releaseId}: ${msg}`);
       log.error(`[ingest] Failed to process release ${releaseId}: ${msg}`);
     }
   }
+
+  return { releasesProcessed, releasesFailed, errors };
+}
+
+export async function runIngestion(
+  client: DiscogsClient,
+  driver: Driver,
+  config: IngestionConfig,
+): Promise<IngestionSummary> {
+  const log: Logger = config.logger ?? console;
+  const startTime = Date.now();
+
+  log.info(`[ingest] Starting ingestion for user: ${config.username}`);
+
+  // Steps 1-2: fetch the collection and MERGE each release (shared with the reload's
+  // `releases` stage via ingestReleases — issue #175).
+  const releasesSummary = await ingestReleases(client, driver, config.username, log);
+  const { releasesProcessed, releasesFailed } = releasesSummary;
+  const errors: string[] = [...releasesSummary.errors];
 
   // Steps 3-7: Enrichment stages. Each runs in isolation via runStage — a throw
   // in one stage is logged and recorded in `errors` but must NOT abort the stages
