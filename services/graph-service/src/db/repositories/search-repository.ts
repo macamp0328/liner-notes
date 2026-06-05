@@ -1,4 +1,5 @@
 import { Driver } from 'neo4j-driver';
+import { toInt, toStr, toFloat } from '../coercions.js';
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -26,33 +27,6 @@ export interface LyricsSearchResult {
   releaseTitle: string | null;
   releaseDiscogsId: number | null;
   score: number;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function toInt(val: unknown): number | null {
-  if (val === null || val === undefined) return null;
-  if (typeof val === 'object' && val !== null && 'toNumber' in val) {
-    return (val as { toNumber: () => number }).toNumber();
-  }
-  if (typeof val === 'number') return val;
-  return null;
-}
-
-function toStr(val: unknown): string | null {
-  if (val === null || val === undefined) return null;
-  return String(val);
-}
-
-function toFloat(val: unknown): number {
-  if (val === null || val === undefined) return 0;
-  if (typeof val === 'number') return val;
-  if (typeof val === 'object' && val !== null && 'toNumber' in val) {
-    return (val as { toNumber: () => number }).toNumber();
-  }
-  return Number(val) || 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +59,8 @@ export async function searchGeneral(driver: Driver, q: string): Promise<SearchRe
       const node = rec.get('node') as Record<string, unknown> & {
         properties: Record<string, unknown>;
       };
-      const score = toFloat(rec.get('score'));
+      // Fulltext queryNodes always yields a score; ?? 0 keeps the contract number (never null).
+      const score = toFloat(rec.get('score')) ?? 0;
       const props = node.properties;
 
       if (nodeLabels.includes('Artist')) {
@@ -153,7 +128,7 @@ export async function searchLyrics(driver: Driver, q: string): Promise<LyricsSea
       trackTitle: toStr(rec.get('trackTitle')) ?? '',
       releaseTitle: toStr(rec.get('releaseTitle')),
       releaseDiscogsId: toInt(rec.get('releaseDiscogsId')),
-      score: toFloat(rec.get('score')),
+      score: toFloat(rec.get('score')) ?? 0,
     }));
   } finally {
     await session.close();
