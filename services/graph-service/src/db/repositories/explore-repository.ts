@@ -1,5 +1,6 @@
 import neo4j, { Driver } from 'neo4j-driver';
 import type { RoleCategory } from '../../ingestion/transforms.js';
+import { toInt, toStr, toFloat } from '../coercions.js';
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -55,33 +56,6 @@ export interface MostPressedRelease {
   masterDiscogsId: number;
   countryCount: number;
   countries: string[];
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function toInt(val: unknown): number | null {
-  if (val === null || val === undefined) return null;
-  if (typeof val === 'object' && val !== null && 'toNumber' in val) {
-    return (val as { toNumber: () => number }).toNumber();
-  }
-  if (typeof val === 'number') return val;
-  return null;
-}
-
-function toStr(val: unknown): string | null {
-  if (val === null || val === undefined) return null;
-  return String(val);
-}
-
-function toFloat(val: unknown): number | null {
-  if (val === null || val === undefined) return null;
-  if (typeof (val as { toNumber?: () => number }).toNumber === 'function') {
-    return (val as { toNumber: () => number }).toNumber();
-  }
-  if (typeof val === 'number' && Number.isFinite(val)) return val;
-  return null;
 }
 
 function mapExploreRelease(record: { get: (key: string) => unknown }): ExploreRelease {

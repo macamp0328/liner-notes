@@ -12,6 +12,7 @@ This is the operator's guide to standing up, redeploying, and recovering the pro
 - [CD — workflow setup](#cd--workflow-setup)
 - [Full reload from scratch](#full-reload-from-scratch)
 - [Instance power switch — scale-to-zero](#instance-power-switch--scale-to-zero)
+- [Keeping Aura warm](#keeping-aura-warm)
 - [Resuming a paused Aura instance](#resuming-a-paused-aura-instance)
 - [Where to look when things break](#where-to-look-when-things-break)
 - [Tear-down](#tear-down)
@@ -924,14 +925,33 @@ Each command prints the resulting state, e.g.:
 
 - Give the node ~1–2 minutes; k3s restarts the graph-service pod automatically.
 - The ECR pull-secret CronJob refreshes every 6h; after a long stop the in-cluster `ecr-pull-secret` may be stale until the next fire. If the pod is stuck `ImagePullBackOff` with `unauthorized`, force a refresh: `kubectl -n liner-notes create job --from=cronjob/ecr-pull-secret-refresher refresh-now`, then `kubectl -n liner-notes rollout restart deployment/graph-service`.
-- The first request is slow: the pod settles and **Aura resumes from its own pause** if it has been idle ≥72h (see below).
+- The first request is slow while the pod settles. If the node was stopped ≥72h, Aura will have auto-paused and does **not** resume on its own — resume it manually first (see "Resuming a paused Aura instance" below).
 - The two transient alarms are re-enabled automatically — no manual alarm steps.
+
+---
+
+## Keeping Aura warm
+
+AuraDB Free auto-pauses after **72 hours of inactivity**, and only a _real query_ resets that idle timer — a bare connectivity check (what `GET /api/v1/health` runs, and what the Route 53 health check hits every 30s) does **not**. So the keep-warm has to issue actual Cypher.
+
+We don't run a separate keep-warm job: **the graph-service stats-snapshot timer already is one.** On every pod start and then every 6h (`STATS_SNAPSHOT_INTERVAL_MS`, default 6h, capped at 24h), it runs `getStats` — real count queries against Aura — to feed the "Collection over time" dashboard. That real query keeps Aura warm as a side effect. The cap guarantees the cadence can never be configured outside the 72h window ([`stats-snapshot.ts`](../services/graph-service/src/observability/stats-snapshot.ts) `MAX_SNAPSHOT_INTERVAL_MS` / `AURA_PAUSE_WINDOW_MS`, enforced by a unit test).
+
+**The scale-to-zero design tension** (from [#103](https://github.com/macamp0328/liner-notes/issues/103)): when the node is stopped via `power:off`, nothing on it can reach Aura. The options were (a) keep the node always-on, (b) run an independent keep-warm (e.g. a Lambda) that hits Aura directly regardless of node state, or (c) align keep-warm to the node's uptime. **We chose (c).** The snapshot timer rides the graph-service pod, so it keeps Aura warm exactly while the node is up. When you `power:off` for >72h, the timer doesn't run, Aura pauses — and a stopped node plus a paused Aura is the intended coherent "asleep" state at ~$0/month. The cost is one manual resume on the way back up (next section); for a personal collection that's the right trade.
+
+### Verifying keep-warm
+
+```bash
+# Confirm the snapshot/keep-warm is firing (one line on startup, then every 6h):
+kubectl -n liner-notes logs deployment/graph-service | grep "stats snapshot"
+```
+
+To confirm it actually prevents the pause, leave the node up and idle (no other traffic) for >72h, then check the Aura console shows the instance **running** and no `liner-notes-neo4j-disconnects` alarm fired.
 
 ---
 
 ## Resuming a paused Aura instance
 
-AuraDB Free auto-pauses after **72 hours of inactivity**. Traffic does **not** auto-resume a paused instance.
+AuraDB Free auto-pauses after **72 hours of inactivity**. Traffic does **not** auto-resume a paused instance. This happens by design only after a long `power:off` — while the node is up, keep-warm prevents it (previous section).
 
 1. Sign in to [console.neo4j.io](https://console.neo4j.io)
 2. Open the project, click the paused instance, click **Resume**
@@ -941,7 +961,7 @@ AuraDB Free auto-pauses after **72 hours of inactivity**. Traffic does **not** a
    kubectl -n liner-notes rollout restart deployment/graph-service
    ```
 
-A scheduled keep-warm ping is tracked in [#103](https://github.com/macamp0328/liner-notes/issues/103).
+To avoid getting here in the first place while the node is up, see "Keeping Aura warm" above ([#103](https://github.com/macamp0328/liner-notes/issues/103)).
 
 ---
 
