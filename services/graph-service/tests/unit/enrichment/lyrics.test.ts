@@ -564,6 +564,31 @@ describe('enrichLyrics', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Genius — nested <script> blocks fully removed (fixpoint block removal)
+  // -------------------------------------------------------------------------
+  it('drops nested <script> blocks without leaving markup', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+
+    // The block removal runs in a fixpoint loop, so nesting cannot leave a
+    // reconstructable <script> tag behind.
+    const html =
+      '<div data-lyrics-container="true">Safe<script><script>alert(1)</script></script> lyrics</div>';
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
+      .mockResolvedValueOnce(makeHtmlResponse(html));
+
+    const summary = await enrichLyrics(fakeDriver);
+
+    expect(summary.enriched).toBe(1);
+    const stored = mockSetTrackLyrics.mock.calls[0]?.[3] as string;
+    expect(stored).toBe('Safe lyrics');
+    expect(stored).not.toContain('<script');
+    expect(stored).not.toContain('alert');
+  });
+
+  // -------------------------------------------------------------------------
   // Initial query failure — returns a failed summary instead of throwing (#151)
   // -------------------------------------------------------------------------
   it('returns a failed summary (does not throw) when the initial track query fails', async () => {

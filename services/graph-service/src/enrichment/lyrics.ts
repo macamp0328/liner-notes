@@ -88,22 +88,31 @@ function decodeHtmlEntities(text: string): string {
 // Order matters for sanitization. Entities are decoded *first* so an entity-encoded
 // tag (e.g. `&lt;script&gt;…&lt;/script&gt;`) becomes a real tag and is removed by the
 // stripping below — decoding last would reconstruct that markup *after* stripping and
-// hand it back as output (CodeQL js/incomplete-multi-character-sanitization). Tags are
-// then stripped in a fixpoint loop so a single removal can't reconstruct a new tag
-// (e.g. `<scr<script>ipt>`), and any leftover angle brackets are dropped so no
-// `<script` fragment can survive. A genuine literal `<`/`>` in lyric text is a rare
-// casualty of that final cleanup — an acceptable trade for plain-text output that can
-// never carry markup.
+// hand it back as output (CodeQL js/incomplete-multi-character-sanitization). Every
+// multi-character removal then runs in a fixpoint loop so a single pass can't leave a
+// reconstructable pattern (e.g. nested `<script><script>…` blocks, or `<scr<script>ipt>`),
+// and any leftover angle brackets are dropped so no `<script` fragment can survive. A
+// genuine literal `<`/`>` in lyric text is a rare casualty of that final cleanup — an
+// acceptable trade for plain-text output that can never carry markup.
 function htmlToText(html: string): string {
   let text = decodeHtmlEntities(html);
-  text = text.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
+
+  // Drop <script>/<style> blocks (content and all). Looped: one pass can leave a
+  // reconstructable block (e.g. nested <script><script>…</script></script>).
+  let previousBlocks: string;
+  do {
+    previousBlocks = text;
+    text = text.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
+  } while (text !== previousBlocks);
+
   text = text.replace(/<br\s*\/?>/gi, '\n');
 
-  let previous: string;
+  // Strip remaining tags. Looped for the same reason (e.g. `<scr<script>ipt>`).
+  let previousTags: string;
   do {
-    previous = text;
+    previousTags = text;
     text = text.replace(/<[^>]*>/g, '');
-  } while (text !== previous);
+  } while (text !== previousTags);
 
   text = text.replace(/[<>]/g, '');
   return text.trim();
