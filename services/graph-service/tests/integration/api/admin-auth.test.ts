@@ -3,8 +3,19 @@ import type { FastifyInstance } from 'fastify';
 import { buildTestServer } from '../setup.js';
 import { clearGraph } from '../../fixtures/loader.js';
 import { getDriver } from '../../../src/db/client.js';
+import { snapshotEnv, type EnvSnapshot } from '../../helpers/env.js';
 
 const TEST_TOKEN = 'test-admin-token-integration';
+
+// Auth-relevant env the suite owns: snapshot once, clear to a baseline before each
+// test, restore at the end. MUSICBRAINZ_USER_AGENT is included so the nationality
+// 503-when-unset case below needs no inline bookkeeping.
+const MANAGED_ENV_KEYS = [
+  'ADMIN_TOKEN',
+  'DISCOGS_TOKEN',
+  'DISCOGS_USERNAME',
+  'MUSICBRAINZ_USER_AGENT',
+];
 
 // Admin routes the auth contract must hold across — every admin endpoint
 // registered by adminRoutes. We exercise GET and POST shapes per route.
@@ -51,32 +62,24 @@ const STATUS_ROUTES = ADMIN_ROUTES.filter((r) => r.url.endsWith('/status'));
 
 describe('admin auth contract', () => {
   let app: FastifyInstance;
-  let originalAdminToken: string | undefined;
-  let originalDiscogsToken: string | undefined;
-  let originalDiscogsUsername: string | undefined;
+  let envSnapshot: EnvSnapshot;
 
   beforeAll(async () => {
     app = await buildTestServer();
     // The graph is irrelevant to auth — keep it empty so status routes are
     // cheap and no test that touches data accidentally depends on seed state.
     await clearGraph(getDriver());
-    originalAdminToken = process.env['ADMIN_TOKEN'];
-    originalDiscogsToken = process.env['DISCOGS_TOKEN'];
-    originalDiscogsUsername = process.env['DISCOGS_USERNAME'];
+    envSnapshot = snapshotEnv(MANAGED_ENV_KEYS);
   });
 
   afterAll(async () => {
-    restoreEnv('ADMIN_TOKEN', originalAdminToken);
-    restoreEnv('DISCOGS_TOKEN', originalDiscogsToken);
-    restoreEnv('DISCOGS_USERNAME', originalDiscogsUsername);
+    envSnapshot.restore();
     await app.close();
   });
 
   beforeEach(() => {
     // Reset auth-related env to a known baseline before each test.
-    delete process.env['ADMIN_TOKEN'];
-    delete process.env['DISCOGS_TOKEN'];
-    delete process.env['DISCOGS_USERNAME'];
+    envSnapshot.clear();
   });
 
   describe('when ADMIN_TOKEN is unset', () => {
@@ -153,26 +156,13 @@ describe('admin auth contract', () => {
     });
 
     it('POST /nationality/enrich returns 503 when MUSICBRAINZ_USER_AGENT is unset', async () => {
-      const original = process.env['MUSICBRAINZ_USER_AGENT'];
-      delete process.env['MUSICBRAINZ_USER_AGENT'];
-      try {
-        const res = await app.inject({
-          method: 'POST',
-          url: '/api/v1/admin/nationality/enrich',
-          headers: { authorization: `Bearer ${TEST_TOKEN}` },
-        });
-        expect(res.statusCode).toBe(503);
-      } finally {
-        restoreEnv('MUSICBRAINZ_USER_AGENT', original);
-      }
+      // beforeEach already cleared MUSICBRAINZ_USER_AGENT to the baseline.
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/nationality/enrich',
+        headers: { authorization: `Bearer ${TEST_TOKEN}` },
+      });
+      expect(res.statusCode).toBe(503);
     });
   });
 });
-
-function restoreEnv(key: string, value: string | undefined): void {
-  if (value === undefined) {
-    delete process.env[key];
-  } else {
-    process.env[key] = value;
-  }
-}
