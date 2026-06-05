@@ -1,0 +1,282 @@
+import { randomUUID } from 'crypto';
+import type { Driver, Session } from 'neo4j-driver';
+import neo4j from 'neo4j-driver';
+
+type Neo4jInt = { toNumber(): number };
+
+/** Overall lifecycle of a single orchestrated reload run. */
+export type ReloadJobStatus = 'running' | 'complete' | 'failed';
+
+/**
+ * Per-stage checkpoint status.
+ * - `pending`  — created, not yet attempted
+ * - `running`  — attempt in flight (a leftover `running` after a crash marks the resume point)
+ * - `complete` — finished and produced a summary
+ * - `skipped`  — deliberately not run (e.g. its upstream client was not configured)
+ * - `failed`   — threw; the orchestrator logs, records, and continues (failure isolation)
+ */
+export type ReloadStageStatus = 'pending' | 'running' | 'complete' | 'failed' | 'skipped';
+
+export interface PersistedStage {
+  stage: string;
+  ordinal: number;
+  status: ReloadStageStatus;
+  startedAt: string | null;
+  completedAt: string | null;
+  counts: Record<string, number>;
+  error: string | null;
+}
+
+export interface PersistedJob {
+  jobId: string;
+  status: ReloadJobStatus;
+  startedAt: string | null;
+  completedAt: string | null;
+  durationMs: number | null;
+  stages: PersistedStage[];
+}
+
+/** Cap stored error messages so a pathological upstream error can't bloat a node property. */
+const MAX_ERROR_LENGTH = 1000;
+
+function toNumberOrNull(raw: unknown): number | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'number') return raw;
+  if (typeof (raw as Neo4jInt).toNumber === 'function') return (raw as Neo4jInt).toNumber();
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Neo4j DateTime values stringify to ISO-8601; null stays null. */
+function toIso(raw: unknown): string | null {
+  return raw === null || raw === undefined ? null : String(raw);
+}
+
+function parseCounts(raw: unknown): Record<string, number> {
+  if (typeof raw !== 'string' || raw.length === 0) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+}
+
+interface RawStage {
+  stage: string;
+  ordinal: unknown;
+  status: ReloadStageStatus;
+  startedAt: unknown;
+  completedAt: unknown;
+  countsJson: unknown;
+  error: string | null;
+}
+
+function mapStage(raw: RawStage): PersistedStage {
+  return {
+    stage: raw.stage,
+    ordinal: toNumberOrNull(raw.ordinal) ?? 0,
+    status: raw.status,
+    startedAt: toIso(raw.startedAt),
+    completedAt: toIso(raw.completedAt),
+    counts: parseCounts(raw.countsJson),
+    error: raw.error,
+  };
+}
+
+/**
+ * Shared projection for reading a job with its ordered stages. The caller supplies the
+ * `MATCH`/selection clause that binds a single `j:ReloadJob`; this appends the stage
+ * collection and mapping so getReloadJob / getLatestReloadJob / findResumableReloadJob
+ * stay in lockstep.
+ */
+async function readSingleJob(
+  session: Session,
+  selectJobCypher: string,
+  params: Record<string, unknown>,
+): Promise<PersistedJob | null> {
+  const result = await session.run(
+    `${selectJobCypher}
+     OPTIONAL MATCH (j)-[:HAS_STAGE]->(st:ReloadStage)
+     WITH j, st ORDER BY st.ordinal
+     WITH j, collect(st) AS sts
+     RETURN j.jobId AS jobId, j.status AS status, j.startedAt AS startedAt,
+            j.completedAt AS completedAt, j.durationMs AS durationMs,
+            [s IN sts WHERE s IS NOT NULL | {
+              stage: s.stage, ordinal: s.ordinal, status: s.status,
+              startedAt: s.startedAt, completedAt: s.completedAt,
+              countsJson: s.countsJson, error: s.error
+            }] AS stages`,
+    params,
+  );
+  const record = result.records[0];
+  if (!record) return null;
+  return {
+    jobId: record.get('jobId') as string,
+    status: record.get('status') as ReloadJobStatus,
+    startedAt: toIso(record.get('startedAt')),
+    completedAt: toIso(record.get('completedAt')),
+    durationMs: toNumberOrNull(record.get('durationMs')),
+    stages: (record.get('stages') as RawStage[]).map(mapStage),
+  };
+}
+
+/**
+ * Create a new reload job with one `pending` ReloadStage per stage name (preserving order
+ * via `ordinal`). The job starts `running`. Returns the generated jobId.
+ */
+export async function createReloadJob(driver: Driver, stageNames: string[]): Promise<string> {
+  const jobId = randomUUID();
+  const session = driver.session();
+  try {
+    await session.run(
+      `CREATE (j:ReloadJob {
+         jobId: $jobId, status: 'running', startedAt: datetime(),
+         completedAt: null, durationMs: null
+       })
+       WITH j
+       UNWIND $stages AS s
+       CREATE (st:ReloadStage {
+         jobId: $jobId, stage: s.name, ordinal: s.ordinal, status: 'pending',
+         startedAt: null, completedAt: null, countsJson: null, error: null
+       })
+       CREATE (j)-[:HAS_STAGE {ordinal: s.ordinal}]->(st)`,
+      {
+        jobId,
+        stages: stageNames.map((name, i) => ({ name, ordinal: neo4j.int(i) })),
+      },
+    );
+    return jobId;
+  } finally {
+    await session.close();
+  }
+}
+
+export async function markStageRunning(
+  driver: Driver,
+  jobId: string,
+  stage: string,
+): Promise<void> {
+  const session = driver.session();
+  try {
+    await session.run(
+      `MATCH (st:ReloadStage {jobId: $jobId, stage: $stage})
+       SET st.status = 'running', st.startedAt = datetime(), st.error = null`,
+      { jobId, stage },
+    );
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Mark a stage terminal-successful. `skipped = true` records that the stage was deliberately
+ * not run (e.g. a missing upstream client) rather than completing work.
+ */
+export async function markStageComplete(
+  driver: Driver,
+  jobId: string,
+  stage: string,
+  counts: Record<string, number>,
+  skipped = false,
+): Promise<void> {
+  const session = driver.session();
+  try {
+    await session.run(
+      `MATCH (st:ReloadStage {jobId: $jobId, stage: $stage})
+       SET st.status = $status, st.completedAt = datetime(),
+           st.countsJson = $countsJson, st.error = null`,
+      {
+        jobId,
+        stage,
+        status: skipped ? 'skipped' : 'complete',
+        countsJson: JSON.stringify(counts),
+      },
+    );
+  } finally {
+    await session.close();
+  }
+}
+
+export async function markStageFailed(
+  driver: Driver,
+  jobId: string,
+  stage: string,
+  error: string,
+): Promise<void> {
+  const session = driver.session();
+  try {
+    await session.run(
+      `MATCH (st:ReloadStage {jobId: $jobId, stage: $stage})
+       SET st.status = 'failed', st.completedAt = datetime(), st.error = $error`,
+      { jobId, stage, error: error.slice(0, MAX_ERROR_LENGTH) },
+    );
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Close out a job. `durationMs` is computed server-side from the stored `startedAt` so it
+ * never depends on the client clock.
+ */
+export async function finishReloadJob(
+  driver: Driver,
+  jobId: string,
+  status: ReloadJobStatus,
+): Promise<void> {
+  const session = driver.session();
+  try {
+    await session.run(
+      `MATCH (j:ReloadJob {jobId: $jobId})
+       SET j.status = $status, j.completedAt = datetime(),
+           j.durationMs = datetime().epochMillis - j.startedAt.epochMillis`,
+      { jobId, status },
+    );
+  } finally {
+    await session.close();
+  }
+}
+
+export async function getReloadJob(driver: Driver, jobId: string): Promise<PersistedJob | null> {
+  const session = driver.session();
+  try {
+    return await readSingleJob(session, 'MATCH (j:ReloadJob {jobId: $jobId})', { jobId });
+  } finally {
+    await session.close();
+  }
+}
+
+/** The most recently started reload job, regardless of status (for status display). */
+export async function getLatestReloadJob(driver: Driver): Promise<PersistedJob | null> {
+  const session = driver.session();
+  try {
+    return await readSingleJob(
+      session,
+      `MATCH (j:ReloadJob)
+       WITH j ORDER BY j.startedAt DESC LIMIT 1`,
+      {},
+    );
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * The most recently started job still `running` — i.e. one whose process died before
+ * `finishReloadJob` ran. Drives cold-start resume. A `complete`/`failed` job is never
+ * resumable; the operator re-triggers a fresh reload instead.
+ */
+export async function findResumableReloadJob(driver: Driver): Promise<PersistedJob | null> {
+  const session = driver.session();
+  try {
+    return await readSingleJob(
+      session,
+      `MATCH (j:ReloadJob {status: 'running'})
+       WITH j ORDER BY j.startedAt DESC LIMIT 1`,
+      {},
+    );
+  } finally {
+    await session.close();
+  }
+}

@@ -33,6 +33,13 @@ import { resetArtistProfilesEnrichment } from '../db/artist-profiles-repository.
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
 import { enrichTrackVersions } from '../enrichment/track-versions.js';
 import { resetTrackVersions } from '../db/track-versions-repository.js';
+import { runReload } from '../ingestion/orchestrator.js';
+import { RELOAD_STAGES } from '../ingestion/stages.js';
+import {
+  createReloadJob,
+  findResumableReloadJob,
+  getLatestReloadJob,
+} from '../db/job-repository.js';
 
 const errorShape = {
   type: 'object',
@@ -73,6 +80,39 @@ const jobStateShape = {
     completedAt: { type: 'string', nullable: true },
     durationMs: { type: 'number', nullable: true },
     stats: statsShape,
+  },
+} as const;
+
+// Persisted orchestrated-reload job (issue #175). `null` when no reload has ever run.
+const reloadJobShape = {
+  type: 'object',
+  nullable: true,
+  required: ['jobId', 'status', 'stages'],
+  properties: {
+    jobId: { type: 'string' },
+    status: { type: 'string', enum: ['running', 'complete', 'failed'] },
+    startedAt: { type: 'string', nullable: true },
+    completedAt: { type: 'string', nullable: true },
+    durationMs: { type: 'number', nullable: true },
+    stages: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['stage', 'status'],
+        properties: {
+          stage: { type: 'string' },
+          ordinal: { type: 'number' },
+          status: {
+            type: 'string',
+            enum: ['pending', 'running', 'complete', 'failed', 'skipped'],
+          },
+          startedAt: { type: 'string', nullable: true },
+          completedAt: { type: 'string', nullable: true },
+          counts: { type: 'object', additionalProperties: { type: 'number' } },
+          error: { type: 'string', nullable: true },
+        },
+      },
+    },
   },
 } as const;
 
@@ -1829,6 +1869,133 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: adminAuthHook,
     },
     async (_request, reply) => reply.send({ data: structuredClone(trackVersionsState) }),
+  );
+
+  fastify.post<{
+    Reply:
+      | { data: { jobId: string; message: string } }
+      | { error: { code: string; message: string; jobId?: string } };
+  }>(
+    '/reload',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Trigger the orchestrated reload (ingest + every enrichment) with resume',
+        description:
+          'Runs the full reload as one resumable, checkpointed job: fetch & MERGE all releases, ' +
+          'then **every** enrichment stage in #154 dependency order — including the track-level ' +
+          'and nationality stages that `POST /ingest` does NOT run ' +
+          '(mb-release-events, track-musicbrainz, track-acousticbrainz, track-deezer, nationality).\n\n' +
+          'Per-stage progress is persisted to Neo4j, so if the pod is killed mid-reload the ' +
+          'replacement **resumes from the last completed stage on startup** — it does not restart ' +
+          'or re-wipe. Poll `GET /api/v1/admin/reload/status` for progress.\n\n' +
+          'Runs asynchronously — returns 202 immediately. Returns 409 if a reload is already in ' +
+          'progress. **Does not wipe**: for a from-scratch reload, call ' +
+          '`POST /api/v1/admin/reset?confirm=wipe-all` first, then trigger this.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          202: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['jobId', 'message'],
+                properties: { jobId: { type: 'string' }, message: { type: 'string' } },
+              },
+            },
+          },
+          401: errorShape,
+          409: {
+            type: 'object',
+            required: ['error'],
+            properties: {
+              error: {
+                type: 'object',
+                required: ['code', 'message', 'jobId'],
+                properties: {
+                  code: { type: 'string' },
+                  message: { type: 'string' },
+                  jobId: { type: 'string' },
+                },
+              },
+            },
+          },
+          503: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (request, reply) => {
+      const driver = getDriver();
+
+      // Coarse mutual exclusion: refuse if a reload job is still running. Full locking
+      // (including against the standalone /enrich routes) is #177.
+      const inProgress = await findResumableReloadJob(driver);
+      if (inProgress) {
+        return reply.code(409).send({
+          error: {
+            code: 'RELOAD_RUNNING',
+            message: 'A reload is already in progress',
+            jobId: inProgress.jobId,
+          },
+        });
+      }
+
+      const username = process.env['DISCOGS_USERNAME'];
+      const discogsClient = buildDiscogsClientFromEnv(request.log);
+      if (!discogsClient || !username) {
+        request.log.warn(
+          'POST /reload: DISCOGS_TOKEN or DISCOGS_USERNAME not set — cannot trigger reload',
+        );
+        return reply.code(503).send({
+          error: { code: 'SERVICE_UNAVAILABLE', message: 'Discogs credentials not configured' },
+        });
+      }
+
+      // Create the job up front so the jobId is known for the 202 and the running job is
+      // immediately visible to the 409 guard and to cold-start resume.
+      const jobId = await createReloadJob(
+        driver,
+        RELOAD_STAGES.map((s) => s.name),
+      );
+      void runReload(driver, { username, logger: request.log, resumeJobId: jobId }).catch(
+        (err: unknown) => {
+          request.log.error({ err }, '[reload] orchestrated reload failed');
+        },
+      );
+
+      return reply.code(202).send({ data: { jobId, message: 'Reload started' } });
+    },
+  );
+
+  fastify.get(
+    '/reload/status',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Per-stage status of the most recent orchestrated reload',
+        description:
+          'Returns the latest reload job with each stage’s status ' +
+          '(`pending`/`running`/`complete`/`skipped`/`failed`), counts, and error. ' +
+          '`null` if no reload has ever run.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: { data: reloadJobShape },
+          },
+          401: errorShape,
+          503: errorShape,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (_request, reply) => {
+      const job = await getLatestReloadJob(getDriver());
+      return reply.send({ data: job });
+    },
   );
 }
 

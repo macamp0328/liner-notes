@@ -156,12 +156,15 @@ Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
 
 ### Admin & Ops
 
-| Method | Path                          | Description                                |
-| ------ | ----------------------------- | ------------------------------------------ |
-| `POST` | `/api/v1/admin/ingest`        | Trigger ingestion (requires `ADMIN_TOKEN`) |
-| `GET`  | `/api/v1/admin/ingest/status` | Last ingestion stats                       |
-| `GET`  | `/api/v1/health`              | Service + Neo4j status                     |
-| `GET`  | `/api/docs`                   | Swagger UI                                 |
+| Method | Path                           | Description                                             |
+| ------ | ------------------------------ | ------------------------------------------------------- |
+| `POST` | `/api/v1/admin/ingest`         | Trigger first-5-stage ingestion (in-memory job state)   |
+| `GET`  | `/api/v1/admin/ingest/status`  | Last ingestion stats                                    |
+| `POST` | `/api/v1/admin/reload`         | Orchestrated reload — all stages, resumable (see below) |
+| `GET`  | `/api/v1/admin/reload/status`  | Per-stage reload status/counts (DB-backed)              |
+| `POST` | `/api/v1/admin/<stage>/enrich` | Run a single enrichment stage (10 stages; see admin.ts) |
+| `GET`  | `/api/v1/health`               | Service + Neo4j status                                  |
+| `GET`  | `/api/docs`                    | Swagger UI                                              |
 
 ### Response Shapes
 
@@ -206,6 +209,47 @@ Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
 - Manual via `POST /api/v1/admin/ingest` (requires `ADMIN_TOKEN` header)
 
 **Idempotency:** All writes use Cypher `MERGE`. Safe to re-run. New collection additions are picked up on re-run.
+
+---
+
+### Orchestrated Reload (issue #175)
+
+`POST /api/v1/admin/ingest` and the empty-graph auto-trigger only run the **first 5** stages
+(lyrics, master-data, artist-genres, track-versions, artist-profiles) and track state
+**in memory** (`src/ingestion/job-state.ts`) — a pod crash loses it. The **orchestrated
+reload** (`POST /api/v1/admin/reload`) owns the **whole** sequence and persists per-stage
+state to Neo4j so it survives a restart.
+
+Source files:
+
+- `src/ingestion/stages.ts` — `RELOAD_STAGES`: the single ordered definition of the sequence
+  (the sequence source of truth). Each descriptor's `run` delegates to the existing `enrichX`
+  function, so there is **one definition per stage**. Stage order follows #154:
+  `releases → lyrics → master-data → artist-genres → artist-profiles → track-versions →
+mb-release-events → track-musicbrainz → track-acousticbrainz → track-deezer → nationality →
+verify`. `verify` is a no-op slot for #178.
+- `src/ingestion/orchestrator.ts` — `runReload(driver, { username, logger?, resumeJobId? })`
+  and `buildReloadContext()`. Iterates `RELOAD_STAGES`, skipping stages already
+  `complete`/`skipped`, and persists each transition.
+- `src/db/job-repository.ts` — `ReloadJob`/`ReloadStage` persistence (one job per run;
+  `findResumableReloadJob` returns the latest still-`running` job — the resume signal).
+- `src/db/schema.ts` — `ReloadJob` constraint + indexes.
+
+**Semantics:**
+
+- **Resume, not restart.** On `POST /reload` and on **cold start** (`server.ts` onReady, after
+  the `autoIngest` guard), a still-`running` job is resumed from the last completed stage. A
+  killed-mid-reload pod continues; it does **not** re-wipe or skip-because-non-empty.
+- **Stage outcomes:** a `run` returning a counts map → `complete`; returning `null` (its
+  client was unconfigured) → `skipped`; throwing → `failed`, logged, and the run continues
+  (failure isolation). The job ends `failed` if any stage failed, else `complete` — only a
+  still-`running` job auto-resumes, so a `failed`/`complete` job never retries on every boot.
+- **Wipe stays separate.** The reload never wipes; run `POST /reset?confirm=wipe-all` first for
+  a from-scratch reload. It picks up from empty-or-partial.
+- **Coarse 409 only.** `/reload` 409s if a reload is already running; full mutual exclusion
+  against the standalone `/<stage>/enrich` routes is #177.
+- **`ingestReleases`** (in `ingest.ts`) is the shared release fetch/MERGE loop used by both the
+  legacy `runIngestion` and the reload's `releases` stage — one definition, no drift.
 
 ---
 

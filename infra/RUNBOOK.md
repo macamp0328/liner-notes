@@ -817,7 +817,9 @@ The `KUBECONFIG_B64` **secret** was set in [CD — cluster bootstrap](#cd--clust
 
 Use this to discard the entire graph and rebuild it from Discogs — e.g. after a schema change, to clear stale nodes that `MERGE` can't remove (releases deleted from the collection), or to validate the ingestion + enrichment pipeline end-to-end on an empty graph.
 
-> **The graph is fully reconstructable from Discogs.** There is no separate backup to restore; a wipe is safe by design. The only data that does _not_ come back automatically is the manual track-level enrichment (MusicBrainz/AcousticBrainz/Deezer), which you re-run explicitly in step 4.
+> **The graph is fully reconstructable from Discogs.** There is no separate backup to restore; a wipe is safe by design.
+
+Since [#175](https://github.com/macamp0328/liner-notes/issues/175) this is **two steps**: an explicit wipe, then **one** orchestrated reload that owns the whole sequence — ingest **and every enrichment**, including the track-level/nationality stages (`mb-release-events`, `track-musicbrainz`, `track-acousticbrainz`, `track-deezer`, `nationality`) that `POST /ingest` does _not_ run. The reload checkpoints per-stage state to Neo4j, so **if the pod is killed mid-reload — a deploy roll, an OOM, a node reboot — the replacement pod resumes from the last completed stage on startup**: it does not restart, re-wipe, or skip because the graph is non-empty. There is no longer a separate `pnpm enrich:bootstrap` step.
 
 **Prereqs.** Set `GRAPH_SERVICE_URL` and `ADMIN_TOKEN` once (the `pnpm` admin scripts read them from a gitignored `.env.local`, or export inline):
 
@@ -834,7 +836,7 @@ export ADMIN_TOKEN="$(aws secretsmanager get-secret-value \
 curl -s "$GRAPH_SERVICE_URL/api/v1/stats" | jq .
 ```
 
-**2. Wipe the graph.** Double-gated (admin token + explicit confirm); see the [reset endpoint](../services/graph-service/src/api/admin.ts):
+**2. Wipe the graph.** Double-gated (admin token + explicit confirm); see the [reset endpoint](../services/graph-service/src/api/admin.ts). **Run this _before_ the reload trigger** — the reload picks up from an empty (or partial) graph and never wipes on its own:
 
 ```bash
 pnpm db:wipe
@@ -843,44 +845,45 @@ pnpm db:wipe
 
 > **Requires the reset endpoint** (`POST /api/v1/admin/reset` + the `pnpm db:wipe` script) added in [#163](https://github.com/macamp0328/liner-notes/pull/163). Confirm the running image includes it before relying on this step. On an older build without the endpoint, wipe directly instead — `cypher-shell -a "$NEO4J_URI" -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" "MATCH (n) DETACH DELETE n"` (creds from the prod secret).
 
-**3. Re-ingest.** An empty graph auto-triggers ingestion on pod start, so the cleanest trigger is a rollout restart (runs base ingestion + the in-pipeline enrichments: lyrics, master-data/originalYear, artist genres, track versions, artist profiles):
+**3. Trigger the orchestrated reload.** One call runs the whole sequence — fetch & MERGE all releases, then every enrichment stage in #154 dependency order. Returns `202` immediately and runs in the background; a second trigger while one is in flight returns `409`:
 
 ```bash
-# Needs the Step 4b SSM port-forward running and KUBECONFIG set (see First-time deploy).
-kubectl -n liner-notes rollout restart deployment/graph-service
-aws logs tail /liner-notes/graph-service --follow   # watch enrichment stages; ~4 min for ~200 releases
+curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "$GRAPH_SERVICE_URL/api/v1/admin/reload"
+# → 202 { "data": { "jobId": "...", "message": "Reload started" } }
 ```
 
-Alternatively, trigger without a restart: `curl -fsS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "$GRAPH_SERVICE_URL/api/v1/admin/ingest"` (returns 202; poll `pnpm status:lyrics` etc.).
+Poll per-stage progress (each stage is `pending` / `running` / `complete` / `skipped` / `failed`):
 
-> **Changed a secret value (e.g. `GENIUS_TOKEN`) before this reload?** Force an ESO sync _before_ the rollout restart, or the new pod comes up with the stale value and that enrichment silently degrades (e.g. lyrics falls back to LRCLIB-only). ESO refreshes `graph-service-secrets` hourly; the pod reads env only at start:
+```bash
+curl -s -H "Authorization: Bearer $ADMIN_TOKEN" "$GRAPH_SERVICE_URL/api/v1/admin/reload/status" \
+  | jq '.data.stages[] | { stage, status, counts }'
+```
+
+A stage whose upstream client is unconfigured (e.g. MusicBrainz creds absent) is recorded `skipped`, not `failed`; a stage that throws is `failed` and the reload **continues past it** (failure isolation), ending the job `failed` so the gap is visible in the status. MusicBrainz is 1 req/sec, so the `track-musicbrainz` pass for ~2000 tracks dominates the runtime (~30 min).
+
+> **Resume is automatic.** If the pod rolls mid-reload, the replacement pod resumes the _same_ job on startup — do **not** re-trigger (a second `/reload` would 409 while it's still running, or start a redundant job once it's done). The persisted job is the source of truth. (The empty-graph auto-ingest safety net still runs only the first-5 in-pipeline enrichments; the full reload is operator-triggered via `/admin/reload`.)
+
+> **Changed a secret value (e.g. `GENIUS_TOKEN`) before this reload?** Force an ESO sync _before_ triggering the reload, or the pod runs with the stale value and that enrichment silently degrades (e.g. lyrics falls back to LRCLIB-only). ESO refreshes `graph-service-secrets` hourly; the pod reads env only at start, so also roll the pod if you changed a value it reads once:
 >
 > ```bash
 > kubectl -n liner-notes annotate externalsecret graph-service-secrets force-sync=$(date +%s) --overwrite
 > ```
 
-**4. Run the manual track-level enrichments** — these are admin-only and **not** part of `runIngestion`, so they stay null after a reload until kicked off (MusicBrainz is 1 req/sec → the track-musicbrainz pass for ~2000 tracks takes ~30 min):
-
-```bash
-pnpm enrich:bootstrap
-# mb-release-events → track-musicbrainz → (track-acousticbrainz ‖ track-deezer) → nationality
-```
-
-**5. Verify coverage** against the targets:
+**4. Verify coverage** against the targets (a dedicated `verify` reload stage is tracked in [#178](https://github.com/macamp0328/liner-notes/issues/178); until then, check `/stats` by hand):
 
 ```bash
 curl -s "$GRAPH_SERVICE_URL/api/v1/stats" | jq .data.enrichment
 ```
 
-| Metric                     | Target                | Filled by                                      |
-| -------------------------- | --------------------- | ---------------------------------------------- |
-| `releasesWithOriginalYear` | ≥ 90%                 | step 3 (master-data)                           |
-| `artistsWithProfile`       | ≥ 80%                 | step 3 (artist-profiles)                       |
-| `tracksWithLyrics`         | best-effort           | step 3 (LRCLIB + Genius if `GENIUS_TOKEN` set) |
-| `tracksWithRecordingMbid`  | high                  | step 4 (`track-musicbrainz`)                   |
-| `tracksWithIsrc`           | high                  | step 4 (`track-musicbrainz`)                   |
-| `tracksWithTempo`          | of those with an mbid | step 4 (`track-acousticbrainz`)                |
-| `tracksWithDeezerBpm`      | of those with an isrc | step 4 (`track-deezer`)                        |
+| Metric                     | Target                | Filled by reload stage                  |
+| -------------------------- | --------------------- | --------------------------------------- |
+| `releasesWithOriginalYear` | ≥ 90%                 | `master-data`                           |
+| `artistsWithProfile`       | ≥ 80%                 | `artist-profiles`                       |
+| `tracksWithLyrics`         | best-effort           | `lyrics` (LRCLIB + Genius if token set) |
+| `tracksWithRecordingMbid`  | high                  | `track-musicbrainz`                     |
+| `tracksWithIsrc`           | high                  | `track-musicbrainz`                     |
+| `tracksWithTempo`          | of those with an mbid | `track-acousticbrainz`                  |
+| `tracksWithDeezerBpm`      | of those with an isrc | `track-deezer`                          |
 
 > `tracksWithLyrics` is LRCLIB-only (~70%) unless `GENIUS_TOKEN` is present in the prod secret — the Genius fallback is skipped when it's unset.
 

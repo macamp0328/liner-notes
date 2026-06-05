@@ -53,6 +53,16 @@ const statements = [
   'MATCH (r:Release) WHERE r.masterFetched IS NOT NULL REMOVE r.masterFetched',
   'MATCH (m:Master) WHERE m.mbReleaseEventsFetched IS NOT NULL REMOVE m.mbReleaseEventsFetched',
   'MATCH (t:Track) WHERE t.musicBrainzFetched IS NOT NULL OR t.acousticBrainzFetched IS NOT NULL OR t.deezerFetched IS NOT NULL REMOVE t.musicBrainzFetched, t.acousticBrainzFetched, t.deezerFetched',
+
+  // --- issue #175: persistent orchestrated-reload job state ---
+  // A ReloadJob (one per run) owns a set of ReloadStage checkpoint nodes so an
+  // interrupted reload resumes from the last completed stage after a pod restart.
+  // createReloadJob writes exactly one ReloadStage per stage name per job (transitions
+  // are MATCH+SET), so there is no ReloadStage uniqueness constraint — the plain jobId
+  // index keeps per-job lookups fast and avoids an enterprise-only composite constraint.
+  'CREATE CONSTRAINT reload_job_id IF NOT EXISTS FOR (j:ReloadJob) REQUIRE j.jobId IS UNIQUE',
+  'CREATE INDEX reload_stage_job IF NOT EXISTS FOR (s:ReloadStage) ON (s.jobId)',
+  'CREATE INDEX reload_job_started_at IF NOT EXISTS FOR (j:ReloadJob) ON (j.startedAt)',
 ];
 
 export async function applySchema(driver: Driver): Promise<void> {

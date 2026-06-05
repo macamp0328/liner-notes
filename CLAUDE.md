@@ -140,17 +140,22 @@ Route handler (src/api/) → Repository (src/db/) → Neo4j driver (src/db/clien
 
 **Key source files:**
 
-| File                              | Purpose                                                          |
-| --------------------------------- | ---------------------------------------------------------------- |
-| `src/server.ts`                   | Fastify instance builder, plugin registration                    |
-| `src/db/schema.ts`                | Idempotent constraint/index application on startup               |
-| `src/ingestion/transforms.ts`     | Pure parsing functions — no I/O, fully unit-testable             |
-| `src/ingestion/discogs-client.ts` | Rate-limited Discogs HTTP client (60 req/min, 429 backoff)       |
-| `src/ingestion/ingest.ts`         | Pipeline orchestrator; auto-triggers on empty graph              |
-| `src/db/ingestion-repository.ts`  | All Cypher MERGE writes                                          |
-| `src/enrichment/`                 | Post-ingest lyrics, originalYear, artist genre/profile pipelines |
+| File                              | Purpose                                                           |
+| --------------------------------- | ----------------------------------------------------------------- |
+| `src/server.ts`                   | Fastify instance builder, plugin registration                     |
+| `src/db/schema.ts`                | Idempotent constraint/index application on startup                |
+| `src/ingestion/transforms.ts`     | Pure parsing functions — no I/O, fully unit-testable              |
+| `src/ingestion/discogs-client.ts` | Rate-limited Discogs HTTP client (60 req/min, 429 backoff)        |
+| `src/ingestion/ingest.ts`         | First-5-stage pipeline (`runIngestion`) + shared `ingestReleases` |
+| `src/ingestion/stages.ts`         | `RELOAD_STAGES` — ordered definition of the full reload sequence  |
+| `src/ingestion/orchestrator.ts`   | `runReload` — all stages, DB-checkpointed, resumable              |
+| `src/db/job-repository.ts`        | `ReloadJob`/`ReloadStage` persistence (checkpoint/resume)         |
+| `src/db/ingestion-repository.ts`  | All Cypher MERGE writes                                           |
+| `src/enrichment/`                 | Post-ingest lyrics, originalYear, artist genre/profile pipelines  |
 
 **Ingestion fires async** (`void runIngestion(...)`) — it does not block `onReady`, so the HTTP server starts immediately while ingestion runs in the background.
+
+**Orchestrated reload (#175).** `POST /api/v1/admin/reload` runs the **full** sequence (ingest + every enrichment, including the track-level/nationality stages) as one job whose per-stage state is **persisted to Neo4j**, so a pod killed mid-reload **resumes from the last completed stage** on restart instead of restarting or silently abandoning the load. The legacy `POST /admin/ingest` + empty-graph auto-trigger remain a first-5-stage, in-memory safety net. The reload does not wipe (run `POST /admin/reset?confirm=wipe-all` first). See [`services/graph-service/CLAUDE.md`](services/graph-service/CLAUDE.md) → "Orchestrated Reload".
 
 ### Non-Obvious Decisions
 

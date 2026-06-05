@@ -15,6 +15,10 @@ vi.mock('../../src/db/schema.js', () => ({
   applySchema: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('../../src/db/job-repository.js', () => ({
+  findResumableReloadJob: vi.fn().mockResolvedValue(null),
+}));
+
 // Mock ingestion repository — server.ts calls hasReleases() in onReady after applySchema
 vi.mock('../../src/db/ingestion-repository.js', () => ({
   hasReleases: vi.fn().mockResolvedValue(true), // pretend graph is populated → no auto-ingest

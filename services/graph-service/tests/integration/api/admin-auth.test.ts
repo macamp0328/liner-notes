@@ -41,6 +41,8 @@ const ADMIN_ROUTES: { method: 'GET' | 'POST'; url: string }[] = [
   { method: 'POST', url: '/api/v1/admin/track-versions/enrich' },
   { method: 'POST', url: '/api/v1/admin/track-versions/reset' },
   { method: 'GET', url: '/api/v1/admin/track-versions/status' },
+  { method: 'POST', url: '/api/v1/admin/reload' },
+  { method: 'GET', url: '/api/v1/admin/reload/status' },
 ];
 
 // Status routes only — safe to call with a valid token because they touch
