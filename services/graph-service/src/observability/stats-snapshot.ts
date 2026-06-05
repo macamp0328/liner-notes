@@ -95,10 +95,12 @@ export function resolveSnapshotIntervalMs(env: NodeJS.ProcessEnv = process.env):
  * reload-aware: it re-checks `isActive()` on a short tick and emits whenever the
  * elapsed time since the last snapshot reaches the *current* cadence —
  * `opts.activeIntervalMs` while a reload is running, `intervalMs` otherwise. The
- * elapsed-gate (rather than just shortening the next delay) is what makes it
- * responsive to a reload that *starts* mid-interval: an already-scheduled long
- * idle delay would otherwise leave up to `intervalMs` of lag. Omitting `opts`
- * keeps the plain fixed-interval behaviour.
+ * active cadence is clamped to at most `intervalMs`, so it only ever tightens the
+ * configured idle cadence (never relaxes it, even if the idle cadence was set
+ * shorter than the active default). The elapsed-gate (rather than just shortening
+ * the next delay) is what makes it responsive to a reload that *starts*
+ * mid-interval: an already-scheduled long idle delay would otherwise leave up to
+ * `intervalMs` of lag. Omitting `opts` keeps the plain fixed-interval behaviour.
  */
 export function startStatsSnapshots(
   driver: Driver,
@@ -120,7 +122,10 @@ export function startStatsSnapshots(
   }
 
   const isActive = opts.isActive;
-  const activeIntervalMs = opts.activeIntervalMs ?? intervalMs;
+  // Clamp to the idle cadence so the active path only ever *tightens* it, never relaxes it —
+  // an operator could configure STATS_SNAPSHOT_INTERVAL_MS shorter than the active default.
+  // This also bounds the re-check tick, so the (possibly shorter) idle cadence is still honored.
+  const activeIntervalMs = Math.min(opts.activeIntervalMs ?? intervalMs, intervalMs);
   let lastEmitMs = Date.now(); // the immediate emit above
   let stopped = false;
   let timer: ReturnType<typeof setTimeout>;
@@ -132,7 +137,7 @@ export function startStatsSnapshots(
       void logStatsSnapshot(driver, logger);
       lastEmitMs = Date.now();
     }
-    timer = setTimeout(tick, activeIntervalMs); // re-check on the short cadence
+    timer = setTimeout(tick, activeIntervalMs); // re-check on the shorter of the two cadences
     timer.unref?.();
   };
 

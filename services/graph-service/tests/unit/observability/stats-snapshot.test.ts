@@ -174,4 +174,25 @@ describe('startStatsSnapshots — reload-aware cadence', () => {
     await vi.advanceTimersByTimeAsync(10_000); // nothing after stop
     expect(log.info).toHaveBeenCalledTimes(4);
   });
+
+  it('clamps the active cadence to the idle cadence so it never relaxes it', async () => {
+    // Idle cadence (1s) is configured shorter than the active default (60s). The active
+    // cadence must be clamped down to 1s, not slowed to 60s, while a reload runs.
+    mockGetStats.mockResolvedValue(STATS);
+    const log = makeLogger();
+
+    const stop = startStatsSnapshots(driver, log, 1_000, {
+      activeIntervalMs: 60_000,
+      isActive: () => true,
+    });
+
+    await vi.advanceTimersByTimeAsync(0); // immediate emit
+    expect(log.info).toHaveBeenCalledTimes(1);
+
+    // Emits every 1s (the clamped cadence), not every 60s.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(log.info).toHaveBeenCalledTimes(4);
+
+    stop();
+  });
 });
