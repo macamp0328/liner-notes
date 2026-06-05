@@ -30,6 +30,14 @@ on:
   push:
     branches: [main]
 
+# Least-privilege default for the GITHUB_TOKEN (CodeQL actions/missing-workflow-permissions).
+# Every job here only reads the checkout; none write to the repo, comment on PRs, or need
+# packages/id-token. Set once at the workflow level so all jobs inherit read-only access.
+# The codeql job overrides this with its own block (it needs security-events: write to upload
+# SARIF) — a job-level permissions block fully replaces, not merges with, this default.
+permissions:
+  contents: read
+
 jobs:
   # ── Static checks ────────────────────────────────────────────────────────────
   # These three jobs run in parallel and gate everything downstream.
