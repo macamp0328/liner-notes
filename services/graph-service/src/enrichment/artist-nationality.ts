@@ -6,12 +6,8 @@ import type { VIAFClient } from '../ingestion/viaf-client.js';
 import {
   getUnenrichedArtistsForNationality,
   getUnenrichedMusiciansForNationality,
-  getUnenrichedProducersForNationality,
-  getUnenrichedEngineersForNationality,
   setArtistNationality,
   setMusicianNationality,
-  setProducerNationality,
-  setEngineerNationality,
 } from '../db/artist-nationality-repository.js';
 import type { UnenrichedMusician, NationalitySource } from '../db/artist-nationality-repository.js';
 
@@ -114,7 +110,7 @@ async function resolveCountryByName(
 }
 
 /**
- * Enrich Artist, Musician, Producer, and Engineer nodes with ORIGIN_COUNTRY relationships.
+ * Enrich Artist and Musician nodes with ORIGIN_COUNTRY relationships.
  *
  * For nodes with a Discogs ID, sources are tried in order:
  * 1. MusicBrainz + Wikidata by Discogs ID (parallel)
@@ -192,7 +188,8 @@ export async function enrichNationality(
     }
   }
 
-  // Enrich Musician, Producer, and Engineer nodes with identical logic
+  // Enrich Musician nodes. Producers and engineers are Musician nodes too (the
+  // role lives on CREDITED_ON, not the label), so this single scan covers them.
   const personGroups: Array<{
     label: string;
     fetch: () => Promise<UnenrichedMusician[]>;
@@ -207,16 +204,6 @@ export async function enrichNationality(
       label: 'musicians',
       fetch: () => getUnenrichedMusiciansForNationality(driver),
       save: setMusicianNationality,
-    },
-    {
-      label: 'producers',
-      fetch: () => getUnenrichedProducersForNationality(driver),
-      save: setProducerNationality,
-    },
-    {
-      label: 'engineers',
-      fetch: () => getUnenrichedEngineersForNationality(driver),
-      save: setEngineerNationality,
     },
   ];
 

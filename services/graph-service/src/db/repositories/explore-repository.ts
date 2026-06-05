@@ -1,4 +1,5 @@
 import neo4j, { Driver } from 'neo4j-driver';
+import type { RoleCategory } from '../../ingestion/transforms.js';
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -116,6 +117,46 @@ export async function getReleasesByMusician(
       ORDER BY pressingYear
       `,
       { name },
+    );
+    return result.records.map((rec) => ({
+      ...mapExploreRelease(rec),
+      instrument: toStr(rec.get('instrument')),
+      role: toStr(rec.get('role')),
+    }));
+  } finally {
+    await session.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// getReleasesByCredit
+// ---------------------------------------------------------------------------
+
+/**
+ * Releases where this person is credited in a specific role category (e.g.
+ * 'producer', 'engineer'). Same shape as getReleasesByMusician — producers and
+ * engineers are Musician nodes too — but filtered by CREDITED_ON.roleCategory,
+ * which is exactly what parseRoleCategory() tags each credit with at ingest.
+ */
+export async function getReleasesByCredit(
+  driver: Driver,
+  name: string,
+  roleCategory: RoleCategory,
+): Promise<MusicianRelease[]> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `
+      MATCH (m:Musician)-[c:CREDITED_ON]->(r:Release)
+      WHERE toLower(m.name) = toLower($name) AND c.roleCategory = $roleCategory
+      OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
+      RETURN r.discogsId AS discogsId, r.title AS title, a.name AS artist,
+             coalesce(r.originalYear, r.pressingYear) AS pressingYear,
+             r.format AS format, r.thumbUrl AS thumbUrl,
+             c.displayRole AS instrument, c.roleCategory AS role
+      ORDER BY pressingYear
+      `,
+      { name, roleCategory },
     );
     return result.records.map((rec) => ({
       ...mapExploreRelease(rec),

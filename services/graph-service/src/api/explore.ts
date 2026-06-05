@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { getDriver } from '../db/client.js';
 import {
   getReleasesByMusician,
+  getReleasesByCredit,
   getReleasesByStudio,
   getReleasesByLabel,
   getReleasesByGenre,
@@ -179,6 +180,54 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request, reply): Promise<MusicianRelease[] | ErrorReply> => {
       const items = await getReleasesByMusician(getDriver(), request.params.name);
+      return reply.send(items);
+    },
+  );
+
+  // GET /api/v1/explore/producer/:name
+  fastify.get<{ Params: NameParams; Reply: MusicianRelease[] | ErrorReply }>(
+    '/api/v1/explore/producer/:name',
+    {
+      schema: {
+        tags: ['explore'],
+        summary: 'Releases this person is credited on as a producer',
+        params: {
+          type: 'object',
+          required: ['name'],
+          properties: { name: { type: 'string' } },
+        },
+        response: {
+          200: { type: 'array', items: musicianReleaseSchema },
+          400: errorSchema,
+        },
+      },
+    },
+    async (request, reply): Promise<MusicianRelease[] | ErrorReply> => {
+      const items = await getReleasesByCredit(getDriver(), request.params.name, 'producer');
+      return reply.send(items);
+    },
+  );
+
+  // GET /api/v1/explore/engineer/:name
+  fastify.get<{ Params: NameParams; Reply: MusicianRelease[] | ErrorReply }>(
+    '/api/v1/explore/engineer/:name',
+    {
+      schema: {
+        tags: ['explore'],
+        summary: 'Releases this person is credited on as an engineer',
+        params: {
+          type: 'object',
+          required: ['name'],
+          properties: { name: { type: 'string' } },
+        },
+        response: {
+          200: { type: 'array', items: musicianReleaseSchema },
+          400: errorSchema,
+        },
+      },
+    },
+    async (request, reply): Promise<MusicianRelease[] | ErrorReply> => {
+      const items = await getReleasesByCredit(getDriver(), request.params.name, 'engineer');
       return reply.send(items);
     },
   );

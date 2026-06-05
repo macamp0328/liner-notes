@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Driver, Session, Result, Record as Neo4jRecord } from 'neo4j-driver';
 import {
   getReleasesByMusician,
+  getReleasesByCredit,
   getReleasesByStudio,
   getReleasesByLabel,
   getReleasesByGenre,
@@ -126,6 +127,58 @@ describe('getReleasesByMusician', () => {
     const { session } = makeMockSession([makeResult([])]);
     const driver = makeMockDriver(session);
     await getReleasesByMusician(driver, 'Test');
+    expect(session.close).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getReleasesByCredit
+// ---------------------------------------------------------------------------
+
+describe('getReleasesByCredit', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns credited releases with instrument and role', async () => {
+    const rec = makeRecord({
+      ...sampleReleaseRecord,
+      instrument: 'Producer',
+      role: 'producer',
+    });
+    const { session } = makeMockSession([makeResult([rec])]);
+    const driver = makeMockDriver(session);
+    const results = await getReleasesByCredit(driver, 'Andrew Sarlo', 'producer');
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      discogsId: 13570466,
+      title: 'U.F.O.F.',
+      instrument: 'Producer',
+      role: 'producer',
+    });
+  });
+
+  it('filters by name and roleCategory', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+    await getReleasesByCredit(driver, 'Andrew Sarlo', 'producer');
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('c.roleCategory = $roleCategory');
+    expect(query).toContain('toLower(m.name) = toLower($name)');
+    expect(params).toEqual({ name: 'Andrew Sarlo', roleCategory: 'producer' });
+  });
+
+  it('returns empty array when no results', async () => {
+    const { session } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+    const results = await getReleasesByCredit(driver, 'Nobody', 'engineer');
+    expect(results).toHaveLength(0);
+  });
+
+  it('closes the session', async () => {
+    const { session } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+    await getReleasesByCredit(driver, 'Test', 'engineer');
     expect(session.close).toHaveBeenCalledOnce();
   });
 });

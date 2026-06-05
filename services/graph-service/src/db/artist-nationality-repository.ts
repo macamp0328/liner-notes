@@ -83,56 +83,6 @@ export async function getUnenrichedMusiciansForNationality(
 }
 
 /**
- * Return Producer nodes that have not yet been enriched with nationality data.
- */
-export async function getUnenrichedProducersForNationality(
-  driver: Driver,
-): Promise<UnenrichedMusician[]> {
-  const session = driver.session();
-  try {
-    const result = await session.run(
-      `MATCH (m:Producer)
-       WHERE NOT EXISTS { (m)-[:ORIGIN_COUNTRY]->() }
-         AND (m.nationalityFetchedAt IS NULL
-              OR m.nationalityFetchedAt < datetime() - duration({ days: $stalenessDays }))
-       RETURN m.discogsId AS discogsId, m.name AS name`,
-      { stalenessDays: neo4j.int(getStalenessDays()) },
-    );
-    return result.records.map((r) => ({
-      discogsId: (r.get('discogsId') as Neo4jInt | null)?.toNumber() ?? null,
-      name: r.get('name') as string,
-    }));
-  } finally {
-    await session.close();
-  }
-}
-
-/**
- * Return Engineer nodes that have not yet been enriched with nationality data.
- */
-export async function getUnenrichedEngineersForNationality(
-  driver: Driver,
-): Promise<UnenrichedMusician[]> {
-  const session = driver.session();
-  try {
-    const result = await session.run(
-      `MATCH (m:Engineer)
-       WHERE NOT EXISTS { (m)-[:ORIGIN_COUNTRY]->() }
-         AND (m.nationalityFetchedAt IS NULL
-              OR m.nationalityFetchedAt < datetime() - duration({ days: $stalenessDays }))
-       RETURN m.discogsId AS discogsId, m.name AS name`,
-      { stalenessDays: neo4j.int(getStalenessDays()) },
-    );
-    return result.records.map((r) => ({
-      discogsId: (r.get('discogsId') as Neo4jInt | null)?.toNumber() ?? null,
-      name: r.get('name') as string,
-    }));
-  } finally {
-    await session.close();
-  }
-}
-
-/**
  * Set the ORIGIN_COUNTRY relationship on an Artist node identified by discogsId.
  * When countryCode is non-null, merges a Country node and creates the relationship,
  * tagging it with the `source` that resolved the country (musicbrainz/wikidata/viaf).
@@ -228,112 +178,14 @@ export async function setMusicianNationality(
 }
 
 /**
- * Set the ORIGIN_COUNTRY relationship on a Producer node.
- * Identifies by discogsId when available; falls back to name-only match.
- * Always stamps nationalityFetchedAt = datetime() (throttles retries of still-uncountried nodes).
- */
-export async function setProducerNationality(
-  driver: Driver,
-  producer: UnenrichedMusician,
-  countryCode: string | null,
-  source: NationalitySource | null,
-): Promise<void> {
-  const session = driver.session();
-  try {
-    const matchClause =
-      producer.discogsId !== null
-        ? `MATCH (m:Producer {discogsId: $discogsId})`
-        : `MATCH (m:Producer {name: $name}) WHERE m.discogsId IS NULL`;
-
-    if (countryCode !== null) {
-      await session.run(
-        `${matchClause}
-         OPTIONAL MATCH (m)-[old:ORIGIN_COUNTRY]->()
-         DELETE old
-         WITH m
-         MERGE (c:Country {name: $countryCode})
-         MERGE (m)-[rel:ORIGIN_COUNTRY]->(c)
-         SET rel.source = $source, m.nationalityFetchedAt = datetime()`,
-        {
-          discogsId: producer.discogsId !== null ? neo4j.int(producer.discogsId) : null,
-          name: producer.name,
-          countryCode,
-          source,
-        },
-      );
-    } else {
-      await session.run(
-        `${matchClause}
-         SET m.nationalityFetchedAt = datetime()`,
-        {
-          discogsId: producer.discogsId !== null ? neo4j.int(producer.discogsId) : null,
-          name: producer.name,
-        },
-      );
-    }
-  } finally {
-    await session.close();
-  }
-}
-
-/**
- * Set the ORIGIN_COUNTRY relationship on an Engineer node.
- * Identifies by discogsId when available; falls back to name-only match.
- * Always stamps nationalityFetchedAt = datetime() (throttles retries of still-uncountried nodes).
- */
-export async function setEngineerNationality(
-  driver: Driver,
-  engineer: UnenrichedMusician,
-  countryCode: string | null,
-  source: NationalitySource | null,
-): Promise<void> {
-  const session = driver.session();
-  try {
-    const matchClause =
-      engineer.discogsId !== null
-        ? `MATCH (m:Engineer {discogsId: $discogsId})`
-        : `MATCH (m:Engineer {name: $name}) WHERE m.discogsId IS NULL`;
-
-    if (countryCode !== null) {
-      await session.run(
-        `${matchClause}
-         OPTIONAL MATCH (m)-[old:ORIGIN_COUNTRY]->()
-         DELETE old
-         WITH m
-         MERGE (c:Country {name: $countryCode})
-         MERGE (m)-[rel:ORIGIN_COUNTRY]->(c)
-         SET rel.source = $source, m.nationalityFetchedAt = datetime()`,
-        {
-          discogsId: engineer.discogsId !== null ? neo4j.int(engineer.discogsId) : null,
-          name: engineer.name,
-          countryCode,
-          source,
-        },
-      );
-    } else {
-      await session.run(
-        `${matchClause}
-         SET m.nationalityFetchedAt = datetime()`,
-        {
-          discogsId: engineer.discogsId !== null ? neo4j.int(engineer.discogsId) : null,
-          name: engineer.name,
-        },
-      );
-    }
-  } finally {
-    await session.close();
-  }
-}
-
-/**
- * Remove the nationalityFetchedAt marker from all Artist, Musician, Producer, and Engineer
- * nodes so the next enrichment run re-processes all of them.
+ * Remove the nationalityFetchedAt marker from all Artist and Musician nodes so the
+ * next enrichment run re-processes all of them.
  */
 export async function resetNationalityEnrichment(driver: Driver): Promise<number> {
   const session = driver.session();
   try {
     const result = await session.run(
-      `MATCH (n) WHERE (n:Artist OR n:Musician OR n:Producer OR n:Engineer) AND n.nationalityFetchedAt IS NOT NULL
+      `MATCH (n) WHERE (n:Artist OR n:Musician) AND n.nationalityFetchedAt IS NOT NULL
        REMOVE n.nationalityFetchedAt
        RETURN count(n) AS reset`,
     );
