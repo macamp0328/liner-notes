@@ -91,8 +91,12 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     const user = process.env['NEO4J_USER'];
     const password = process.env['NEO4J_PASSWORD'];
 
-    if (!uri || !user || !password) {
-      throw new Error('NEO4J_URI, NEO4J_USER, and NEO4J_PASSWORD are required');
+    // Require each var to be *set*, but honor an explicitly-empty value: an empty
+    // password is legitimate for a NEO4J_AUTH=none database (local docker-compose).
+    // `=== undefined` (not `!value`) lets "" through while a genuinely unset var
+    // still fails fast here instead of surfacing later as an opaque driver error.
+    if (uri === undefined || user === undefined || password === undefined) {
+      throw new Error('NEO4J_URI, NEO4J_USER, and NEO4J_PASSWORD must be set');
     }
 
     if (!process.env['ADMIN_TOKEN']) {
