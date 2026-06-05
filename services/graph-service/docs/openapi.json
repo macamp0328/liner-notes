@@ -3975,6 +3975,184 @@
         }
       }
     },
+    "/api/v1/explore/producer/{name}": {
+      "get": {
+        "summary": "Releases this person is credited on as a producer",
+        "tags": ["explore"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "name",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["discogsId", "title"],
+                    "properties": {
+                      "discogsId": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "artist": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "pressingYear": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "format": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "thumbUrl": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "instrument": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "role": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/engineer/{name}": {
+      "get": {
+        "summary": "Releases this person is credited on as an engineer",
+        "tags": ["explore"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "name",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["discogsId", "title"],
+                    "properties": {
+                      "discogsId": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "artist": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "pressingYear": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "format": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "thumbUrl": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "instrument": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "role": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error"],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/explore/studio/{name}": {
       "get": {
         "summary": "Releases recorded at this studio",

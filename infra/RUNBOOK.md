@@ -8,6 +8,7 @@ This is the operator's guide to standing up, redeploying, and recovering the pro
 - [Observability — fluent-bit and alarms](#observability--fluent-bit-and-alarms)
 - [Redeploy procedure](#redeploy-procedure)
 - [CD — IAM bootstrap](#cd--iam-bootstrap)
+- [CD — cluster bootstrap](#cd--cluster-bootstrap)
 - [Full reload from scratch](#full-reload-from-scratch)
 - [Instance power switch — scale-to-zero](#instance-power-switch--scale-to-zero)
 - [Resuming a paused Aura instance](#resuming-a-paused-aura-instance)
@@ -731,6 +732,45 @@ gh variable set AWS_DEPLOY_ROLE_ARN --body "$ROLE_ARN"
 ```
 
 Or set it via the GitHub UI under **Settings → Secrets and variables → Actions → Variables**. This unblocks #120.
+
+---
+
+## CD — cluster bootstrap
+
+One-time setup of the scoped identity the CD workflow ([#120](https://github.com/macamp0328/liner-notes/issues/120)) authenticates as. That workflow runs `kubectl apply -k infra/k8s/graph-service` + `rollout status` from GitHub Actions and must use a **scoped** ServiceAccount — never the cluster-admin `/etc/rancher/k3s/k3s.yaml`. [`infra/k8s/deploy/github-deployer.yaml`](k8s/deploy/github-deployer.yaml) defines that identity: a `github-deployer` ServiceAccount, a long-lived token Secret, a least-privilege namespace Role/RoleBinding granting exactly what `apply -k` touches, and a one-resource ClusterRole/ClusterRoleBinding for the cluster-scoped `ClusterSecretStore`.
+
+It is **deliberately not** part of the graph-service kustomization — the deployer can't create the identity it authenticates as — so you apply it once, by hand, with the admin kubeconfig. Run all three steps from your laptop with `KUBECONFIG` set and the [Step 4b](#step-4--get-a-kubeconfig-pointed-at-the-k3s-api-via-ssm-port-forward) port-forward still running.
+
+**1. Apply the identity (admin kubeconfig):**
+
+```bash
+kubectl apply -f infra/k8s/deploy/github-deployer.yaml
+# Expected: 6 × "created" — serviceaccount, secret, role.rbac, rolebinding.rbac,
+#           clusterrole.rbac, clusterrolebinding.rbac.
+```
+
+**2. Verify the scope** — the grants should be `yes`, the deliberately-withheld ones `no`:
+
+```bash
+AS=system:serviceaccount:liner-notes:github-deployer
+
+kubectl auth can-i create deployments        -n liner-notes --as="$AS"   # yes
+kubectl auth can-i create roles              -n liner-notes --as="$AS"   # yes — escalation rule OK: holds a superset of the ecr-refresher Role's secret perms
+kubectl auth can-i create rolebindings       -n liner-notes --as="$AS"   # yes
+kubectl auth can-i create clustersecretstores               --as="$AS"   # yes — the one cluster-scoped grant
+kubectl auth can-i create namespaces                        --as="$AS"   # no  — intentionally not granted
+kubectl auth can-i delete deployments        -n liner-notes --as="$AS"   # no  — apply never deletes
+```
+
+**3. Mint the kubeconfig and set the GitHub secret.** The minter reads the SA token from the cluster, takes the cluster CA from your admin kubeconfig, templates a token-auth kubeconfig pointed at `https://127.0.0.1:6443`, and prints its base64 to stdout — pipe it straight into `gh`:
+
+```bash
+scripts/admin/mint-deploy-kubeconfig.sh | gh secret set KUBECONFIG_B64 --repo macamp0328/liner-notes
+
+gh secret list --repo macamp0328/liner-notes    # KUBECONFIG_B64 should now be listed
+```
+
+> **Why `https://127.0.0.1:6443`, and why the admin CA?** The k3s API serving cert is signed only for `127.0.0.1` and the node's local IPs, so the kubeconfig must target the loopback address — the CD workflow (#120) reaches the API exactly as this runbook does, by opening its own SSM port-forward to `6443` before running `kubectl`. The minter takes `certificate-authority-data` from the admin kubeconfig rather than the SA token Secret's `ca.crt` because the admin config's CA is the trust anchor already proven (Step 4) to validate this server.
 
 ---
 

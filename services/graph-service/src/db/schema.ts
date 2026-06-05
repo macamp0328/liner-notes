@@ -48,7 +48,7 @@ const statements = [
   // One-time cleanup: remove the superseded boolean markers. The `*FetchedAt` queries
   // never read them, so this is cosmetic — but it keeps the graph free of vestigial
   // properties. Idempotent: the WHERE guards make each a no-op once cleared.
-  'MATCH (n) WHERE (n:Artist OR n:Musician OR n:Producer OR n:Engineer) AND n.nationalityFetched IS NOT NULL REMOVE n.nationalityFetched',
+  'MATCH (n) WHERE (n:Artist OR n:Musician) AND n.nationalityFetched IS NOT NULL REMOVE n.nationalityFetched',
   'MATCH (a:Artist) WHERE a.profileFetched IS NOT NULL REMOVE a.profileFetched',
   'MATCH (r:Release) WHERE r.masterFetched IS NOT NULL REMOVE r.masterFetched',
   'MATCH (m:Master) WHERE m.mbReleaseEventsFetched IS NOT NULL REMOVE m.mbReleaseEventsFetched',

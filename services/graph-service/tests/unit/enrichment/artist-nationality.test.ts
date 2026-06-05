@@ -7,22 +7,14 @@ import { enrichNationality } from '../../../src/enrichment/artist-nationality.js
 // ---------------------------------------------------------------------------
 const mockGetUnenrichedArtists = vi.hoisted(() => vi.fn());
 const mockGetUnenrichedMusicians = vi.hoisted(() => vi.fn());
-const mockGetUnenrichedProducers = vi.hoisted(() => vi.fn());
-const mockGetUnenrichedEngineers = vi.hoisted(() => vi.fn());
 const mockSetArtistNationality = vi.hoisted(() => vi.fn());
 const mockSetMusicianNationality = vi.hoisted(() => vi.fn());
-const mockSetProducerNationality = vi.hoisted(() => vi.fn());
-const mockSetEngineerNationality = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/db/artist-nationality-repository.js', () => ({
   getUnenrichedArtistsForNationality: mockGetUnenrichedArtists,
   getUnenrichedMusiciansForNationality: mockGetUnenrichedMusicians,
-  getUnenrichedProducersForNationality: mockGetUnenrichedProducers,
-  getUnenrichedEngineersForNationality: mockGetUnenrichedEngineers,
   setArtistNationality: mockSetArtistNationality,
   setMusicianNationality: mockSetMusicianNationality,
-  setProducerNationality: mockSetProducerNationality,
-  setEngineerNationality: mockSetEngineerNationality,
 }));
 
 // ---------------------------------------------------------------------------
@@ -73,12 +65,8 @@ describe('enrichNationality', () => {
     vi.clearAllMocks();
     mockGetUnenrichedArtists.mockResolvedValue([]);
     mockGetUnenrichedMusicians.mockResolvedValue([]);
-    mockGetUnenrichedProducers.mockResolvedValue([]);
-    mockGetUnenrichedEngineers.mockResolvedValue([]);
     mockSetArtistNationality.mockResolvedValue(undefined);
     mockSetMusicianNationality.mockResolvedValue(undefined);
-    mockSetProducerNationality.mockResolvedValue(undefined);
-    mockSetEngineerNationality.mockResolvedValue(undefined);
   });
 
   it('returns zero counts when nothing needs enrichment', async () => {
@@ -193,108 +181,31 @@ describe('enrichNationality', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Producer and Engineer nodes
+  // Musician group (covers producers/engineers too — they are Musician nodes)
   // ---------------------------------------------------------------------------
 
-  describe('Producer and Engineer enrichment', () => {
-    it('enriches a producer with a discogsId', async () => {
-      mockGetUnenrichedProducers.mockResolvedValue([{ discogsId: 50, name: 'Rick Rubin' }]);
-      const client = makeMbClient(async () => 'US');
-
-      const summary = await enrichNationality(client, fakeDriver);
-
-      expect(client.getCountryByDiscogsId).toHaveBeenCalledWith(50);
-      expect(mockSetProducerNationality).toHaveBeenCalledWith(
-        fakeDriver,
-        { discogsId: 50, name: 'Rick Rubin' },
-        'US',
-        'musicbrainz',
-      );
-      expect(summary.enriched).toBe(1);
-    });
-
-    it('enriches a producer without discogsId via MB then VIAF', async () => {
-      mockGetUnenrichedProducers.mockResolvedValue([{ discogsId: null, name: 'Joe Meek' }]);
-      const client = makeMbClient(
-        async () => null,
-        async () => null,
-      );
-      const viaf = makeViafClient(async () => 'GB');
-
-      await enrichNationality(client, fakeDriver, undefined, undefined, undefined, viaf);
-
-      expect(client.getCountryByName).toHaveBeenCalledWith('Joe Meek');
-      expect(viaf.getCountryByName).toHaveBeenCalledWith('Joe Meek');
-      expect(mockSetProducerNationality).toHaveBeenCalledWith(
-        fakeDriver,
-        { discogsId: null, name: 'Joe Meek' },
-        'GB',
-        'viaf',
-      );
-    });
-
-    it('enriches an engineer with a discogsId', async () => {
-      mockGetUnenrichedEngineers.mockResolvedValue([{ discogsId: 60, name: 'Rudy Van Gelder' }]);
-      const client = makeMbClient(async () => 'US');
-
-      const summary = await enrichNationality(client, fakeDriver);
-
-      expect(client.getCountryByDiscogsId).toHaveBeenCalledWith(60);
-      expect(mockSetEngineerNationality).toHaveBeenCalledWith(
-        fakeDriver,
-        { discogsId: 60, name: 'Rudy Van Gelder' },
-        'US',
-        'musicbrainz',
-      );
-      expect(summary.enriched).toBe(1);
-    });
-
-    it('enriches an engineer without discogsId via MB then VIAF', async () => {
-      mockGetUnenrichedEngineers.mockResolvedValue([{ discogsId: null, name: 'Tom Dowd' }]);
-      const client = makeMbClient(
-        async () => null,
-        async () => 'US',
-      );
-
-      const summary = await enrichNationality(client, fakeDriver);
-
-      expect(client.getCountryByName).toHaveBeenCalledWith('Tom Dowd');
-      expect(mockSetEngineerNationality).toHaveBeenCalledWith(
-        fakeDriver,
-        { discogsId: null, name: 'Tom Dowd' },
-        'US',
-        'musicbrainz',
-      );
-      expect(summary.enriched).toBe(1);
-    });
-
-    it('continues enriching other groups when one group fetch fails', async () => {
+  describe('Musician group resilience', () => {
+    it('counts failed and continues when the musician group fetch throws', async () => {
+      mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 1, name: 'Artist A' }]);
       mockGetUnenrichedMusicians.mockRejectedValue(new Error('DB timeout'));
-      mockGetUnenrichedProducers.mockResolvedValue([{ discogsId: 50, name: 'Rick Rubin' }]);
       const client = makeMbClient(async () => 'US');
 
       const summary = await enrichNationality(client, fakeDriver);
 
-      expect(summary.failed).toBe(1);
+      // Artist still enriched; the musician group fetch failure is counted, not thrown.
       expect(summary.enriched).toBe(1);
-      expect(mockSetProducerNationality).toHaveBeenCalledWith(
-        fakeDriver,
-        expect.anything(),
-        'US',
-        'musicbrainz',
-      );
+      expect(summary.failed).toBe(1);
+      expect(mockSetMusicianNationality).not.toHaveBeenCalled();
     });
 
-    it('aggregates counts across all four node types', async () => {
+    it('aggregates counts across artist and musician groups', async () => {
       mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 1, name: 'Artist A' }]);
       mockGetUnenrichedMusicians.mockResolvedValue([{ discogsId: 2, name: 'Musician B' }]);
-      mockGetUnenrichedProducers.mockResolvedValue([{ discogsId: 3, name: 'Producer C' }]);
-      mockGetUnenrichedEngineers.mockResolvedValue([{ discogsId: 4, name: 'Engineer D' }]);
       const client = makeMbClient(async () => 'FR');
 
       const summary = await enrichNationality(client, fakeDriver);
 
-      expect(summary.enriched).toBe(4);
+      expect(summary.enriched).toBe(2);
       expect(summary.skipped).toBe(0);
       expect(summary.failed).toBe(0);
     });

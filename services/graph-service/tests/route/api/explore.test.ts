@@ -8,6 +8,7 @@ import { buildServer } from '../../../src/server.js';
 
 const mockVerifyConnectivity = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const mockGetReleasesByMusician = vi.hoisted(() => vi.fn());
+const mockGetReleasesByCredit = vi.hoisted(() => vi.fn());
 const mockGetReleasesByStudio = vi.hoisted(() => vi.fn());
 const mockGetReleasesByLabel = vi.hoisted(() => vi.fn());
 const mockGetReleasesByGenre = vi.hoisted(() => vi.fn());
@@ -35,6 +36,7 @@ vi.mock('../../../src/db/ingestion-repository.js', () => ({
 
 vi.mock('../../../src/db/repositories/explore-repository.js', () => ({
   getReleasesByMusician: mockGetReleasesByMusician,
+  getReleasesByCredit: mockGetReleasesByCredit,
   getReleasesByStudio: mockGetReleasesByStudio,
   getReleasesByLabel: mockGetReleasesByLabel,
   getReleasesByGenre: mockGetReleasesByGenre,
@@ -105,6 +107,44 @@ describe('explore routes', () => {
       const response = await app.inject({ method: 'GET', url: '/api/v1/explore/musician/Unknown' });
       expect(response.statusCode).toBe(200);
       expect(JSON.parse(response.payload)).toEqual([]);
+    });
+  });
+
+  // GET /api/v1/explore/producer/:name
+  describe('GET /api/v1/explore/producer/:name', () => {
+    it('returns 200 and queries the producer role category', async () => {
+      mockGetReleasesByCredit.mockResolvedValue([{ ...sampleMusicianRelease, role: 'producer' }]);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/producer/Andrew%20Sarlo',
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as (typeof sampleMusicianRelease)[];
+      expect(body).toHaveLength(1);
+      expect(body[0]!.role).toBe('producer');
+      expect(mockGetReleasesByCredit).toHaveBeenCalledWith(
+        expect.anything(),
+        'Andrew Sarlo',
+        'producer',
+      );
+    });
+  });
+
+  // GET /api/v1/explore/engineer/:name
+  describe('GET /api/v1/explore/engineer/:name', () => {
+    it('returns 200 and queries the engineer role category', async () => {
+      mockGetReleasesByCredit.mockResolvedValue([]);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/engineer/Dominic%20Monks',
+      });
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.payload)).toEqual([]);
+      expect(mockGetReleasesByCredit).toHaveBeenCalledWith(
+        expect.anything(),
+        'Dominic Monks',
+        'engineer',
+      );
     });
   });
 
