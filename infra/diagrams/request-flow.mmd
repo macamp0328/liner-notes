@@ -1,13 +1,13 @@
 %% Hand-maintained logical architecture for graph-service in production.
-%%
+
 %% This file is the source of truth. `pnpm diagrams:generate` inlines it
 %% into the "Architecture" section of the root README and infra/RUNBOOK.md
 %% between <!-- diagrams:request-flow:start --> and …:end markers.
-%%
+
 %% Edit this when the request flow changes (new ingress path, new external
 %% dependency, secrets/image pull mechanics change). The /diagrams skill
 %% can help draft updates — see .claude/skills/diagrams/SKILL.md.
-%%
+
 %% Edge colors encode flow category (see the inline legend at the bottom):
 %%   slate  — user request path (ingress → pod)
 %%   blue   — heavy data path (Cypher to Aura, image pull from ECR)

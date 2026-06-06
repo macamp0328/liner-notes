@@ -7,7 +7,7 @@ import { buildDeezerClientFromEnv } from './deezer-client.js';
 import { buildWikidataClientFromEnv } from './wikidata-client.js';
 import { buildViafClientFromEnv } from './viaf-client.js';
 import { RELOAD_STAGES } from './stages.js';
-import type { ReloadContext, StageDescriptor } from './stages.js';
+import type { ReloadContext, ReloadStageName, StageDescriptor } from './stages.js';
 import { scheduleStages } from './scheduler.js';
 import {
   createReloadJob,
@@ -26,6 +26,8 @@ import {
   clearStage,
 } from './reload-progress.js';
 import type { ProgressReporter } from '../enrichment/progress.js';
+import { getStats } from '../db/stats-repository.js';
+import { evaluateCoverage, reportToCounts, formatVerifyFailure } from './reload-verify.js';
 
 export interface RunReloadOptions {
   username: string;
@@ -96,8 +98,9 @@ export function buildReloadContext(driver: Driver, username: string, log: Logger
  *
  * A stage that returns null is recorded `skipped` (its client was not configured); a stage that
  * throws is recorded `failed`, logged, and the rest of the schedule continues (failure isolation).
- * The job ends `failed` if any stage failed, else `complete` — only a still-`running` job (a
- * genuine mid-run crash) is resumable on the next boot.
+ * `verify` runs last (its deps cover every other stage) as the #178 coverage gate. The job ends
+ * `failed` if any stage failed, else `complete` — only a still-`running` job (a genuine mid-run
+ * crash) is resumable on the next boot.
  */
 export async function runReload(driver: Driver, options: RunReloadOptions): Promise<ReloadResult> {
   const log: Logger = options.logger ?? console;
@@ -118,6 +121,16 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
     (existing?.stages ?? [])
       .filter((s) => s.status === 'complete' || s.status === 'skipped')
       .map((s) => s.stage),
+  );
+
+  // Stages that produced output (status `complete`, not `skipped`) — across both a prior run's
+  // checkpoints and this run. The verify gate judges coverage only for stages that actually ran,
+  // so a skipped stage's metric is exempt rather than a false silently-zero. Mutated as stages
+  // complete; `verify` deps on every other stage, so it reads a fully-populated set.
+  const ranStages = new Set<ReloadStageName>(
+    (existing?.stages ?? [])
+      .filter((s) => s.status === 'complete')
+      .map((s) => s.stage as ReloadStageName),
   );
 
   // Accurate whether the job is brand-new (pre-created by the route with all stages pending)
@@ -144,6 +157,18 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
       reportStageProgress(jobId, descriptor.name, processed, total);
     try {
       await markStageRunning(driver, jobId, descriptor.name);
+
+      // The verify gate (#178) runs here, not via descriptor.run, because it needs `ranStages`
+      // (which stages produced output this job) that the run(ctx) signature can't carry. Its deps
+      // cover every other stage, so the scheduler runs it last and alone; it does no per-item work,
+      // so it skips the live-progress registry (no beginStage).
+      if (descriptor.name === 'verify') {
+        const { passed } = await runVerifyGate(driver, jobId, ranStages, log);
+        if (passed) stagesRun++;
+        else stagesFailed++;
+        return;
+      }
+
       beginStage(jobId, descriptor.name);
       const counts = await descriptor.run(ctx, onProgress);
       if (counts === null) {
@@ -153,6 +178,7 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
       } else {
         await markStageComplete(driver, jobId, descriptor.name, counts);
         stagesRun++;
+        ranStages.add(descriptor.name);
         log.info(`[reload] stage "${descriptor.name}" complete`);
       }
     } catch (err) {
@@ -202,4 +228,38 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
   );
 
   return { jobId, status, stagesRun, stagesSkipped, stagesFailed };
+}
+
+/**
+ * The verify gate (#178). Reads coverage via `getStats`, compares it against the
+ * pinned thresholds for the stages that ran (`ranStages`), and records the result
+ * on the verify ReloadStage. On failure it logs at pino error level (≥ 50, so the
+ * CloudWatch `$.data.level >= 50` filter and the #169 dashboard fire) and persists
+ * the structured per-metric report alongside the failure summary, so a degraded
+ * load surfaces in `/admin/reload/status` rather than reporting green.
+ */
+export async function runVerifyGate(
+  driver: Driver,
+  jobId: string,
+  ranStages: ReadonlySet<ReloadStageName>,
+  log: Logger,
+): Promise<{ passed: boolean }> {
+  try {
+    const report = evaluateCoverage(await getStats(driver), ranStages);
+    const counts = reportToCounts(report);
+    if (report.pass) {
+      await markStageComplete(driver, jobId, 'verify', counts);
+      log.info('[reload] verify gate passed');
+      return { passed: true };
+    }
+    const summary = formatVerifyFailure(report);
+    log.error(`[reload] ${summary}`);
+    await markStageFailed(driver, jobId, 'verify', summary, counts);
+    return { passed: false };
+  } catch (err) {
+    const msg = `verify gate errored: ${err instanceof Error ? err.message : String(err)}`;
+    log.error(`[reload] ${msg}`);
+    await markStageFailed(driver, jobId, 'verify', msg);
+    return { passed: false };
+  }
 }

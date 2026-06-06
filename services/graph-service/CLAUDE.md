@@ -226,14 +226,19 @@ Source files:
   descriptor's `run` delegates to the existing `enrichX` function (one definition per stage) and
   declares `deps` (ordering prerequisites) + `resources` (mutual-exclusion lanes). The array is in
   **priority** order (cheap + #165-gate stages first), which is also a valid topological sort;
-  actual run order is governed by `deps`, not array position. `verify` is a no-op slot for #178
-  whose deps are derived from every other stage so it always runs last.
+  actual run order is governed by `deps`, not array position. `verify` is the final **coverage
+  gate** (#178) — its descriptor `run` is a no-op; the gate logic lives in the orchestrator's
+  `runVerifyGate` (it needs cross-stage `ranStages`), and its derived deps keep it strictly last.
 - `src/ingestion/scheduler.ts` — `scheduleStages`: the generic bounded-concurrency, dependency- and
   resource-aware scheduler (no Neo4j/job-repo imports) plus `validateStageGraph` (test-only DAG
   guard). See "Scheduling (#176)" below.
 - `src/ingestion/orchestrator.ts` — `runReload(driver, { username, logger?, resumeJobId?, concurrency? })`
-  and `buildReloadContext()`. Drives `scheduleStages` over `RELOAD_STAGES`, skipping stages already
+  and `buildReloadContext()`. Drives `scheduleStages` over `RELOAD_STAGES`, special-cases `verify`
+  via `runVerifyGate`, skipping stages already
   `complete`/`skipped`, and persists each transition.
+- `src/ingestion/reload-verify.ts` — the coverage-gate thresholds and pure comparison logic.
+  `RELOAD_COVERAGE_THRESHOLDS` is the one place the bars live; `evaluateCoverage(stats,
+ranStages)` produces a structured per-metric pass/fail report reused by the gate and its tests.
 - `src/db/job-repository.ts` — `ReloadJob`/`ReloadStage` persistence (one job per run;
   `findResumableReloadJob` returns the latest still-`running` job — the resume signal).
 - `src/db/schema.ts` — `ReloadJob` constraint + indexes.
@@ -267,6 +272,12 @@ Source files:
   client was unconfigured) → `skipped`; throwing → `failed`, logged, and the run continues
   (failure isolation). The job ends `failed` if any stage failed, else `complete` — only a
   still-`running` job auto-resumes, so a `failed`/`complete` job never retries on every boot.
+- **Verify gate (#178).** The final `verify` stage compares graph coverage (via `getStats`)
+  against `RELOAD_COVERAGE_THRESHOLDS`, gating a metric only when its producing stage actually
+  ran this job (so a skipped stage's metric is exempt, not a false silently-zero). A metric that
+  is silently-zero (`applicable>0, covered=0`) or below its floor fails the reload `failed` and
+  logs at pino level ≥ 50; the per-metric report is persisted on the verify stage's `counts`
+  (and `error` on failure), surfaced by `/admin/reload/status`. An empty graph fails the gate.
 - **Wipe stays separate.** The reload never wipes; run `POST /reset?confirm=wipe-all` first for
   a from-scratch reload. It picks up from empty-or-partial.
 - **Coarse 409 only.** `/reload` 409s if a reload is already running; full mutual exclusion

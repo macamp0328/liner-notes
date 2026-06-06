@@ -64,6 +64,29 @@ async function countReleases(driver: Driver): Promise<number> {
   }
 }
 
+/**
+ * Seed the enrichments the #178 verify gate checks for stages that ran/are-done this
+ * job, so a healthy resume still ends `complete`. recordingMbid/isrc stay null →
+ * track-musicbrainz is skipped (no MB client) → exempt; tempo/deezer applicable 0.
+ */
+async function seedVerifyPassingEnrichment(driver: Driver): Promise<void> {
+  const session = driver.session();
+  try {
+    await session.run(
+      `MATCH (t:Track)
+       SET t.lyrics = coalesce(t.lyrics, 'la la la'),
+           t.lyricsSource = coalesce(t.lyricsSource, 'lrclib')`,
+    );
+    await session.run(`MATCH (r:Release) SET r.originalYear = coalesce(r.originalYear, 1965)`);
+    await session.run(
+      `MATCH (a:Artist) WHERE a.discogsId IS NOT NULL
+       SET a.profile = coalesce(a.profile, 'seeded profile')`,
+    );
+  } finally {
+    await session.close();
+  }
+}
+
 describe('reload resume after a simulated crash (real Neo4j)', () => {
   let driver: Driver;
   let fetchSpy: ReturnType<typeof vi.spyOn>;
@@ -98,6 +121,7 @@ describe('reload resume after a simulated crash (real Neo4j)', () => {
     await clearGraph(driver);
     await mergeReleaseGraph(driver, release7000001 as unknown as DiscogsRelease);
     expect(await countReleases(driver)).toBe(1);
+    await seedVerifyPassingEnrichment(driver);
 
     // 2. A persisted job mid-reload: everything up to the crash stage is complete, the
     //    crash stage is `running`, the rest are `pending` (as createReloadJob leaves them).
