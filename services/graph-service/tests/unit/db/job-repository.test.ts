@@ -129,6 +129,21 @@ describe('stage transition writes', () => {
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(query).toContain("st.status = 'failed'");
     expect((params['error'] as string).length).toBe(1000);
+    // No counts passed → countsJson is left untouched.
+    expect(query).not.toContain('countsJson');
+    expect(params['countsJson']).toBeUndefined();
+  });
+
+  it('markStageFailed persists counts alongside the error when given', async () => {
+    const { session, runSpy } = makeMockSession();
+    await markStageFailed(makeMockDriver(session), 'job-1', 'verify', 'gate failed', {
+      coverageChecksFailed: 2,
+    });
+
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain("st.status = 'failed'");
+    expect(query).toContain('st.countsJson = $countsJson');
+    expect(params['countsJson']).toBe(JSON.stringify({ coverageChecksFailed: 2 }));
   });
 });
 

@@ -1,0 +1,174 @@
+import type { CoverageMetric, StatsData } from '../db/stats-repository.js';
+import type { ReloadStageName } from './stages.js';
+
+/**
+ * One coverage bar the reload must clear. `metric` names a key under
+ * `StatsData.enrichment`; `stage` is the reload stage that produces it (so a
+ * failure can name the offending stage); `minPct` is the inclusive floor the
+ * metric's `pct` must reach. `minPct: 0` means "silently-zero protection only" —
+ * no percentage floor, only a non-empty result is required.
+ */
+export interface CoverageThreshold {
+  metric: keyof StatsData['enrichment'];
+  stage: ReloadStageName;
+  minPct: number;
+}
+
+/**
+ * The single source of truth for reload coverage bars. Changing a bar is a
+ * one-line edit here, reused by the verify gate and its tests.
+ *
+ * Pinned by #165: originalYear ≥ 90%, artistsWithProfile ≥ 80%. Track-level
+ * (recordingMbid/isrc) confirmed lenient by the operator. lyrics/tempo/deezerBpm
+ * are best-effort external sources — gated for "populated" (silently-zero) only.
+ *
+ * Deliberately omitted: genres, styles, nationality, versions, releaseEvents,
+ * deezerGain. They are not in #178's scope; add a row here to start gating one.
+ */
+export const RELOAD_COVERAGE_THRESHOLDS: readonly CoverageThreshold[] = [
+  { metric: 'releasesWithOriginalYear', stage: 'master-data', minPct: 90 },
+  { metric: 'artistsWithProfile', stage: 'artist-profiles', minPct: 80 },
+  { metric: 'tracksWithLyrics', stage: 'lyrics', minPct: 0 },
+  { metric: 'tracksWithRecordingMbid', stage: 'track-musicbrainz', minPct: 50 },
+  { metric: 'tracksWithIsrc', stage: 'track-musicbrainz', minPct: 40 },
+  { metric: 'tracksWithTempo', stage: 'track-acousticbrainz', minPct: 0 },
+  { metric: 'tracksWithDeezerBpm', stage: 'track-deezer', minPct: 0 },
+];
+
+/** Why a metric passed or failed — drives the human-readable failure summary. */
+export type VerifyReason =
+  | 'ok'
+  | 'not-applicable'
+  | 'not-run'
+  | 'silently-zero'
+  | 'below-threshold'
+  | 'empty-graph';
+
+export interface MetricVerdict {
+  metric: string;
+  stage: ReloadStageName;
+  covered: number;
+  applicable: number;
+  pct: number | null;
+  threshold: number;
+  pass: boolean;
+  reason: VerifyReason;
+}
+
+export interface VerifyReport {
+  pass: boolean;
+  metrics: MetricVerdict[];
+  /** Distinct stages with at least one failing metric — what to investigate. */
+  failingStages: ReloadStageName[];
+}
+
+function evaluateMetric(
+  t: CoverageThreshold,
+  m: CoverageMetric,
+  ranStages: ReadonlySet<ReloadStageName>,
+): MetricVerdict {
+  const base = {
+    metric: t.metric,
+    stage: t.stage,
+    covered: m.covered,
+    applicable: m.applicable,
+    pct: m.pct,
+    threshold: t.minPct,
+  };
+  // The producing stage did not run this job (skipped — e.g. its client was not
+  // configured). No output was expected, so the metric is exempt rather than a
+  // false silently-zero. This is what keeps a forkable, no-MusicBrainz
+  // deployment from failing every reload on recordingMbid/isrc (applicable = all
+  // tracks, so it would not self-exempt via applicable === 0).
+  if (!ranStages.has(t.stage)) {
+    return { ...base, pass: true, reason: 'not-run' };
+  }
+  // Genuinely nothing to enrich (e.g. no release has a master → originalYear
+  // applicable 0). Reporting 0% here would be misleading, not a failure.
+  if (m.applicable === 0) {
+    return { ...base, pass: true, reason: 'not-applicable' };
+  }
+  // The #151 bug: the stage ran against real candidates and produced nothing.
+  if (m.covered === 0) {
+    return { ...base, pass: false, reason: 'silently-zero' };
+  }
+  // Below the pinned floor (inclusive — exactly at the floor passes). Compare the
+  // exact covered/applicable counts, not getStats's `pct` (rounded to one decimal),
+  // so a true 89.96% can't slip past a 90% gate by rounding up to 90.0. Integer
+  // math: covered/applicable < minPct/100  ⇔  covered*100 < applicable*minPct.
+  if (m.covered * 100 < m.applicable * t.minPct) {
+    return { ...base, pass: false, reason: 'below-threshold' };
+  }
+  return { ...base, pass: true, reason: 'ok' };
+}
+
+/**
+ * Compare graph coverage against `RELOAD_COVERAGE_THRESHOLDS`, gating a metric
+ * only when its producing stage actually ran (`ranStages`). Pure: takes a stats
+ * snapshot, returns a structured pass/fail report — no I/O.
+ */
+export function evaluateCoverage(
+  stats: StatsData,
+  ranStages: ReadonlySet<ReloadStageName>,
+): VerifyReport {
+  const metrics: MetricVerdict[] = [];
+
+  // Liveness floor: an empty graph makes every coverage metric trivially
+  // "not-applicable" and would otherwise pass — the loudest silent zero of all.
+  if (stats.counts.releases === 0) {
+    metrics.push({
+      metric: 'graphNotEmpty',
+      stage: 'releases',
+      covered: stats.counts.releases,
+      applicable: 0,
+      pct: null,
+      threshold: 0,
+      pass: false,
+      reason: 'empty-graph',
+    });
+  }
+
+  for (const t of RELOAD_COVERAGE_THRESHOLDS) {
+    metrics.push(evaluateMetric(t, stats.enrichment[t.metric], ranStages));
+  }
+
+  const failing = metrics.filter((m) => !m.pass);
+  return {
+    pass: failing.length === 0,
+    metrics,
+    failingStages: [...new Set(failing.map((m) => m.stage))],
+  };
+}
+
+/**
+ * Flatten a report into a numeric counts map for persistence on the verify
+ * ReloadStage node (its `countsJson` is numbers-only, surfaced verbatim by
+ * `GET /admin/reload/status`). `_pass` is 1/0; `_pct` is omitted when null.
+ */
+export function reportToCounts(report: VerifyReport): Record<string, number> {
+  const counts: Record<string, number> = {
+    coverageChecksTotal: report.metrics.length,
+    coverageChecksFailed: report.metrics.filter((m) => !m.pass).length,
+  };
+  for (const m of report.metrics) {
+    counts[`${m.metric}_covered`] = m.covered;
+    counts[`${m.metric}_applicable`] = m.applicable;
+    counts[`${m.metric}_pass`] = m.pass ? 1 : 0;
+    if (m.pct !== null) counts[`${m.metric}_pct`] = m.pct;
+  }
+  return counts;
+}
+
+/** Human-readable failure summary naming the offending stage(s) and metrics. */
+export function formatVerifyFailure(report: VerifyReport): string {
+  const failures = report.metrics.filter((m) => !m.pass);
+  if (failures.length === 0) return 'verify gate passed';
+  const stages = [...new Set(failures.map((m) => m.stage))].join(', ');
+  const details = failures
+    .map((m) => {
+      const pct = m.pct === null ? 'n/a' : `${m.pct}%`;
+      return `${m.stage}/${m.metric} ${m.reason} (covered ${m.covered}/${m.applicable}, ${pct}, floor ${m.threshold}%)`;
+    })
+    .join('; ');
+  return `verify gate FAILED — ${failures.length} check(s) below bar in stage(s) [${stages}]: ${details}`;
+}

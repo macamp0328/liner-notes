@@ -198,18 +198,31 @@ export async function markStageComplete(
   }
 }
 
+/**
+ * Mark a stage failed. Optional `counts` lets a stage that produces a structured
+ * result before failing (e.g. the verify gate) persist that report alongside the
+ * error, so `/admin/reload/status` shows the per-metric detail and not just a
+ * truncated message.
+ */
 export async function markStageFailed(
   driver: Driver,
   jobId: string,
   stage: string,
   error: string,
+  counts?: Record<string, number>,
 ): Promise<void> {
   const session = driver.session();
   try {
     await session.run(
       `MATCH (st:ReloadStage {jobId: $jobId, stage: $stage})
-       SET st.status = 'failed', st.completedAt = datetime(), st.error = $error`,
-      { jobId, stage, error: error.slice(0, MAX_ERROR_LENGTH) },
+       SET st.status = 'failed', st.completedAt = datetime(), st.error = $error` +
+        (counts === undefined ? '' : ', st.countsJson = $countsJson'),
+      {
+        jobId,
+        stage,
+        error: error.slice(0, MAX_ERROR_LENGTH),
+        ...(counts === undefined ? {} : { countsJson: JSON.stringify(counts) }),
+      },
     );
   } finally {
     await session.close();
