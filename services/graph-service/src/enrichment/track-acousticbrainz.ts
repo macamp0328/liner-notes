@@ -10,6 +10,7 @@ import {
   setTrackAcousticBrainzFeatures,
 } from '../db/track-acousticbrainz-repository.js';
 import type { TrackAcousticBrainzResult } from '../db/track-acousticbrainz-repository.js';
+import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 
 export interface TrackAcousticBrainzEnrichmentSummary {
   /** Tracks that received at least one non-null feature. */
@@ -51,6 +52,7 @@ export async function enrichTrackAcousticBrainz(
   abClient: AcousticBrainzClient,
   driver: Driver,
   logger?: Logger,
+  onProgress: ProgressReporter = NOOP_PROGRESS,
 ): Promise<TrackAcousticBrainzEnrichmentSummary> {
   const log: Logger = logger ?? console;
   const startTime = Date.now();
@@ -86,11 +88,13 @@ export async function enrichTrackAcousticBrainz(
   }
 
   const uniqueMbids = [...elementIdsByMbid.keys()];
+  const total = uniqueMbids.length;
   log.info(
-    `[track-acousticbrainz] Found ${tracks.length} unenriched tracks across ${uniqueMbids.length} unique recordings`,
+    `[track-acousticbrainz] Found ${tracks.length} unenriched tracks across ${total} unique recordings`,
   );
+  onProgress(0, total);
 
-  const batchCount = Math.ceil(uniqueMbids.length / MAX_RECORDING_IDS_PER_CALL);
+  const batchCount = Math.ceil(total / MAX_RECORDING_IDS_PER_CALL);
   for (let batchIndex = 0; batchIndex < batchCount; batchIndex++) {
     const batch = uniqueMbids.slice(
       batchIndex * MAX_RECORDING_IDS_PER_CALL,
@@ -134,8 +138,12 @@ export async function enrichTrackAcousticBrainz(
         tracksFailed += (elementIdsByMbid.get(mbid) ?? []).length;
       }
     }
+
+    // Report in recording (MBID) units — the unit of actual work after dedup.
+    onProgress(Math.min((batchIndex + 1) * MAX_RECORDING_IDS_PER_CALL, total), total);
   }
 
+  onProgress(total, total);
   const durationMs = Date.now() - startTime;
   log.info(
     `[track-acousticbrainz] Enrichment complete: processed=${tracksProcessed}, skipped=${tracksSkipped}, failed=${tracksFailed}, duration=${durationMs}ms`,

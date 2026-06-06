@@ -18,6 +18,14 @@ import {
   finishReloadJob,
 } from '../db/job-repository.js';
 import type { PersistedJob } from '../db/job-repository.js';
+import {
+  markReloadActive,
+  markReloadInactive,
+  beginStage,
+  reportStageProgress,
+  clearStage,
+} from './reload-progress.js';
+import type { ProgressReporter } from '../enrichment/progress.js';
 
 export interface RunReloadOptions {
   username: string;
@@ -125,11 +133,15 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
   let stagesFailed = 0;
 
   // Run one stage end-to-end. MUST NOT reject — a rejected run would abort the whole concurrent
-  // schedule — so even a failed checkpoint write is swallowed after logging.
+  // schedule — so even a failed checkpoint write is swallowed after logging. Each stage feeds the
+  // live-progress mirror (#179): begin on start, forward an onProgress reporter, clear on settle.
   const runOneStage = async (descriptor: StageDescriptor): Promise<void> => {
+    const onProgress: ProgressReporter = (processed, total) =>
+      reportStageProgress(jobId, descriptor.name, processed, total);
     try {
       await markStageRunning(driver, jobId, descriptor.name);
-      const counts = await descriptor.run(ctx);
+      beginStage(jobId, descriptor.name);
+      const counts = await descriptor.run(ctx, onProgress);
       if (counts === null) {
         await markStageComplete(driver, jobId, descriptor.name, {}, true);
         stagesSkipped++;
@@ -149,19 +161,31 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
         log.error(`[reload] stage "${descriptor.name}" failed; recording it also failed: ${rmsg}`);
       }
       log.error(`[reload] stage "${descriptor.name}" failed (recorded; continuing): ${msg}`);
+    } finally {
+      // Drop this stage's live progress on settle. The #179 mirror tracks a single stage, so under
+      // concurrency > 1 the overlay shows the most-recently-begun stage (progress is cosmetic; the
+      // persisted ReloadStage status is the source of truth).
+      clearStage();
     }
   };
 
   // Stages already settled on a prior run are skipped by the scheduler (and unblock their
   // dependents). With concurrency > 1 a crash can leave several stages `running`; all re-run here,
   // which is safe because each stage's idempotent candidate filters only pick up unfinished work.
-  await scheduleStages({
-    stages: RELOAD_STAGES,
-    concurrency,
-    alreadyDone: doneStages,
-    run: runOneStage,
-    log,
-  });
+  // markReloadActive flags the run for the /stats cache + snapshot timer; the `finally` guarantees
+  // the flag (and any live stage progress) is cleared even if the schedule throws.
+  markReloadActive(jobId);
+  try {
+    await scheduleStages({
+      stages: RELOAD_STAGES,
+      concurrency,
+      alreadyDone: doneStages,
+      run: runOneStage,
+      log,
+    });
+  } finally {
+    markReloadInactive(jobId);
+  }
 
   // A schedule that couldn't settle every stage (a malformed graph trips the scheduler's stuck
   // guard — unit-tested away, defensive here) is a failure, like any failed stage.

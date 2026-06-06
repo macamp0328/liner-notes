@@ -1,7 +1,12 @@
 import { type FastifyInstance } from 'fastify';
 import { buildServer } from './server.js';
 import { getDriver } from './db/client.js';
-import { startStatsSnapshots, resolveSnapshotIntervalMs } from './observability/stats-snapshot.js';
+import {
+  startStatsSnapshots,
+  resolveSnapshotIntervalMs,
+  ACTIVE_SNAPSHOT_INTERVAL_MS,
+} from './observability/stats-snapshot.js';
+import { isReloadActive } from './ingestion/reload-progress.js';
 
 const start = async (): Promise<void> => {
   let app: FastifyInstance | undefined;
@@ -26,8 +31,13 @@ const start = async (): Promise<void> => {
 
     // onReady has now run and Neo4j is connected, so begin periodic graph-stats
     // snapshots — structured logs that feed the "Collection over time" dashboard
-    // widgets. The interval is unref'd; shutdown stops it explicitly above.
-    stopSnapshots = startStatsSnapshots(getDriver(), app.log, resolveSnapshotIntervalMs());
+    // widgets. The interval is unref'd; shutdown stops it explicitly above. While
+    // an orchestrated reload runs, the cadence tightens to ACTIVE_SNAPSHOT_INTERVAL_MS
+    // so the dashboard's coverage bars move during the reload (#179).
+    stopSnapshots = startStatsSnapshots(getDriver(), app.log, resolveSnapshotIntervalMs(), {
+      activeIntervalMs: ACTIVE_SNAPSHOT_INTERVAL_MS,
+      isActive: isReloadActive,
+    });
 
     if (process.env['NODE_ENV'] !== 'production') {
       const w = 53;

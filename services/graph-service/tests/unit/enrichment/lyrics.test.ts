@@ -89,8 +89,9 @@ describe('enrichLyrics', () => {
   it('enriches a track from LRCLIB and stores plainLyrics with source lrclib', async () => {
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
     fetchSpy.mockResolvedValueOnce(makeOkResponse(lrclibHit));
+    const onProgress = vi.fn();
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, onProgress);
 
     expect(summary.enriched).toBe(1);
     expect(summary.skipped).toBe(0);
@@ -103,6 +104,9 @@ describe('enrichLyrics', () => {
       lrclibHit.plainLyrics,
       'lrclib',
     );
+    // Progress is reported against the track work-list (1 track here).
+    expect(onProgress).toHaveBeenCalledWith(0, 1);
+    expect(onProgress).toHaveBeenLastCalledWith(1, 1);
   });
 
   // -------------------------------------------------------------------------

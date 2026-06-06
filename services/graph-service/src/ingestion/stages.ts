@@ -16,10 +16,10 @@ import { enrichTrackMusicBrainz } from '../enrichment/track-musicbrainz.js';
 import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
 import { enrichTrackDeezer } from '../enrichment/track-deezer.js';
 import { enrichNationality } from '../enrichment/artist-nationality.js';
+import type { ProgressReporter } from '../enrichment/progress.js';
 
 /**
- * Stage names in the orchestrated reload, in #154 dependency order. `verify` is a no-op
- * placeholder for #178.
+ * Stage names in the orchestrated reload. `verify` is a no-op placeholder for #178.
  */
 export type ReloadStageName =
   | 'releases'
@@ -86,8 +86,14 @@ export interface StageDescriptor {
    * Run the stage. Returns a flat counts map on success, or `null` to signal "skipped"
    * (a required client was not configured). A throw is caught by the orchestrator and
    * recorded as `failed` without aborting later stages.
+   *
+   * `onProgress` is optional: the orchestrator passes a reporter that feeds the live
+   * reload-progress registry (#179); stages with no per-item loop ignore it.
    */
-  run: (ctx: ReloadContext) => Promise<Record<string, number> | null>;
+  run: (
+    ctx: ReloadContext,
+    onProgress?: ProgressReporter,
+  ) => Promise<Record<string, number> | null>;
 }
 
 /**
@@ -103,15 +109,18 @@ export interface StageDescriptor {
  * (its candidate query `MATCH (m:Master)` needs the Master nodes only `master-data` creates);
  * `track-acousticbrainz`/`track-deezer` dep `track-musicbrainz` (they need the recordingMbid/isrc
  * it writes).
+ *
+ * Each `run` forwards the orchestrator's optional `onProgress` reporter to its enrich function
+ * (#179); `artist-genres` has no per-item loop, so it takes none.
  */
 const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
   {
     name: 'releases',
     deps: [],
     resources: ['discogs'],
-    run: async (ctx): Promise<Record<string, number> | null> => {
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.discogs) return null;
-      const s = await ingestReleases(ctx.discogs, ctx.driver, ctx.username, ctx.log);
+      const s = await ingestReleases(ctx.discogs, ctx.driver, ctx.username, ctx.log, onProgress);
       return {
         releasesProcessed: s.releasesProcessed,
         releasesFailed: s.releasesFailed,
@@ -123,18 +132,18 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     name: 'master-data',
     deps: ['releases'],
     resources: ['discogs'],
-    run: async (ctx): Promise<Record<string, number> | null> => {
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.discogs) return null;
-      return { ...(await enrichMasterData(ctx.discogs, ctx.driver, ctx.log)) };
+      return { ...(await enrichMasterData(ctx.discogs, ctx.driver, ctx.log, onProgress)) };
     },
   },
   {
     name: 'artist-profiles',
     deps: ['releases'],
     resources: ['discogs'],
-    run: async (ctx): Promise<Record<string, number> | null> => {
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.discogs) return null;
-      return { ...(await enrichArtistProfiles(ctx.discogs, ctx.driver, ctx.log)) };
+      return { ...(await enrichArtistProfiles(ctx.discogs, ctx.driver, ctx.log, onProgress)) };
     },
   },
   {
@@ -147,51 +156,57 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     name: 'track-versions',
     deps: ['releases'],
     resources: ['track'],
-    run: async (ctx) => ({ ...(await enrichTrackVersions(ctx.driver, ctx.log)) }),
+    run: async (ctx, onProgress) => ({
+      ...(await enrichTrackVersions(ctx.driver, ctx.log, onProgress)),
+    }),
   },
   {
     name: 'track-musicbrainz',
     deps: ['releases'],
     resources: ['musicbrainz', 'track'],
-    run: async (ctx): Promise<Record<string, number> | null> => {
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.musicbrainz) return null;
-      return { ...(await enrichTrackMusicBrainz(ctx.musicbrainz, ctx.driver, ctx.log)) };
+      return {
+        ...(await enrichTrackMusicBrainz(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)),
+      };
     },
   },
   {
     name: 'mb-release-events',
     deps: ['master-data'],
     resources: ['musicbrainz'],
-    run: async (ctx): Promise<Record<string, number> | null> => {
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.musicbrainz) return null;
-      return { ...(await enrichMbReleaseEvents(ctx.musicbrainz, ctx.driver, ctx.log)) };
+      return { ...(await enrichMbReleaseEvents(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)) };
     },
   },
   {
     name: 'lyrics',
     deps: ['releases'],
     resources: [],
-    run: async (ctx) => ({ ...(await enrichLyrics(ctx.driver, ctx.log)) }),
+    run: async (ctx, onProgress) => ({ ...(await enrichLyrics(ctx.driver, ctx.log, onProgress)) }),
   },
   {
     name: 'track-acousticbrainz',
     deps: ['track-musicbrainz'],
     resources: ['track'],
-    run: async (ctx) => ({
-      ...(await enrichTrackAcousticBrainz(ctx.acousticbrainz, ctx.driver, ctx.log)),
+    run: async (ctx, onProgress) => ({
+      ...(await enrichTrackAcousticBrainz(ctx.acousticbrainz, ctx.driver, ctx.log, onProgress)),
     }),
   },
   {
     name: 'track-deezer',
     deps: ['track-musicbrainz'],
     resources: ['track'],
-    run: async (ctx) => ({ ...(await enrichTrackDeezer(ctx.deezer, ctx.driver, ctx.log)) }),
+    run: async (ctx, onProgress) => ({
+      ...(await enrichTrackDeezer(ctx.deezer, ctx.driver, ctx.log, onProgress)),
+    }),
   },
   {
     name: 'nationality',
     deps: ['releases'],
     resources: ['discogs', 'musicbrainz'],
-    run: async (ctx): Promise<Record<string, number> | null> => {
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.musicbrainz) return null;
       return {
         ...(await enrichNationality(
@@ -201,6 +216,7 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
           ctx.wikidata ?? undefined,
           ctx.discogs ?? undefined,
           ctx.viaf ?? undefined,
+          onProgress,
         )),
       };
     },

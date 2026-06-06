@@ -7,6 +7,7 @@ import {
   releasesShareArtist,
 } from '../db/track-versions-repository.js';
 import type { VersionPair } from '../db/track-versions-repository.js';
+import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 
 export interface TrackVersionsEnrichmentSummary {
   enriched: number;
@@ -34,6 +35,7 @@ export interface TrackVersionsEnrichmentSummary {
 export async function enrichTrackVersions(
   driver: Driver,
   logger?: Logger,
+  onProgress: ProgressReporter = NOOP_PROGRESS,
 ): Promise<TrackVersionsEnrichmentSummary> {
   const log: Logger = logger ?? console;
   const startTime = Date.now();
@@ -45,9 +47,14 @@ export async function enrichTrackVersions(
 
   try {
     const groups = await getVersionCandidates(driver);
-    log.info(`[track-versions] Found ${groups.length} candidate version groups`);
+    const total = groups.length;
+    log.info(`[track-versions] Found ${total} candidate version groups`);
+    onProgress(0, total);
 
+    let i = 0;
     for (const group of groups) {
+      i++;
+      if (i % 25 === 0) onProgress(i, total);
       try {
         // Collect unique release IDs in this group
         const releaseIds = [...new Set(group.tracks.map((t) => t.releaseDiscogsId))];
@@ -99,6 +106,7 @@ export async function enrichTrackVersions(
         failed++;
       }
     }
+    onProgress(total, total);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.error(`[track-versions] Failed to fetch version candidates: ${msg}`);

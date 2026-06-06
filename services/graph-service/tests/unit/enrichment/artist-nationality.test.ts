@@ -102,6 +102,29 @@ describe('enrichNationality', () => {
     expect(summary.enriched).toBe(0);
   });
 
+  it('reports a progress denominator that grows when the musician phase begins', async () => {
+    mockGetUnenrichedArtists.mockResolvedValue([{ discogsId: 1 }]);
+    mockGetUnenrichedMusicians.mockResolvedValue([{ discogsId: 10, name: 'Ron Carter' }]);
+    const client = makeMbClient(async () => 'US');
+    const onProgress = vi.fn();
+
+    await enrichNationality(
+      client,
+      fakeDriver,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      onProgress,
+    );
+
+    // Starts with the artist count only...
+    expect(onProgress).toHaveBeenNthCalledWith(1, 0, 1);
+    // ...then the denominator jumps to include musicians once that phase is fetched.
+    expect(onProgress).toHaveBeenCalledWith(1, 2);
+    expect(onProgress).toHaveBeenLastCalledWith(2, 2);
+  });
+
   it('enriches a musician with a discogsId via getCountryByDiscogsId', async () => {
     mockGetUnenrichedMusicians.mockResolvedValue([{ discogsId: 10, name: 'Ron Carter' }]);
     const client = makeMbClient(async () => 'US');
