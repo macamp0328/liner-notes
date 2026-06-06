@@ -4,6 +4,7 @@ This is the operator's guide to standing up, redeploying, and recovering the pro
 
 - [Architecture at a glance](#architecture-at-a-glance)
 - [Prerequisites](#prerequisites)
+- [Remote Terraform state](#remote-terraform-state)
 - [First-time deploy — step by step](#first-time-deploy--step-by-step)
 - [Observability — fluent-bit and alarms](#observability--fluent-bit-and-alarms)
 - [Redeploy procedure](#redeploy-procedure)
@@ -177,6 +178,41 @@ See [`infra/iam/README.md`](iam/README.md) for the one-time attach procedure. **
 
 ---
 
+## Remote Terraform state
+
+Terraform state lives in an S3 bucket — `liner-notes-tfstate-<account-id>` — not in a local `terraform.tfstate`. The bucket is **versioned** (state recovery), encrypted with **SSE-S3** (AES256), **TLS-only** (a bucket policy denies non-HTTPS requests), and **locked** via the S3 backend's native `use_lockfile` (a `<key>.tflock` object alongside the state — no DynamoDB table). The config is [`infra/terraform/backend.tf`](terraform/backend.tf).
+
+The bucket name is account-id-suffixed, so it can't be committed as a backend literal (the repo bans account ids in tracked files) — the bucket is supplied at `terraform init` via `-backend-config`. Copy [`backend.config.example`](terraform/backend.config.example) to `backend.config` (gitignored) and fill in your account id.
+
+> **Why S3, why no DynamoDB.** Local state diverges silently if a second machine or CI applies, sits in plaintext, and has no locking (concurrent applies corrupt it). S3 fixes all three. `use_lockfile` (GA since Terraform 1.11) does the locking through S3 itself, so the DynamoDB table the older pattern needed is unnecessary — `.mise.toml` pins 1.15.3, well past 1.11. Cost is effectively zero: a few-KB state file in S3 is pennies/month even with versioning.
+
+### One-time bootstrap (creates the bucket)
+
+A separate root module, [`infra/terraform/bootstrap/`](terraform/bootstrap/), creates only the state bucket. It keeps its own local state — chicken-and-egg: the main config's backend depends on the bucket already existing. Run it once, from the **primary checkout**, with the admin `root` profile (bucket creation, the bucket policy, and the public-access block are broader than the scoped operator's state grant):
+
+```bash
+cd infra/terraform/bootstrap
+terraform init
+AWS_PROFILE=root terraform apply         # type `yes`
+cd ..
+echo "bucket = \"$(terraform -chdir=bootstrap output -raw state_bucket_name)\"" > backend.config
+```
+
+### Migrating an existing local state (one-time)
+
+If your account already has a local `terraform.tfstate` from before this change, migrate it into the bucket once. **First** push the new `liner-notes-deploy` managed-policy version that grants S3 state access (see [`infra/iam/README.md`](iam/README.md) → "Updating a managed policy"), so subsequent operator applies keep working. Then, from `infra/terraform`:
+
+```bash
+terraform init -backend-config=backend.config -migrate-state   # type `yes` to copy local → S3
+terraform plan                                                 # expect: No changes
+```
+
+Keep the stale local `terraform.tfstate` as a backup until `plan` confirms the migration is clean; it's gitignored either way. **Fresh accounts skip migration** — after the bootstrap above, a plain `terraform init -backend-config=backend.config` starts straight on the remote backend.
+
+> **CD follow-up (out of scope here).** When CI eventually runs `terraform apply` (the deferred [#102](https://github.com/macamp0328/liner-notes/issues/102) / [#120](https://github.com/macamp0328/liner-notes/issues/120) CD work), the `github-deploy` role in [`cicd.tf`](terraform/cicd.tf) will need the same `TerraformRemoteState` S3 statement (bucket + `graph-service/*` prefix); `use_lockfile` keeps that addition DynamoDB-free too. The live role only pushes ECR images + opens an SSM port-forward today, so nothing changes yet.
+
+---
+
 ## First-time deploy — step by step
 
 > **Where commands run:** every step in this section runs on **your laptop** except a few minutes inside Step 5, which open an interactive SSM session on the EC2 node. Step 4 opens a Session Manager port-forward in a second terminal that stays running for Steps 6–8.
@@ -189,9 +225,11 @@ From the repo root:
 
 ```bash
 cd infra/terraform
-terraform init
-AWS_PROFILE=root terraform apply         # FIRST apply: admin profile — type `yes` to confirm
+terraform init -backend-config=backend.config   # remote S3 backend — see "Remote Terraform state" first
+AWS_PROFILE=root terraform apply                # FIRST apply: admin profile — type `yes` to confirm
 ```
+
+> **Set up remote state first.** State lives in S3, not locally — complete the [Remote Terraform state](#remote-terraform-state) bootstrap (and, on a pre-existing deployment, the migration) before this step, so `backend.config` exists and `terraform init` can reach the bucket.
 
 > **The first apply needs the admin `root` profile, later applies don't.** The root module includes the **account-wide** GitHub Actions OIDC provider (`aws_iam_openid_connect_provider.github` — see [CD — IAM bootstrap](#cd--iam-bootstrap)). Creating it needs `iam:CreateOpenIDConnectProvider`, which the scoped operator (`default`/`liner-notes-cli`) deliberately doesn't have, so this very first `terraform apply` must run as `AWS_PROFILE=root`. Every **subsequent** apply can use the operator `default` profile: [`operator-iam-policy.json`](iam/operator-iam-policy.json) grants read-only `iam:GetOpenIDConnectProvider` + `iam:ListOpenIDConnectProviderTags` (the provider runs with `default_tags`, so Terraform reads its tags on refresh too), which is what Terraform needs to _refresh_ the existing provider on later runs. (Without those read grants, a plain operator apply would fail on refresh with `AccessDenied` — see the iam README.) If your account already has a GitHub OIDC provider, run the [CD — IAM bootstrap Step 1](#step-1--check-for-an-existing-oidc-provider) existence check first and switch `cicd.tf` to the data-source form before applying.
 
@@ -686,7 +724,7 @@ The Deployment uses `strategy: Recreate` — there will be ~30 seconds of downti
 
 One-time setup that lets the CD workflow ([#120](https://github.com/macamp0328/liner-notes/issues/120)) deploy without long-lived AWS keys. [`infra/terraform/cicd.tf`](terraform/cicd.tf) declares a GitHub Actions OIDC identity provider and a scoped `github-deploy` IAM role; a hosted runner assumes the role via `sts:AssumeRoleWithWebIdentity`. The role can push images to ECR and open an SSM port-forward to the k3s API server — nothing more.
 
-> **Run this manually, from the primary checkout, never in CI.** Terraform uses local state that lives in the **primary checkout** (not a worktree). Apply with your **admin `root` AWS profile** (the `liner-notes-admin` IAM user) — _not_ the scoped `default` profile (the `liner-notes-cli` operator user). This bootstrap creates an **account-wide** GitHub Actions OIDC provider (`aws_iam_openid_connect_provider.github`), and `iam:CreateOpenIDConnectProvider` is deliberately outside the operator's scope: [`operator-iam-policy.json`](iam/operator-iam-policy.json) scopes the operator's IAM role and instance-profile actions to `role/liner-notes-*` / `instance-profile/liner-notes-*` (`CreateRole`, `PutRolePolicy`, `PassRole`, and the like) plus read-only `iam:GetOpenIDConnectProvider` / `iam:ListOpenIDConnectProviderTags` (just enough for day-to-day operator applies to _refresh_ the provider and its `default_tags`), but grants **no** `iam:CreateOpenIDConnectProvider` or `iam:ListOpenIDConnectProviders`. Run with the operator profile and the create fails; even the `aws iam list-open-id-connect-providers` pre-check below returns `AccessDenied`. CI has no Terraform credentials and must never run `apply`. The role this creates is exactly what CI later _assumes_ — bootstrapping it from CI would be circular.
+> **Run this manually, from the primary checkout, never in CI.** Terraform state lives in S3 ([Remote Terraform state](#remote-terraform-state)), and `use_lockfile` serializes applies — but still run this from the **primary checkout** to keep the local `.terraform/` backend cache and `backend.config` in one place, and never from a worktree or CI. Apply with your **admin `root` AWS profile** (the `liner-notes-admin` IAM user) — _not_ the scoped `default` profile (the `liner-notes-cli` operator user). This bootstrap creates an **account-wide** GitHub Actions OIDC provider (`aws_iam_openid_connect_provider.github`), and `iam:CreateOpenIDConnectProvider` is deliberately outside the operator's scope: [`operator-iam-policy.json`](iam/operator-iam-policy.json) scopes the operator's IAM role and instance-profile actions to `role/liner-notes-*` / `instance-profile/liner-notes-*` (`CreateRole`, `PutRolePolicy`, `PassRole`, and the like) plus read-only `iam:GetOpenIDConnectProvider` / `iam:ListOpenIDConnectProviderTags` (just enough for day-to-day operator applies to _refresh_ the provider and its `default_tags`), but grants **no** `iam:CreateOpenIDConnectProvider` or `iam:ListOpenIDConnectProviders`. Run with the operator profile and the create fails; even the `aws iam list-open-id-connect-providers` pre-check below returns `AccessDenied`. CI has no Terraform credentials and must never run `apply`. The role this creates is exactly what CI later _assumes_ — bootstrapping it from CI would be circular.
 
 ### Step 1 — Check for an existing OIDC provider
 
