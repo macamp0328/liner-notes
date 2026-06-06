@@ -19,8 +19,8 @@ import { enrichNationality } from '../enrichment/artist-nationality.js';
 import type { ProgressReporter } from '../enrichment/progress.js';
 
 /**
- * Stage names in the orchestrated reload, in #154 dependency order. `verify` is a no-op
- * placeholder for #178.
+ * Stage names in the orchestrated reload, in #154 dependency order. `verify` is the final
+ * coverage gate (#178), run by the orchestrator's `runVerifyGate`, not via a `run` here.
  */
 export type ReloadStageName =
   | 'releases'
@@ -163,8 +163,11 @@ export const RELOAD_STAGES: readonly StageDescriptor[] = [
     },
   },
   {
-    // Placeholder for #178 — a no-op that always completes. Implementing verification
-    // (coverage assertions, sane-counts gates) is tracked separately.
+    // The coverage gate (#178). Its logic lives in `runVerifyGate` in the
+    // orchestrator, not here, because the gate needs to know which stages ran this
+    // job (`ranStages`) — context the generic `run(ctx)` signature can't carry. This
+    // descriptor stays in the sequence for ordering and job-node creation; the
+    // orchestrator special-cases it and never calls this no-op `run`.
     name: 'verify',
     run: async () => Promise.resolve({}),
   },
