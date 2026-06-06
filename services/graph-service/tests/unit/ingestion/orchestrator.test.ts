@@ -1,7 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import type { Driver } from 'neo4j-driver';
 import type { Logger } from '../../../src/ingestion/discogs-client.js';
-import { runReload, buildReloadContext } from '../../../src/ingestion/orchestrator.js';
+import {
+  runReload,
+  buildReloadContext,
+  resolveConcurrency,
+} from '../../../src/ingestion/orchestrator.js';
+import { snapshotEnv } from '../../helpers/env.js';
 
 const stageMocks = vi.hoisted(() => ({
   releasesRun: vi.fn(),
@@ -242,6 +247,34 @@ describe('runReload — concurrency', () => {
     expect(stageMocks.masterRun).toHaveBeenCalledOnce();
     expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'complete');
     expect(result).toMatchObject({ status: 'complete', stagesRun: 3 });
+  });
+});
+
+describe('resolveConcurrency', () => {
+  const env = snapshotEnv(['RELOAD_STAGE_CONCURRENCY']);
+  beforeEach(() => env.clear());
+  afterAll(() => env.restore());
+
+  it('prefers an explicit option, clamped to [1, total]', () => {
+    expect(resolveConcurrency(3, 12)).toBe(3);
+    expect(resolveConcurrency(0, 12)).toBe(1); // clamped up
+    expect(resolveConcurrency(99, 12)).toBe(12); // clamped to total
+  });
+
+  it('reads a valid all-digits env var when no option is given', () => {
+    process.env['RELOAD_STAGE_CONCURRENCY'] = '4';
+    expect(resolveConcurrency(undefined, 12)).toBe(4);
+  });
+
+  it('falls back to the default (2) for a malformed env var, not parseInt of its digits', () => {
+    for (const bad of ['2foo', 'foo', '', '  ', '-1', '1.5']) {
+      process.env['RELOAD_STAGE_CONCURRENCY'] = bad;
+      expect(resolveConcurrency(undefined, 12)).toBe(2);
+    }
+  });
+
+  it('falls back to the default when the env var is unset', () => {
+    expect(resolveConcurrency(undefined, 12)).toBe(2);
   });
 });
 

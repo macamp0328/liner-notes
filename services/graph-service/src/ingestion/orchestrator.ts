@@ -46,11 +46,15 @@ const DEFAULT_STAGE_CONCURRENCY = 2;
  * Resolve the stage concurrency cap: explicit option → `RELOAD_STAGE_CONCURRENCY` env → default 2,
  * clamped to `[1, total]`. Default 2 keeps load modest for Aura Free + the single t3.small node;
  * raise it via the env var if the node has headroom.
+ *
+ * The env var must be an all-digits string to count — a malformed value like `"2foo"` or `"foo"`
+ * falls back to the default rather than `parseInt`-ing to its leading digits.
  */
-function resolveConcurrency(option: number | undefined, total: number): number {
-  const fromEnv = parseInt(process.env['RELOAD_STAGE_CONCURRENCY'] ?? '', 10);
-  const raw = option ?? (Number.isFinite(fromEnv) ? fromEnv : DEFAULT_STAGE_CONCURRENCY);
-  return Math.min(Math.max(1, Math.floor(raw)), total);
+export function resolveConcurrency(option: number | undefined, total: number): number {
+  const clamp = (n: number): number => Math.min(Math.max(1, Math.floor(n)), total);
+  if (option !== undefined && Number.isFinite(option)) return clamp(option);
+  const raw = process.env['RELOAD_STAGE_CONCURRENCY']?.trim() ?? '';
+  return /^[0-9]+$/.test(raw) ? clamp(Number(raw)) : DEFAULT_STAGE_CONCURRENCY;
 }
 
 export interface ReloadResult {
