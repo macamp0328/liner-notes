@@ -186,16 +186,17 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
       stagesFailed++;
       try {
         await markStageFailed(driver, jobId, descriptor.name, msg);
+        log.error(`[reload] stage "${descriptor.name}" failed (recorded; continuing): ${msg}`);
       } catch (recordErr) {
         const rmsg = recordErr instanceof Error ? recordErr.message : String(recordErr);
-        log.error(`[reload] stage "${descriptor.name}" failed; recording it also failed: ${rmsg}`);
+        log.error(
+          `[reload] stage "${descriptor.name}" failed AND recording it failed (continuing): ${msg} / ${rmsg}`,
+        );
       }
-      log.error(`[reload] stage "${descriptor.name}" failed (recorded; continuing): ${msg}`);
     } finally {
-      // Drop this stage's live progress on settle. The #179 mirror tracks a single stage, so under
-      // concurrency > 1 the overlay shows the most-recently-begun stage (progress is cosmetic; the
-      // persisted ReloadStage status is the source of truth).
-      clearStage();
+      // Drop this stage's live progress on settle, keyed by name so it never wipes a still-running
+      // sibling's slot under concurrency (the #179 mirror tracks one entry per running stage).
+      clearStage(jobId, descriptor.name);
     }
   };
 

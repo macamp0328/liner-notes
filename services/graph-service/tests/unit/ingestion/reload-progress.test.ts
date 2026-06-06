@@ -86,10 +86,43 @@ describe('reload-progress registry', () => {
     it('clearStage drops live progress but keeps the active flag', () => {
       markReloadActive('job-1');
       beginStage('job-1', 'lyrics');
-      clearStage();
+      clearStage('job-1', 'lyrics');
 
       expect(getLiveProgress()).toBeNull();
       expect(isReloadActive()).toBe(true);
+    });
+  });
+
+  describe('concurrent stages (#176)', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('tracks each running stage independently and returns the earliest-started one', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-06-05T12:00:00.000Z'));
+      beginStage('job-1', 'track-musicbrainz');
+      vi.setSystemTime(new Date('2026-06-05T12:00:05.000Z'));
+      beginStage('job-1', 'lyrics');
+
+      reportStageProgress('job-1', 'lyrics', 5, 10);
+      reportStageProgress('job-1', 'track-musicbrainz', 2, 20);
+
+      // getLiveProgress surfaces the bottleneck (earliest-started) stage, with its own counters.
+      const bottleneck = getLiveProgress();
+      expect(bottleneck?.stage).toBe('track-musicbrainz');
+      expect(bottleneck?.processed).toBe(2);
+    });
+
+    it('clearStage clears only the named stage, never a still-running sibling', () => {
+      beginStage('job-1', 'track-musicbrainz');
+      beginStage('job-1', 'lyrics');
+      reportStageProgress('job-1', 'lyrics', 5, 10);
+
+      // A settling stage clears its own entry without wiping the sibling's progress.
+      clearStage('job-1', 'track-musicbrainz');
+
+      const stillLive = getLiveProgress();
+      expect(stillLive?.stage).toBe('lyrics');
+      expect(stillLive?.processed).toBe(5);
     });
   });
 });
