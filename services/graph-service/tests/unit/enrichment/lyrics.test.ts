@@ -195,6 +195,7 @@ describe('enrichLyrics', () => {
     expect(searchHeaders['Authorization']).toBe('Bearer test-genius-token');
     expect(searchHeaders['User-Agent']).toContain('Mozilla/5.0');
     expect(searchHeaders['Accept']).toBe('application/json');
+    expect(searchHeaders['Accept-Language']).toContain('en');
 
     const pageHeaders = (fetchSpy.mock.calls[2]?.[1] as RequestInit).headers as Record<
       string,
