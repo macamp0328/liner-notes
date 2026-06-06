@@ -557,7 +557,9 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           '**This step also runs automatically as part of `POST /api/v1/admin/ingest`.** ' +
           'Use this endpoint to re-run lyrics enrichment in isolation — e.g. after clearing Genius lyrics via ' +
           '`POST /api/v1/admin/lyrics/clear-genius`, after adding new tracks, or when LRCLIB coverage improves.\n\n' +
-          'Requires `GENIUS_TOKEN` env var for the Genius fallback; LRCLIB works without any key.',
+          'Requires `GENIUS_TOKEN` env var for the Genius fallback; LRCLIB works without any key. ' +
+          'The Genius fallback sends a browser-like User-Agent to clear Cloudflare (issue #195) — ' +
+          'override it with `GENIUS_USER_AGENT` if the default needs refreshing.',
         security: [{ bearerAuth: [] }],
         response: {
           200: {
