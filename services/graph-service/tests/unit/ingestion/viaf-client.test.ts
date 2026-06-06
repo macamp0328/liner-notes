@@ -119,6 +119,7 @@ describe('VIAFClient', () => {
     const url = fetchSpy.mock.calls[0]?.[0] as string;
     expect(url).toContain('viaf.org/viaf/search');
     expect(url).toContain('Ron%20Carter');
+    expect(client.getMetrics()).toMatchObject({ calls: 1, ok: 1 });
   });
 
   it('returns null when nameType is not Personal', async () => {
@@ -291,6 +292,7 @@ describe('VIAFClient', () => {
     expect(result).toBeNull();
     expect(fetchSpy).toHaveBeenCalledTimes(4);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Exceeded max retries'));
+    expect(clientWithLogger.getMetrics()).toMatchObject({ calls: 4, rateLimited: 4 });
   });
 
   it('returns null on network error (does not throw)', async () => {
@@ -330,6 +332,7 @@ describe('VIAFClient', () => {
     expect(result).toBeNull();
     expect(fetchSpy).toHaveBeenCalledTimes(4);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Exceeded max retries'));
+    expect(clientWithLogger.getMetrics()).toMatchObject({ calls: 4, networkError: 4 });
   });
 
   it('does not retry a non-transient error — returns null after a single attempt', async () => {
@@ -344,6 +347,7 @@ describe('VIAFClient', () => {
     const result = await client.getCountryByName('Someone');
     expect(result).toBeNull();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(client.getMetrics()).toMatchObject({ calls: 1, httpError: 1 });
   });
 
   it('sends the configured User-Agent header', async () => {
@@ -399,6 +403,7 @@ describe('VIAFClient', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('bot block'));
     expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('Exceeded max retries'));
+    expect(clientWithLogger.getMetrics()).toMatchObject({ calls: 1, botBlocked: 1 });
   });
 
   it('skips on a 200 + text/html response without retrying', async () => {
@@ -420,6 +425,58 @@ describe('VIAFClient', () => {
     // (makeHtmlResponse rejects .json()) or via the retry-exhaustion log instead.
     expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('Network error'));
     expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('Exceeded max retries'));
+    expect(clientWithLogger.getMetrics()).toMatchObject({ calls: 1, html: 1 });
+  });
+
+  it('starts with an all-zero metrics tally', () => {
+    expect(client.getMetrics()).toEqual({
+      calls: 0,
+      ok: 0,
+      botBlocked: 0,
+      html: 0,
+      httpError: 0,
+      rateLimited: 0,
+      networkError: 0,
+    });
+  });
+
+  it('tracks per-outcome HTTP metrics and keeps calls === sum of outcomes', async () => {
+    fetchSpy
+      // call A: 429 (retry) then 200 OK → rateLimited +1, ok +1, calls +2
+      .mockResolvedValueOnce(makeErrorResponse(429))
+      .mockResolvedValueOnce(
+        makeOkResponse(
+          makeViafResponse({ preferredName: 'Ron Carter', nationalities: [{ text: 'xxu' }] }),
+        ),
+      )
+      // call B: 403 → botBlocked +1, calls +1
+      .mockResolvedValueOnce(makeErrorResponse(403))
+      // call C: 200 + HTML → html +1, calls +1
+      .mockResolvedValueOnce(makeHtmlResponse(200))
+      // call D: 500 → httpError +1, calls +1
+      .mockResolvedValueOnce(makeErrorResponse(500))
+      // call E: non-transient network error → networkError +1, calls +1
+      .mockRejectedValueOnce(new Error('boom'));
+
+    await client.getCountryByName('Ron Carter');
+    await client.getCountryByName('Blocked');
+    await client.getCountryByName('Htmlish');
+    await client.getCountryByName('Server Error');
+    await client.getCountryByName('Network');
+
+    const m = client.getMetrics();
+    expect(m).toEqual({
+      calls: 6,
+      ok: 1,
+      botBlocked: 1,
+      html: 1,
+      httpError: 1,
+      rateLimited: 1,
+      networkError: 1,
+    });
+    expect(m.calls).toBe(
+      m.ok + m.botBlocked + m.html + m.httpError + m.rateLimited + m.networkError,
+    );
   });
 });
 

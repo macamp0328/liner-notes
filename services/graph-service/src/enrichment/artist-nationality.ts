@@ -2,7 +2,8 @@ import type { Driver } from 'neo4j-driver';
 import type { MusicBrainzClient } from '../ingestion/musicbrainz-client.js';
 import type { WikidataClient } from '../ingestion/wikidata-client.js';
 import type { DiscogsClient, Logger } from '../ingestion/discogs-client.js';
-import type { VIAFClient } from '../ingestion/viaf-client.js';
+import type { VIAFClient, ViafMetrics } from '../ingestion/viaf-client.js';
+import { createEmptyViafMetrics } from '../ingestion/viaf-client.js';
 import {
   getUnenrichedArtistsForNationality,
   getUnenrichedMusiciansForNationality,
@@ -15,7 +16,45 @@ import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 /** A resolved country plus the source that produced it, or null when unresolved. */
 type ResolvedNationality = { country: string; source: NationalitySource };
 
-export interface NationalityEnrichmentSummary {
+/**
+ * Per-run instrumentation for #194: how many nationalities each source was credited with this
+ * run (i.e. the source that was *selected* — MB when it answers and Wikidata agrees or is null,
+ * Wikidata on disagreement / WD-only / Wikipedia-URL fallback), plus VIAF's HTTP-outcome tally.
+ * Because sources are tried in priority order and VIAF is last (only after MB and Wikidata both
+ * return null), `resolvedByViaf` *is* VIAF's unique contribution — the MB/WD counts are not
+ * strictly "unique" because an agreement is credited to MB. `viafOk` ("got HTTP 200 + JSON") is
+ * deliberately distinct from `resolvedByViaf` ("VIAF produced a country") — their gap, and the
+ * size of `viafBotBlocked`/`viafHtml`, is the answers-but-no-match vs bot-blocked signal.
+ */
+export interface NationalityExtras {
+  resolvedByMusicbrainz: number;
+  resolvedByWikidata: number;
+  resolvedByViaf: number;
+  viafCalls: number;
+  viafOk: number;
+  viafBotBlocked: number;
+  viafHtml: number;
+  viafHttpError: number;
+  viafRateLimited: number;
+  viafNetworkError: number;
+}
+
+function zeroNationalityExtras(): NationalityExtras {
+  return {
+    resolvedByMusicbrainz: 0,
+    resolvedByWikidata: 0,
+    resolvedByViaf: 0,
+    viafCalls: 0,
+    viafOk: 0,
+    viafBotBlocked: 0,
+    viafHtml: 0,
+    viafHttpError: 0,
+    viafRateLimited: 0,
+    viafNetworkError: 0,
+  };
+}
+
+export interface NationalityEnrichmentSummary extends NationalityExtras {
   enriched: number;
   skipped: number;
   failed: number;
@@ -145,6 +184,21 @@ export async function enrichNationality(
   let enriched = 0;
   let skipped = 0;
   let failed = 0;
+  const bySource: Record<NationalitySource, number> = { musicbrainz: 0, wikidata: 0, viaf: 0 };
+  // switch (not bySource[source]++) to keep eslint-plugin-security's object-injection rule happy.
+  const recordSource = (source: NationalitySource): void => {
+    switch (source) {
+      case 'musicbrainz':
+        bySource.musicbrainz++;
+        break;
+      case 'wikidata':
+        bySource.wikidata++;
+        break;
+      case 'viaf':
+        bySource.viaf++;
+        break;
+    }
+  };
 
   log.info('[artist-nationality] Starting nationality enrichment');
 
@@ -155,7 +209,13 @@ export async function enrichNationality(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.error(`[artist-nationality] Failed to fetch unenriched artists: ${msg}`);
-    return { enriched: 0, skipped: 0, failed: 1, durationMs: Date.now() - startTime };
+    return {
+      enriched: 0,
+      skipped: 0,
+      failed: 1,
+      durationMs: Date.now() - startTime,
+      ...zeroNationalityExtras(),
+    };
   }
 
   // `total` grows once per person group: the musician count isn't known until its fetch
@@ -188,6 +248,7 @@ export async function enrichNationality(
       );
       if (resolved !== null) {
         enriched++;
+        recordSource(resolved.source);
       } else {
         skipped++;
       }
@@ -257,6 +318,7 @@ export async function enrichNationality(
 
         if (resolved !== null) {
           enriched++;
+          recordSource(resolved.source);
         } else {
           skipped++;
         }
@@ -272,9 +334,36 @@ export async function enrichNationality(
 
   onProgress(processed, total);
   const durationMs = Date.now() - startTime;
+
+  // Single read: the VIAF client is built fresh per run (both the orchestrated reload's
+  // buildReloadContext and the standalone /nationality/enrich route construct a new client),
+  // so its lifetime tally is exactly this run's contribution — no before/after diff needed.
+  const vm: ViafMetrics = viaf?.getMetrics() ?? createEmptyViafMetrics();
+
   log.info(
     `[artist-nationality] Enrichment complete: enriched=${enriched}, skipped=${skipped}, failed=${failed}, duration=${durationMs}ms`,
   );
+  log.info(
+    `[artist-nationality] Resolved by source: musicbrainz=${bySource.musicbrainz}, wikidata=${bySource.wikidata}, viaf=${bySource.viaf}`,
+  );
+  log.info(
+    `[artist-nationality] VIAF outcomes: calls=${vm.calls}, ok=${vm.ok}, botBlocked=${vm.botBlocked}, html=${vm.html}, httpError=${vm.httpError}, rateLimited=${vm.rateLimited}, networkError=${vm.networkError}`,
+  );
 
-  return { enriched, skipped, failed, durationMs };
+  return {
+    enriched,
+    skipped,
+    failed,
+    durationMs,
+    resolvedByMusicbrainz: bySource.musicbrainz,
+    resolvedByWikidata: bySource.wikidata,
+    resolvedByViaf: bySource.viaf,
+    viafCalls: vm.calls,
+    viafOk: vm.ok,
+    viafBotBlocked: vm.botBlocked,
+    viafHtml: vm.html,
+    viafHttpError: vm.httpError,
+    viafRateLimited: vm.rateLimited,
+    viafNetworkError: vm.networkError,
+  };
 }

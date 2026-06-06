@@ -60,6 +60,7 @@ describe('enrichLyrics', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env['GENIUS_TOKEN'];
+    delete process.env['GENIUS_USER_AGENT'];
 
     mockGetUnenrichedTracks.mockResolvedValue([]);
     mockSetTrackLyrics.mockResolvedValue(undefined);
@@ -184,6 +185,51 @@ describe('enrichLyrics', () => {
     );
     // Success writes via setTrackLyrics (which stamps) — no separate mark call.
     expect(mockMarkLyricsFetched).not.toHaveBeenCalled();
+
+    // Both Genius requests carry a browser-like User-Agent to clear Cloudflare's bot
+    // check (issue #195) — without it Genius 403s datacenter IPs like the prod host.
+    const searchHeaders = (fetchSpy.mock.calls[1]?.[1] as RequestInit).headers as Record<
+      string,
+      string
+    >;
+    expect(searchHeaders['Authorization']).toBe('Bearer test-genius-token');
+    expect(searchHeaders['User-Agent']).toContain('Mozilla/5.0');
+    expect(searchHeaders['Accept']).toBe('application/json');
+    expect(searchHeaders['Accept-Language']).toContain('en');
+
+    const pageHeaders = (fetchSpy.mock.calls[2]?.[1] as RequestInit).headers as Record<
+      string,
+      string
+    >;
+    expect(pageHeaders['User-Agent']).toContain('Mozilla/5.0');
+    expect(pageHeaders['Accept']).toContain('text/html');
+  });
+
+  // -------------------------------------------------------------------------
+  // Genius — GENIUS_USER_AGENT override
+  // -------------------------------------------------------------------------
+  it('uses the GENIUS_USER_AGENT override on both Genius requests when set', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    process.env['GENIUS_USER_AGENT'] = 'CustomAgent/9.9';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
+      .mockResolvedValueOnce(makeHtmlResponse('<div data-lyrics-container="true">Hi</div>'));
+
+    await enrichLyrics(fakeDriver);
+
+    const searchHeaders = (fetchSpy.mock.calls[1]?.[1] as RequestInit).headers as Record<
+      string,
+      string
+    >;
+    const pageHeaders = (fetchSpy.mock.calls[2]?.[1] as RequestInit).headers as Record<
+      string,
+      string
+    >;
+    expect(searchHeaders['User-Agent']).toBe('CustomAgent/9.9');
+    expect(pageHeaders['User-Agent']).toBe('CustomAgent/9.9');
   });
 
   // -------------------------------------------------------------------------
