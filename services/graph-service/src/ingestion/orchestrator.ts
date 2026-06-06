@@ -7,7 +7,8 @@ import { buildDeezerClientFromEnv } from './deezer-client.js';
 import { buildWikidataClientFromEnv } from './wikidata-client.js';
 import { buildViafClientFromEnv } from './viaf-client.js';
 import { RELOAD_STAGES } from './stages.js';
-import type { ReloadContext, ReloadStageName } from './stages.js';
+import type { ReloadContext, ReloadStageName, StageDescriptor } from './stages.js';
+import { scheduleStages } from './scheduler.js';
 import {
   createReloadJob,
   getReloadJob,
@@ -34,6 +35,28 @@ export interface RunReloadOptions {
   logger?: Logger;
   /** Resume the given job instead of starting a new one. Cold-start recovery passes this. */
   resumeJobId?: string;
+  /**
+   * Max stages running at once. Defaults to `RELOAD_STAGE_CONCURRENCY` (env) or 2, clamped to
+   * `[1, stage count]`. Pass `1` for the legacy strictly-sequential behaviour.
+   */
+  concurrency?: number;
+}
+
+const DEFAULT_STAGE_CONCURRENCY = 2;
+
+/**
+ * Resolve the stage concurrency cap: explicit option → `RELOAD_STAGE_CONCURRENCY` env → default 2,
+ * clamped to `[1, total]`. Default 2 keeps load modest for Aura Free + the single t3.small node;
+ * raise it via the env var if the node has headroom.
+ *
+ * The env var must be an all-digits string to count — a malformed value like `"2foo"` or `"foo"`
+ * falls back to the default rather than `parseInt`-ing to its leading digits.
+ */
+export function resolveConcurrency(option: number | undefined, total: number): number {
+  const clamp = (n: number): number => Math.min(Math.max(1, Math.floor(n)), total);
+  if (option !== undefined && Number.isFinite(option)) return clamp(option);
+  const raw = process.env['RELOAD_STAGE_CONCURRENCY']?.trim() ?? '';
+  return /^[0-9]+$/.test(raw) ? clamp(Number(raw)) : DEFAULT_STAGE_CONCURRENCY;
 }
 
 export interface ReloadResult {
@@ -64,18 +87,20 @@ export function buildReloadContext(driver: Driver, username: string, log: Logger
 }
 
 /**
- * Run the orchestrated reload: every stage in RELOAD_STAGES order, persisting per-stage
- * checkpoints to Neo4j so a killed pod resumes from the last completed stage.
+ * Run the orchestrated reload: every stage from RELOAD_STAGES, scheduled with bounded concurrency
+ * and honouring each stage's `deps` + `resources` lanes, persisting per-stage checkpoints to Neo4j
+ * so a killed pod resumes from where it left off.
  *
  * - Fresh run: creates a job with all stages `pending`.
- * - Resume (`resumeJobId`): reads the persisted job and skips stages already
- *   `complete`/`skipped`; the leftover `running` stage (the interrupted one) re-runs, which
- *   is safe because each stage's idempotent candidate filters only pick up unfinished work.
+ * - Resume (`resumeJobId`): reads the persisted job and skips stages already `complete`/`skipped`;
+ *   any leftover `running` stages (with concurrency > 1 a crash can leave several) re-run, which is
+ *   safe because each stage's idempotent candidate filters only pick up unfinished work.
  *
- * A stage that returns null is recorded `skipped` (its client was not configured); a stage
- * that throws is recorded `failed`, logged, and the run continues (failure isolation). The
- * job ends `failed` if any stage failed, else `complete` — only a still-`running` job (a
- * genuine mid-run crash) is resumable on the next boot.
+ * A stage that returns null is recorded `skipped` (its client was not configured); a stage that
+ * throws is recorded `failed`, logged, and the rest of the schedule continues (failure isolation).
+ * `verify` runs last (its deps cover every other stage) as the #178 coverage gate. The job ends
+ * `failed` if any stage failed, else `complete` — only a still-`running` job (a genuine mid-run
+ * crash) is resumable on the next boot.
  */
 export async function runReload(driver: Driver, options: RunReloadOptions): Promise<ReloadResult> {
   const log: Logger = options.logger ?? console;
@@ -98,10 +123,10 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
       .map((s) => s.stage),
   );
 
-  // Stages that produced output (status `complete`, not `skipped`) — across both a
-  // prior run's checkpoints and this run. The verify gate judges coverage only for
-  // stages that actually ran, so a skipped stage's metric is exempt rather than a
-  // false silently-zero.
+  // Stages that produced output (status `complete`, not `skipped`) — across both a prior run's
+  // checkpoints and this run. The verify gate judges coverage only for stages that actually ran,
+  // so a skipped stage's metric is exempt rather than a false silently-zero. Mutated as stages
+  // complete; `verify` deps on every other stage, so it reads a fully-populated set.
   const ranStages = new Set<ReloadStageName>(
     (existing?.stages ?? [])
       .filter((s) => s.status === 'complete')
@@ -117,64 +142,87 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
   );
 
   const ctx = buildReloadContext(driver, options.username, log);
+  const concurrency = resolveConcurrency(options.concurrency, RELOAD_STAGES.length);
+  log.info(`[reload] scheduling ${RELOAD_STAGES.length} stage(s) at concurrency ${concurrency}`);
 
   let stagesRun = 0;
   let stagesSkipped = 0;
   let stagesFailed = 0;
 
-  // Flag the run active for the /stats cache + snapshot timer. The `finally` guarantees the
-  // flag (and any live stage progress) is cleared even if a transition write throws.
-  markReloadActive(jobId);
-  try {
-    for (const descriptor of RELOAD_STAGES) {
-      if (doneStages.has(descriptor.name)) {
-        log.info(`[reload] stage "${descriptor.name}" already done — skipping`);
-        continue;
-      }
-
+  // Run one stage end-to-end. MUST NOT reject — a rejected run would abort the whole concurrent
+  // schedule — so even a failed checkpoint write is swallowed after logging. Each stage feeds the
+  // live-progress mirror (#179): begin on start, forward an onProgress reporter, clear on settle.
+  const runOneStage = async (descriptor: StageDescriptor): Promise<void> => {
+    const onProgress: ProgressReporter = (processed, total) =>
+      reportStageProgress(jobId, descriptor.name, processed, total);
+    try {
       await markStageRunning(driver, jobId, descriptor.name);
 
-      // The verify gate runs here, not via descriptor.run, because it needs
-      // `ranStages` (which stages produced output this job) that the run(ctx)
-      // signature can't carry. The descriptor stays in RELOAD_STAGES for sequence
-      // ordering and job-node creation; its run is a no-op never reached here. It
-      // does no per-item work, so it skips the live-progress registry.
+      // The verify gate (#178) runs here, not via descriptor.run, because it needs `ranStages`
+      // (which stages produced output this job) that the run(ctx) signature can't carry. Its deps
+      // cover every other stage, so the scheduler runs it last and alone; it does no per-item work,
+      // so it skips the live-progress registry (no beginStage).
       if (descriptor.name === 'verify') {
         const { passed } = await runVerifyGate(driver, jobId, ranStages, log);
         if (passed) stagesRun++;
         else stagesFailed++;
-        continue;
+        return;
       }
 
       beginStage(jobId, descriptor.name);
-      const onProgress: ProgressReporter = (processed, total) =>
-        reportStageProgress(jobId, descriptor.name, processed, total);
-      try {
-        const counts = await descriptor.run(ctx, onProgress);
-        if (counts === null) {
-          await markStageComplete(driver, jobId, descriptor.name, {}, true);
-          stagesSkipped++;
-          log.info(`[reload] stage "${descriptor.name}" skipped — required client not configured`);
-        } else {
-          await markStageComplete(driver, jobId, descriptor.name, counts);
-          stagesRun++;
-          ranStages.add(descriptor.name);
-          log.info(`[reload] stage "${descriptor.name}" complete`);
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        await markStageFailed(driver, jobId, descriptor.name, msg);
-        stagesFailed++;
-        log.error(`[reload] stage "${descriptor.name}" failed (recorded; continuing): ${msg}`);
+      const counts = await descriptor.run(ctx, onProgress);
+      if (counts === null) {
+        await markStageComplete(driver, jobId, descriptor.name, {}, true);
+        stagesSkipped++;
+        log.info(`[reload] stage "${descriptor.name}" skipped — required client not configured`);
+      } else {
+        await markStageComplete(driver, jobId, descriptor.name, counts);
+        stagesRun++;
+        ranStages.add(descriptor.name);
+        log.info(`[reload] stage "${descriptor.name}" complete`);
       }
-      // Drop live progress between stages so the overlay reports a position only mid-stage.
-      clearStage();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      stagesFailed++;
+      try {
+        await markStageFailed(driver, jobId, descriptor.name, msg);
+        log.error(`[reload] stage "${descriptor.name}" failed (recorded; continuing): ${msg}`);
+      } catch (recordErr) {
+        const rmsg = recordErr instanceof Error ? recordErr.message : String(recordErr);
+        log.error(
+          `[reload] stage "${descriptor.name}" failed AND recording it failed (continuing): ${msg} / ${rmsg}`,
+        );
+      }
+    } finally {
+      // Drop this stage's live progress on settle, keyed by name so it never wipes a still-running
+      // sibling's slot under concurrency (the #179 mirror tracks one entry per running stage).
+      clearStage(jobId, descriptor.name);
     }
+  };
+
+  // Stages already settled on a prior run are skipped by the scheduler (and unblock their
+  // dependents). With concurrency > 1 a crash can leave several stages `running`; all re-run here,
+  // which is safe because each stage's idempotent candidate filters only pick up unfinished work.
+  // markReloadActive flags the run for the /stats cache + snapshot timer; the `finally` guarantees
+  // the flag (and any live stage progress) is cleared even if the schedule throws.
+  markReloadActive(jobId);
+  try {
+    await scheduleStages({
+      stages: RELOAD_STAGES,
+      concurrency,
+      alreadyDone: doneStages,
+      run: runOneStage,
+      log,
+    });
   } finally {
     markReloadInactive(jobId);
   }
 
-  const status = stagesFailed > 0 ? 'failed' : 'complete';
+  // A schedule that couldn't settle every stage (a malformed graph trips the scheduler's stuck
+  // guard — unit-tested away, defensive here) is a failure, like any failed stage.
+  const allSettled =
+    stagesRun + stagesSkipped + stagesFailed + doneStages.size >= RELOAD_STAGES.length;
+  const status: 'complete' | 'failed' = stagesFailed > 0 || !allSettled ? 'failed' : 'complete';
   await finishReloadJob(driver, jobId, status);
   log.info(
     `[reload] job ${jobId} ${status}: ${stagesRun} run, ${stagesSkipped} skipped, ${stagesFailed} failed`,

@@ -1,12 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import type { Driver } from 'neo4j-driver';
 import type { Logger } from '../../../src/ingestion/discogs-client.js';
 import {
   runReload,
   buildReloadContext,
+  resolveConcurrency,
   runVerifyGate,
 } from '../../../src/ingestion/orchestrator.js';
 import type { ReloadStageName } from '../../../src/ingestion/stages.js';
+import { snapshotEnv } from '../../helpers/env.js';
 
 const stageMocks = vi.hoisted(() => ({
   releasesRun: vi.fn(),
@@ -18,9 +20,9 @@ const stageMocks = vi.hoisted(() => ({
 // verify branch — runVerifyGate is exercised directly below instead.
 vi.mock('../../../src/ingestion/stages.js', () => ({
   RELOAD_STAGES: [
-    { name: 'releases', run: stageMocks.releasesRun },
-    { name: 'lyrics', run: stageMocks.lyricsRun },
-    { name: 'master-data', run: stageMocks.masterRun },
+    { name: 'releases', deps: [], resources: [], run: stageMocks.releasesRun },
+    { name: 'lyrics', deps: [], resources: [], run: stageMocks.lyricsRun },
+    { name: 'master-data', deps: [], resources: [], run: stageMocks.masterRun },
   ],
 }));
 
@@ -217,6 +219,18 @@ describe('runReload — failure isolation', () => {
     expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'failed');
     expect(result).toMatchObject({ status: 'failed', stagesRun: 2, stagesFailed: 1 });
   });
+
+  it('does not abort the schedule when recording a failure also throws', async () => {
+    stageMocks.masterRun.mockRejectedValue(new Error('stage boom'));
+    repo.markStageFailed.mockRejectedValue(new Error('db down'));
+
+    const result = await runReload(driver, { username: 'tester', logger: log });
+
+    // The other stages still complete — a rejected checkpoint write can't wedge the run.
+    expect(stageMocks.releasesRun).toHaveBeenCalledOnce();
+    expect(stageMocks.lyricsRun).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ status: 'failed', stagesFailed: 1 });
+  });
 });
 
 describe('runReload — skip', () => {
@@ -228,6 +242,59 @@ describe('runReload — skip', () => {
     expect(repo.markStageComplete).toHaveBeenCalledWith(driver, 'job-new', 'master-data', {}, true);
     expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'complete');
     expect(result).toMatchObject({ status: 'complete', stagesRun: 2, stagesSkipped: 1 });
+  });
+});
+
+describe('runReload — concurrency', () => {
+  it('with concurrency 1, runs stages strictly in array (priority) order', async () => {
+    const order: string[] = [];
+    repo.markStageRunning.mockImplementation((_driver, _jobId, stage: string) => {
+      order.push(stage);
+      return Promise.resolve();
+    });
+
+    const result = await runReload(driver, { username: 'tester', logger: log, concurrency: 1 });
+
+    expect(order).toEqual(['releases', 'lyrics', 'master-data']);
+    expect(result).toMatchObject({ status: 'complete', stagesRun: 3 });
+  });
+
+  it('runs every stage exactly once and finishes complete under the default cap', async () => {
+    const result = await runReload(driver, { username: 'tester', logger: log });
+
+    expect(stageMocks.releasesRun).toHaveBeenCalledOnce();
+    expect(stageMocks.lyricsRun).toHaveBeenCalledOnce();
+    expect(stageMocks.masterRun).toHaveBeenCalledOnce();
+    expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'complete');
+    expect(result).toMatchObject({ status: 'complete', stagesRun: 3 });
+  });
+});
+
+describe('resolveConcurrency', () => {
+  const env = snapshotEnv(['RELOAD_STAGE_CONCURRENCY']);
+  beforeEach(() => env.clear());
+  afterAll(() => env.restore());
+
+  it('prefers an explicit option, clamped to [1, total]', () => {
+    expect(resolveConcurrency(3, 12)).toBe(3);
+    expect(resolveConcurrency(0, 12)).toBe(1); // clamped up
+    expect(resolveConcurrency(99, 12)).toBe(12); // clamped to total
+  });
+
+  it('reads a valid all-digits env var when no option is given', () => {
+    process.env['RELOAD_STAGE_CONCURRENCY'] = '4';
+    expect(resolveConcurrency(undefined, 12)).toBe(4);
+  });
+
+  it('falls back to the default (2) for a malformed env var, not parseInt of its digits', () => {
+    for (const bad of ['2foo', 'foo', '', '  ', '-1', '1.5']) {
+      process.env['RELOAD_STAGE_CONCURRENCY'] = bad;
+      expect(resolveConcurrency(undefined, 12)).toBe(2);
+    }
+  });
+
+  it('falls back to the default when the env var is unset', () => {
+    expect(resolveConcurrency(undefined, 12)).toBe(2);
   });
 });
 

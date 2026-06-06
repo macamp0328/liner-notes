@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RELOAD_STAGES } from '../../../src/ingestion/stages.js';
 import type { ReloadContext, ReloadStageName } from '../../../src/ingestion/stages.js';
+import { validateStageGraph } from '../../../src/ingestion/scheduler.js';
 import { ingestReleases } from '../../../src/ingestion/ingest.js';
 import { enrichLyrics } from '../../../src/enrichment/lyrics.js';
 import { enrichMasterData } from '../../../src/enrichment/master-data.js';
@@ -82,17 +83,31 @@ beforeEach(() => {
   }
 });
 
+function transitiveDeps(name: ReloadStageName): Set<string> {
+  const out = new Set<string>();
+  const visit = (n: ReloadStageName): void => {
+    for (const d of stage(n).deps) {
+      if (!out.has(d)) {
+        out.add(d);
+        visit(d);
+      }
+    }
+  };
+  visit(name);
+  return out;
+}
+
 describe('RELOAD_STAGES order', () => {
-  it('lists every stage in #154 dependency order with verify last', () => {
+  it('front-loads the gate + cheap stages, defers the slow ones, verify last', () => {
     expect(RELOAD_STAGES.map((s) => s.name)).toEqual([
       'releases',
-      'lyrics',
       'master-data',
-      'artist-genres',
       'artist-profiles',
+      'artist-genres',
       'track-versions',
-      'mb-release-events',
       'track-musicbrainz',
+      'mb-release-events',
+      'lyrics',
       'track-acousticbrainz',
       'track-deezer',
       'nationality',
@@ -100,10 +115,73 @@ describe('RELOAD_STAGES order', () => {
     ]);
   });
 
-  it('runs track-musicbrainz before its acousticbrainz/deezer dependents', () => {
-    const names = RELOAD_STAGES.map((s) => s.name);
-    expect(names.indexOf('track-musicbrainz')).toBeLessThan(names.indexOf('track-acousticbrainz'));
-    expect(names.indexOf('track-musicbrainz')).toBeLessThan(names.indexOf('track-deezer'));
+  it('is a valid topological sort — every dep appears earlier in the list', () => {
+    const seen = new Set<string>();
+    for (const s of RELOAD_STAGES) {
+      for (const d of s.deps) expect(seen.has(d)).toBe(true);
+      seen.add(s.name);
+    }
+  });
+});
+
+describe('RELOAD_STAGES dependency graph', () => {
+  it('is well-formed (deps reference real stages, acyclic)', () => {
+    expect(() => validateStageGraph(RELOAD_STAGES)).not.toThrow();
+  });
+
+  it('makes releases a (transitive) prerequisite of every other stage', () => {
+    for (const s of RELOAD_STAGES) {
+      if (s.name === 'releases') continue;
+      expect(transitiveDeps(s.name).has('releases')).toBe(true);
+    }
+  });
+
+  it('runs mb-release-events after master-data (needs the Master nodes it creates)', () => {
+    expect(stage('mb-release-events').deps).toContain('master-data');
+  });
+
+  it('runs track-acousticbrainz and track-deezer after track-musicbrainz', () => {
+    expect(stage('track-acousticbrainz').deps).toContain('track-musicbrainz');
+    expect(stage('track-deezer').deps).toContain('track-musicbrainz');
+  });
+
+  it('makes verify depend on every other stage so it runs strictly last', () => {
+    const others = RELOAD_STAGES.filter((s) => s.name !== 'verify')
+      .map((s) => s.name)
+      .sort();
+    expect([...stage('verify').deps].sort()).toEqual(others);
+  });
+});
+
+describe('RELOAD_STAGES resource lanes', () => {
+  it('tags every Discogs-client stage with the discogs lane (shared rate limiter)', () => {
+    for (const name of ['releases', 'master-data', 'artist-profiles', 'nationality'] as const) {
+      expect(stage(name).resources).toContain('discogs');
+    }
+  });
+
+  it('tags every MusicBrainz-client stage with the musicbrainz lane (shared rate limiter)', () => {
+    for (const name of ['track-musicbrainz', 'mb-release-events', 'nationality'] as const) {
+      expect(stage(name).resources).toContain('musicbrainz');
+    }
+  });
+
+  it('serialises the batched Track writers via the track lane, exempting per-node lyrics', () => {
+    for (const name of [
+      'track-versions',
+      'track-musicbrainz',
+      'track-acousticbrainz',
+      'track-deezer',
+    ] as const) {
+      expect(stage(name).resources).toContain('track');
+    }
+    // lyrics writes one Track per transaction → deadlock-immune → intentionally untagged.
+    expect(stage('lyrics').resources).not.toContain('track');
+  });
+
+  it('leaves the pure-Cypher and lyrics stages off every rate-limited lane', () => {
+    expect(stage('artist-genres').resources).toEqual([]);
+    expect(stage('lyrics').resources).toEqual([]);
   });
 });
 
