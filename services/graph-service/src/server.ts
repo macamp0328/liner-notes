@@ -1,5 +1,5 @@
 import 'dotenv-flow/config';
-import Fastify, { FastifyInstance } from 'fastify';
+import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import rateLimit from '@fastify/rate-limit';
@@ -94,9 +94,11 @@ export interface BuildServerOptions {
    */
   rateLimitMax?: number;
   /**
-   * Fastify logger configuration. Defaults to true unless NODE_ENV=test.
+   * Fastify logger configuration. Mirrors Fastify's own `logger` option type
+   * (boolean | a logger instance | pino options) so callers get proper TS
+   * validation/autocomplete. Defaults to true unless NODE_ENV=test.
    */
-  logger?: boolean | object;
+  logger?: FastifyServerOptions['logger'];
 }
 
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {

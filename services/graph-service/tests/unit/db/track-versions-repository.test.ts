@@ -87,6 +87,7 @@ describe('getVersionCandidates', () => {
     ]);
     expect(runSpy.mock.calls[0]?.[0]).toContain('normalizedTitle');
     expect(runSpy.mock.calls[0]?.[0]).toContain('size(tracks) > 1');
+    expect(session.close).toHaveBeenCalledOnce();
   });
 
   it('closes the session even when query throws', async () => {
@@ -171,6 +172,7 @@ describe('releasesShareArtist', () => {
     };
     expect(params.idA.toNumber()).toBe(101);
     expect(params.idB.toNumber()).toBe(202);
+    expect(session.close).toHaveBeenCalledOnce();
   });
 
   it('returns false when no shared artist exists', async () => {
@@ -179,6 +181,7 @@ describe('releasesShareArtist', () => {
     const shared = await releasesShareArtist(makeMockDriver(session), 1, 2);
 
     expect(shared).toBe(false);
+    expect(session.close).toHaveBeenCalledOnce();
   });
 
   it('closes the session even when query throws', async () => {
@@ -208,12 +211,14 @@ describe('resetTrackVersions', () => {
     const [query] = runSpy.mock.calls[0] as [string];
     expect(query).toContain('[r:IS_VERSION_OF]');
     expect(query).toContain('DELETE r');
+    expect(session.close).toHaveBeenCalledOnce();
   });
 
   it('returns 0 when the query yields no records', async () => {
     const { session } = makeMockSession();
     const reset = await resetTrackVersions(makeMockDriver(session));
     expect(reset).toBe(0);
+    expect(session.close).toHaveBeenCalledOnce();
   });
 
   it('closes the session even when run throws', async () => {

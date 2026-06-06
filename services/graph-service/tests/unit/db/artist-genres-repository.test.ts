@@ -43,6 +43,7 @@ describe('aggregateArtistGenres', () => {
     expect(updated).toBe(7);
     expect(runSpy.mock.calls[0]?.[0]).toContain('IN_GENRE');
     expect(runSpy.mock.calls[0]?.[0]).toContain('SET a.genres = genres');
+    expect(session.close).toHaveBeenCalledOnce();
   });
 
   it('returns 0 when no records are returned', async () => {
@@ -51,6 +52,7 @@ describe('aggregateArtistGenres', () => {
     const updated = await aggregateArtistGenres(makeMockDriver(session));
 
     expect(updated).toBe(0);
+    expect(session.close).toHaveBeenCalledOnce();
   });
 
   it('closes session when query fails', async () => {
@@ -78,6 +80,7 @@ describe('aggregateArtistStyles', () => {
     expect(updated).toBe(4);
     expect(runSpy.mock.calls[0]?.[0]).toContain('IN_STYLE');
     expect(runSpy.mock.calls[0]?.[0]).toContain('SET a.styles = styles');
+    expect(session.close).toHaveBeenCalledOnce();
   });
 
   it('returns 0 when no records are returned', async () => {
@@ -86,6 +89,7 @@ describe('aggregateArtistStyles', () => {
     const updated = await aggregateArtistStyles(makeMockDriver(session));
 
     expect(updated).toBe(0);
+    expect(session.close).toHaveBeenCalledOnce();
   });
 
   it('closes session when query fails', async () => {
