@@ -108,17 +108,49 @@ function marcToIso(marcCode: string): string | null {
   return MARC_TO_ISO.get(normalized) ?? null;
 }
 
+/**
+ * Per-run HTTP-outcome tally for VIAF, exposed so the nationality pipeline can report whether
+ * VIAF is actually answering or just being bot-blocked (#194). Counters are per HTTP *attempt*
+ * (a single `getCountryByName` call may retry, so it can bump `calls` more than once), and
+ * every attempt lands in exactly one outcome bucket — so the invariant
+ * `calls === ok + botBlocked + html + httpError + rateLimited + networkError` always holds.
+ *
+ * `ok` means "received HTTP 200 + parseable JSON", which is NOT the same as resolving a country
+ * (`extractCountry` can still return null on a name/MARC/agreement mismatch). The gap between
+ * `ok` and the pipeline's resolved-by-VIAF count is the "answers but never matches" signal;
+ * a high `botBlocked`/`html` with `ok` near zero is the "bot-blocked everywhere" signal.
+ */
+export interface ViafMetrics {
+  calls: number;
+  ok: number;
+  botBlocked: number;
+  html: number;
+  httpError: number;
+  rateLimited: number;
+  networkError: number;
+}
+
+export function createEmptyViafMetrics(): ViafMetrics {
+  return { calls: 0, ok: 0, botBlocked: 0, html: 0, httpError: 0, rateLimited: 0, networkError: 0 };
+}
+
 export class VIAFClient {
   private readonly userAgent: string;
   private readonly delayMs: number;
   private readonly backoffBaseMs: number;
   private readonly log: Logger;
+  private readonly metrics: ViafMetrics = createEmptyViafMetrics();
 
   constructor(config: VIAFClientConfig) {
     this.userAgent = config.userAgent;
     this.delayMs = config.delayMs;
     this.backoffBaseMs = config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
     this.log = config.logger ?? console;
+  }
+
+  /** Snapshot of this client's HTTP-outcome tally. See {@link ViafMetrics}. */
+  getMetrics(): ViafMetrics {
+    return { ...this.metrics };
   }
 
   /**
@@ -148,6 +180,7 @@ export class VIAFClient {
     let backoffMs = this.backoffBaseMs;
 
     while (attempt <= MAX_RETRIES) {
+      this.metrics.calls++;
       try {
         const response = await fetch(url, {
           headers: { 'User-Agent': this.userAgent, Accept: 'application/json' },
@@ -155,6 +188,7 @@ export class VIAFClient {
 
         // 429/503 are genuinely transient — retry with exponential backoff.
         if (response.status === 429 || response.status === 503) {
+          this.metrics.rateLimited++;
           if (attempt >= MAX_RETRIES) break;
           const retryAfterHeader = response.headers.get('Retry-After');
           const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
@@ -172,12 +206,14 @@ export class VIAFClient {
         // 403 is VIAF's soft bot-block — deterministic for this request, so don't retry.
         // Must be checked before the !response.ok guard (403 is also !ok) to keep this log.
         if (response.status === 403) {
+          this.metrics.botBlocked++;
           this.log.warn(`[viaf-client] HTTP 403 (bot block) for "${name}" — skipping`);
           await this.sleep(this.delayMs);
           return null;
         }
 
         if (!response.ok) {
+          this.metrics.httpError++;
           this.log.warn(`[viaf-client] HTTP ${response.status} for "${name}" — skipping`);
           await this.sleep(this.delayMs);
           return null;
@@ -187,6 +223,7 @@ export class VIAFClient {
         // a given request, so skip rather than retry the identical call.
         const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
         if (contentType.includes('text/html')) {
+          this.metrics.html++;
           this.log.warn(
             `[viaf-client] HTML response (status ${response.status}) for "${name}" — skipping`,
           );
@@ -195,6 +232,7 @@ export class VIAFClient {
         }
 
         const data = (await response.json()) as ViafSearchResponse;
+        this.metrics.ok++;
         await this.sleep(this.delayMs);
 
         return this.extractCountry(name, data);
@@ -203,6 +241,9 @@ export class VIAFClient {
         // bounded retry on the same budget as the 429/503 branch above. Anything else stays a
         // soft-skip to null — this client never throws (see #189). Exhausting the retries
         // breaks to the "Exceeded max retries" path below, which also returns null.
+        // Every catch entry — transient or not, and a 200-but-unparseable-JSON body — is one
+        // failed attempt, so it counts as a single networkError.
+        this.metrics.networkError++;
         const netCode = transientNetworkCode(err);
         if (netCode === null) {
           const msg = err instanceof Error ? err.message : String(err);
