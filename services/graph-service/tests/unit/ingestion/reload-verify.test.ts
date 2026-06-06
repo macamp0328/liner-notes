@@ -127,6 +127,20 @@ describe('evaluateCoverage — verdict matrix', () => {
     expect(verdict(report, 'releasesWithOriginalYear')).toMatchObject({ pass: true, reason: 'ok' });
   });
 
+  it('gates on exact counts, not the rounded pct, at the floor boundary', () => {
+    // 8996/10000 = 89.96% rounds to 90.0 in getStats, but is below a 90% floor.
+    const metric = cov(8996, 10000);
+    expect(metric.pct).toBe(90); // confirms the rounding that the exact check defeats
+    const report = evaluateCoverage(
+      makeStats({ enrichment: { releasesWithOriginalYear: metric } }),
+      ALL_RAN,
+    );
+    expect(verdict(report, 'releasesWithOriginalYear')).toMatchObject({
+      pass: false,
+      reason: 'below-threshold',
+    });
+  });
+
   it('treats applicable=0 as not-applicable (not a failure) even with 0 covered', () => {
     const report = evaluateCoverage(
       makeStats({ enrichment: { releasesWithOriginalYear: cov(0, 0) } }),

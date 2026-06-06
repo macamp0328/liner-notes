@@ -92,9 +92,11 @@ function evaluateMetric(
   if (m.covered === 0) {
     return { ...base, pass: false, reason: 'silently-zero' };
   }
-  // Below the pinned floor (inclusive — pct === minPct passes). pct is non-null
-  // here because applicable > 0; the rounded pct from getStats is good enough.
-  if (m.pct !== null && m.pct < t.minPct) {
+  // Below the pinned floor (inclusive — exactly at the floor passes). Compare the
+  // exact covered/applicable counts, not getStats's `pct` (rounded to one decimal),
+  // so a true 89.96% can't slip past a 90% gate by rounding up to 90.0. Integer
+  // math: covered/applicable < minPct/100  ⇔  covered*100 < applicable*minPct.
+  if (m.covered * 100 < m.applicable * t.minPct) {
     return { ...base, pass: false, reason: 'below-threshold' };
   }
   return { ...base, pass: true, reason: 'ok' };
