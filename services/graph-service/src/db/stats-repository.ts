@@ -47,7 +47,6 @@ export interface StatsData {
     tracksWithTempo: CoverageMetric;
     tracksWithDeezerBpm: CoverageMetric;
     tracksWithDeezerGain: CoverageMetric;
-    tracksWithVersions: CoverageMetric;
     mastersWithReleaseEvents: CoverageMetric;
   };
 }
@@ -125,11 +124,7 @@ const TRACK_QUERY = `
     count(CASE WHEN t.isrc IS NOT NULL THEN 1 END) AS isrcCovered,
     count(CASE WHEN t.recordingMbid IS NOT NULL AND t.tempo IS NOT NULL THEN 1 END) AS tempoCovered,
     count(CASE WHEN t.isrc IS NOT NULL AND t.deezerBpm IS NOT NULL THEN 1 END) AS deezerCovered,
-    count(CASE WHEN t.isrc IS NOT NULL AND t.deezerGain IS NOT NULL THEN 1 END) AS deezerGainCovered,
-    // Undirected by intent: counts every track in a version cluster (both the variants and
-    // the earliest pressing they point at), i.e. "participates in versioning" — the signal
-    // that the track-versions stage produced output, not "has an earlier version".
-    count(CASE WHEN EXISTS { (t)-[:IS_VERSION_OF]-() } THEN 1 END) AS versionsCovered`;
+    count(CASE WHEN t.isrc IS NOT NULL AND t.deezerGain IS NOT NULL THEN 1 END) AS deezerGainCovered`;
 
 const MASTER_QUERY = `
   MATCH (m:Master)
@@ -248,7 +243,6 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       tracksWithTempo: coverage(n(track, 'tempoCovered'), mbidCovered),
       tracksWithDeezerBpm: coverage(n(track, 'deezerCovered'), isrcCovered),
       tracksWithDeezerGain: coverage(n(track, 'deezerGainCovered'), isrcCovered),
-      tracksWithVersions: coverage(n(track, 'versionsCovered'), trackTotal),
       mastersWithReleaseEvents: coverage(n(master, 'releaseEventsCovered'), n(master, 'total')),
     },
   };

@@ -22,7 +22,7 @@ export interface CoverageThreshold {
  * (recordingMbid/isrc) confirmed lenient by the operator. lyrics/tempo/deezerBpm
  * are best-effort external sources — gated for "populated" (silently-zero) only.
  *
- * Deliberately omitted: genres, styles, nationality, versions, releaseEvents,
+ * Deliberately omitted: genres, styles, nationality, releaseEvents,
  * deezerGain. They are not in #178's scope; add a row here to start gating one.
  */
 export const RELOAD_COVERAGE_THRESHOLDS: readonly CoverageThreshold[] = [

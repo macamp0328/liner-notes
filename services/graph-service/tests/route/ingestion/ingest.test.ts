@@ -22,9 +22,6 @@ const mockEnrichOriginalYear = vi.hoisted(() =>
 const mockEnrichArtistGenres = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 }),
 );
-const mockEnrichTrackVersions = vi.hoisted(() =>
-  vi.fn().mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 }),
-);
 const mockEnrichArtistProfiles = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 }),
 );
@@ -70,10 +67,6 @@ vi.mock('../../../src/enrichment/artist-genres.js', () => ({
   enrichArtistGenres: mockEnrichArtistGenres,
 }));
 
-vi.mock('../../../src/enrichment/track-versions.js', () => ({
-  enrichTrackVersions: mockEnrichTrackVersions,
-}));
-
 vi.mock('../../../src/enrichment/artist-profiles.js', () => ({
   enrichArtistProfiles: mockEnrichArtistProfiles,
 }));
@@ -107,12 +100,6 @@ describe('Discogs ingestion pipeline', () => {
     mockEnrichLyrics.mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
     mockEnrichOriginalYear.mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
     mockEnrichArtistGenres.mockResolvedValue({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
-    mockEnrichTrackVersions.mockResolvedValue({
-      enriched: 0,
-      skipped: 0,
-      failed: 0,
-      durationMs: 0,
-    });
     mockEnrichArtistProfiles.mockResolvedValue({
       enriched: 0,
       skipped: 0,

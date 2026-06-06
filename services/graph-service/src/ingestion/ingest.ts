@@ -9,8 +9,6 @@ import { enrichMasterData } from '../enrichment/master-data.js';
 import type { MasterDataEnrichmentSummary } from '../enrichment/master-data.js';
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
 import type { ArtistGenresEnrichmentSummary } from '../enrichment/artist-genres.js';
-import { enrichTrackVersions } from '../enrichment/track-versions.js';
-import type { TrackVersionsEnrichmentSummary } from '../enrichment/track-versions.js';
 import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
 import type { ArtistProfilesEnrichmentSummary } from '../enrichment/artist-profiles.js';
 
@@ -18,7 +16,6 @@ export type { Logger };
 export type { LyricsEnrichmentSummary };
 export type { MasterDataEnrichmentSummary };
 export type { ArtistGenresEnrichmentSummary };
-export type { TrackVersionsEnrichmentSummary };
 export type { ArtistProfilesEnrichmentSummary };
 
 export interface IngestionConfig {
@@ -35,7 +32,6 @@ export interface IngestionSummary {
   lyricsEnrichment: LyricsEnrichmentSummary;
   masterDataEnrichment: MasterDataEnrichmentSummary;
   artistGenresEnrichment: ArtistGenresEnrichmentSummary;
-  trackVersionsEnrichment: TrackVersionsEnrichmentSummary;
   artistProfilesEnrichment: ArtistProfilesEnrichmentSummary;
 }
 
@@ -204,16 +200,7 @@ export async function runIngestion(
     errors,
   );
 
-  // Step 6: Create IS_VERSION_OF relationships between track variants
-  const trackVersionsEnrichment = await runStage(
-    'track-versions',
-    () => enrichTrackVersions(driver, log),
-    { enriched: 0, skipped: 0, failed: 0, durationMs: 0 },
-    log,
-    errors,
-  );
-
-  // Step 7: Enrich Artist nodes with realName + profile from Discogs artist API
+  // Step 6: Enrich Artist nodes with realName + profile from Discogs artist API
   const artistProfilesEnrichment = await runStage(
     'artist-profiles',
     () => enrichArtistProfiles(client, driver, log),
@@ -235,7 +222,6 @@ export async function runIngestion(
     lyricsEnrichment,
     masterDataEnrichment,
     artistGenresEnrichment,
-    trackVersionsEnrichment,
     artistProfilesEnrichment,
   };
 
@@ -252,9 +238,6 @@ export async function runIngestion(
       `  Artist genres (genres): ${artistGenresEnrichment.genresEnriched}\n` +
       `  Artist genres (styles): ${artistGenresEnrichment.stylesEnriched}\n` +
       `  Artist genres failed:  ${artistGenresEnrichment.failed}\n` +
-      `  Track versions enrich: ${trackVersionsEnrichment.enriched}\n` +
-      `  Track versions skip:   ${trackVersionsEnrichment.skipped}\n` +
-      `  Track versions failed: ${trackVersionsEnrichment.failed}\n` +
       `  Artist profiles enrich: ${artistProfilesEnrichment.enriched}\n` +
       `  Artist profiles skip:  ${artistProfilesEnrichment.skipped}\n` +
       `  Artist profiles failed: ${artistProfilesEnrichment.failed}\n` +

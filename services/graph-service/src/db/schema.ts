@@ -15,7 +15,9 @@ const statements = [
   'MATCH (r:Release) WHERE r.year IS NOT NULL AND r.pressingYear IS NULL SET r.pressingYear = r.year',
   'CREATE INDEX musician_name IF NOT EXISTS FOR (m:Musician) ON (m.name)',
   'CREATE INDEX studio_name IF NOT EXISTS FOR (s:Studio) ON (s.name)',
-  'CREATE INDEX track_normalized_title IF NOT EXISTS FOR (t:Track) ON (t.normalizedTitle)',
+  // issue #196: the track-versions stage (sole reader of t.normalizedTitle) was dropped.
+  // Drop its now-unused index; IF EXISTS keeps this a no-op once cleared.
+  'DROP INDEX track_normalized_title IF EXISTS',
   'CREATE FULLTEXT INDEX releaseArtistTrackSearch IF NOT EXISTS FOR (n:Release|Artist|Track) ON EACH [n.title, n.name]',
   'CREATE FULLTEXT INDEX lyricsSearch IF NOT EXISTS FOR (t:Track) ON EACH [t.lyrics]',
   'CREATE CONSTRAINT master_discogs_id IF NOT EXISTS FOR (m:Master) REQUIRE m.discogsId IS UNIQUE',

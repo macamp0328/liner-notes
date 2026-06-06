@@ -54,13 +54,6 @@ describe('GET /api/v1/stats', () => {
              t.recordingMbid = 'mbid-1', t.isrc = 'ISRC0001',
              t.tempo = 120.0, t.deezerBpm = 121.0, t.deezerGain = -7.5`,
       );
-      // A cross-track version edge so tracksWithVersions has a covered count.
-      await session.run(
-        `MATCH (t:Track) WITH t LIMIT 2
-         WITH collect(t) AS ts
-         WITH ts[0] AS a, ts[1] AS b
-         MERGE (a)-[:IS_VERSION_OF]->(b)`,
-      );
       await session.run(`MERGE (m:Master {discogsId: 555555})`);
       // mb-release-events output on the master.
       await session.run(
@@ -117,7 +110,6 @@ describe('GET /api/v1/stats', () => {
     expect(enrichment.artistsWithStyles.covered).toBeLessThanOrEqual(
       enrichment.artistsWithStyles.applicable,
     );
-    expect(enrichment.tracksWithVersions.covered).toBeGreaterThanOrEqual(1);
     expect(enrichment.mastersWithReleaseEvents).toEqual({ covered: 1, applicable: 1, pct: 100 });
 
     // The lyrics track came from LRCLIB; the per-source split reflects it.
