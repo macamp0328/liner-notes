@@ -669,19 +669,78 @@
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": ["enriched", "skipped", "failed", "durationMs"],
+                      "required": [
+                        "enriched",
+                        "skipped",
+                        "failed",
+                        "durationMs",
+                        "resolvedByMusicbrainz",
+                        "resolvedByWikidata",
+                        "resolvedByViaf",
+                        "viafCalls",
+                        "viafOk",
+                        "viafBotBlocked",
+                        "viafHtml",
+                        "viafHttpError",
+                        "viafRateLimited",
+                        "viafNetworkError"
+                      ],
                       "properties": {
                         "enriched": {
-                          "type": "integer"
+                          "type": "integer",
+                          "description": "Nodes that received an ORIGIN_COUNTRY this run."
                         },
                         "skipped": {
-                          "type": "integer"
+                          "type": "integer",
+                          "description": "Nodes no source could resolve (stamped; retried next staleness window)."
                         },
                         "failed": {
-                          "type": "integer"
+                          "type": "integer",
+                          "description": "Nodes that threw and were not stamped."
                         },
                         "durationMs": {
-                          "type": "integer"
+                          "type": "integer",
+                          "description": "Wall-clock duration of the run."
+                        },
+                        "resolvedByMusicbrainz": {
+                          "type": "integer",
+                          "description": "Countries this run where MusicBrainz was the chosen source (MB returned a country and Wikidata agreed or was null)."
+                        },
+                        "resolvedByWikidata": {
+                          "type": "integer",
+                          "description": "Countries this run where Wikidata was the chosen source (Wikidata-only, preferred on an MB/WD disagreement, or via the Wikipedia-URL fallback)."
+                        },
+                        "resolvedByViaf": {
+                          "type": "integer",
+                          "description": "Countries this run resolved by VIAF. VIAF is the last-resort source (tried only after MB and Wikidata both return null), so this is its unique contribution."
+                        },
+                        "viafCalls": {
+                          "type": "integer",
+                          "description": "VIAF HTTP attempts (retries counted separately). Denominator for the counts below."
+                        },
+                        "viafOk": {
+                          "type": "integer",
+                          "description": "VIAF attempts returning HTTP 200 + parseable JSON — NOT the same as resolving a country (compare resolvedByViaf)."
+                        },
+                        "viafBotBlocked": {
+                          "type": "integer",
+                          "description": "VIAF attempts blocked with HTTP 403."
+                        },
+                        "viafHtml": {
+                          "type": "integer",
+                          "description": "VIAF attempts that returned an HTML page instead of JSON (soft bot-block)."
+                        },
+                        "viafHttpError": {
+                          "type": "integer",
+                          "description": "VIAF attempts with a non-OK status other than 403/429/503 (e.g. 500)."
+                        },
+                        "viafRateLimited": {
+                          "type": "integer",
+                          "description": "VIAF attempts rate-limited or unavailable (HTTP 429/503)."
+                        },
+                        "viafNetworkError": {
+                          "type": "integer",
+                          "description": "VIAF attempts that failed at the network level (timeout/ECONNRESET) or returned an unparseable 200 body."
                         }
                       }
                     }
@@ -2412,18 +2471,78 @@
                         },
                         "lastResult": {
                           "type": "object",
+                          "required": [
+                            "enriched",
+                            "skipped",
+                            "failed",
+                            "durationMs",
+                            "resolvedByMusicbrainz",
+                            "resolvedByWikidata",
+                            "resolvedByViaf",
+                            "viafCalls",
+                            "viafOk",
+                            "viafBotBlocked",
+                            "viafHtml",
+                            "viafHttpError",
+                            "viafRateLimited",
+                            "viafNetworkError"
+                          ],
                           "properties": {
                             "enriched": {
-                              "type": "integer"
+                              "type": "integer",
+                              "description": "Nodes that received an ORIGIN_COUNTRY this run."
                             },
                             "skipped": {
-                              "type": "integer"
+                              "type": "integer",
+                              "description": "Nodes no source could resolve (stamped; retried next staleness window)."
                             },
                             "failed": {
-                              "type": "integer"
+                              "type": "integer",
+                              "description": "Nodes that threw and were not stamped."
                             },
                             "durationMs": {
-                              "type": "integer"
+                              "type": "integer",
+                              "description": "Wall-clock duration of the run."
+                            },
+                            "resolvedByMusicbrainz": {
+                              "type": "integer",
+                              "description": "Countries this run where MusicBrainz was the chosen source (MB returned a country and Wikidata agreed or was null)."
+                            },
+                            "resolvedByWikidata": {
+                              "type": "integer",
+                              "description": "Countries this run where Wikidata was the chosen source (Wikidata-only, preferred on an MB/WD disagreement, or via the Wikipedia-URL fallback)."
+                            },
+                            "resolvedByViaf": {
+                              "type": "integer",
+                              "description": "Countries this run resolved by VIAF. VIAF is the last-resort source (tried only after MB and Wikidata both return null), so this is its unique contribution."
+                            },
+                            "viafCalls": {
+                              "type": "integer",
+                              "description": "VIAF HTTP attempts (retries counted separately). Denominator for the counts below."
+                            },
+                            "viafOk": {
+                              "type": "integer",
+                              "description": "VIAF attempts returning HTTP 200 + parseable JSON — NOT the same as resolving a country (compare resolvedByViaf)."
+                            },
+                            "viafBotBlocked": {
+                              "type": "integer",
+                              "description": "VIAF attempts blocked with HTTP 403."
+                            },
+                            "viafHtml": {
+                              "type": "integer",
+                              "description": "VIAF attempts that returned an HTML page instead of JSON (soft bot-block)."
+                            },
+                            "viafHttpError": {
+                              "type": "integer",
+                              "description": "VIAF attempts with a non-OK status other than 403/429/503 (e.g. 500)."
+                            },
+                            "viafRateLimited": {
+                              "type": "integer",
+                              "description": "VIAF attempts rate-limited or unavailable (HTTP 429/503)."
+                            },
+                            "viafNetworkError": {
+                              "type": "integer",
+                              "description": "VIAF attempts that failed at the network level (timeout/ECONNRESET) or returned an unparseable 200 body."
                             }
                           },
                           "nullable": true

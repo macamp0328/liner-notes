@@ -91,6 +91,11 @@ vi.mock('../../../src/enrichment/track-versions.js', () => ({
   enrichTrackVersions: mockEnrichTrackVersions,
 }));
 
+const mockEnrichNationality = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/enrichment/artist-nationality.js', () => ({
+  enrichNationality: mockEnrichNationality,
+}));
+
 const mockResetTrackVersions = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/db/track-versions-repository.js', () => ({
   resetTrackVersions: mockResetTrackVersions,
@@ -111,6 +116,25 @@ vi.mock('../../../src/ingestion/job-state.js', () => ({
 
 // ── helpers ───────────────────────────────────────────────────────────────
 const VALID_TOKEN = 'test-admin-token';
+
+// A fully-populated nationality summary including the #194 instrumentation fields. Used to
+// guard against the Fastify response schema silently stripping the per-source / VIAF counts.
+const nationalitySummary = {
+  enriched: 7,
+  skipped: 2,
+  failed: 0,
+  durationMs: 1234,
+  resolvedByMusicbrainz: 4,
+  resolvedByWikidata: 2,
+  resolvedByViaf: 1,
+  viafCalls: 9,
+  viafOk: 3,
+  viafBotBlocked: 5,
+  viafHtml: 1,
+  viafHttpError: 0,
+  viafRateLimited: 0,
+  viafNetworkError: 0,
+};
 
 const completeSummary: IngestionSummary = {
   releasesProcessed: 10,
@@ -215,6 +239,7 @@ describe('Admin API', () => {
       durationMs: 150,
     });
     mockResetTrackVersions.mockResolvedValue(9);
+    mockEnrichNationality.mockResolvedValue(nationalitySummary);
     resetAllPipelineStates();
     app = await buildServer();
     await app.ready();
@@ -224,6 +249,7 @@ describe('Admin API', () => {
     await app.close();
     delete process.env['ADMIN_TOKEN'];
     delete process.env['DISCOGS_USERNAME'];
+    delete process.env['MUSICBRAINZ_USER_AGENT'];
   });
 
   // ── POST /ingest ─────────────────────────────────────────────────────────
@@ -508,6 +534,58 @@ describe('Admin API', () => {
       const body409 = r1.statusCode === 409 ? r1 : r2;
       const parsed = JSON.parse(body409.payload) as { error: { code: string } };
       expect(parsed.error.code).toBe('ENRICHMENT_RUNNING');
+    });
+  });
+
+  // ── POST /nationality/enrich ──────────────────────────────────────────────
+  describe('POST /api/v1/admin/nationality/enrich', () => {
+    it('returns the full instrumented summary without stripping per-source / VIAF fields', async () => {
+      process.env['MUSICBRAINZ_USER_AGENT'] = 'liner-notes/test (test@example.com)';
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/nationality/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as { data: Record<string, number> };
+      // toEqual (not toMatchObject): the response schema must expose every #194 field, and
+      // Fastify strips any property not declared in the schema — so a missing field here means
+      // the schema regressed.
+      expect(body.data).toEqual(nationalitySummary);
+    });
+
+    it('surfaces the instrumented summary as lastResult on /nationality/status after a run', async () => {
+      process.env['MUSICBRAINZ_USER_AGENT'] = 'liner-notes/test (test@example.com)';
+      await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/nationality/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/nationality/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { running: boolean; lastResult: Record<string, number> | null };
+      };
+      expect(body.data.running).toBe(false);
+      expect(body.data.lastResult).toEqual(nationalitySummary);
+    });
+
+    it('returns 503 when MUSICBRAINZ_USER_AGENT is not configured', async () => {
+      delete process.env['MUSICBRAINZ_USER_AGENT'];
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/nationality/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(503);
     });
   });
 

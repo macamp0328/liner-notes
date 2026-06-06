@@ -106,11 +106,13 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   const enableLogger = options.logger ?? process.env['NODE_ENV'] !== 'test';
   const app = Fastify({ logger: enableLogger });
 
-  // Global rate limiting (CodeQL js/missing-rate-limiting). Registered before routes so
-  // its onRequest hook covers every endpoint. The cap is per client IP (request.ip) — note
-  // that behind a proxy/NodePort that SNATs the source address, callers can share a bucket
-  // unless Fastify `trustProxy` + X-Forwarded-For are configured; the planned Cloudflare
-  // layer is the primary edge defence, this is an in-app backstop.
+  // Global rate limiting — a runtime DoS backstop. Registered before routes so its onRequest
+  // hook covers every endpoint. The cap is per client IP (request.ip) — note that behind a
+  // proxy/NodePort that SNATs the source address, callers can share a bucket unless Fastify
+  // `trustProxy` + X-Forwarded-For are configured; the planned Cloudflare layer is the primary
+  // edge defence. Note: this does NOT clear the CodeQL js/missing-rate-limiting alerts — that
+  // query models only the express-rate-limit family, not @fastify/rate-limit (global hook or
+  // per-route config), so its findings here were dismissed as false positives (issue #238).
   await app.register(rateLimit, {
     max: resolveRateLimitMax(options.rateLimitMax),
     timeWindow: RATE_LIMIT_TIME_WINDOW,

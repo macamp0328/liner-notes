@@ -283,7 +283,7 @@ aws secretsmanager put-secret-value \
   --secret-string "$SECRET_JSON"
 ```
 
-Add `GENIUS_TOKEN` to the JSON for lyrics enrichment; `ACOUSTICBRAINZ_USER_AGENT` is optional.
+Add `GENIUS_TOKEN` to the JSON for lyrics enrichment; `ACOUSTICBRAINZ_USER_AGENT` and `GENIUS_USER_AGENT` are optional. The Genius fallback now sends a browser-like User-Agent by default to clear Cloudflare's bot check (issue #195); only set `GENIUS_USER_AGENT` to refresh that string without a redeploy.
 
 > **Why this isn't in Terraform:** keeping the value out of state means the Aura password isn't readable from `terraform.tfstate`, and rotation is one CLI call away — no Terraform run needed.
 
@@ -924,7 +924,7 @@ curl -s "$GRAPH_SERVICE_URL/api/v1/stats" | jq .data.enrichment
 | `tracksWithTempo`          | of those with an mbid | `track-acousticbrainz`                  |
 | `tracksWithDeezerBpm`      | of those with an isrc | `track-deezer`                          |
 
-> `tracksWithLyrics` is LRCLIB-only (~70%) unless `GENIUS_TOKEN` is present in the prod secret — the Genius fallback is skipped when it's unset.
+> `tracksWithLyrics` is LRCLIB-only (~70%) unless `GENIUS_TOKEN` is present in the prod secret — the Genius fallback is skipped when it's unset. With the token set, the per-source split is readable at `tracksWithLyrics.sources.genius` (issue #203). The fallback historically landed ~0 because Genius's Cloudflare edge 403'd the EC2 IP; it now sends a browser-like User-Agent to clear that check (issue #195). After enabling the token, purge any stale rows via `POST /admin/lyrics/clear-genius`, re-run `POST /admin/lyrics/enrich`, then re-check `sources.genius` — if it's still ~0 with `403`s in the logs, it's a hard IP block and the fallback should be dropped.
 
 ---
 
