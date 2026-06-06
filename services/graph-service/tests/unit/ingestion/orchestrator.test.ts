@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Driver } from 'neo4j-driver';
 import type { Logger } from '../../../src/ingestion/discogs-client.js';
-import { runReload, buildReloadContext } from '../../../src/ingestion/orchestrator.js';
+import {
+  runReload,
+  buildReloadContext,
+  runVerifyGate,
+} from '../../../src/ingestion/orchestrator.js';
+import type { ReloadStageName } from '../../../src/ingestion/stages.js';
 
 const stageMocks = vi.hoisted(() => ({
   releasesRun: vi.fn(),
@@ -9,6 +14,8 @@ const stageMocks = vi.hoisted(() => ({
   masterRun: vi.fn(),
 }));
 
+// The runReload tests mock RELOAD_STAGES without `verify`, so they never enter the
+// verify branch — runVerifyGate is exercised directly below instead.
 vi.mock('../../../src/ingestion/stages.js', () => ({
   RELOAD_STAGES: [
     { name: 'releases', run: stageMocks.releasesRun },
@@ -37,6 +44,22 @@ const progress = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/ingestion/reload-progress.js', () => progress);
+
+// Mocked so runVerifyGate's gate logic (covered by reload-verify.test.ts) and DB
+// scan (getStats) are isolated; we assert only the orchestration around them.
+const verifyMocks = vi.hoisted(() => ({
+  getStats: vi.fn(),
+  evaluateCoverage: vi.fn(),
+  reportToCounts: vi.fn(),
+  formatVerifyFailure: vi.fn(),
+}));
+
+vi.mock('../../../src/db/stats-repository.js', () => ({ getStats: verifyMocks.getStats }));
+vi.mock('../../../src/ingestion/reload-verify.js', () => ({
+  evaluateCoverage: verifyMocks.evaluateCoverage,
+  reportToCounts: verifyMocks.reportToCounts,
+  formatVerifyFailure: verifyMocks.formatVerifyFailure,
+}));
 
 const log = {
   info: vi.fn(),
@@ -219,5 +242,65 @@ describe('buildReloadContext', () => {
     expect(ctx).toHaveProperty('deezer');
     expect(ctx).toHaveProperty('wikidata');
     expect(ctx).toHaveProperty('viaf');
+  });
+});
+
+describe('runVerifyGate', () => {
+  const ran = new Set<ReloadStageName>(['lyrics', 'master-data']);
+
+  beforeEach(() => {
+    verifyMocks.getStats.mockResolvedValue({ counts: {}, enrichment: {} });
+    verifyMocks.reportToCounts.mockReturnValue({ coverageChecksFailed: 0 });
+    verifyMocks.formatVerifyFailure.mockReturnValue('verify gate FAILED — stage [lyrics]');
+  });
+
+  it('passes the ran-stage set through to evaluateCoverage and marks verify complete', async () => {
+    verifyMocks.evaluateCoverage.mockReturnValue({ pass: true, metrics: [], failingStages: [] });
+
+    const result = await runVerifyGate(driver, 'job-1', ran, log);
+
+    expect(result).toEqual({ passed: true });
+    expect(verifyMocks.getStats).toHaveBeenCalledWith(driver);
+    expect(verifyMocks.evaluateCoverage).toHaveBeenCalledWith(expect.anything(), ran);
+    expect(repo.markStageComplete).toHaveBeenCalledWith(driver, 'job-1', 'verify', {
+      coverageChecksFailed: 0,
+    });
+    expect(repo.markStageFailed).not.toHaveBeenCalled();
+  });
+
+  it('fails loud: logs at error level and persists the report alongside the summary', async () => {
+    verifyMocks.evaluateCoverage.mockReturnValue({
+      pass: false,
+      metrics: [],
+      failingStages: ['lyrics'],
+    });
+    verifyMocks.reportToCounts.mockReturnValue({ coverageChecksFailed: 1 });
+
+    const result = await runVerifyGate(driver, 'job-1', ran, log);
+
+    expect(result).toEqual({ passed: false });
+    expect(log.error).toHaveBeenCalled();
+    expect(repo.markStageFailed).toHaveBeenCalledWith(
+      driver,
+      'job-1',
+      'verify',
+      'verify gate FAILED — stage [lyrics]',
+      { coverageChecksFailed: 1 },
+    );
+    expect(repo.markStageComplete).not.toHaveBeenCalled();
+  });
+
+  it('marks verify failed if the coverage scan itself errors', async () => {
+    verifyMocks.getStats.mockRejectedValue(new Error('neo4j down'));
+
+    const result = await runVerifyGate(driver, 'job-1', ran, log);
+
+    expect(result).toEqual({ passed: false });
+    expect(repo.markStageFailed).toHaveBeenCalledWith(
+      driver,
+      'job-1',
+      'verify',
+      expect.stringContaining('verify gate errored: neo4j down'),
+    );
   });
 });

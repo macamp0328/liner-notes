@@ -7,7 +7,7 @@ import { buildDeezerClientFromEnv } from './deezer-client.js';
 import { buildWikidataClientFromEnv } from './wikidata-client.js';
 import { buildViafClientFromEnv } from './viaf-client.js';
 import { RELOAD_STAGES } from './stages.js';
-import type { ReloadContext } from './stages.js';
+import type { ReloadContext, ReloadStageName } from './stages.js';
 import {
   createReloadJob,
   getReloadJob,
@@ -25,6 +25,8 @@ import {
   clearStage,
 } from './reload-progress.js';
 import type { ProgressReporter } from '../enrichment/progress.js';
+import { getStats } from '../db/stats-repository.js';
+import { evaluateCoverage, reportToCounts, formatVerifyFailure } from './reload-verify.js';
 
 export interface RunReloadOptions {
   username: string;
@@ -96,6 +98,16 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
       .map((s) => s.stage),
   );
 
+  // Stages that produced output (status `complete`, not `skipped`) — across both a
+  // prior run's checkpoints and this run. The verify gate judges coverage only for
+  // stages that actually ran, so a skipped stage's metric is exempt rather than a
+  // false silently-zero.
+  const ranStages = new Set<ReloadStageName>(
+    (existing?.stages ?? [])
+      .filter((s) => s.status === 'complete')
+      .map((s) => s.stage as ReloadStageName),
+  );
+
   // Accurate whether the job is brand-new (pre-created by the route with all stages pending)
   // or a genuine resume after a crash (some stages already settled).
   log.info(
@@ -121,6 +133,19 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
       }
 
       await markStageRunning(driver, jobId, descriptor.name);
+
+      // The verify gate runs here, not via descriptor.run, because it needs
+      // `ranStages` (which stages produced output this job) that the run(ctx)
+      // signature can't carry. The descriptor stays in RELOAD_STAGES for sequence
+      // ordering and job-node creation; its run is a no-op never reached here. It
+      // does no per-item work, so it skips the live-progress registry.
+      if (descriptor.name === 'verify') {
+        const { passed } = await runVerifyGate(driver, jobId, ranStages, log);
+        if (passed) stagesRun++;
+        else stagesFailed++;
+        continue;
+      }
+
       beginStage(jobId, descriptor.name);
       const onProgress: ProgressReporter = (processed, total) =>
         reportStageProgress(jobId, descriptor.name, processed, total);
@@ -133,6 +158,7 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
         } else {
           await markStageComplete(driver, jobId, descriptor.name, counts);
           stagesRun++;
+          ranStages.add(descriptor.name);
           log.info(`[reload] stage "${descriptor.name}" complete`);
         }
       } catch (err) {
@@ -155,4 +181,38 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
   );
 
   return { jobId, status, stagesRun, stagesSkipped, stagesFailed };
+}
+
+/**
+ * The verify gate (#178). Reads coverage via `getStats`, compares it against the
+ * pinned thresholds for the stages that ran (`ranStages`), and records the result
+ * on the verify ReloadStage. On failure it logs at pino error level (≥ 50, so the
+ * CloudWatch `$.data.level >= 50` filter and the #169 dashboard fire) and persists
+ * the structured per-metric report alongside the failure summary, so a degraded
+ * load surfaces in `/admin/reload/status` rather than reporting green.
+ */
+export async function runVerifyGate(
+  driver: Driver,
+  jobId: string,
+  ranStages: ReadonlySet<ReloadStageName>,
+  log: Logger,
+): Promise<{ passed: boolean }> {
+  try {
+    const report = evaluateCoverage(await getStats(driver), ranStages);
+    const counts = reportToCounts(report);
+    if (report.pass) {
+      await markStageComplete(driver, jobId, 'verify', counts);
+      log.info('[reload] verify gate passed');
+      return { passed: true };
+    }
+    const summary = formatVerifyFailure(report);
+    log.error(`[reload] ${summary}`);
+    await markStageFailed(driver, jobId, 'verify', summary, counts);
+    return { passed: false };
+  } catch (err) {
+    const msg = `verify gate errored: ${err instanceof Error ? err.message : String(err)}`;
+    log.error(`[reload] ${msg}`);
+    await markStageFailed(driver, jobId, 'verify', msg);
+    return { passed: false };
+  }
 }

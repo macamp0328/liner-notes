@@ -230,7 +230,9 @@ describe('stage run() delegates to the right enrich function', () => {
     );
   });
 
-  it('verify is a no-op returning empty counts', async () => {
+  it('verify descriptor run is a no-op — the real gate runs in the orchestrator', async () => {
+    // The coverage gate lives in runVerifyGate (it needs cross-stage ranStages); this
+    // descriptor exists only for sequence ordering and job-node creation.
     expect(await stage('verify').run(makeCtx())).toEqual({});
   });
 });
