@@ -184,12 +184,23 @@ function normalizeArtistName(name: string): string {
     .trim();
 }
 
+// Browser-like User-Agent sent on every Genius request. Unlike DISCOGS_USER_AGENT /
+// ACOUSTICBRAINZ_USER_AGENT — which are polite identifying strings — this default must
+// look like a real browser: Genius's Cloudflare edge returns 403 to requests carrying a
+// bot-like or empty UA (especially from datacenter IPs like the prod EC2 host), which is
+// the root cause of the "403-limited" fallback (issue #195). Overridable via
+// GENIUS_USER_AGENT for when the string needs refreshing without a code change.
+const DEFAULT_GENIUS_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
 /**
  * Fetch lyrics from Genius: search API to find the song page, then scrape HTML.
  * Returns lyrics text or null if not found/valid. Throws on network/API errors.
+ * `userAgent` is sent on both requests to clear Genius's Cloudflare bot check (#195).
  */
 async function fetchGenius(
   token: string,
+  userAgent: string,
   artistName: string,
   title: string,
 ): Promise<string | null> {
@@ -197,7 +208,11 @@ async function fetchGenius(
   searchUrl.searchParams.set('q', `${artistName} ${title}`);
 
   const searchResponse = await fetch(searchUrl.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'User-Agent': userAgent,
+      Accept: 'application/json',
+    },
   });
 
   if (!searchResponse.ok) throw new Error(`Genius search returned ${searchResponse.status}`);
@@ -216,7 +231,13 @@ async function fetchGenius(
     return null;
   }
 
-  const pageResponse = await fetch(firstHit.result.url);
+  const pageResponse = await fetch(firstHit.result.url, {
+    headers: {
+      'User-Agent': userAgent,
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
+  });
   if (!pageResponse.ok) throw new Error(`Genius page returned ${pageResponse.status}`);
 
   const html = await pageResponse.text();
@@ -256,6 +277,7 @@ export async function enrichLyrics(
   onProgress(0, total);
 
   const geniusToken = process.env['GENIUS_TOKEN'];
+  const geniusUserAgent = process.env['GENIUS_USER_AGENT'] || DEFAULT_GENIUS_USER_AGENT;
 
   let i = 0;
   for (const track of tracks) {
@@ -296,7 +318,12 @@ export async function enrichLyrics(
     // LRCLIB returned null (404) — try Genius fallback
     if (geniusToken) {
       try {
-        const geniusResult = await fetchGenius(geniusToken, track.artistName ?? '', track.title);
+        const geniusResult = await fetchGenius(
+          geniusToken,
+          geniusUserAgent,
+          track.artistName ?? '',
+          track.title,
+        );
         if (geniusResult !== null) {
           await setTrackLyrics(
             driver,
