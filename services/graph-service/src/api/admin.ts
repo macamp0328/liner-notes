@@ -93,16 +93,18 @@ const nationalitySummarySchema = {
     durationMs: { type: 'integer', description: 'Wall-clock duration of the run.' },
     resolvedByMusicbrainz: {
       type: 'integer',
-      description: 'Countries uniquely produced by MusicBrainz this run.',
+      description:
+        'Countries this run where MusicBrainz was the chosen source (MB returned a country and Wikidata agreed or was null).',
     },
     resolvedByWikidata: {
       type: 'integer',
-      description: 'Countries uniquely produced by Wikidata this run (by-ID or via Wikipedia URL).',
+      description:
+        'Countries this run where Wikidata was the chosen source (Wikidata-only, preferred on an MB/WD disagreement, or via the Wikipedia-URL fallback).',
     },
     resolvedByViaf: {
       type: 'integer',
       description:
-        'Countries uniquely produced by VIAF this run. VIAF is the last-resort source, so this is its unique contribution.',
+        'Countries this run resolved by VIAF. VIAF is the last-resort source (tried only after MB and Wikidata both return null), so this is its unique contribution.',
     },
     viafCalls: {
       type: 'integer',

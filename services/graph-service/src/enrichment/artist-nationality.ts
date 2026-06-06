@@ -17,9 +17,12 @@ import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 type ResolvedNationality = { country: string; source: NationalitySource };
 
 /**
- * Per-run instrumentation for #194: how many nationalities each source uniquely produced this
- * run, plus VIAF's HTTP-outcome tally. Because sources are tried in priority order and VIAF is
- * last, `resolvedByViaf` is VIAF's *unique* contribution. `viafOk` ("got HTTP 200 + JSON") is
+ * Per-run instrumentation for #194: how many nationalities each source was credited with this
+ * run (i.e. the source that was *selected* — MB when it answers and Wikidata agrees or is null,
+ * Wikidata on disagreement / WD-only / Wikipedia-URL fallback), plus VIAF's HTTP-outcome tally.
+ * Because sources are tried in priority order and VIAF is last (only after MB and Wikidata both
+ * return null), `resolvedByViaf` *is* VIAF's unique contribution — the MB/WD counts are not
+ * strictly "unique" because an agreement is credited to MB. `viafOk` ("got HTTP 200 + JSON") is
  * deliberately distinct from `resolvedByViaf` ("VIAF produced a country") — their gap, and the
  * size of `viafBotBlocked`/`viafHtml`, is the answers-but-no-match vs bot-blocked signal.
  */
