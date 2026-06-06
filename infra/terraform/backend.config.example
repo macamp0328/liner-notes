@@ -1,0 +1,7 @@
+# Copy this file to backend.config (gitignored) and initialise the backend with:
+#   terraform init -backend-config=backend.config
+#
+# Replace the placeholder account id with your own. The value must match the
+# bucket the bootstrap module created:
+#   terraform -chdir=bootstrap output -raw state_bucket_name
+bucket = "liner-notes-tfstate-123456789012"

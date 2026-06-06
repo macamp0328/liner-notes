@@ -7,7 +7,9 @@
 # Apply procedure and post-apply steps are documented in infra/RUNBOOK.md.
 
 terraform {
-  required_version = ">= 1.5"
+  # >= 1.11: the S3 backend's native state locking (use_lockfile, see backend.tf)
+  # is GA from 1.11; older versions error on the argument or run unlocked.
+  required_version = ">= 1.11"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
