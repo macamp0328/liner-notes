@@ -15,7 +15,10 @@ import { enrichLyrics } from '../enrichment/lyrics.js';
 import { buildMusicBrainzClientFromEnv } from '../ingestion/musicbrainz-client.js';
 import { buildWikidataClientFromEnv } from '../ingestion/wikidata-client.js';
 import { buildViafClientFromEnv } from '../ingestion/viaf-client.js';
-import { enrichNationality } from '../enrichment/artist-nationality.js';
+import {
+  enrichNationality,
+  type NationalityEnrichmentSummary,
+} from '../enrichment/artist-nationality.js';
 import { resetNationalityEnrichment } from '../db/artist-nationality-repository.js';
 import { enrichMasterData } from '../enrichment/master-data.js';
 import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
@@ -57,6 +60,82 @@ const errorShape = {
     },
   },
 } as const;
+
+// Shared response shape for the nationality summary, used by both POST /nationality/enrich and
+// GET /nationality/status. Lists every field as required because enrichNationality fully
+// populates the summary on every return path (including its early error-return). The viaf*
+// counts (#194) make VIAF's real prod contribution legible; see NationalityEnrichmentSummary.
+const nationalitySummarySchema = {
+  type: 'object',
+  required: [
+    'enriched',
+    'skipped',
+    'failed',
+    'durationMs',
+    'resolvedByMusicbrainz',
+    'resolvedByWikidata',
+    'resolvedByViaf',
+    'viafCalls',
+    'viafOk',
+    'viafBotBlocked',
+    'viafHtml',
+    'viafHttpError',
+    'viafRateLimited',
+    'viafNetworkError',
+  ],
+  properties: {
+    enriched: { type: 'integer', description: 'Nodes that received an ORIGIN_COUNTRY this run.' },
+    skipped: {
+      type: 'integer',
+      description: 'Nodes no source could resolve (stamped; retried next staleness window).',
+    },
+    failed: { type: 'integer', description: 'Nodes that threw and were not stamped.' },
+    durationMs: { type: 'integer', description: 'Wall-clock duration of the run.' },
+    resolvedByMusicbrainz: {
+      type: 'integer',
+      description:
+        'Countries this run where MusicBrainz was the chosen source (MB returned a country and Wikidata agreed or was null).',
+    },
+    resolvedByWikidata: {
+      type: 'integer',
+      description:
+        'Countries this run where Wikidata was the chosen source (Wikidata-only, preferred on an MB/WD disagreement, or via the Wikipedia-URL fallback).',
+    },
+    resolvedByViaf: {
+      type: 'integer',
+      description:
+        'Countries this run resolved by VIAF. VIAF is the last-resort source (tried only after MB and Wikidata both return null), so this is its unique contribution.',
+    },
+    viafCalls: {
+      type: 'integer',
+      description:
+        'VIAF HTTP attempts (retries counted separately). Denominator for the counts below.',
+    },
+    viafOk: {
+      type: 'integer',
+      description:
+        'VIAF attempts returning HTTP 200 + parseable JSON — NOT the same as resolving a country (compare resolvedByViaf).',
+    },
+    viafBotBlocked: { type: 'integer', description: 'VIAF attempts blocked with HTTP 403.' },
+    viafHtml: {
+      type: 'integer',
+      description: 'VIAF attempts that returned an HTML page instead of JSON (soft bot-block).',
+    },
+    viafHttpError: {
+      type: 'integer',
+      description: 'VIAF attempts with a non-OK status other than 403/429/503 (e.g. 500).',
+    },
+    viafRateLimited: {
+      type: 'integer',
+      description: 'VIAF attempts rate-limited or unavailable (HTTP 429/503).',
+    },
+    viafNetworkError: {
+      type: 'integer',
+      description:
+        'VIAF attempts that failed at the network level (timeout/ECONNRESET) or returned an unparseable 200 body.',
+    },
+  },
+};
 
 const statsShape = {
   type: 'object',
@@ -209,7 +288,7 @@ type ArtistGenresSummary = {
 };
 
 const lyricsState = makePipelineState<EnrichSummary>();
-const nationalityState = makePipelineState<EnrichSummary>();
+const nationalityState = makePipelineState<NationalityEnrichmentSummary>();
 const masterDataState = makePipelineState<EnrichSummary>();
 const mbReleaseEventsState = makePipelineState<MbReleaseEventsSummary>();
 const trackMusicBrainzState = makePipelineState<TrackMusicBrainzSummary>();
@@ -530,9 +609,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   fastify.post<{
-    Reply:
-      | { data: { enriched: number; skipped: number; failed: number; durationMs: number } }
-      | { error: { code: string; message: string } };
+    Reply: { data: NationalityEnrichmentSummary } | { error: { code: string; message: string } };
   }>(
     '/nationality/enrich',
     {
@@ -568,16 +645,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
             type: 'object',
             required: ['data'],
             properties: {
-              data: {
-                type: 'object',
-                required: ['enriched', 'skipped', 'failed', 'durationMs'],
-                properties: {
-                  enriched: { type: 'integer' },
-                  skipped: { type: 'integer' },
-                  failed: { type: 'integer' },
-                  durationMs: { type: 'integer' },
-                },
-              },
+              data: nationalitySummarySchema,
             },
           },
           401: errorShape,
@@ -1739,7 +1807,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['admin'],
         summary: 'Status of the most recent nationality enrichment run',
         security: [{ bearerAuth: [] }],
-        response: { 200: enrichStatusSchema(standardSummarySchema), 401: errorShape },
+        response: { 200: enrichStatusSchema(nationalitySummarySchema), 401: errorShape },
       },
       preHandler: adminAuthHook,
     },
@@ -2049,7 +2117,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
 export function resetAllPipelineStates(): void {
   Object.assign(lyricsState, makePipelineState<EnrichSummary>());
-  Object.assign(nationalityState, makePipelineState<EnrichSummary>());
+  Object.assign(nationalityState, makePipelineState<NationalityEnrichmentSummary>());
   Object.assign(masterDataState, makePipelineState<EnrichSummary>());
   Object.assign(mbReleaseEventsState, makePipelineState<MbReleaseEventsSummary>());
   Object.assign(trackMusicBrainzState, makePipelineState<TrackMusicBrainzSummary>());
