@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Driver } from 'neo4j-driver';
 import { enrichNationality } from '../../../src/enrichment/artist-nationality.js';
+import { createEmptyViafMetrics, type ViafMetrics } from '../../../src/ingestion/viaf-client.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks
@@ -50,9 +51,13 @@ function makeDiscogsClient(
   } as unknown as import('../../../src/ingestion/discogs-client.js').DiscogsClient;
 }
 
-function makeViafClient(byName: (name: string) => Promise<string | null> = async () => null) {
+function makeViafClient(
+  byName: (name: string) => Promise<string | null> = async () => null,
+  metrics: ViafMetrics = createEmptyViafMetrics(),
+) {
   return {
     getCountryByName: vi.fn().mockImplementation(byName),
+    getMetrics: vi.fn().mockReturnValue(metrics),
   } as unknown as import('../../../src/ingestion/viaf-client.js').VIAFClient;
 }
 
@@ -89,6 +94,13 @@ describe('enrichNationality', () => {
     expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 1, 'US', 'musicbrainz');
     expect(summary.enriched).toBe(1);
     expect(summary.skipped).toBe(0);
+    // Per-source breakdown attributes the one resolution to MusicBrainz; with no VIAF
+    // client the VIAF outcome tally is all zeros (#194).
+    expect(summary.resolvedByMusicbrainz).toBe(1);
+    expect(summary.resolvedByWikidata).toBe(0);
+    expect(summary.resolvedByViaf).toBe(0);
+    expect(summary.viafCalls).toBe(0);
+    expect(summary.viafOk).toBe(0);
   });
 
   it('counts skipped when country is not found for an artist', async () => {
@@ -190,6 +202,20 @@ describe('enrichNationality', () => {
     expect(summary.failed).toBe(1);
     expect(summary.enriched).toBe(0);
     expect(client.getCountryByDiscogsId).not.toHaveBeenCalled();
+    // The early error-return still carries a fully-zeroed instrumentation block so the
+    // all-fields-required response schema serializes cleanly.
+    expect(summary).toMatchObject({
+      resolvedByMusicbrainz: 0,
+      resolvedByWikidata: 0,
+      resolvedByViaf: 0,
+      viafCalls: 0,
+      viafOk: 0,
+      viafBotBlocked: 0,
+      viafHtml: 0,
+      viafHttpError: 0,
+      viafRateLimited: 0,
+      viafNetworkError: 0,
+    });
   });
 
   it('is idempotent — second call enriches zero because repo returns empty', async () => {
@@ -314,6 +340,8 @@ describe('enrichNationality', () => {
 
       expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 5, 'JP', 'wikidata');
       expect(summary.enriched).toBe(1);
+      expect(summary.resolvedByWikidata).toBe(1);
+      expect(summary.resolvedByMusicbrainz).toBe(0);
     });
 
     it('uses MusicBrainz country when both agree', async () => {
@@ -473,7 +501,16 @@ describe('enrichNationality', () => {
       const mb = makeMbClient(async () => null);
       const wd = makeWdClient(async () => null);
       const dc = makeDiscogsClient(async () => ({ urls: [] }));
-      const viaf = makeViafClient(async () => 'NO');
+      const viafMetrics: ViafMetrics = {
+        calls: 4,
+        ok: 1,
+        botBlocked: 2,
+        html: 1,
+        httpError: 0,
+        rateLimited: 0,
+        networkError: 0,
+      };
+      const viaf = makeViafClient(async () => 'NO', viafMetrics);
 
       const summary = await enrichNationality(mb, fakeDriver, undefined, wd, dc, viaf);
 
@@ -485,6 +522,13 @@ describe('enrichNationality', () => {
         'viaf',
       );
       expect(summary.enriched).toBe(1);
+      // VIAF produced the one resolution, and its HTTP-outcome tally propagates into the
+      // summary (the diagnostic that lets ops decide whether to keep or drop VIAF — #194).
+      expect(summary.resolvedByViaf).toBe(1);
+      expect(summary.viafCalls).toBe(4);
+      expect(summary.viafOk).toBe(1);
+      expect(summary.viafBotBlocked).toBe(2);
+      expect(summary.viafHtml).toBe(1);
     });
 
     it('does not call VIAF when an earlier source found a result', async () => {
