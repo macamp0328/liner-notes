@@ -3,6 +3,7 @@ import {
   decodeHtmlEntities,
   htmlToText,
   extractLyricsFromHtml,
+  stripGeniusHeader,
   isValidGeniusLyrics,
   normalizeArtistName,
 } from '../../../src/enrichment/lyrics-extract.js';
@@ -106,6 +107,49 @@ describe('extractLyricsFromHtml', () => {
   it('returns null when a container is never closed', () => {
     const html = '<div data-lyrics-container="true">unterminated';
     expect(extractLyricsFromHtml(html)).toBeNull();
+  });
+});
+
+describe('stripGeniusHeader', () => {
+  it('strips the header when the body runs straight into "Lyrics"', () => {
+    expect(stripGeniusHeader('2 ContributorsRight On Time LyricsWell, well, yeah')).toBe(
+      'Well, well, yeah',
+    );
+  });
+
+  it('strips a "Translations…/<language>" header that spans newlines (dotall flag)', () => {
+    const text =
+      '5 Contributors\nTranslations\nEspañol\nFrançais\nRight On Time Lyrics\nWell, well';
+    expect(stripGeniusHeader(text)).toBe('Well, well');
+  });
+
+  it('strips only the leading header, leaving a later "Lyrics" in the body intact', () => {
+    expect(stripGeniusHeader('8 ContributorsSong LyricsVerse one\n\nthese Lyrics stay')).toBe(
+      'Verse one\n\nthese Lyrics stay',
+    );
+  });
+
+  it('leaves a header-free body containing the word "Lyrics" untouched', () => {
+    const body = 'These are the lyrics I wrote\nLyrics about life';
+    expect(stripGeniusHeader(body)).toBe(body);
+  });
+
+  it('matches the singular "1 Contributor" form', () => {
+    expect(stripGeniusHeader('1 ContributorAmazing Song LyricsThe real body here')).toBe(
+      'The real body here',
+    );
+  });
+
+  it('is case-insensitive', () => {
+    expect(stripGeniusHeader('3 contributors some title lyrics the body')).toBe('the body');
+  });
+
+  it('returns an empty string for a header-only body', () => {
+    expect(stripGeniusHeader('2 ContributorsSong Title Lyrics')).toBe('');
+  });
+
+  it('trims surrounding whitespace when there is no header to strip', () => {
+    expect(stripGeniusHeader('  plain lyric body  ')).toBe('plain lyric body');
   });
 });
 
