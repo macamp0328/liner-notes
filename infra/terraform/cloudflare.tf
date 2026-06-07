@@ -17,6 +17,17 @@
 # hop is mitigated by restrict_app_to_cloudflare, which locks the security group
 # to Cloudflare's IP ranges (see networking.tf).
 
+# restrict_app_to_cloudflare only takes effect alongside cloudflare_enabled.
+# Gating on both flags makes it structurally impossible to lock the origin
+# security group / flip the health check to the (then non-existent) Cloudflare
+# domain without the DNS record and origin rule also being created. Terraform
+# can't express this as a cross-variable validation here — the diagram
+# generator runs inframap, whose HCL parser rejects both precondition blocks
+# and cross-variable validation conditions.
+locals {
+  restrict_to_cloudflare = var.restrict_app_to_cloudflare && var.cloudflare_enabled
+}
+
 resource "cloudflare_dns_record" "api" {
   count = var.cloudflare_enabled ? 1 : 0
 
@@ -78,5 +89,5 @@ resource "cloudflare_ruleset" "origin_port" {
 # to Cloudflare-only traffic. Read only when restrict_app_to_cloudflare is true.
 # IPv4 only: the VPC has no IPv6 CIDR, so Cloudflare reaches the origin over v4.
 data "cloudflare_ip_ranges" "cloudflare" {
-  count = var.restrict_app_to_cloudflare ? 1 : 0
+  count = local.restrict_to_cloudflare ? 1 : 0
 }

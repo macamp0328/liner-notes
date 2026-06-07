@@ -68,7 +68,7 @@ resource "aws_security_group" "k3s_node" {
 # Public NodePort access. Disabled (empty for_each) when the security group is
 # locked to Cloudflare — see app_nodeport_cloudflare below and issue #119.
 resource "aws_vpc_security_group_ingress_rule" "app_nodeport" {
-  for_each = toset(var.restrict_app_to_cloudflare ? [] : var.allow_app_cidr)
+  for_each = toset(local.restrict_to_cloudflare ? [] : var.allow_app_cidr)
 
   security_group_id = aws_security_group.k3s_node.id
   description       = "graph-service NodePort"
@@ -83,7 +83,7 @@ resource "aws_vpc_security_group_ingress_rule" "app_nodeport" {
 # ranges. The splat + one() reads the count=1 cloudflare_ip_ranges data source
 # without tripping an index error when the data source is absent (count=0).
 resource "aws_vpc_security_group_ingress_rule" "app_nodeport_cloudflare" {
-  for_each = var.restrict_app_to_cloudflare ? toset(one(data.cloudflare_ip_ranges.cloudflare[*].ipv4_cidrs)) : toset([])
+  for_each = local.restrict_to_cloudflare ? toset(one(data.cloudflare_ip_ranges.cloudflare[*].ipv4_cidrs)) : toset([])
 
   security_group_id = aws_security_group.k3s_node.id
   description       = "graph-service NodePort (Cloudflare origin)"

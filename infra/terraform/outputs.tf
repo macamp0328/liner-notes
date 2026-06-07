@@ -42,7 +42,7 @@ output "service_url" {
 
 output "custom_domain" {
   description = "Custom hostname Cloudflare serves graph-service on. Empty until cloudflare_enabled is set (issue #119)."
-  value       = var.custom_domain
+  value       = var.cloudflare_enabled ? var.custom_domain : ""
 }
 
 output "log_group_name" {
