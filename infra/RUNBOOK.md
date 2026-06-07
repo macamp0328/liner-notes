@@ -27,6 +27,7 @@ This is the operator's guide to standing up, redeploying, and recovering the pro
 ```mermaid
 flowchart LR
   user([Your laptop / browser]):::ext
+  cloudflare["Cloudflare<br/>DNS · TLS · origin rule :30080"]:::ext
 
   subgraph aws["AWS account · region us-east-1"]
     direction TB
@@ -73,7 +74,8 @@ flowchart LR
     discogs[("Discogs API<br/>https · 60 req/min")]:::ext
   end
 
-  user -- "http :30080 (NodePort)" --> svc
+  user -- "https" --> cloudflare
+  cloudflare -- "http :30080 (origin rule)" --> svc
   pod == "Cypher · neo4j+s://" ==> aura
   pod -.ingest.-> discogs
   cron == "ecr get-login-password<br/>(IMDS → instance role)" ==> ecr
@@ -89,28 +91,29 @@ flowchart LR
   end
 
   %% Edge indices follow declaration order across the entire file.
-  %% Main edges (0–11):
+  %% Main edges (0–12):
   %%   0  svc --> pod                          (request)
   %%   1  k8s_secret -.envFrom.-> pod          (mount, gray default)
   %%   2  k8s_pull -.imagePullSecret.-> pod    (mount, gray default)
   %%   3  cron -- "writes refreshed token" --> k8s_pull   (secret sync)
   %%   4  eso_op -- "syncs every 1h" --> k8s_secret       (secret sync)
   %%   5  iam -.attached.-> ec2                (attachment, gray default)
-  %%   6  user --> svc                         (request)
-  %%   7  pod ==> aura                         (data path)
-  %%   8  pod -.ingest.-> discogs              (external egress)
-  %%   9  cron ==> ecr                         (secret sync — image-pull token)
-  %%  10  eso_op ==> sm                        (secret sync)
-  %%  11  pod ==> ecr                          (data path — image pull)
-  %% Legend edges (12–15):
-  %%  12  lr1 --> lr2                          (request)
-  %%  13  ld1 ==> ld2                          (data path)
-  %%  14  lc1 -.-> lc2                         (secret sync)
-  %%  15  le1 -.-> le2                         (external egress)
-  linkStyle 0,6,12 stroke:#0f172a,stroke-width:2px
-  linkStyle 7,11,13 stroke:#1d4ed8,stroke-width:2.5px
-  linkStyle 3,4,9,10,14 stroke:#7c3aed,stroke-width:1.8px
-  linkStyle 8,15 stroke:#15803d,stroke-width:1.8px
+  %%   6  user --> cloudflare                  (request)
+  %%   7  cloudflare --> svc                   (request)
+  %%   8  pod ==> aura                         (data path)
+  %%   9  pod -.ingest.-> discogs              (external egress)
+  %%  10  cron ==> ecr                         (secret sync — image-pull token)
+  %%  11  eso_op ==> sm                        (secret sync)
+  %%  12  pod ==> ecr                          (data path — image pull)
+  %% Legend edges (13–16):
+  %%  13  lr1 --> lr2                          (request)
+  %%  14  ld1 ==> ld2                          (data path)
+  %%  15  lc1 -.-> lc2                         (secret sync)
+  %%  16  le1 -.-> le2                         (external egress)
+  linkStyle 0,6,7,13 stroke:#0f172a,stroke-width:2px
+  linkStyle 8,12,14 stroke:#1d4ed8,stroke-width:2.5px
+  linkStyle 3,4,10,11,15 stroke:#7c3aed,stroke-width:1.8px
+  linkStyle 9,16 stroke:#15803d,stroke-width:1.8px
 
   classDef ext fill:#f4f4f4,stroke:#999,stroke-dasharray:5 3
   classDef legendNode fill:#ffffff,stroke:#cbd5e1,color:#475569
@@ -717,6 +720,81 @@ The Deployment uses `strategy: Recreate` — there will be ~30 seconds of downti
 > kubectl -n liner-notes annotate externalsecret graph-service-secrets force-sync=$(date +%s) --overwrite
 > kubectl -n liner-notes get externalsecret graph-service-secrets   # LAST SYNC resets to a few seconds
 > ```
+
+---
+
+## TLS + custom domain (Cloudflare)
+
+Puts Cloudflare in front of the NodePort so the API is served over HTTPS on a custom hostname instead of plain HTTP on `http://<eip-dns>:30080` (issue [#119](https://github.com/macamp0328/liner-notes/issues/119)). Cloudflare proxies the hostname, terminates TLS for free, and an **Origin Rule** rewrites the destination port to `30080` — Cloudflare's proxy only dials origins on `:80`/`:443`, so a plain proxied record cannot reach the NodePort without it. TLS mode is **Flexible** (browser↔Cloudflare is HTTPS; Cloudflare↔origin stays HTTP on `:30080`, as the issue specifies). All of it is defined in [`infra/terraform/cloudflare.tf`](terraform/cloudflare.tf) and **off by default** — the steps below are a deliberate two-phase rollout.
+
+### Prerequisites
+
+- A domain (zone) added to Cloudflare, and a subdomain to serve graph-service on (e.g. `api.example.com`).
+- The zone ID — Cloudflare dashboard → the zone → **Overview** → API → **Zone ID**.
+- A Cloudflare API token (My Profile → API Tokens → Create Token) scoped to that zone with **Zone → DNS → Edit** and **Zone → Zone Settings → Edit**. Export it before every `terraform` run — it is read from the environment, never stored in tfvars or state:
+
+  ```bash
+  export CLOUDFLARE_API_TOKEN=...
+  ```
+
+> The domain and zone ID live in a **gitignored `terraform.tfvars`** (public-repo safety), not in committed defaults. See the Cloudflare block in [`terraform.tfvars.example`](terraform/terraform.tfvars.example).
+
+### Phase 1 — put Cloudflare in front (origin still publicly reachable)
+
+In `terraform.tfvars`:
+
+```hcl
+cloudflare_enabled = true
+cloudflare_zone_id = "<your-zone-id>"
+custom_domain      = "api.example.com"
+```
+
+Apply (from the primary checkout, with `CLOUDFLARE_API_TOKEN` and AWS creds in the environment):
+
+```bash
+terraform -chdir=infra/terraform plan      # creates a CNAME, 3 zone settings, 1 origin ruleset
+terraform -chdir=infra/terraform apply
+```
+
+Verify the full path while `:30080` is still open (so you can A/B against the origin):
+
+```bash
+curl -fsS https://api.example.com/api/v1/health      # {"status":"ok","neo4j":"connected"}
+curl -fsS http://"$(terraform -chdir=infra/terraform output -raw ec2_public_dns)":30080/api/v1/health
+```
+
+Both should return `200`. If the HTTPS one fails, give Cloudflare a minute to issue the edge cert, then re-check; confirm the DNS record shows **Proxied** (orange cloud) in the dashboard.
+
+### Phase 2 — lock the origin to Cloudflare only
+
+Once HTTPS is green, stop the world from reaching `:30080` directly. Add to `terraform.tfvars`:
+
+```hcl
+restrict_app_to_cloudflare = true
+allow_app_cidr             = []
+```
+
+```bash
+terraform -chdir=infra/terraform apply
+```
+
+This swaps the security group's public NodePort rule for one scoped to Cloudflare's published IPv4 ranges (`cloudflare_ip_ranges`), and **repoints the Route 53 health check** from the now-blocked direct IP probe onto `HTTPS https://api.example.com/api/v1/health` (otherwise the health alarm would fire). Verify:
+
+```bash
+curl -fsS https://api.example.com/api/v1/health                       # still 200
+curl --max-time 8 http://<eip-dns>:30080/api/v1/health || echo "blocked (expected)"   # times out
+```
+
+> The Tailscale/tailnet `:30080` path is unaffected — it rides an encrypted overlay, not this public security group, so read-only tailnet access keeps working after the lockdown.
+
+### Bot protection
+
+Free-tier **Bot Fight Mode** (dashboard → Security → Bots) is a coarse on/off toggle that isn't reliably Terraform-manageable, so it is left as a manual step rather than codified. It is defense-in-depth on top of the SG lock — enable it if you want it, but note it can challenge the Route 53 health prober and turn the health alarm red; if that happens, turn it back off (the SG restriction is the primary control).
+
+### Rollback / hardening notes
+
+- To revert, set the flags back to `false` and `apply` — the CNAME, zone settings, and origin rule are destroyed and the SG reopens per `allow_app_cidr`.
+- Flexible SSL leaves the Cloudflare→origin hop in plaintext (mitigated by the SG lock). Future hardening: a Cloudflare **Origin CA** cert + **Full (Strict)** mode (requires the origin to terminate TLS), or a **Cloudflare Tunnel** (removes inbound exposure entirely).
 
 ---
 

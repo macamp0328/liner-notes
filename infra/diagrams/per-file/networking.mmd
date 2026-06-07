@@ -13,8 +13,12 @@ flowchart LR
     aws_route_table_association_public["🔗 public<br/><small>route table assoc</small>"]:::networking
     aws_security_group_k3s_node["🛡️ k3s_node<br/><small>security group</small>"]:::networking
     aws_vpc_security_group_ingress_rule_app_nodeport["🚦 app_nodeport<br/><small>ingress rule</small>"]:::networking
+    aws_vpc_security_group_ingress_rule_app_nodeport_cloudflare["🚦 app_nodeport_cloudflare<br/><small>ingress rule</small>"]:::networking
     aws_vpc_security_group_ingress_rule_ssh["🚦 ssh<br/><small>ingress rule</small>"]:::networking
     aws_vpc_security_group_egress_rule_all["🚦 all<br/><small>egress rule</small>"]:::networking
+  end
+  subgraph ext_cloudflare_tf["cloudflare.tf"]
+    data_cloudflare_ip_ranges_cloudflare(["◻️ cloudflare<br/><small>📥 cloudflare ip ranges</small>"]):::other
   end
   aws_internet_gateway_main --> aws_vpc_main
   aws_route_table_association_public --> aws_route_table_public
@@ -26,4 +30,6 @@ flowchart LR
   aws_subnet_public --> data_aws_availability_zones_available
   aws_vpc_security_group_egress_rule_all --> aws_security_group_k3s_node
   aws_vpc_security_group_ingress_rule_app_nodeport --> aws_security_group_k3s_node
+  aws_vpc_security_group_ingress_rule_app_nodeport_cloudflare --> aws_security_group_k3s_node
+  aws_vpc_security_group_ingress_rule_app_nodeport_cloudflare -.-> data_cloudflare_ip_ranges_cloudflare
   aws_vpc_security_group_ingress_rule_ssh --> aws_security_group_k3s_node

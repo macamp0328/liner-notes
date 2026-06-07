@@ -45,3 +45,19 @@
 # — the default points at the upstream repo, and the trust policy won't match a
 # fork's OIDC `sub` claim until you set it.
 # github_repository = "your-org/your-fork"
+
+# TLS + custom domain via Cloudflare (infra/terraform/cloudflare.tf, issue #119).
+# Default is plain HTTP on the NodePort — enabling is a two-phase rollout
+# documented in the "TLS + custom domain (Cloudflare)" section of infra/RUNBOOK.md.
+# The Cloudflare API token is NOT a variable — export it before running terraform:
+#   export CLOUDFLARE_API_TOKEN=...   # Zone:DNS:Edit + Zone Settings:Edit on the zone
+#
+# Phase 1 — put Cloudflare in front (origin still publicly reachable, easy to A/B):
+# cloudflare_enabled = true
+# cloudflare_zone_id = "023e105f4ecef8ad9ca31a8372d0c353"  # from the zone Overview page
+# custom_domain      = "api.example.com"
+#
+# Phase 2 — once https://<custom_domain>/api/v1/health is green, lock the origin
+# to Cloudflare only (this also repoints the Route 53 health check at the domain):
+# restrict_app_to_cloudflare = true
+# allow_app_cidr             = []
