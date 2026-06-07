@@ -1,7 +1,13 @@
 import type { Driver } from 'neo4j-driver';
 import type { Logger } from '../ingestion/discogs-client.js';
-import { getUnenrichedTracks, setTrackLyrics, markLyricsFetched } from '../db/lyrics-repository.js';
+import {
+  getUnenrichedTracks,
+  setTrackLyrics,
+  markLyricsFetched,
+  type UnenrichedTrack,
+} from '../db/lyrics-repository.js';
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
+import { runEnrichment, type EnrichmentStage, type EnrichmentSummary } from './run.js';
 import {
   extractLyricsFromHtml,
   stripGeniusHeader,
@@ -9,12 +15,7 @@ import {
   normalizeArtistName,
 } from './lyrics-extract.js';
 
-export interface LyricsEnrichmentSummary {
-  enriched: number;
-  skipped: number;
-  failed: number;
-  durationMs: number;
-}
+export type LyricsEnrichmentSummary = EnrichmentSummary;
 
 interface LrclibResponse {
   plainLyrics?: string | null;
@@ -143,10 +144,20 @@ async function fetchGenius(
   return lyrics;
 }
 
+/** What a successful lyrics lookup resolves to: the text and the source that provided it. */
+interface LyricsResolved {
+  lyrics: string;
+  source: 'lrclib' | 'genius';
+}
+
 /**
  * Enrich all Track nodes that lack lyrics.
  * Queries LRCLIB first; falls back to Genius when GENIUS_TOKEN is set.
  * Missing lyrics are logged and skipped — never crashes the caller.
+ *
+ * The multi-source fallback lives inside `resolve`, so a single track can only ever be
+ * counted `failed` once (LRCLIB throwing short-circuits the Genius attempt) — the
+ * per-item loop, isolation, and stamp-on-attempt contract are owned by {@link runEnrichment}.
  */
 export async function enrichLyrics(
   driver: Driver,
@@ -154,119 +165,35 @@ export async function enrichLyrics(
   onProgress: ProgressReporter = NOOP_PROGRESS,
 ): Promise<LyricsEnrichmentSummary> {
   const log: Logger = logger ?? console;
-  const startTime = Date.now();
-  let enriched = 0;
-  let skipped = 0;
-  let failed = 0;
-
-  log.info('[lyrics] Starting lyrics enrichment');
-
-  let tracks;
-  try {
-    tracks = await getUnenrichedTracks(driver);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error(`[lyrics] Failed to fetch unenriched tracks: ${msg}`);
-    return { enriched: 0, skipped: 0, failed: 1, durationMs: Date.now() - startTime };
-  }
-  const total = tracks.length;
-  log.info(`[lyrics] Found ${total} tracks without lyrics`);
-  onProgress(0, total);
-
   const geniusToken = process.env['GENIUS_TOKEN'];
   const geniusUserAgent = process.env['GENIUS_USER_AGENT'] || DEFAULT_GENIUS_USER_AGENT;
 
-  let i = 0;
-  for (const track of tracks) {
-    i++;
-    if (i % 25 === 0) onProgress(i, total);
-    let lrclibResult: string | null = null;
-    let lrclibFailed = false;
+  const stage: EnrichmentStage<UnenrichedTrack, LyricsResolved> = {
+    name: 'lyrics',
+    selectCandidates: (d) => getUnenrichedTracks(d),
+    async resolve(track) {
+      const lrclibResult = await fetchLrclib(track.artistName ?? '', track.title);
+      if (lrclibResult !== null) return { lyrics: lrclibResult, source: 'lrclib' };
 
-    try {
-      lrclibResult = await fetchLrclib(track.artistName ?? '', track.title);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.error(`[lyrics] LRCLIB failed for "${track.title}": ${msg}`);
-      failed++;
-      lrclibFailed = true;
-    }
-
-    if (lrclibFailed) continue;
-
-    if (lrclibResult !== null) {
-      try {
-        await setTrackLyrics(
-          driver,
-          track.releaseDiscogsId,
-          track.position,
-          lrclibResult,
-          'lrclib',
-        );
-        enriched++;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`[lyrics] Failed to write LRCLIB lyrics for "${track.title}": ${msg}`);
-        failed++;
+      // LRCLIB returned null (404) — try Genius fallback when configured.
+      if (!geniusToken) {
+        log.debug?.('[lyrics] GENIUS_TOKEN not set — skipping Genius fallback');
+        return null;
       }
-      continue;
-    }
+      const geniusResult = await fetchGenius(
+        geniusToken,
+        geniusUserAgent,
+        track.artistName ?? '',
+        track.title,
+      );
+      return geniusResult === null ? null : { lyrics: geniusResult, source: 'genius' };
+    },
+    write: (d, track, resolved) =>
+      setTrackLyrics(d, track.releaseDiscogsId, track.position, resolved.lyrics, resolved.source),
+    markAttempted: (d, track) => markLyricsFetched(d, track.releaseDiscogsId, track.position),
+    isExpectedError: isExpectedGeniusBlock,
+    describeItem: (track) => `"${track.title}"`,
+  };
 
-    // LRCLIB returned null (404) — try Genius fallback
-    if (geniusToken) {
-      try {
-        const geniusResult = await fetchGenius(
-          geniusToken,
-          geniusUserAgent,
-          track.artistName ?? '',
-          track.title,
-        );
-        if (geniusResult !== null) {
-          await setTrackLyrics(
-            driver,
-            track.releaseDiscogsId,
-            track.position,
-            geniusResult,
-            'genius',
-          );
-          enriched++;
-        } else {
-          // Both sources came up empty — stamp the attempt so we retry at most once per
-          // staleness window, not every run.
-          await markLyricsFetched(driver, track.releaseDiscogsId, track.position);
-          skipped++;
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        const line = `[lyrics] Genius failed for "${track.title}": ${msg}`;
-        // Expected Cloudflare 403 → warn (below the alarm threshold); anything else → error.
-        if (isExpectedGeniusBlock(err)) {
-          log.warn(line);
-        } else {
-          log.error(line);
-        }
-        failed++;
-      }
-    } else {
-      log.debug?.('[lyrics] GENIUS_TOKEN not set — skipping Genius fallback');
-      // No Genius fallback configured and LRCLIB had nothing — stamp the attempt so we
-      // retry at most once per staleness window rather than re-hitting LRCLIB every run.
-      try {
-        await markLyricsFetched(driver, track.releaseDiscogsId, track.position);
-        skipped++;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`[lyrics] Failed to mark "${track.title}" fetched: ${msg}`);
-        failed++;
-      }
-    }
-  }
-
-  onProgress(total, total);
-  const durationMs = Date.now() - startTime;
-  log.info(
-    `[lyrics] Enrichment complete: enriched=${enriched}, skipped=${skipped}, failed=${failed}, duration=${durationMs}ms`,
-  );
-
-  return { enriched, skipped, failed, durationMs };
+  return runEnrichment(driver, stage, { logger: log, onProgress });
 }
