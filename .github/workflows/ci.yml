@@ -5,15 +5,22 @@ name: CI
 #
 # Job dependency graph (arrows = "requires passing first"):
 #
-#   format ──┐
-#   lint ────┼──→ tests-and-coverage (unit + integration, Neo4j, 70% threshold) ──→ docker-build
-#   typecheck ┤
-#             └──→ schema-validation (Neo4j service container)
+#   format, lint, typecheck                                       ┐
+#   tests-and-coverage (unit + integration, Neo4j, 70% threshold) │  all start at
+#   schema-validation (Neo4j service container)                   │  t=0, in
+#   audit, secrets-scan, codeql, actionlint                       ┘  parallel
 #
-#   audit, secrets-scan, codeql — independent, always run in parallel
+#   lint, typecheck ──→ docker-build   (the ONLY gate: the multi-stage build
+#                                       compiles TS so it waits on typecheck —
+#                                       but NOT on the ~90s test job, so it runs
+#                                       alongside it instead of behind it)
 #
-# For agents: if format/lint/typecheck fail, all test jobs are skipped (fast-fail).
-# Fix static checks first, then re-push to re-trigger the full suite.
+# Everything fans out at t=0 to minimise wall-clock; the test job (~85s) and
+# CodeQL (~80s) are the floor. There is deliberately NO static fast-fail gate on
+# the test/schema jobs — on a green PR (the case you wait on) it only added ~22s
+# of latency. The trade: Neo4j/Docker runner minutes are spent even when
+# lint/typecheck fails. For agents: a red lint/type check no longer skips the
+# test jobs, so you may see several reds at once — fix the static checks first.
 #
 # Why unit + integration tests are combined in one job:
 #   The 70% coverage threshold applies to the full test suite. Unit tests alone only
