@@ -76,6 +76,11 @@ interface ProbeResult extends Candidate {
   lyricsLength?: number;
   invalidReason?: InvalidReason;
   head?: string; // redacted ~60-char head, only for invalid-lyrics triage
+  // For invalid-lyrics: would the body validate if the "N ContributorsTitle Lyrics"
+  // header the extractor leaves on the front were stripped? Distinguishes
+  // real-lyrics-but-mangled (the extractor bug's hidden upside) from genuine junk.
+  recoverable?: boolean;
+  strippedHead?: string; // redacted ~90-char head of the header-stripped body
   geniusUrl?: string;
   geniusArtist?: string;
   error?: string;
@@ -172,6 +177,20 @@ function invalidReasonFor(text: string): InvalidReason {
   return 'trailing-lyrics-title';
 }
 
+// Strip the "<n> Contributor(s)[Translations…]<Title> Lyrics" header that the
+// extractor currently leaves on the front of the body — the reason every
+// contributor-header invalid-lyrics result is rejected. What remains is the body
+// the validator would see if the sibling extractor bug were fixed.
+//
+// NB: no word boundary after "Lyrics" — the body frequently runs straight into it
+// ("…Right On Time LyricsWell, well…"), so /\bLyrics\b/ would fail to match and
+// leave the header on, under-counting recoverable lyrics. Non-greedy .*? stops at
+// the first "Lyrics", which is always the header's (the body comes after it).
+function stripGeniusHeader(text: string): string {
+  const m = text.match(/^\s*\d+\s+Contributors?.*?Lyrics/is);
+  return (m ? text.slice(m[0].length) : text).trim();
+}
+
 // Mirrors production fetchGenius's decision flow (search -> song-type gate ->
 // artist fuzzy-match -> page scrape -> extract -> validate), but against Genius's
 // unauthenticated public search. Returns the production-equivalent outcome and the
@@ -182,7 +201,14 @@ async function probeGenius(
 ): Promise<
   Pick<
     ProbeResult,
-    'outcome' | 'lyricsLength' | 'invalidReason' | 'head' | 'geniusUrl' | 'geniusArtist'
+    | 'outcome'
+    | 'lyricsLength'
+    | 'invalidReason'
+    | 'head'
+    | 'recoverable'
+    | 'strippedHead'
+    | 'geniusUrl'
+    | 'geniusArtist'
   >
 > {
   const searchUrl = new URL('https://genius.com/api/search/song');
@@ -235,12 +261,16 @@ async function probeGenius(
   if (!lyrics) return { outcome: 'no-lyrics-container', geniusUrl };
 
   if (!isValidGeniusLyrics(lyrics)) {
+    const stripped = stripGeniusHeader(lyrics);
+    const recoverable = isValidGeniusLyrics(stripped) && stripped.length >= 40;
     return {
       outcome: 'invalid-lyrics',
       geniusUrl,
       lyricsLength: lyrics.length,
       invalidReason: invalidReasonFor(lyrics),
       head: lyrics.slice(0, 60).replace(/\s+/g, ' ').trim(),
+      recoverable,
+      strippedHead: stripped.slice(0, 90).replace(/\s+/g, ' ').trim(),
     };
   }
 
@@ -343,11 +373,17 @@ function report(results: ProbeResult[]): void {
     console.log(`${o.padEnd(22)} | ${String(n).padStart(5)} | ${pct.padStart(9)}%`);
   }
 
-  console.log('\n----- headline -----');
-  console.log(`GENIUS-WIN / total            = ${win} / ${total}`);
-  console.log(`GENIUS-WIN / LRCLIB-missing   = ${win} / ${lrclibStillMissing}`);
-
   const invalids = results.filter((r) => r.outcome === 'invalid-lyrics');
+  const recoverable = invalids.filter((r) => r.recoverable).length;
+
+  console.log('\n----- headline -----');
+  console.log(`GENIUS-WIN / total                       = ${win} / ${total}`);
+  console.log(`GENIUS-WIN / LRCLIB-missing              = ${win} / ${lrclibStillMissing}`);
+  console.log(
+    `true ceiling if extractor bug fixed too  = ${win + recoverable} / ${total}  ` +
+      `(GENIUS-WIN ${win} + recoverable invalid-lyrics ${recoverable})`,
+  );
+
   if (invalids.length) {
     const byReason = new Map<InvalidReason, number>();
     for (const r of invalids) {
@@ -355,9 +391,19 @@ function report(results: ProbeResult[]): void {
     }
     console.log('\n----- invalid-lyrics breakdown (rejection reason) -----');
     for (const [reason, n] of byReason) console.log(`  ${reason.padEnd(24)} ${n}`);
-    console.log('  (heads below are for real-vs-junk triage; not committed)');
-    for (const r of invalids.slice(0, 40)) {
-      console.log(`  [${r.invalidReason}] ${r.artist ?? '?'} — ${r.title} :: "${r.head ?? ''}"`);
+    console.log(
+      `  recoverable (real lyrics, only the header is in the way): ${recoverable} / ${invalids.length}`,
+    );
+    console.log(
+      `  not recoverable (instrumental / description / wrong-song): ${invalids.length - recoverable}`,
+    );
+    console.log('\n  not-recoverable heads (header-stripped; manual junk check):');
+    for (const r of invalids.filter((x) => !x.recoverable)) {
+      console.log(`    ${r.artist ?? '?'} — ${r.title} :: "${r.strippedHead ?? ''}"`);
+    }
+    console.log('\n  recoverable heads (header-stripped; sample):');
+    for (const r of invalids.filter((x) => x.recoverable).slice(0, 20)) {
+      console.log(`    ${r.artist ?? '?'} — ${r.title} :: "${r.strippedHead ?? ''}"`);
     }
   }
 
