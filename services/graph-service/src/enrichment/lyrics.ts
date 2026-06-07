@@ -60,6 +60,32 @@ const DEFAULT_GENIUS_USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 /**
+ * A non-OK HTTP response from Genius, carrying the status code as a typed property so
+ * callers can distinguish an expected Cloudflare bot-block (403) from a genuinely
+ * unexpected failure (5xx, …) without parsing the message string. The message text
+ * mirrors the prior plain-Error format so existing log lines are unchanged.
+ */
+class GeniusHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly phase: 'search' | 'page',
+  ) {
+    super(`Genius ${phase} returned ${status}`);
+    this.name = 'GeniusHttpError';
+  }
+}
+
+/**
+ * Genius's Cloudflare edge returns 403 to the prod EC2 datacenter IP for every request
+ * (#240) — an expected, environmental dead-end, not a code fault. Treating it as expected
+ * keeps it at `warn`, below the level-50 threshold that feeds the prod error alarm (#243).
+ * Every other failure (5xx, parse crash, network error) stays unexpected → `error`.
+ */
+function isExpectedGeniusBlock(err: unknown): boolean {
+  return err instanceof GeniusHttpError && err.status === 403;
+}
+
+/**
  * Fetch lyrics from Genius: search API to find the song page, then scrape HTML.
  * Returns lyrics text or null if not found/valid. Throws on network/API errors.
  * `userAgent` is sent on both requests to clear Genius's Cloudflare bot check (#195).
@@ -82,7 +108,7 @@ async function fetchGenius(
     },
   });
 
-  if (!searchResponse.ok) throw new Error(`Genius search returned ${searchResponse.status}`);
+  if (!searchResponse.ok) throw new GeniusHttpError(searchResponse.status, 'search');
 
   const searchData = (await searchResponse.json()) as GeniusSearchResponse;
   const firstHit = searchData.response.hits[0];
@@ -105,7 +131,7 @@ async function fetchGenius(
       'Accept-Language': 'en-US,en;q=0.9',
     },
   });
-  if (!pageResponse.ok) throw new Error(`Genius page returned ${pageResponse.status}`);
+  if (!pageResponse.ok) throw new GeniusHttpError(pageResponse.status, 'page');
 
   const html = await pageResponse.text();
   const lyrics = extractLyricsFromHtml(html);
@@ -208,7 +234,13 @@ export async function enrichLyrics(
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        log.error(`[lyrics] Genius failed for "${track.title}": ${msg}`);
+        const line = `[lyrics] Genius failed for "${track.title}": ${msg}`;
+        // Expected Cloudflare 403 → warn (below the alarm threshold); anything else → error.
+        if (isExpectedGeniusBlock(err)) {
+          log.warn(line);
+        } else {
+          log.error(line);
+        }
         failed++;
       }
     } else {

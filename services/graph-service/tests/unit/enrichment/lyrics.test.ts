@@ -44,6 +44,10 @@ function makeHtmlResponse(html: string): Response {
   } as unknown as Response;
 }
 
+function makeMockLogger() {
+  return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+}
+
 const sampleTrack = {
   title: 'Song Title',
   position: 'A1',
@@ -292,6 +296,61 @@ describe('enrichLyrics', () => {
     expect(mockSetTrackLyrics).not.toHaveBeenCalled();
     // Genius threw — transient error path must not stamp; the track retries next run.
     expect(mockMarkLyricsFetched).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Genius page 403 — expected Cloudflare bot-block logs at warn, not error (#243)
+  // -------------------------------------------------------------------------
+  it('logs an expected Genius page 403 at warn, not error', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+    const logger = makeMockLogger();
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
+      .mockResolvedValueOnce(makeOkResponse({}, 403)); // Genius page bot-block
+
+    const summary = await enrichLyrics(fakeDriver, logger);
+
+    expect(summary.failed).toBe(1);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Genius page returned 403'));
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Genius search 403 — same bot-block path, warn not error (#243)
+  // -------------------------------------------------------------------------
+  it('logs an expected Genius search 403 at warn, not error', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+    const logger = makeMockLogger();
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse({}, 403)); // Genius search bot-block
+
+    const summary = await enrichLyrics(fakeDriver, logger);
+
+    expect(summary.failed).toBe(1);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Genius search returned 403'));
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Genius 5xx — genuinely unexpected failure still surfaces at error (#243)
+  // -------------------------------------------------------------------------
+  it('logs an unexpected Genius 5xx at error', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+    const logger = makeMockLogger();
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
+      .mockResolvedValueOnce(makeOkResponse({}, 500)); // Genius page server error
+
+    const summary = await enrichLyrics(fakeDriver, logger);
+
+    expect(summary.failed).toBe(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Genius page returned 500'));
   });
 
   // -------------------------------------------------------------------------
