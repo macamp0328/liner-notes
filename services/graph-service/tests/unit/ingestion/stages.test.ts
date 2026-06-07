@@ -7,7 +7,6 @@ import { enrichLyrics } from '../../../src/enrichment/lyrics.js';
 import { enrichMasterData } from '../../../src/enrichment/master-data.js';
 import { enrichArtistGenres } from '../../../src/enrichment/artist-genres.js';
 import { enrichArtistProfiles } from '../../../src/enrichment/artist-profiles.js';
-import { enrichTrackVersions } from '../../../src/enrichment/track-versions.js';
 import { enrichMbReleaseEvents } from '../../../src/enrichment/mb-release-events.js';
 import { enrichTrackMusicBrainz } from '../../../src/enrichment/track-musicbrainz.js';
 import { enrichTrackAcousticBrainz } from '../../../src/enrichment/track-acousticbrainz.js';
@@ -19,7 +18,6 @@ vi.mock('../../../src/enrichment/lyrics.js', () => ({ enrichLyrics: vi.fn() }));
 vi.mock('../../../src/enrichment/master-data.js', () => ({ enrichMasterData: vi.fn() }));
 vi.mock('../../../src/enrichment/artist-genres.js', () => ({ enrichArtistGenres: vi.fn() }));
 vi.mock('../../../src/enrichment/artist-profiles.js', () => ({ enrichArtistProfiles: vi.fn() }));
-vi.mock('../../../src/enrichment/track-versions.js', () => ({ enrichTrackVersions: vi.fn() }));
 vi.mock('../../../src/enrichment/mb-release-events.js', () => ({ enrichMbReleaseEvents: vi.fn() }));
 vi.mock('../../../src/enrichment/track-musicbrainz.js', () => ({
   enrichTrackMusicBrainz: vi.fn(),
@@ -72,7 +70,6 @@ beforeEach(() => {
     enrichMasterData,
     enrichArtistGenres,
     enrichArtistProfiles,
-    enrichTrackVersions,
     enrichMbReleaseEvents,
     enrichTrackMusicBrainz,
     enrichTrackAcousticBrainz,
@@ -104,7 +101,6 @@ describe('RELOAD_STAGES order', () => {
       'master-data',
       'artist-profiles',
       'artist-genres',
-      'track-versions',
       'track-musicbrainz',
       'mb-release-events',
       'lyrics',
@@ -167,12 +163,7 @@ describe('RELOAD_STAGES resource lanes', () => {
   });
 
   it('serialises the batched Track writers via the track lane, exempting per-node lyrics', () => {
-    for (const name of [
-      'track-versions',
-      'track-musicbrainz',
-      'track-acousticbrainz',
-      'track-deezer',
-    ] as const) {
+    for (const name of ['track-musicbrainz', 'track-acousticbrainz', 'track-deezer'] as const) {
       expect(stage(name).resources).toContain('track');
     }
     // lyrics writes one Track per transaction → deadlock-immune → intentionally untagged.
@@ -226,13 +217,6 @@ describe('stage run() delegates to the right enrich function', () => {
     const onProgress = vi.fn();
     await stage('artist-profiles').run(ctx, onProgress);
     expect(enrichArtistProfiles).toHaveBeenCalledWith(ctx.discogs, ctx.driver, ctx.log, onProgress);
-  });
-
-  it('track-versions → enrichTrackVersions(driver, log, onProgress)', async () => {
-    const ctx = makeCtx();
-    const onProgress = vi.fn();
-    await stage('track-versions').run(ctx, onProgress);
-    expect(enrichTrackVersions).toHaveBeenCalledWith(ctx.driver, ctx.log, onProgress);
   });
 
   it('mb-release-events → enrichMbReleaseEvents(musicbrainz, ..., onProgress)', async () => {

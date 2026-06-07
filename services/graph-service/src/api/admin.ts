@@ -34,8 +34,6 @@ import { resetTrackDeezerEnrichment } from '../db/track-deezer-repository.js';
 import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
 import { resetArtistProfilesEnrichment } from '../db/artist-profiles-repository.js';
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
-import { enrichTrackVersions } from '../enrichment/track-versions.js';
-import { resetTrackVersions } from '../db/track-versions-repository.js';
 import { runReload } from '../ingestion/orchestrator.js';
 import { RELOAD_STAGES } from '../ingestion/stages.js';
 import {
@@ -296,7 +294,6 @@ const trackAcousticBrainzState = makePipelineState<TrackAcousticBrainzSummary>()
 const trackDeezerState = makePipelineState<TrackDeezerSummary>();
 const artistProfilesState = makePipelineState<EnrichSummary>();
 const artistGenresState = makePipelineState<ArtistGenresSummary>();
-const trackVersionsState = makePipelineState<EnrichSummary>();
 
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
@@ -317,8 +314,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           '2. Lyrics enrichment (LRCLIB primary, Genius fallback)\n' +
           '3. Master data enrichment (originalYear + global pressing countries/formats via Discogs master API)\n' +
           '4. Artist genres/styles aggregation (rolled up from releases)\n' +
-          '5. Track version deduplication (IS_VERSION_OF relationships)\n' +
-          '6. Artist profiles enrichment (realName + profile from Discogs artist API)\n\n' +
+          '5. Artist profiles enrichment (realName + profile from Discogs artist API)\n\n' +
           '**Not included — must be triggered separately:**\n' +
           '- `POST /api/v1/admin/nationality/enrich` — nationality data from MusicBrainz + Wikidata\n' +
           '- `POST /api/v1/admin/mb-release-events/enrich` — ISO-coded country + date release events from MusicBrainz\n' +
@@ -1635,127 +1631,6 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     },
   );
 
-  fastify.post<{
-    Reply:
-      | { data: { enriched: number; skipped: number; failed: number; durationMs: number } }
-      | { error: { code: string; message: string } };
-  }>(
-    '/track-versions/enrich',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Create IS_VERSION_OF relationships between Track variants',
-        description:
-          'Links Track variants that share a normalized title across releases by the same artist ' +
-          'into IS_VERSION_OF relationships pointing at the earliest pressing. Pure graph ' +
-          'computation — no external API. Blocks until complete.\n\n' +
-          '**This step also runs automatically as part of `POST /api/v1/admin/ingest`.** ' +
-          'Use this endpoint to recompute in isolation after a re-ingest. Relationships are ' +
-          're-MERGEd, so re-running is safe and never creates duplicate edges; run ' +
-          '`POST /api/v1/admin/track-versions/reset` first for a clean recompute.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: {
-                type: 'object',
-                required: ['enriched', 'skipped', 'failed', 'durationMs'],
-                properties: {
-                  enriched: { type: 'integer' },
-                  skipped: { type: 'integer' },
-                  failed: { type: 'integer' },
-                  durationMs: { type: 'integer' },
-                },
-              },
-            },
-          },
-          401: errorShape,
-          409: errorShape,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (request, reply) => {
-      if (trackVersionsState.running) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message: 'Track versions enrichment already in progress',
-          },
-        });
-      }
-      trackVersionsState.running = true;
-      trackVersionsState.startedAt = new Date().toISOString();
-      trackVersionsState.completedAt = null;
-      trackVersionsState.durationMs = null;
-      trackVersionsState.lastResult = null;
-      try {
-        const summary = await enrichTrackVersions(getDriver(), request.log);
-        trackVersionsState.lastResult = summary;
-        trackVersionsState.completedAt = new Date().toISOString();
-        trackVersionsState.durationMs = summary.durationMs;
-        return reply.send({ data: summary });
-      } finally {
-        trackVersionsState.running = false;
-      }
-    },
-  );
-
-  fastify.post<{
-    Reply: { data: { reset: number } } | { error: { code: string; message: string } };
-  }>(
-    '/track-versions/reset',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Delete all IS_VERSION_OF relationships for a clean recompute',
-        description:
-          'Deletes every `IS_VERSION_OF` relationship in the graph, causing the next ' +
-          '`POST /api/v1/admin/track-versions/enrich` call to rebuild the version graph from ' +
-          'scratch. The relationships are purely derived, so this is non-destructive to source ' +
-          'data.\n\n' +
-          'This endpoint is blocked while enrichment is running.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: {
-                type: 'object',
-                required: ['reset'],
-                properties: { reset: { type: 'integer' } },
-              },
-            },
-          },
-          401: errorShape,
-          409: errorShape,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => {
-      if (trackVersionsState.running) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message:
-              'Track versions enrichment is currently running — wait for it to finish before resetting',
-          },
-        });
-      }
-      trackVersionsState.running = true;
-      try {
-        const reset = await resetTrackVersions(getDriver());
-        return reply.send({ data: { reset } });
-      } finally {
-        trackVersionsState.running = false;
-      }
-    },
-  );
-
   // ── Status endpoints ───────────────────────────────────────────────────────
 
   const enrichStatusSchema = (summary: Record<string, unknown>): Record<string, unknown> => ({
@@ -1971,20 +1846,6 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     async (_request, reply) => reply.send({ data: structuredClone(artistGenresState) }),
   );
 
-  fastify.get(
-    '/track-versions/status',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Status of the most recent track versions enrichment run',
-        security: [{ bearerAuth: [] }],
-        response: { 200: enrichStatusSchema(standardSummarySchema), 401: errorShape },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => reply.send({ data: structuredClone(trackVersionsState) }),
-  );
-
   fastify.post<{
     Reply:
       | { data: { jobId: string; message: string } }
@@ -2125,5 +1986,4 @@ export function resetAllPipelineStates(): void {
   Object.assign(trackDeezerState, makePipelineState<TrackDeezerSummary>());
   Object.assign(artistProfilesState, makePipelineState<EnrichSummary>());
   Object.assign(artistGenresState, makePipelineState<ArtistGenresSummary>());
-  Object.assign(trackVersionsState, makePipelineState<EnrichSummary>());
 }

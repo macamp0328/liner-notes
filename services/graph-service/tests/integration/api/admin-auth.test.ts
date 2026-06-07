@@ -49,9 +49,6 @@ const ADMIN_ROUTES: { method: 'GET' | 'POST'; url: string }[] = [
   { method: 'GET', url: '/api/v1/admin/artist-profiles/status' },
   { method: 'POST', url: '/api/v1/admin/artist-genres/enrich' },
   { method: 'GET', url: '/api/v1/admin/artist-genres/status' },
-  { method: 'POST', url: '/api/v1/admin/track-versions/enrich' },
-  { method: 'POST', url: '/api/v1/admin/track-versions/reset' },
-  { method: 'GET', url: '/api/v1/admin/track-versions/status' },
   { method: 'POST', url: '/api/v1/admin/reload' },
   { method: 'GET', url: '/api/v1/admin/reload/status' },
 ];

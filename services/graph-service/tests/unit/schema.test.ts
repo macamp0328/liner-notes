@@ -24,9 +24,9 @@ describe('applySchema', () => {
     } as unknown as Driver;
   });
 
-  it('opens and closes a fresh session for each of the 42 statements', async () => {
+  it('opens and closes a fresh session for each of the 44 statements', async () => {
     await applySchema(driver);
-    expect(sessions).toHaveLength(42);
+    expect(sessions).toHaveLength(44);
     for (const s of sessions) {
       expect(s.run).toHaveBeenCalledTimes(1);
       expect(s.close).toHaveBeenCalledTimes(1);
@@ -131,6 +131,19 @@ describe('applySchema', () => {
         (s) =>
           s.includes('REMOVE t.musicBrainzFetched, t.acousticBrainzFetched, t.deezerFetched') &&
           !s.includes('FetchedAt'),
+      ),
+    ).toBe(true);
+  });
+
+  it('cleans up the dropped track-versions stage: index, relationships, property (issue #196)', async () => {
+    await applySchema(driver);
+    const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
+    expect(stmts.some((s) => s.includes('DROP INDEX track_normalized_title IF EXISTS'))).toBe(true);
+    expect(stmts.some((s) => s.includes('MATCH ()-[r:IS_VERSION_OF]->() DELETE r'))).toBe(true);
+    expect(
+      stmts.some(
+        (s) =>
+          s.includes('REMOVE t.normalizedTitle') && s.includes('t.normalizedTitle IS NOT NULL'),
       ),
     ).toBe(true);
   });

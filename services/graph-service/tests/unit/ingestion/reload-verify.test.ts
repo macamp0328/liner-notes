@@ -31,7 +31,6 @@ const ALL_STAGES: ReloadStageName[] = [
   'master-data',
   'artist-genres',
   'artist-profiles',
-  'track-versions',
   'mb-release-events',
   'track-musicbrainz',
   'track-acousticbrainz',
@@ -60,7 +59,6 @@ function makeStats(
     tracksWithTempo: cov(30, 60),
     tracksWithDeezerBpm: cov(20, 45),
     tracksWithDeezerGain: cov(20, 45),
-    tracksWithVersions: cov(50, 100),
     mastersWithReleaseEvents: cov(40, 50),
   };
   return {

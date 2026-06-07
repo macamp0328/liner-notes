@@ -53,7 +53,6 @@ const STATS = {
     tracksWithTempo: { covered: 35, applicable: 70, pct: 50 },
     tracksWithDeezerBpm: { covered: 30, applicable: 60, pct: 50 },
     tracksWithDeezerGain: { covered: 24, applicable: 60, pct: 40 },
-    tracksWithVersions: { covered: 12, applicable: 100, pct: 12 },
     mastersWithReleaseEvents: { covered: 5, applicable: 7, pct: 71.4 },
   },
 };

@@ -9,7 +9,6 @@ const mockMergeReleaseGraph = vi.hoisted(() => vi.fn());
 const mockEnrichLyrics = vi.hoisted(() => vi.fn());
 const mockEnrichMasterData = vi.hoisted(() => vi.fn());
 const mockEnrichArtistGenres = vi.hoisted(() => vi.fn());
-const mockEnrichTrackVersions = vi.hoisted(() => vi.fn());
 const mockEnrichArtistProfiles = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/db/ingestion-repository.js', () => ({
@@ -21,9 +20,6 @@ vi.mock('../../../src/enrichment/master-data.js', () => ({
 }));
 vi.mock('../../../src/enrichment/artist-genres.js', () => ({
   enrichArtistGenres: mockEnrichArtistGenres,
-}));
-vi.mock('../../../src/enrichment/track-versions.js', () => ({
-  enrichTrackVersions: mockEnrichTrackVersions,
 }));
 vi.mock('../../../src/enrichment/artist-profiles.js', () => ({
   enrichArtistProfiles: mockEnrichArtistProfiles,
@@ -42,7 +38,6 @@ const log = { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
 const LYRICS_OK = { enriched: 5, skipped: 1, failed: 0, durationMs: 10 };
 const MASTER_OK = { enriched: 3, skipped: 0, failed: 0, durationMs: 10 };
 const GENRES_OK = { genresEnriched: 2, stylesEnriched: 3, skipped: 0, failed: 0, durationMs: 5 };
-const VERSIONS_OK = { enriched: 1, skipped: 0, failed: 0, durationMs: 5 };
 const PROFILES_OK = { enriched: 4, skipped: 0, failed: 0, durationMs: 5 };
 
 function makeClient(overrides: Partial<Record<keyof DiscogsClient, unknown>> = {}): DiscogsClient {
@@ -62,7 +57,6 @@ describe('runIngestion', () => {
     mockEnrichLyrics.mockResolvedValue(LYRICS_OK);
     mockEnrichMasterData.mockResolvedValue(MASTER_OK);
     mockEnrichArtistGenres.mockResolvedValue(GENRES_OK);
-    mockEnrichTrackVersions.mockResolvedValue(VERSIONS_OK);
     mockEnrichArtistProfiles.mockResolvedValue(PROFILES_OK);
   });
 
@@ -74,7 +68,6 @@ describe('runIngestion', () => {
     expect(mockEnrichLyrics).toHaveBeenCalledOnce();
     expect(mockEnrichMasterData).toHaveBeenCalledOnce();
     expect(mockEnrichArtistGenres).toHaveBeenCalledOnce();
-    expect(mockEnrichTrackVersions).toHaveBeenCalledOnce();
     expect(mockEnrichArtistProfiles).toHaveBeenCalledOnce();
 
     expect(summary.lyricsEnrichment).toEqual(LYRICS_OK);
@@ -84,7 +77,7 @@ describe('runIngestion', () => {
   });
 
   it('isolates a thrown stage: later stages still run and the run resolves (#151)', async () => {
-    // master-data (stage 4) throws — previously this aborted genres, versions,
+    // master-data (stage 4) throws — previously this aborted genres
     // and profiles for the whole run, leaving them permanently null.
     mockEnrichMasterData.mockRejectedValue(new Error('Aura write timeout'));
     const client = makeClient();
@@ -93,7 +86,6 @@ describe('runIngestion', () => {
 
     // The stages after the throw still ran.
     expect(mockEnrichArtistGenres).toHaveBeenCalledOnce();
-    expect(mockEnrichTrackVersions).toHaveBeenCalledOnce();
     expect(mockEnrichArtistProfiles).toHaveBeenCalledOnce();
 
     // The failed stage reports its fallback (zeroed) summary...

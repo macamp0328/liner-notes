@@ -51,7 +51,6 @@ const completeSummary: IngestionSummary = {
     failed: 0,
     durationMs: 0,
   },
-  trackVersionsEnrichment: { enriched: 0, skipped: 0, failed: 0, durationMs: 0 },
   artistProfilesEnrichment: { enriched: 0, skipped: 0, failed: 0, durationMs: 0 },
 };
 

@@ -97,7 +97,6 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
                       'tracksWithTempo',
                       'tracksWithDeezerBpm',
                       'tracksWithDeezerGain',
-                      'tracksWithVersions',
                       'mastersWithReleaseEvents',
                     ],
                     properties: {
@@ -115,7 +114,6 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
                       tracksWithTempo: coverageSchema,
                       tracksWithDeezerBpm: coverageSchema,
                       tracksWithDeezerGain: coverageSchema,
-                      tracksWithVersions: coverageSchema,
                       mastersWithReleaseEvents: coverageSchema,
                     },
                   },
