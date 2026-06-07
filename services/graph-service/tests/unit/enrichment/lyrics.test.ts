@@ -760,4 +760,25 @@ describe('enrichLyrics', () => {
     // Both tracks attempted a write — the first throw did not abort the loop
     expect(mockSetTrackLyrics).toHaveBeenCalledTimes(2);
   });
+
+  // -------------------------------------------------------------------------
+  // Double-count guard (#222) — an LRCLIB throw short-circuits the Genius fallback,
+  // so one track can only ever increment `failed` once (the bug was two separate
+  // try/catch sites each doing failed++).
+  // -------------------------------------------------------------------------
+  it('counts failed exactly once and never reaches Genius when LRCLIB throws', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+    fetchSpy.mockRejectedValueOnce(new Error('LRCLIB down')); // LRCLIB throws
+
+    const summary = await enrichLyrics(fakeDriver);
+
+    expect(summary.failed).toBe(1);
+    expect(summary.enriched).toBe(0);
+    expect(summary.skipped).toBe(0);
+    // Genius is never attempted — only the single LRCLIB fetch happened.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    // Transient failure must not stamp — the track retries next run.
+    expect(mockMarkLyricsFetched).not.toHaveBeenCalled();
+  });
 });
