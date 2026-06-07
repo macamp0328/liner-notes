@@ -10,36 +10,11 @@ import {
   type ArtistFull,
   type LabelFull,
 } from '../db/repositories/collection-repository.js';
+import { errorResponseRef, paginationRef } from './schemas.js';
 
 // ---------------------------------------------------------------------------
 // Shared schema fragments
 // ---------------------------------------------------------------------------
-
-const errorSchema = {
-  type: 'object',
-  required: ['error'],
-  properties: {
-    error: {
-      type: 'object',
-      required: ['code', 'message'],
-      properties: {
-        code: { type: 'string' },
-        message: { type: 'string' },
-      },
-    },
-  },
-} as const;
-
-const paginationSchema = {
-  type: 'object',
-  required: ['page', 'limit', 'total', 'totalPages'],
-  properties: {
-    page: { type: 'integer', minimum: 1 },
-    limit: { type: 'integer', minimum: 1, maximum: 100 },
-    total: { type: 'integer', minimum: 0 },
-    totalPages: { type: 'integer', minimum: 0 },
-  },
-} as const;
 
 const releaseListItemSchema = {
   type: 'object',
@@ -294,7 +269,7 @@ export async function collectionRoutes(fastify: FastifyInstance): Promise<void> 
             required: ['data', 'pagination'],
             properties: {
               data: { type: 'array', items: releaseListItemSchema },
-              pagination: paginationSchema,
+              pagination: paginationRef,
             },
           },
         },
@@ -330,7 +305,7 @@ export async function collectionRoutes(fastify: FastifyInstance): Promise<void> 
             required: ['data'],
             properties: { data: releaseFullSchema },
           },
-          404: errorSchema,
+          404: errorResponseRef,
         },
       },
     },
@@ -363,7 +338,7 @@ export async function collectionRoutes(fastify: FastifyInstance): Promise<void> 
             required: ['data'],
             properties: { data: artistFullSchema },
           },
-          404: errorSchema,
+          404: errorResponseRef,
         },
       },
     },
@@ -396,7 +371,7 @@ export async function collectionRoutes(fastify: FastifyInstance): Promise<void> 
             required: ['data'],
             properties: { data: labelFullSchema },
           },
-          404: errorSchema,
+          404: errorResponseRef,
         },
       },
     },
