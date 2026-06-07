@@ -107,8 +107,8 @@ vi.mock('../../../src/ingestion/job-state.js', () => ({
 // ── helpers ───────────────────────────────────────────────────────────────
 const VALID_TOKEN = 'test-admin-token';
 
-// A fully-populated nationality summary including the #194 instrumentation fields. Used to
-// guard against the Fastify response schema silently stripping the per-source / VIAF counts.
+// A fully-populated nationality summary including the per-source counts. Used to guard
+// against the Fastify response schema silently stripping the per-source fields.
 const nationalitySummary = {
   enriched: 7,
   skipped: 2,
@@ -116,14 +116,6 @@ const nationalitySummary = {
   durationMs: 1234,
   resolvedByMusicbrainz: 4,
   resolvedByWikidata: 2,
-  resolvedByViaf: 1,
-  viafCalls: 9,
-  viafOk: 3,
-  viafBotBlocked: 5,
-  viafHtml: 1,
-  viafHttpError: 0,
-  viafRateLimited: 0,
-  viafNetworkError: 0,
 };
 
 const completeSummary: IngestionSummary = {
@@ -521,7 +513,7 @@ describe('Admin API', () => {
 
   // ── POST /nationality/enrich ──────────────────────────────────────────────
   describe('POST /api/v1/admin/nationality/enrich', () => {
-    it('returns the full instrumented summary without stripping per-source / VIAF fields', async () => {
+    it('returns the full instrumented summary without stripping per-source fields', async () => {
       process.env['MUSICBRAINZ_USER_AGENT'] = 'liner-notes/test (test@example.com)';
       const response = await app.inject({
         method: 'POST',
@@ -531,7 +523,7 @@ describe('Admin API', () => {
 
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.payload) as { data: Record<string, number> };
-      // toEqual (not toMatchObject): the response schema must expose every #194 field, and
+      // toEqual (not toMatchObject): the response schema must expose every per-source field, and
       // Fastify strips any property not declared in the schema — so a missing field here means
       // the schema regressed.
       expect(body.data).toEqual(nationalitySummary);

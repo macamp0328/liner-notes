@@ -308,7 +308,6 @@ describe('buildReloadContext', () => {
     expect(ctx).toHaveProperty('acousticbrainz');
     expect(ctx).toHaveProperty('deezer');
     expect(ctx).toHaveProperty('wikidata');
-    expect(ctx).toHaveProperty('viaf');
   });
 });
 

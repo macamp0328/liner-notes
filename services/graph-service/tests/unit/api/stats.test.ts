@@ -22,8 +22,7 @@ const sourcedNat = {
   sources: {
     musicbrainz: { covered: 7, applicable: 16, pct: 43.8 },
     wikidata: { covered: 4, applicable: 16, pct: 25 },
-    viaf: { covered: 1, applicable: 16, pct: 6.3 },
-    untagged: { covered: 0, applicable: 16, pct: 0 },
+    untagged: { covered: 1, applicable: 16, pct: 6.3 },
   },
 };
 

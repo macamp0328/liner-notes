@@ -7,11 +7,11 @@ type Neo4jInt = { toNumber(): number };
 /**
  * Which upstream source resolved an ORIGIN_COUNTRY relationship. Stored as a
  * `source` property on the relationship so /api/v1/stats can split nationality
- * coverage per source and a dead source (e.g. VIAF) is visible at a glance.
- * Edges written before this property existed carry no source — surfaced as an
- * `untagged` bucket in the stats split until the next full re-run tags them.
+ * coverage per source. Edges written before this property existed carry no
+ * source — surfaced as an `untagged` bucket in the stats split until the next
+ * full re-run tags them.
  */
-export type NationalitySource = 'musicbrainz' | 'wikidata' | 'viaf';
+export type NationalitySource = 'musicbrainz' | 'wikidata';
 
 export interface UnenrichedArtist {
   discogsId: number;
@@ -85,7 +85,7 @@ export async function getUnenrichedMusiciansForNationality(
 /**
  * Set the ORIGIN_COUNTRY relationship on an Artist node identified by discogsId.
  * When countryCode is non-null, merges a Country node and creates the relationship,
- * tagging it with the `source` that resolved the country (musicbrainz/wikidata/viaf).
+ * tagging it with the `source` that resolved the country (musicbrainz/wikidata).
  * Always stamps nationalityFetchedAt = datetime() regardless of whether a country was
  * found — the timestamp throttles re-attempts of still-uncountried nodes to once per
  * staleness window (issue #89).

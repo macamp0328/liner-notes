@@ -31,7 +31,7 @@ const coverageSchema = {
 
 // A multi-source stage: the parent coverage plus a per-source split. `sources`
 // keys vary by stage (lyrics → lrclib/genius/untagged; nationality →
-// musicbrainz/wikidata/viaf/untagged), so it's an open map of CoverageMetric.
+// musicbrainz/wikidata/untagged), so it's an open map of CoverageMetric.
 const sourcedCoverageSchema = {
   type: 'object',
   required: ['covered', 'applicable', 'pct', 'sources'],

@@ -4,7 +4,6 @@ import type { MusicBrainzClient } from './musicbrainz-client.js';
 import type { AcousticBrainzClient } from './acousticbrainz-client.js';
 import type { DeezerClient } from './deezer-client.js';
 import type { WikidataClient } from './wikidata-client.js';
-import type { VIAFClient } from './viaf-client.js';
 import { ingestReleases } from './ingest.js';
 import { enrichLyrics } from '../enrichment/lyrics.js';
 import { enrichMasterData } from '../enrichment/master-data.js';
@@ -48,7 +47,6 @@ export interface ReloadContext {
   acousticbrainz: AcousticBrainzClient;
   deezer: DeezerClient;
   wikidata: WikidataClient | null;
-  viaf: VIAFClient | null;
 }
 
 /**
@@ -206,7 +204,6 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
           ctx.log,
           ctx.wikidata ?? undefined,
           ctx.discogs ?? undefined,
-          ctx.viaf ?? undefined,
           onProgress,
         )),
       };

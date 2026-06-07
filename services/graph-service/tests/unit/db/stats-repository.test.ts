@@ -6,12 +6,11 @@ import { getStats } from '../../../src/db/stats-repository.js';
 const int = (n: number) => ({ toNumber: () => n, low: n, high: 0 });
 
 /** A nationality-query result row: applicable/covered plus the per-source split. */
-const nat = (applicable: number, covered: number, mb: number, wikidata: number, viaf: number) => ({
+const nat = (applicable: number, covered: number, mb: number, wikidata: number) => ({
   applicable: int(applicable),
   covered: int(covered),
   mb: int(mb),
   wikidata: int(wikidata),
-  viaf: int(viaf),
 });
 
 function makeRecord(fields: Record<string, unknown>): unknown {
@@ -80,10 +79,10 @@ describe('getStats', () => {
         deezerGainCovered: int(24),
       },
       master: { total: int(7), releaseEventsCovered: int(5) },
-      natArtist: nat(16, 12, 7, 4, 1),
-      natMusician: nat(50, 30, 10, 5, 15),
-      natProducer: nat(8, 4, 4, 0, 0),
-      natEngineer: nat(6, 3, 1, 1, 0),
+      natArtist: nat(16, 12, 7, 4),
+      natMusician: nat(50, 30, 10, 5),
+      natProducer: nat(8, 4, 4, 0),
+      natEngineer: nat(6, 3, 1, 1),
     });
 
     const stats = await getStats(driver);
@@ -141,19 +140,18 @@ describe('getStats', () => {
       sources: {
         musicbrainz: { covered: 7, applicable: 16, pct: 43.8 },
         wikidata: { covered: 4, applicable: 16, pct: 25 },
-        viaf: { covered: 1, applicable: 16, pct: 6.3 },
-        untagged: { covered: 0, applicable: 16, pct: 0 },
+        // covered (12) exceeds tagged sources (7+4) → untagged absorbs the remaining 1
+        untagged: { covered: 1, applicable: 16, pct: 6.3 },
       },
     });
-    expect(stats.enrichment.musiciansWithNationality.sources.viaf).toEqual({
+    expect(stats.enrichment.musiciansWithNationality.sources.untagged).toEqual({
       covered: 15,
       applicable: 50,
       pct: 30,
     });
-    // dead source: producers have zero wikidata/viaf coverage → pct 0, obvious at a glance
+    // dead source: producers have zero wikidata coverage → pct 0, obvious at a glance
     expect(stats.enrichment.producersWithNationality.sources.wikidata!.pct).toBe(0);
-    expect(stats.enrichment.producersWithNationality.sources.viaf!.pct).toBe(0);
-    // legacy edges: engineer covered (3) exceeds tagged sources (1+1+0) → untagged 1
+    // legacy edges: engineer covered (3) exceeds tagged sources (1+1) → untagged 1
     expect(stats.enrichment.engineersWithNationality.sources.untagged).toEqual({
       covered: 1,
       applicable: 6,
@@ -198,7 +196,7 @@ describe('getStats', () => {
     expect(stats.enrichment.mastersWithReleaseEvents.pct).toBeNull();
     expect(stats.enrichment.tracksWithDeezerGain).toEqual({ covered: 0, applicable: 0, pct: null });
     // a sourced metric still has every bucket, each with pct null on an empty graph
-    expect(stats.enrichment.artistsWithNationality.sources.viaf!.pct).toBeNull();
+    expect(stats.enrichment.artistsWithNationality.sources.musicbrainz!.pct).toBeNull();
     expect(stats.enrichment.artistsWithNationality.sources.untagged!.pct).toBeNull();
   });
 });

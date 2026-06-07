@@ -76,7 +76,7 @@ export async function seedExploreEnrichment(driver: Driver): Promise<void> {
            co.roleCategory = 'performer', co.creditedAs = null, co.scope = 'track'`,
     );
     // Give those three musicians distinct origin countries. ORIGIN_COUNTRY stores
-    // ISO 3166-1 alpha-2 codes (the VIAF nationality client's output), so use
+    // ISO 3166-1 alpha-2 codes (the nationality enrichment's output), so use
     // codes here. The specific countries are synthetic test values chosen to
     // exercise multi-country ranking — not the musicians' real nationalities.
     await session.run(

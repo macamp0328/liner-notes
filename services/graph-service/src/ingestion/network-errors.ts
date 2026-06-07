@@ -17,7 +17,7 @@ const TRANSIENT_NETWORK_CODES = new Set([
  * null when the error is not retryable.
  *
  * Shared by the HTTP clients (DiscogsClient, MusicBrainzClient, AcousticBrainzClient,
- * DeezerClient, VIAFClient, WikidataClient) so their retry loops agree on what counts as a
+ * DeezerClient, WikidataClient) so their retry loops agree on what counts as a
  * retryable network blip.
  */
 export function transientNetworkCode(err: unknown): string | null {

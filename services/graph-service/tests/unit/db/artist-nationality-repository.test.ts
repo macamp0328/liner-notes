@@ -176,7 +176,7 @@ describe('setMusicianNationality', () => {
       makeMockDriver(session),
       { discogsId: null, name: 'Anon' },
       'FR',
-      'viaf',
+      'wikidata',
     );
 
     expect(runSpy.mock.calls[0]?.[0]).toContain('name: $name');

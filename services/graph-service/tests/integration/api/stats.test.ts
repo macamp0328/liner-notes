@@ -46,7 +46,7 @@ describe('GET /api/v1/stats', () => {
          SET a.genres = ['Jazz'], a.styles = ['Hard Bop']
          MERGE (c:Country {name: 'US'})
          MERGE (a)-[rel:ORIGIN_COUNTRY]->(c)
-         SET rel.source = 'viaf'`,
+         SET rel.source = 'musicbrainz'`,
       );
       await session.run(
         `MATCH (t:Track) WITH t LIMIT 1
@@ -116,9 +116,11 @@ describe('GET /api/v1/stats', () => {
     expect(enrichment.tracksWithLyrics.sources.lrclib!.covered).toBe(1);
     expect(enrichment.tracksWithLyrics.sources.genius!.covered).toBe(0);
 
-    // The one nationality edge is tagged viaf; the split attributes it there.
+    // The one nationality edge is tagged musicbrainz; the split attributes it there.
     expect(enrichment.artistsWithNationality.covered).toBeGreaterThanOrEqual(1);
-    expect(enrichment.artistsWithNationality.sources.viaf!.covered).toBeGreaterThanOrEqual(1);
+    expect(enrichment.artistsWithNationality.sources.musicbrainz!.covered).toBeGreaterThanOrEqual(
+      1,
+    );
   });
 
   it('exposes the endpoint without an admin token', async () => {

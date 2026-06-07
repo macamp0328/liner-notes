@@ -16,10 +16,10 @@ export interface CoverageMetric {
 
 /**
  * Coverage for a stage that draws from more than one source (lyrics: lrclib /
- * genius; nationality: musicbrainz / wikidata / viaf). `sources` splits the
- * covered total per source plus an `untagged` bucket — covered minus the known
- * sources — so the buckets sum to `covered` and any legacy/un-attributed
- * coverage is visible rather than silently dropped.
+ * genius; nationality: musicbrainz / wikidata). `sources` splits the covered
+ * total per source plus an `untagged` bucket — covered minus the known sources —
+ * so the buckets sum to `covered` and any legacy/un-attributed coverage is
+ * visible rather than silently dropped.
  */
 export interface SourcedCoverageMetric extends CoverageMetric {
   sources: Record<string, CoverageMetric>;
@@ -149,8 +149,7 @@ function nationalityQuery(label: string, applicableExpr: string): string {
       count(CASE WHEN app THEN 1 END) AS applicable,
       count(CASE WHEN app AND EXISTS { (p)-[:ORIGIN_COUNTRY]->() } THEN 1 END) AS covered,
       count(CASE WHEN app AND EXISTS { MATCH (p)-[r:ORIGIN_COUNTRY]->() WHERE r.source = 'musicbrainz' } THEN 1 END) AS mb,
-      count(CASE WHEN app AND EXISTS { MATCH (p)-[r:ORIGIN_COUNTRY]->() WHERE r.source = 'wikidata' } THEN 1 END) AS wikidata,
-      count(CASE WHEN app AND EXISTS { MATCH (p)-[r:ORIGIN_COUNTRY]->() WHERE r.source = 'viaf' } THEN 1 END) AS viaf`;
+      count(CASE WHEN app AND EXISTS { MATCH (p)-[r:ORIGIN_COUNTRY]->() WHERE r.source = 'wikidata' } THEN 1 END) AS wikidata`;
 }
 
 const ARTIST_NATIONALITY_QUERY = nationalityQuery(
@@ -213,7 +212,6 @@ export async function getStats(driver: Driver): Promise<StatsData> {
     sourced(n(m, 'covered'), n(m, 'applicable'), {
       musicbrainz: n(m, 'mb'),
       wikidata: n(m, 'wikidata'),
-      viaf: n(m, 'viaf'),
     });
 
   return {
