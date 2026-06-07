@@ -101,8 +101,13 @@ jobs:
         run: pnpm typecheck
 
   # ── Tests ────────────────────────────────────────────────────────────────────
-  # Only run after all three static checks pass (fast-fail prevents wasting Neo4j
-  # container startup time on code that already has lint/type errors).
+  # These run with NO `needs:` — they start at t=0, in parallel with the static
+  # checks, rather than waiting ~22s behind them. The old static gate was a
+  # runner-minute saver (don't spin up Neo4j for code that already has lint/type
+  # errors), but on a green PR — the case you actually sit waiting on — it just
+  # added the full static-check duration to the critical path. We trade those
+  # minutes for wall-clock. CodeQL (~80s) is now the floor; the test job lands
+  # just under it instead of starting only after the gate clears.
 
   tests-and-coverage:
     name: Tests & Coverage
@@ -120,7 +125,6 @@ jobs:
     #
     # Note: the neo4j:5 image is Community edition — only the single default "neo4j" database
     # exists. CREATE DATABASE is not supported. Test isolation is by full graph wipe between files.
-    needs: [format, lint, typecheck]
     runs-on: ubuntu-latest
     services:
       neo4j:
@@ -132,9 +136,10 @@ jobs:
           - 7474:7474
         options: >-
           --health-cmd "wget -q --spider http://localhost:7474 || exit 1"
-          --health-interval 10s
+          --health-interval 3s
           --health-timeout 5s
-          --health-retries 10
+          --health-retries 20
+          --health-start-period 5s
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -161,7 +166,7 @@ jobs:
     # Verifies that all constraints and indexes (src/db/schema.ts) apply idempotently —
     # the script runs schema setup twice and asserts no error on either run.
     # Fix locally: start Neo4j via docker-compose, then pnpm tsx services/graph-service/scripts/validate-schema.ts
-    needs: [format, lint, typecheck]
+    # No `needs:` — runs in parallel from t=0 (same trade as tests-and-coverage above).
     runs-on: ubuntu-latest
     services:
       neo4j:
@@ -173,9 +178,10 @@ jobs:
           - 7474:7474
         options: >-
           --health-cmd "wget -q --spider http://localhost:7474 || exit 1"
-          --health-interval 10s
+          --health-interval 3s
           --health-timeout 5s
-          --health-retries 10
+          --health-retries 20
+          --health-start-period 5s
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -199,8 +205,13 @@ jobs:
     # Builds the multi-stage graph-service image (does NOT push to ECR — that's deploy.yml).
     # Build context is the repo root (Dockerfile copies the workspace lockfile).
     # GitHub Actions cache (type=gha) stores BuildKit layers between runs.
-    # Gated on coverage (not just lint/typecheck) so broken tests never reach a built image.
-    needs: [lint, typecheck, tests-and-coverage]
+    # Gated on lint+typecheck but NOT tests-and-coverage, so it runs alongside the
+    # ~90s test job instead of waiting behind it (~28s shaved off the serial path).
+    # The image is never pushed (push: false) and never reaches ECR from here, so
+    # building it on a red-test PR wastes only a runner — nothing ships. typecheck
+    # stays a gate because the multi-stage build compiles TS: a type error would
+    # fail the build anyway, so there's no point starting it before typecheck.
+    needs: [lint, typecheck]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
