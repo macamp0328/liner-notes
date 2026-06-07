@@ -257,7 +257,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 ### Step 2 — Populate AWS Secrets Manager
 
-Terraform created the secret _container_ but **not** the value. Populate it once. `MUSICBRAINZ_USER_AGENT` is mandatory — without it the MusicBrainz / VIAF / Wikidata enrichment endpoints return 503.
+Terraform created the secret _container_ but **not** the value. Populate it once. `MUSICBRAINZ_USER_AGENT` is mandatory — without it the MusicBrainz / Wikidata enrichment endpoints return 503.
 
 Build the JSON in a shell variable so you can validate it with `jq` before sending — malformed JSON here is by far the most common cause of `ExternalSecret SecretSyncedError` later:
 
@@ -494,7 +494,7 @@ pnpm enrich:bootstrap
 | `track-musicbrainz`    | ~30 min  | One MusicBrainz call per track for ISRC matching.   |
 | `track-acousticbrainz` | ~5 min   | AcousticBrainz; runs in parallel with deezer.       |
 | `track-deezer`         | ~5 min   | Deezer; runs in parallel with acousticbrainz.       |
-| `nationality`          | ~5 min   | VIAF + Wikidata lookups per person.                 |
+| `nationality`          | ~5 min   | MusicBrainz + Wikidata lookups per person.          |
 
 **Total**: ~45 minutes wall-clock for a fresh collection. Keep the terminal open — the HTTP requests block until each stage completes, and `curl -fsS` will exit non-zero if any stage fails so the `&&`-chained sequence stops cleanly.
 
