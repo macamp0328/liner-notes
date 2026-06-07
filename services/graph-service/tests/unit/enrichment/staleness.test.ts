@@ -28,9 +28,9 @@ describe('getStalenessDays', () => {
     expect(getStalenessDays()).toBe(30);
   });
 
-  it('falls back to 30 for zero', () => {
+  it('honors zero (re-attempt every still-missing node, ignore last-attempt time)', () => {
     process.env[ENV_KEY] = '0';
-    expect(getStalenessDays()).toBe(30);
+    expect(getStalenessDays()).toBe(0);
   });
 
   it('falls back to 30 for a negative value', () => {
