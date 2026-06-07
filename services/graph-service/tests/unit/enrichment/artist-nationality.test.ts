@@ -234,7 +234,7 @@ describe('enrichNationality', () => {
   // ---------------------------------------------------------------------------
 
   describe('No-Discogs-ID nodes', () => {
-    it('does not call MB by name when MB name search already found a result for no-ID musician', async () => {
+    it('resolves a no-ID musician via MB name search and tags it musicbrainz', async () => {
       mockGetUnenrichedMusicians.mockResolvedValue([
         { discogsId: null, name: 'No ID Musician Found by MB' },
       ]);
