@@ -272,7 +272,7 @@ No service talks to Neo4j directly except `graph-service`.
 
 ## CI Requirements
 
-**Fast-fail chain:** `format`, `lint`, `typecheck` run first in parallel → `tests-and-coverage` + `schema-validation` → `docker-build`. The following jobs run independently of this chain on every PR: `audit`, `secrets-scan`, `codeql`.
+**Parallel fan-out:** `format`, `lint`, `typecheck`, `tests-and-coverage`, `schema-validation`, `audit`, `secrets-scan`, `codeql`, and `actionlint` all start in parallel at t=0. `docker-build` is the only gated job — it waits on `lint` + `typecheck` (the multi-stage build compiles TS, so a type error would fail it anyway) but **not** on the ~90s test job, so it builds alongside it. There is deliberately no static fast-fail gate on the test/schema jobs: it traded ~1 min of green-path wall-clock for runner minutes that were only saved on red PRs. The critical path is now `max(tests-and-coverage, codeql)` ≈ 85s.
 
 | Check             | Tool                                   | Requirement                            |
 | ----------------- | -------------------------------------- | -------------------------------------- |
