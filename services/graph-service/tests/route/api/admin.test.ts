@@ -86,19 +86,9 @@ vi.mock('../../../src/enrichment/artist-genres.js', () => ({
   enrichArtistGenres: mockEnrichArtistGenres,
 }));
 
-const mockEnrichTrackVersions = vi.hoisted(() => vi.fn());
-vi.mock('../../../src/enrichment/track-versions.js', () => ({
-  enrichTrackVersions: mockEnrichTrackVersions,
-}));
-
 const mockEnrichNationality = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/enrichment/artist-nationality.js', () => ({
   enrichNationality: mockEnrichNationality,
-}));
-
-const mockResetTrackVersions = vi.hoisted(() => vi.fn());
-vi.mock('../../../src/db/track-versions-repository.js', () => ({
-  resetTrackVersions: mockResetTrackVersions,
 }));
 
 // job-state is mocked so integration tests don't share singleton state
@@ -150,7 +140,6 @@ const completeSummary: IngestionSummary = {
     failed: 0,
     durationMs: 200,
   },
-  trackVersionsEnrichment: { enriched: 3, skipped: 1, failed: 0, durationMs: 100 },
   artistProfilesEnrichment: { enriched: 8, skipped: 2, failed: 0, durationMs: 8000 },
 };
 
@@ -232,13 +221,6 @@ describe('Admin API', () => {
       failed: 0,
       durationMs: 300,
     });
-    mockEnrichTrackVersions.mockResolvedValue({
-      enriched: 6,
-      skipped: 2,
-      failed: 0,
-      durationMs: 150,
-    });
-    mockResetTrackVersions.mockResolvedValue(9);
     mockEnrichNationality.mockResolvedValue(nationalitySummary);
     resetAllPipelineStates();
     app = await buildServer();
@@ -1120,112 +1102,6 @@ describe('Admin API', () => {
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/admin/artist-genres/status',
-      });
-      expect(response.statusCode).toBe(401);
-    });
-  });
-
-  // ── POST /track-versions/enrich ──────────────────────────────────────────
-  describe('POST /api/v1/admin/track-versions/enrich', () => {
-    it('returns 200 with enrichment summary on success', async () => {
-      const response = await app.inject({
-        method: 'POST',
-        url: '/api/v1/admin/track-versions/enrich',
-        headers: { authorization: `Bearer ${VALID_TOKEN}` },
-      });
-
-      expect(response.statusCode).toBe(200);
-      const body = JSON.parse(response.payload) as {
-        data: { enriched: number; skipped: number; failed: number; durationMs: number };
-      };
-      expect(body.data.enriched).toBe(6);
-      expect(body.data.skipped).toBe(2);
-      expect(body.data.failed).toBe(0);
-      expect(body.data.durationMs).toBe(150);
-    });
-
-    it('returns 401 when token is missing', async () => {
-      const response = await app.inject({
-        method: 'POST',
-        url: '/api/v1/admin/track-versions/enrich',
-      });
-      expect(response.statusCode).toBe(401);
-      const body = JSON.parse(response.payload) as { error: { code: string } };
-      expect(body.error.code).toBe('UNAUTHORIZED');
-    });
-
-    it('returns 409 when enrichment is already in progress', async () => {
-      mockEnrichTrackVersions.mockImplementationOnce(
-        () =>
-          new Promise((resolve) =>
-            setTimeout(() => resolve({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 }), 100),
-          ),
-      );
-
-      const [r1, r2] = await Promise.all([
-        app.inject({
-          method: 'POST',
-          url: '/api/v1/admin/track-versions/enrich',
-          headers: { authorization: `Bearer ${VALID_TOKEN}` },
-        }),
-        app.inject({
-          method: 'POST',
-          url: '/api/v1/admin/track-versions/enrich',
-          headers: { authorization: `Bearer ${VALID_TOKEN}` },
-        }),
-      ]);
-
-      const codes = [r1.statusCode, r2.statusCode].sort((a, b) => a - b);
-      expect(codes).toEqual([200, 409]);
-      const body409 = r1.statusCode === 409 ? r1 : r2;
-      const parsed = JSON.parse(body409.payload) as { error: { code: string } };
-      expect(parsed.error.code).toBe('ENRICHMENT_RUNNING');
-    });
-  });
-
-  // ── POST /track-versions/reset ───────────────────────────────────────────
-  describe('POST /api/v1/admin/track-versions/reset', () => {
-    it('returns 200 with count of deleted relationships', async () => {
-      const response = await app.inject({
-        method: 'POST',
-        url: '/api/v1/admin/track-versions/reset',
-        headers: { authorization: `Bearer ${VALID_TOKEN}` },
-      });
-
-      expect(response.statusCode).toBe(200);
-      const body = JSON.parse(response.payload) as { data: { reset: number } };
-      expect(body.data.reset).toBe(9);
-    });
-
-    it('returns 401 when token is missing', async () => {
-      const response = await app.inject({
-        method: 'POST',
-        url: '/api/v1/admin/track-versions/reset',
-      });
-      expect(response.statusCode).toBe(401);
-    });
-  });
-
-  // ── GET /track-versions/status ───────────────────────────────────────────
-  describe('GET /api/v1/admin/track-versions/status', () => {
-    it('returns 200 with running:false and null lastResult before any run', async () => {
-      const response = await app.inject({
-        method: 'GET',
-        url: '/api/v1/admin/track-versions/status',
-        headers: { authorization: `Bearer ${VALID_TOKEN}` },
-      });
-      expect(response.statusCode).toBe(200);
-      const body = JSON.parse(response.payload) as {
-        data: { running: boolean; lastResult: unknown };
-      };
-      expect(body.data.running).toBe(false);
-      expect(body.data.lastResult).toBeNull();
-    });
-
-    it('returns 401 when token is missing', async () => {
-      const response = await app.inject({
-        method: 'GET',
-        url: '/api/v1/admin/track-versions/status',
       });
       expect(response.statusCode).toBe(401);
     });

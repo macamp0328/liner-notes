@@ -18,7 +18,6 @@ import {
   filterTracks,
   isInstrumental,
   normalizeCountry,
-  normalizeTrackTitle,
   parseDisplayRole,
   parseRoleCategory,
   parseDurationSeconds,
@@ -283,13 +282,12 @@ async function mergeTracks(
     const duration = track.duration === '' ? null : track.duration;
     const durationSeconds = parseDurationSeconds(track.duration);
     const instrumental = isInstrumental(track);
-    const normalizedTitle = normalizeTrackTitle(track.title);
     await session.run(
       `MERGE (t:Track {position: $position, releaseDiscogsId: $releaseDiscogsId})
-       ON CREATE SET t.title = $title, t.normalizedTitle = $normalizedTitle,
+       ON CREATE SET t.title = $title,
                      t.duration = $duration,
                      t.durationSeconds = $durationSeconds, t.isInstrumental = $isInstrumental
-       ON MATCH SET  t.title = $title, t.normalizedTitle = $normalizedTitle,
+       ON MATCH SET  t.title = $title,
                      t.duration = $duration,
                      t.durationSeconds = $durationSeconds, t.isInstrumental = $isInstrumental
        WITH t
@@ -300,7 +298,6 @@ async function mergeTracks(
         position: track.position,
         releaseDiscogsId: neo4j.int(releaseId),
         title: track.title,
-        normalizedTitle,
         duration,
         durationSeconds: durationSeconds != null ? neo4j.int(durationSeconds) : null,
         isInstrumental: instrumental,

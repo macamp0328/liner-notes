@@ -10,7 +10,6 @@ import { enrichLyrics } from '../enrichment/lyrics.js';
 import { enrichMasterData } from '../enrichment/master-data.js';
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
 import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
-import { enrichTrackVersions } from '../enrichment/track-versions.js';
 import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
 import { enrichTrackMusicBrainz } from '../enrichment/track-musicbrainz.js';
 import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
@@ -28,7 +27,6 @@ export type ReloadStageName =
   | 'master-data'
   | 'artist-genres'
   | 'artist-profiles'
-  | 'track-versions'
   | 'mb-release-events'
   | 'track-musicbrainz'
   | 'track-acousticbrainz'
@@ -63,8 +61,8 @@ export interface ReloadContext {
  *   client carries its tag.
  * - `track` — a Neo4j node-lock lane for **batched** Track writers. A deadlock needs two
  *   transactions that each hold-and-wait on ≥2 nodes, so it is only possible between two *batched*
- *   writers of the same label. The four batched Track writers (`track-versions`,
- *   `track-musicbrainz`, `track-acousticbrainz`, `track-deezer`) carry `track` and serialise.
+ *   writers of the same label. The three batched Track writers (`track-musicbrainz`,
+ *   `track-acousticbrainz`, `track-deezer`) carry `track` and serialise.
  *   `lyrics` writes one Track per transaction (`setTrackLyrics`) — a single-node tx can't be half
  *   of a lock cycle, so it is deadlock-immune and intentionally untagged, free to overlap the
  *   batched Track lane. **If `lyrics` (or any per-node writer) ever moves to a batched write, give
@@ -101,7 +99,7 @@ export interface StageDescriptor {
  * Every stage except `verify`, in priority order — when several stages are eligible for one free
  * slot the earlier one wins. Ordering is governed by `deps` (not array position), so this list is
  * tuned for *priority*: cheap + #165-gate stages (`master-data`, `artist-profiles`, the pure-Cypher
- * `artist-genres`/`track-versions`) lead, ahead of the slow `track-musicbrainz` and `lyrics`, so the
+ * `artist-genres`) lead, ahead of the slow `track-musicbrainz` and `lyrics`, so the
  * gate metrics reach threshold without waiting on the multi-hour stages. The list is also a valid
  * topological sort (every dep appears earlier), which keeps the persisted stage ordinals sensible.
  *
@@ -152,14 +150,6 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     deps: ['releases'],
     resources: [],
     run: async (ctx) => ({ ...(await enrichArtistGenres(ctx.driver, ctx.log)) }),
-  },
-  {
-    name: 'track-versions',
-    deps: ['releases'],
-    resources: ['track'],
-    run: async (ctx, onProgress) => ({
-      ...(await enrichTrackVersions(ctx.driver, ctx.log, onProgress)),
-    }),
   },
   {
     name: 'track-musicbrainz',

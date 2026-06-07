@@ -170,6 +170,13 @@ Run a post-ingestion step that creates explicit relationships:
 Matching logic: normalized base title equality across releases, with `versionType` derived from
 the parenthetical content. Queries then navigate the relationship instead of string-munging.
 
+> **Status (#196): implemented, then dropped.** The `IS_VERSION_OF` stage shipped but on the live
+> collection yielded only 23 links, **all `versionType: "unknown"`** and all byte-identical-title
+> pairs — i.e. the same recording reappearing on an album + compilation, never the remix/live
+> variants this was meant to capture. The byte-exact title match only ever fires on duplicates, so
+> the stage was removed in #196 (docs/schema reconciled to match). If revived, anchor on
+> `recordingMbid` equality or shared-master grouping (both already populated) rather than title.
+
 ---
 
 ### C2. No cover song relationship

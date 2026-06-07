@@ -96,7 +96,6 @@ Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At)
 | `SAME_PERSON_AS` | Musician → Artist           |                                                                                                                                     |
 | `MEMBER_OF`      | Artist → Artist             | `startYear`, `endYear`                                                                                                              |
 | `SUBSIDIARY_OF`  | Label → Label               |                                                                                                                                     |
-| `VERSION_OF`     | Release → Release           |                                                                                                                                     |
 
 ### Constraints & Indexes
 
@@ -214,8 +213,8 @@ Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
 
 ### Orchestrated Reload (issue #175)
 
-`POST /api/v1/admin/ingest` and the empty-graph auto-trigger only run the **first 5** stages
-(lyrics, master-data, artist-genres, track-versions, artist-profiles) and track state
+`POST /api/v1/admin/ingest` and the empty-graph auto-trigger only run the **first 4** enrichment stages
+(lyrics, master-data, artist-genres, artist-profiles) and track state
 **in memory** (`src/ingestion/job-state.ts`) — a pod crash loses it. The **orchestrated
 reload** (`POST /api/v1/admin/reload`) owns the **whole** sequence and persists per-stage
 state to Neo4j so it survives a restart.
@@ -255,7 +254,7 @@ ranStages)` produces a structured per-metric pass/fail report reused by the gate
   - **`resources`** — stages sharing a lane never overlap. `discogs`/`musicbrainz` guard the
     **shared HTTP client's rate limiter** (the clients have no shared request queue, so two
     concurrent stages on one would double the request rate — every client user carries its tag).
-    `track` serialises the four **batched** Track writers (`track-versions`, `track-musicbrainz`,
+    `track` serialises the three **batched** Track writers (`track-musicbrainz`,
     `track-acousticbrainz`, `track-deezer`): a Neo4j deadlock needs two transactions each holding-
     and-waiting on ≥2 nodes, so it is only possible between two batched writers of the same label.
     **`lyrics` writes one Track per transaction (deadlock-immune) and is intentionally untagged**,

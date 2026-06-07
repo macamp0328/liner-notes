@@ -78,7 +78,6 @@ describe('getStats', () => {
         tempoCovered: int(35),
         deezerCovered: int(30),
         deezerGainCovered: int(24),
-        versionsCovered: int(12),
       },
       master: { total: int(7), releaseEventsCovered: int(5) },
       natArtist: nat(16, 12, 7, 4, 1),
@@ -126,8 +125,6 @@ describe('getStats', () => {
     // deezerBpm/deezerGain applicable = tracks with an isrc (60)
     expect(stats.enrichment.tracksWithDeezerBpm).toEqual({ covered: 30, applicable: 60, pct: 50 });
     expect(stats.enrichment.tracksWithDeezerGain).toEqual({ covered: 24, applicable: 60, pct: 40 });
-    // versions ungated: denominator is total tracks
-    expect(stats.enrichment.tracksWithVersions).toEqual({ covered: 12, applicable: 100, pct: 12 });
 
     // 5/7 = 71.42857… → 71.4
     expect(stats.enrichment.mastersWithReleaseEvents).toEqual({
@@ -198,7 +195,6 @@ describe('getStats', () => {
     expect(stats.enrichment.releasesWithOriginalYear.pct).toBeNull();
     expect(stats.enrichment.artistsWithGenres.pct).toBeNull();
     expect(stats.enrichment.tracksWithLyrics.pct).toBeNull();
-    expect(stats.enrichment.tracksWithVersions.pct).toBeNull();
     expect(stats.enrichment.mastersWithReleaseEvents.pct).toBeNull();
     expect(stats.enrichment.tracksWithDeezerGain).toEqual({ covered: 0, applicable: 0, pct: null });
     // a sourced metric still has every bucket, each with pct null on an empty graph
