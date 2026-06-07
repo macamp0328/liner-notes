@@ -56,6 +56,13 @@ const statements = [
   'MATCH (m:Master) WHERE m.mbReleaseEventsFetched IS NOT NULL REMOVE m.mbReleaseEventsFetched',
   'MATCH (t:Track) WHERE t.musicBrainzFetched IS NOT NULL OR t.acousticBrainzFetched IS NOT NULL OR t.deezerFetched IS NOT NULL REMOVE t.musicBrainzFetched, t.acousticBrainzFetched, t.deezerFetched',
 
+  // --- issue #196: the track-versions stage was dropped ---
+  // Remove its vestigial graph data so the drop leaves the DB clean, not just the code.
+  // Both are idempotent: the relationship match finds nothing once deleted, and the WHERE
+  // guard makes the property removal a no-op once cleared. (The unused index is dropped above.)
+  'MATCH ()-[r:IS_VERSION_OF]->() DELETE r',
+  'MATCH (t:Track) WHERE t.normalizedTitle IS NOT NULL REMOVE t.normalizedTitle',
+
   // --- issue #175: persistent orchestrated-reload job state ---
   // A ReloadJob (one per run) owns a set of ReloadStage checkpoint nodes so an
   // interrupted reload resumes from the last completed stage after a pod restart.
