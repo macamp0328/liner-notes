@@ -136,8 +136,15 @@ export function isValidGeniusLyrics(text: string): boolean {
   return true;
 }
 
+// Normalizes an artist name for fuzzy comparison: NFD-decomposes accented letters
+// and strips the combining marks *before* the ASCII filter, so a diacritic is
+// removed but its base letter survives (e.g. "Françoise" → "francoise", not
+// "franoise"). Decomposing first matters — the ASCII filter alone would drop the
+// whole "ç", weakening the Genius primary-artist match for accented names.
 export function normalizeArtistName(name: string): string {
   return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, ' ')

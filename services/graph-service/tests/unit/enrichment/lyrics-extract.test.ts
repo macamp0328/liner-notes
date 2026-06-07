@@ -131,9 +131,15 @@ describe('isValidGeniusLyrics', () => {
 
 describe('normalizeArtistName', () => {
   it('lowercases, strips punctuation/accents, and collapses whitespace', () => {
-    expect(normalizeArtistName('  Françoise   Hardy! ')).toBe('franoise hardy');
+    expect(normalizeArtistName('  Françoise   Hardy! ')).toBe('francoise hardy');
     expect(normalizeArtistName('AC/DC')).toBe('acdc');
     expect(normalizeArtistName('Earth, Wind & Fire')).toBe('earth wind fire');
+  });
+
+  it('folds diacritics to their base letter rather than dropping the letter', () => {
+    expect(normalizeArtistName('Beyoncé')).toBe('beyonce');
+    expect(normalizeArtistName('Sigur Rós')).toBe('sigur ros');
+    expect(normalizeArtistName('Mötley Crüe')).toBe('motley crue');
   });
 
   it('returns an empty string for punctuation-only input', () => {
