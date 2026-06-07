@@ -283,7 +283,7 @@ aws secretsmanager put-secret-value \
   --secret-string "$SECRET_JSON"
 ```
 
-Add `GENIUS_TOKEN` to the JSON for lyrics enrichment; `ACOUSTICBRAINZ_USER_AGENT` and `GENIUS_USER_AGENT` are optional. The Genius fallback now sends a browser-like User-Agent by default to clear Cloudflare's bot check (issue #195); only set `GENIUS_USER_AGENT` to refresh that string without a redeploy.
+`ACOUSTICBRAINZ_USER_AGENT` is optional. **Do not add `GENIUS_TOKEN` to the prod secret** — Genius 403s the prod datacenter IP (issue #240), so prod runs lyrics LRCLIB-only and the Genius fallback self-disables when the token is absent (no 403s, no alarm noise). Genius lyrics are harvested out-of-band from a residential machine instead — see ["Harvest Genius lyrics locally"](#harvest-genius-lyrics-locally) (issue #258).
 
 > **Why this isn't in Terraform:** keeping the value out of state means the Aura password isn't readable from `terraform.tfstate`, and rotation is one CLI call away — no Terraform run needed.
 
@@ -902,7 +902,7 @@ A stage whose upstream client is unconfigured (e.g. MusicBrainz creds absent) is
 
 > **Resume is automatic.** If the pod rolls mid-reload, the replacement pod resumes the _same_ job on startup — do **not** re-trigger (a second `/reload` would 409 while it's still running, or start a redundant job once it's done). The persisted job is the source of truth. (The empty-graph auto-ingest safety net still runs only the first-5 in-pipeline enrichments; the full reload is operator-triggered via `/admin/reload`.)
 
-> **Changed a secret value (e.g. `GENIUS_TOKEN`) before this reload?** Force an ESO sync _before_ triggering the reload, or the pod runs with the stale value and that enrichment silently degrades (e.g. lyrics falls back to LRCLIB-only). ESO refreshes `graph-service-secrets` hourly; the pod reads env only at start, so also roll the pod if you changed a value it reads once:
+> **Changed a secret value (e.g. `DISCOGS_TOKEN`) before this reload?** Force an ESO sync _before_ triggering the reload, or the pod runs with the stale value and that enrichment silently degrades. ESO refreshes `graph-service-secrets` hourly; the pod reads env only at start, so also roll the pod if you changed a value it reads once:
 >
 > ```bash
 > kubectl -n liner-notes annotate externalsecret graph-service-secrets force-sync=$(date +%s) --overwrite
@@ -924,7 +924,65 @@ curl -s "$GRAPH_SERVICE_URL/api/v1/stats" | jq .data.enrichment
 | `tracksWithTempo`          | of those with an mbid | `track-acousticbrainz`                  |
 | `tracksWithDeezerBpm`      | of those with an isrc | `track-deezer`                          |
 
-> `tracksWithLyrics` is LRCLIB-only (~70%) unless `GENIUS_TOKEN` is present in the prod secret — the Genius fallback is skipped when it's unset. With the token set, the per-source split is readable at `tracksWithLyrics.sources.genius` (issue #203). The fallback historically landed ~0 because Genius's Cloudflare edge 403'd the EC2 IP; it now sends a browser-like User-Agent to clear that check (issue #195). After enabling the token, purge any stale rows via `POST /admin/lyrics/clear-genius`, re-run `POST /admin/lyrics/enrich`, then re-check `sources.genius` — if it's still ~0 with `403`s in the logs, it's a hard IP block and the fallback should be dropped.
+> `tracksWithLyrics` is **LRCLIB-only (~70%) in prod by design** — `GENIUS_TOKEN` is intentionally absent from the prod secret (issue #258), so the Genius fallback self-disables and prod emits no Genius 403s. Genius was confirmed a hard IP block from the EC2 datacenter IP (issue #240); rather than dropping it, the ~87 genuine Genius lyrics LRCLIB misses (issue #241) are harvested out-of-band from a residential machine — see ["Harvest Genius lyrics locally"](#harvest-genius-lyrics-locally). The per-source split stays readable at `tracksWithLyrics.sources.genius` (issue #203); after a harvest it climbs above 0 even though prod itself never calls Genius (the rows persist; only `POST /admin/lyrics/clear-genius` removes them).
+
+---
+
+## Harvest Genius lyrics locally
+
+Prod runs lyrics **LRCLIB-only**: `GENIUS_TOKEN` is intentionally absent from the prod secret because Genius's Cloudflare edge 403s the EC2 datacenter IP ([#240](https://github.com/macamp0328/liner-notes/issues/240)). The genuine Genius lyrics LRCLIB misses ([#241](https://github.com/macamp0328/liner-notes/issues/241) measured ~87) are recovered **out-of-band** by running the production lyrics pipeline from a **residential** connection, where Genius returns 200. This is the cheap "alternate egress" resolution of #240 — no paid proxy, nothing wired into the hot path. Re-run it occasionally as the collection grows.
+
+> **Where it writes.** The script (`services/graph-service/scripts/lyrics-enrich-local.ts`, run via `tsx`) connects to the **prod** Aura graph with read-write creds and `SET`s lyrics directly. It is **not** the Fastify server, so it has no schema-apply / reload-resume / keep-warm side-effects — just env → driver → `enrichLyrics` → summary → exit.
+
+**Prereqs.**
+
+- Run from a **residential** machine (home Wi-Fi / cellular). A datacenter or VPN egress gets the same Cloudflare 403 prod does.
+- A Genius API token: <https://genius.com/api-clients>.
+- A **dedicated**, gitignored env file — e.g. `services/graph-service/.env.prod.local` — holding the **read-write prod** creds plus the token. Keep it separate from your dev `.env.local` so the harvest can't accidentally target localhost:
+
+  ```bash
+  # services/graph-service/.env.prod.local   (gitignored via .env.*.local)
+  NEO4J_URI=neo4j+s://<your-aura-id>.databases.neo4j.io
+  NEO4J_USER=neo4j
+  NEO4J_PASSWORD=<aura-password>          # all three from liner-notes/graph-service/prod
+  GENIUS_TOKEN=<your-genius-token>
+  # GENIUS_USER_AGENT=                     # optional; defaults to a current Chrome UA
+  ```
+
+  Pull the prod Neo4j creds from Secrets Manager if you don't have them to hand:
+
+  ```bash
+  aws secretsmanager get-secret-value --secret-id liner-notes/graph-service/prod \
+    --query SecretString --output text \
+    | jq -r '"NEO4J_URI="+.NEO4J_URI, "NEO4J_USER="+.NEO4J_USER, "NEO4J_PASSWORD="+.NEO4J_PASSWORD'
+  ```
+
+**Run it.**
+
+```bash
+pnpm --filter graph-service exec tsx scripts/lyrics-enrich-local.ts \
+  --env services/graph-service/.env.prod.local
+```
+
+The script prints the **target Neo4j host** first — confirm it's your Aura prod host, not localhost, before it writes. (`pnpm lyrics:enrich:local` is a shorthand that uses the default `services/graph-service/.env.local`; only use it if that file holds prod creds.)
+
+It runs `enrichLyrics` over every track that still has no lyrics and reports `enriched / skipped / failed`. Two things make it actually do work rather than silently no-op:
+
+- It **forces `ENRICHMENT_STALENESS_DAYS=0`** (unless you set it in the env file). Prod stamped `lyricsFetchedAt` on every LRCLIB miss, so under the normal 30-day window the candidate query would exclude them all and the run would find nothing. `0` re-includes every `lyrics IS NULL` track regardless of last attempt. **This is the difference between "works" and "silently no-ops".**
+- It **requires `GENIUS_TOKEN`** — without it the harvest adds nothing over what prod already did, so it hard-errors.
+
+It's idempotent and re-runnable (writes are `MERGE`-style); transient LRCLIB/Genius blips count as `failed` without stamping, so a re-run picks them up. It's serial today, so a full pass over the misses takes a while — fine for a one-shot.
+
+**Verify.**
+
+```bash
+curl -s "$GRAPH_SERVICE_URL/api/v1/stats" \
+  | jq '.data.enrichment.tracksWithLyrics.sources.genius'
+```
+
+`covered` should climb from `0` toward ~87. Note: `sources.genius` staying above 0 afterward does **not** mean prod is calling Genius — those rows are this harvest's writes; prod still never calls it (only `POST /admin/lyrics/clear-genius` removes them).
+
+> **Data quality.** The harvest reuses prod's `fetchGenius` as-is, which has **no length floor**, so a handful of editorial-"About" prose or wrong-song matches land alongside the real lyrics (#241's findings estimated ~18 of ~105 stored). That is the accepted "reuse the pipeline as-is" tradeoff; tightening it is a separate data-quality follow-up. The summary's `enriched` count is the real per-run yield.
 
 ---
 
