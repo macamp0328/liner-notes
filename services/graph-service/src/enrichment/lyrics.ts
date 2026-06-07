@@ -4,6 +4,7 @@ import { getUnenrichedTracks, setTrackLyrics, markLyricsFetched } from '../db/ly
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 import {
   extractLyricsFromHtml,
+  stripGeniusHeader,
   isValidGeniusLyrics,
   normalizeArtistName,
 } from './lyrics-extract.js';
@@ -134,7 +135,10 @@ async function fetchGenius(
   if (!pageResponse.ok) throw new GeniusHttpError(pageResponse.status, 'page');
 
   const html = await pageResponse.text();
-  const lyrics = extractLyricsFromHtml(html);
+  const extracted = extractLyricsFromHtml(html);
+  // Strip Genius's contributor/title header before validating (#253); a pure-header
+  // page collapses to "" and is rejected by the falsy guard below.
+  const lyrics = extracted ? stripGeniusHeader(extracted) : null;
   if (!lyrics || !isValidGeniusLyrics(lyrics)) return null;
   return lyrics;
 }

@@ -127,6 +127,23 @@ export function extractLyricsFromHtml(html: string): string | null {
   return parts.length > 0 ? parts.join('\n\n') : null;
 }
 
+// Strips the "<n> Contributor(s)[Translations…/<language>]<Title> Lyrics" header
+// Genius prepends to the lyric body. The extractor leaves it glued to the front
+// ("…Right On Time LyricsWell, well…"), which makes isValidGeniusLyrics reject the
+// whole body on its contributor-header rule even when real lyrics follow (#253).
+// Applied at the Genius validation boundary (fetchGenius + the offline probe), not
+// inside extractLyricsFromHtml, so the validator's own header rule stays a live
+// backstop rather than dead code.
+//
+// NB: no word boundary after "Lyrics" — the body frequently runs straight into it,
+// so /\bLyrics\b/ would fail to match and leave the header on. Non-greedy .*? with
+// the `s` (dotall) flag stops at the header's first "Lyrics" (the body comes after)
+// and crosses the newlines of Genius's "Translations…/<language>" block.
+export function stripGeniusHeader(text: string): string {
+  const m = text.match(/^\s*\d+\s+Contributors?.*?Lyrics/is);
+  return (m ? text.slice(m[0].length) : text).trim();
+}
+
 // Rejects content that is known garbage: Genius header blocks, bare title
 // matches, and oversized results (books/articles scraped instead of lyrics).
 export function isValidGeniusLyrics(text: string): boolean {

@@ -477,15 +477,16 @@ describe('enrichLyrics', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Genius — garbage content guard (header prefix leaked via nested div)
+  // Genius — contributor header is stripped before validating (#253)
   // -------------------------------------------------------------------------
-  it('skips track when extracted Genius lyrics start with contributor header', async () => {
+  it('strips the contributor header and enriches with the body that follows', async () => {
     process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
 
-    // Simulates Genius page where a header div nests inside the lyrics container.
-    // The balanced-bracket extractor captures the full outer div content including
-    // the header text, which isValidGeniusLyrics then rejects.
+    // Genius page where a header div nests inside the lyrics container. The
+    // balanced-bracket extractor captures the full outer div (header + body);
+    // fetchGenius strips the "N Contributors…Lyrics" header so the real body
+    // validates instead of being rejected wholesale (issue #253).
     const headerHtml = `
       <div data-lyrics-container="true">
         <div class="header">8 ContributorsMusic For Indigo Lyrics</div>
@@ -496,6 +497,32 @@ describe('enrichLyrics', () => {
       .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
       .mockResolvedValueOnce(makeHtmlResponse(headerHtml)); // Genius page with header
+
+    const summary = await enrichLyrics(fakeDriver);
+
+    expect(summary.enriched).toBe(1);
+    expect(summary.skipped).toBe(0);
+    expect(mockSetTrackLyrics).toHaveBeenCalledWith(
+      fakeDriver,
+      sampleTrack.releaseDiscogsId,
+      sampleTrack.position,
+      'Actual lyrics would follow here',
+      'genius',
+    );
+  });
+
+  it('skips track when the Genius page is a header-only (instrumental) container', async () => {
+    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+
+    // No body after the header — stripping it leaves an empty string, which
+    // fetchGenius rejects (no lyrics to store).
+    const headerOnlyHtml =
+      '<div data-lyrics-container="true">2 ContributorsSong Title Lyrics</div>';
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
+      .mockResolvedValueOnce(makeHtmlResponse(headerOnlyHtml));
 
     const summary = await enrichLyrics(fakeDriver);
 
