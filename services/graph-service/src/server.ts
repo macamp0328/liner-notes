@@ -9,6 +9,7 @@ import { collectionRoutes } from './api/collection.js';
 import { exploreRoutes } from './api/explore.js';
 import { searchRoutes } from './api/search.js';
 import { statsRoutes } from './api/stats.js';
+import { registerSharedSchemas } from './api/schemas.js';
 import { initDriver, closeDriver } from './db/client.js';
 import { applySchema } from './db/schema.js';
 import { hasReleases } from './db/ingestion-repository.js';
@@ -38,6 +39,19 @@ const OPENAPI_CONFIG = {
       },
     },
   },
+  // Key shared-schema components by their $id (e.g. "ErrorResponse") rather than the
+  // default anonymous "def-0"/"def-1", so the generated components.schemas entries and
+  // the $refs that point at them are stable and human-readable.
+  refResolver: {
+    buildLocalReference(
+      json: Record<string, unknown>,
+      _baseUri: unknown,
+      _fragment: string,
+      i: number,
+    ): string {
+      return typeof json['$id'] === 'string' ? json['$id'] : `def-${i}`;
+    },
+  },
 };
 
 const DEFAULT_RATE_LIMIT_MAX = 100;
@@ -65,6 +79,7 @@ export function resolveRateLimitMax(option?: number): number {
  */
 export async function buildDocsServer(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+  registerSharedSchemas(app);
   await app.register(rateLimit, { max: resolveRateLimitMax(), timeWindow: RATE_LIMIT_TIME_WINDOW });
   await app.register(swagger, OPENAPI_CONFIG);
   await app.register(swaggerUi, {
@@ -105,6 +120,12 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   const autoIngest = options.autoIngest ?? true;
   const enableLogger = options.logger ?? process.env['NODE_ENV'] !== 'test';
   const app = Fastify({ logger: enableLogger });
+
+  // Shared response schemas (error + pagination envelopes). Registered before routes
+  // so their `$ref`s resolve at route-schema compilation time — and unconditionally
+  // (not behind the swagger guard) because routes reference them for runtime
+  // serialization whether or not swagger is registered.
+  registerSharedSchemas(app);
 
   // Global rate limiting — a runtime DoS backstop. Registered before routes so its onRequest
   // hook covers every endpoint. The cap is per client IP (request.ip) — note that behind a

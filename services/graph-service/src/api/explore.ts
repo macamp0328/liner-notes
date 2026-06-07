@@ -24,25 +24,11 @@ import {
   type AudioFeatureFilters,
   type AudioFeatureTrack,
 } from '../db/repositories/explore-repository.js';
+import { errorResponseRef } from './schemas.js';
 
 // ---------------------------------------------------------------------------
 // Shared schema fragments
 // ---------------------------------------------------------------------------
-
-const errorSchema = {
-  type: 'object',
-  required: ['error'],
-  properties: {
-    error: {
-      type: 'object',
-      required: ['code', 'message'],
-      properties: {
-        code: { type: 'string' },
-        message: { type: 'string' },
-      },
-    },
-  },
-} as const;
 
 const exploreReleaseSchema = {
   type: 'object',
@@ -174,7 +160,7 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
         },
         response: {
           200: { type: 'array', items: musicianReleaseSchema },
-          400: errorSchema,
+          400: errorResponseRef,
         },
       },
     },
@@ -198,7 +184,7 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
         },
         response: {
           200: { type: 'array', items: musicianReleaseSchema },
-          400: errorSchema,
+          400: errorResponseRef,
         },
       },
     },
@@ -222,7 +208,7 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
         },
         response: {
           200: { type: 'array', items: musicianReleaseSchema },
-          400: errorSchema,
+          400: errorResponseRef,
         },
       },
     },
@@ -361,7 +347,7 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
         },
         response: {
           200: { type: 'array', items: exploreReleaseSchema },
-          400: errorSchema,
+          400: errorResponseRef,
         },
       },
     },
@@ -424,7 +410,7 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
         },
         response: {
           200: connectionsResponseSchema,
-          404: errorSchema,
+          404: errorResponseRef,
         },
       },
     },
