@@ -5,7 +5,6 @@ import { buildMusicBrainzClientFromEnv } from './musicbrainz-client.js';
 import { buildAcousticBrainzClientFromEnv } from './acousticbrainz-client.js';
 import { buildDeezerClientFromEnv } from './deezer-client.js';
 import { buildWikidataClientFromEnv } from './wikidata-client.js';
-import { buildViafClientFromEnv } from './viaf-client.js';
 import { RELOAD_STAGES } from './stages.js';
 import type { ReloadContext, ReloadStageName, StageDescriptor } from './stages.js';
 import { scheduleStages } from './scheduler.js';
@@ -82,7 +81,6 @@ export function buildReloadContext(driver: Driver, username: string, log: Logger
     acousticbrainz: buildAcousticBrainzClientFromEnv(log),
     deezer: buildDeezerClientFromEnv(log),
     wikidata: buildWikidataClientFromEnv(log),
-    viaf: buildViafClientFromEnv(log),
   };
 }
 

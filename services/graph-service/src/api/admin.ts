@@ -14,7 +14,6 @@ import { clearGeniusLyrics } from '../db/lyrics-repository.js';
 import { enrichLyrics } from '../enrichment/lyrics.js';
 import { buildMusicBrainzClientFromEnv } from '../ingestion/musicbrainz-client.js';
 import { buildWikidataClientFromEnv } from '../ingestion/wikidata-client.js';
-import { buildViafClientFromEnv } from '../ingestion/viaf-client.js';
 import {
   enrichNationality,
   type NationalityEnrichmentSummary,
@@ -61,8 +60,9 @@ const errorShape = {
 
 // Shared response shape for the nationality summary, used by both POST /nationality/enrich and
 // GET /nationality/status. Lists every field as required because enrichNationality fully
-// populates the summary on every return path (including its early error-return). The viaf*
-// counts (#194) make VIAF's real prod contribution legible; see NationalityEnrichmentSummary.
+// populates the summary on every return path (including its early error-return). The
+// resolvedBy* counts attribute each resolution to its chosen source; see
+// NationalityEnrichmentSummary.
 const nationalitySummarySchema = {
   type: 'object',
   required: [
@@ -72,14 +72,6 @@ const nationalitySummarySchema = {
     'durationMs',
     'resolvedByMusicbrainz',
     'resolvedByWikidata',
-    'resolvedByViaf',
-    'viafCalls',
-    'viafOk',
-    'viafBotBlocked',
-    'viafHtml',
-    'viafHttpError',
-    'viafRateLimited',
-    'viafNetworkError',
   ],
   properties: {
     enriched: { type: 'integer', description: 'Nodes that received an ORIGIN_COUNTRY this run.' },
@@ -98,39 +90,6 @@ const nationalitySummarySchema = {
       type: 'integer',
       description:
         'Countries this run where Wikidata was the chosen source (Wikidata-only, preferred on an MB/WD disagreement, or via the Wikipedia-URL fallback).',
-    },
-    resolvedByViaf: {
-      type: 'integer',
-      description:
-        'Countries this run resolved by VIAF. VIAF is the last-resort source (tried only after MB and Wikidata both return null), so this is its unique contribution.',
-    },
-    viafCalls: {
-      type: 'integer',
-      description:
-        'VIAF HTTP attempts (retries counted separately). Denominator for the counts below.',
-    },
-    viafOk: {
-      type: 'integer',
-      description:
-        'VIAF attempts returning HTTP 200 + parseable JSON — NOT the same as resolving a country (compare resolvedByViaf).',
-    },
-    viafBotBlocked: { type: 'integer', description: 'VIAF attempts blocked with HTTP 403.' },
-    viafHtml: {
-      type: 'integer',
-      description: 'VIAF attempts that returned an HTML page instead of JSON (soft bot-block).',
-    },
-    viafHttpError: {
-      type: 'integer',
-      description: 'VIAF attempts with a non-OK status other than 403/429/503 (e.g. 500).',
-    },
-    viafRateLimited: {
-      type: 'integer',
-      description: 'VIAF attempts rate-limited or unavailable (HTTP 429/503).',
-    },
-    viafNetworkError: {
-      type: 'integer',
-      description:
-        'VIAF attempts that failed at the network level (timeout/ECONNRESET) or returned an unparseable 200 body.',
     },
   },
 };
@@ -623,13 +582,10 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           '2. Wikidata via Wikipedia URL: fetches the Discogs artist page, extracts any English ' +
           'Wikipedia URLs from `urls[]`, and queries Wikidata via `schema:about` triple. ' +
           'Covers artists whose Discogs ID is not in Wikidata but who have a Wikipedia article. ' +
-          'Requires `DISCOGS_TOKEN`.\n' +
-          '3. VIAF name search: queries the Virtual International Authority File by artist name. ' +
-          'Strong coverage of classical/orchestral musicians. Validates nameType, name match, ' +
-          'and nationality agreement before accepting. Requires `MUSICBRAINZ_USER_AGENT`.\n\n' +
+          'Requires `DISCOGS_TOKEN`.\n\n' +
           '**Conflict resolution:** when MB and WD disagree on source 1, Wikidata is preferred and the discrepancy is logged.\n\n' +
           'For musicians without a Discogs ID, MusicBrainz name search is used instead ' +
-          '(score ≥ 90 only). Sources 2 and 3 are skipped for these musicians.\n\n' +
+          '(score ≥ 90 only). Source 2 is skipped for these musicians.\n\n' +
           'Selects nodes that still have no `ORIGIN_COUNTRY` and whose last attempt has aged past ' +
           '`ENRICHMENT_STALENESS_DAYS` (default 30), stamping `nationalityFetchedAt` after each attempt — so a ' +
           'node no source could resolve is retried at most once per window while already-countried nodes are ' +
@@ -673,7 +629,6 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
       const wdClient = buildWikidataClientFromEnv(request.log);
       const discogsClient = buildDiscogsClientFromEnv(request.log);
-      const viafClient = buildViafClientFromEnv(request.log);
 
       nationalityState.running = true;
       nationalityState.startedAt = new Date().toISOString();
@@ -687,7 +642,6 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           request.log,
           wdClient ?? undefined,
           discogsClient ?? undefined,
-          viafClient ?? undefined,
         );
         nationalityState.lastResult = summary;
         nationalityState.completedAt = new Date().toISOString();

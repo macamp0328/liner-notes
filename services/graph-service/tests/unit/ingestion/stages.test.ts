@@ -47,7 +47,6 @@ function makeCtx(overrides: Partial<ReloadContext> = {}): ReloadContext {
     acousticbrainz: {} as ReloadContext['acousticbrainz'],
     deezer: {} as ReloadContext['deezer'],
     wikidata: {} as ReloadContext['wikidata'],
-    viaf: {} as ReloadContext['viaf'],
     ...overrides,
   };
 }
@@ -272,13 +271,12 @@ describe('stage run() delegates to the right enrich function', () => {
       ctx.log,
       ctx.wikidata,
       ctx.discogs,
-      ctx.viaf,
       onProgress,
     );
   });
 
   it('nationality passes undefined for null optional clients', async () => {
-    const ctx = makeCtx({ wikidata: null, viaf: null });
+    const ctx = makeCtx({ wikidata: null });
     const onProgress = vi.fn();
     await stage('nationality').run(ctx, onProgress);
     expect(enrichNationality).toHaveBeenCalledWith(
@@ -287,7 +285,6 @@ describe('stage run() delegates to the right enrich function', () => {
       ctx.log,
       undefined,
       ctx.discogs,
-      undefined,
       onProgress,
     );
   });
