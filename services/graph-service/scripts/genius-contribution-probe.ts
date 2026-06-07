@@ -153,8 +153,10 @@ async function fetchWithRetry(url: string, init: RequestInit, label: string): Pr
   }
 }
 
-// Replica of production fetchLrclib (src/enrichment/lyrics.ts): 200 -> lyrics,
-// 404 -> null, anything else -> throw.
+// Mirrors production fetchLrclib's status-code contract (src/enrichment/lyrics.ts):
+// 200 -> plainLyrics, 404 -> null (LRCLIB miss), any other status -> throw. The
+// transport differs deliberately — this adds retry/timeout/UA for the long offline
+// run — but the lyrics/miss/error decision is identical.
 async function fetchLrclib(artistName: string, title: string): Promise<string | null> {
   const url = new URL('https://lrclib.net/api/get');
   url.searchParams.set('track_name', title);
