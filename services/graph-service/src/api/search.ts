@@ -6,25 +6,11 @@ import {
   type SearchResultItem,
   type LyricsSearchResult,
 } from '../db/repositories/search-repository.js';
+import { errorResponseRef } from './schemas.js';
 
 // ---------------------------------------------------------------------------
 // Shared schema fragments
 // ---------------------------------------------------------------------------
-
-const errorSchema = {
-  type: 'object',
-  required: ['error'],
-  properties: {
-    error: {
-      type: 'object',
-      required: ['code', 'message'],
-      properties: {
-        code: { type: 'string' },
-        message: { type: 'string' },
-      },
-    },
-  },
-} as const;
 
 // Discriminated union represented as anyOf in OpenAPI
 const searchResultItemSchema = {
@@ -120,7 +106,7 @@ export async function searchRoutes(fastify: FastifyInstance): Promise<void> {
         },
         response: {
           200: { type: 'array', items: searchResultItemSchema },
-          400: errorSchema,
+          400: errorResponseRef,
         },
       },
     },
@@ -147,7 +133,7 @@ export async function searchRoutes(fastify: FastifyInstance): Promise<void> {
         },
         response: {
           200: { type: 'array', items: lyricsResultSchema },
-          400: errorSchema,
+          400: errorResponseRef,
         },
       },
     },

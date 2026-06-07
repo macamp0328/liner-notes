@@ -12,11 +12,15 @@ vi.mock('../../../src/db/ingestion-repository.js', async (orig) => ({
 vi.mock('../../../src/db/client.js', () => ({ getDriver: vi.fn().mockReturnValue({}) }));
 
 import { adminRoutes } from '../../../src/api/admin.js';
+import { registerSharedSchemas } from '../../../src/api/schemas.js';
 
 const TOKEN = 'secret-token';
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+  // adminRoutes' response schemas $ref the shared ErrorResponse schema; register it
+  // before the routes so the reference resolves (buildServer does this in production).
+  registerSharedSchemas(app);
   await app.register(adminRoutes, { prefix: '/api/v1/admin' });
   await app.ready();
   return app;
