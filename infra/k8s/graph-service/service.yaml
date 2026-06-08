@@ -14,5 +14,6 @@ spec:
     - name: http
       port: 80
       targetPort: http
-      # EC2 security group (allow_app_cidr in Terraform) opens this port on the node.
+      # EC2 security group opens this port on the node — to Cloudflare's IP ranges
+      # when restrict_app_to_cloudflare is set (#119), otherwise per allow_app_cidr.
       nodePort: 30080

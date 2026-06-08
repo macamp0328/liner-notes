@@ -44,7 +44,7 @@ See the [Fork Guide](liner-notes-spec-v0.5.md#16-fork-guide) for step-by-step in
 
 ## Architecture
 
-The production deployment is a single-node k3s cluster on EC2, with [Neo4j AuraDB Free](https://console.neo4j.io) as the managed graph database and a small set of AWS services (ECR, Secrets Manager, CloudWatch) providing operational glue.
+The production deployment is a single-node k3s cluster on EC2, with [Neo4j AuraDB Free](https://console.neo4j.io) as the managed graph database and a small set of AWS services (ECR, Secrets Manager, CloudWatch) providing operational glue. [Cloudflare](https://www.cloudflare.com) sits in front of the service — it terminates TLS for a custom domain and forwards to the origin, which only accepts traffic from Cloudflare's IP ranges. This front door is opt-in (`cloudflare_enabled`); a fork runs over plain HTTP on the NodePort until it's configured.
 
 <!-- diagrams:request-flow:start -->
 
