@@ -727,7 +727,7 @@ The Deployment uses `strategy: Recreate` — there will be ~30 seconds of downti
 
 Puts Cloudflare in front of the NodePort so the API is served over HTTPS on a custom hostname instead of plain HTTP on `http://<eip-dns>:30080` (issue [#119](https://github.com/macamp0328/liner-notes/issues/119)). Cloudflare proxies the hostname, terminates TLS for free, and an **Origin Rule** rewrites the destination port to `30080` — Cloudflare's proxy only dials origins on `:80`/`:443`, so a plain proxied record cannot reach the NodePort without it. TLS mode is **Flexible** (browser↔Cloudflare is HTTPS; Cloudflare↔origin stays HTTP on `:30080`, as the issue specifies). All of it is defined in [`infra/terraform/cloudflare.tf`](terraform/cloudflare.tf).
 
-**This is applied in the liner-notes production deployment** — the API is live over HTTPS at its custom domain, origin locked to Cloudflare. It's opt-in (`cloudflare_enabled`, default off, so a fork stays on plain HTTP until configured); the two-phase rollout below is the setup procedure, and the reference for how the live config was built.
+**This is applied in the liner-notes production deployment** — the API is live over HTTPS at `https://ln-api.impressivelyadequate.com`, origin locked to Cloudflare. It's opt-in (`cloudflare_enabled`, default off, so a fork stays on plain HTTP until configured); the two-phase rollout below is the setup procedure, and the reference for how the live config was built.
 
 ### Prerequisites
 
