@@ -147,7 +147,11 @@ async function discogsGet<T>(path: string): Promise<T> {
   const url = `${BASE_URL}${path}`;
   const res = await fetch(url, { headers: HEADERS });
   if (!res.ok) {
-    throw new Error(`Discogs API ${res.status} for ${url}: ${await res.text()}`);
+    // Don't interpolate the request URL — the collection path embeds DISCOGS_USERNAME
+    // (env), and that tainted URL flowing through the thrown error into the top-level
+    // catch's console.error trips CodeQL's clear-text-logging (js/clear-text-logging).
+    // Status + response body is enough to debug this exploration script locally.
+    throw new Error(`Discogs API ${res.status}: ${await res.text()}`);
   }
   return res.json() as Promise<T>;
 }
@@ -310,7 +314,9 @@ function analyzeCompanies(companies: DiscogsLabel[]): void {
 
 async function main(): Promise<void> {
   console.log('🎵 liner-notes — Discogs API Exploration');
-  console.log(`   User: ${USERNAME}`);
+  // Don't echo USERNAME (sourced from DISCOGS_USERNAME): the repo treats it as personal
+  // data and CodeQL flags env-derived values in logs as clear-text logging — same rule
+  // and rationale as the ingest.ts "Starting ingestion" guard.
   console.log(`   User-Agent: ${USER_AGENT}`);
   console.log(`   Request delay: ${DELAY_MS}ms\n`);
 

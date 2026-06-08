@@ -53,7 +53,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v6
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           # The SSM session id is prefixed with this, so the deploy role's
@@ -119,13 +119,13 @@ jobs:
         run: echo "tag=${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@fa648b43de3d4d023bcb3f89ed6940096949c419 # v2
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
 
       - name: Build and push graph-service image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
         with:
           context: .
           file: ./services/graph-service/Dockerfile
