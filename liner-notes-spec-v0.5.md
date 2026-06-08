@@ -658,7 +658,7 @@ All writes use Cypher `MERGE`. Re-running is safe. New additions picked up on re
 
 ### 9.4 Security
 
-No hard rate limiting on the service itself. `@fastify/rate-limit` as a basic stopgap; Cloudflare handles it properly at the edge when wired in.
+No hard rate limiting on the service itself. `@fastify/rate-limit` as a basic stopgap; Cloudflare now fronts the service (#119), so edge-level bot mitigation / rate limiting can be handled there.
 
 ---
 
@@ -678,7 +678,7 @@ docker-compose up
 ```
 Internet
     │
-[Cloudflare DNS + bot protection]  ← future
+[Cloudflare — TLS + custom domain]  ← live (#119); origin locked to Cloudflare IPs
     │
 [EC2 t3.micro — k3s single-node Kubernetes]
     └── graph-service Pod
@@ -805,7 +805,7 @@ Incremental ingestion of new collection additions without full re-run.
 
 ### Cloudflare Edge Layer
 
-Edge caching, CDN for album art, bot protection. Add when there's a concrete need.
+TLS + custom domain via Cloudflare already landed (#119) — the API is served over HTTPS with the origin locked to Cloudflare's IPs. Remaining edge scope (add when there's a concrete need): edge caching, CDN for album art, and bot protection rules.
 
 ### Discogs OAuth
 
