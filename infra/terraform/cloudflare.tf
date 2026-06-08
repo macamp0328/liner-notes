@@ -5,10 +5,11 @@
 # the default deploy (flag false) never evaluates them and Terraform never even
 # configures the Cloudflare provider — no API token needed until you opt in.
 #
-# Why an origin rule: Cloudflare's reverse proxy only dials origins on standard
-# ports (80/443). A plain proxied DNS record cannot reach the NodePort on
-# :30080, and nothing serves :80/:443 on the host. The http_request_origin
-# ruleset below rewrites the origin port to 30080 — a free-plan Origin Rule.
+# Why an origin rule: Cloudflare connects to the origin on a standard port
+# derived from the request (80 for HTTP/Flexible, 443 for HTTPS), never a
+# non-standard NodePort like :30080 — and nothing serves :80/:443 on the host.
+# The http_request_origin ruleset below rewrites the origin port to 30080 — a
+# free-plan Origin Rule.
 # (Overriding the origin host/SNI is Enterprise-only, so the CNAME must resolve
 # to the real origin; we override only the port.)
 #
