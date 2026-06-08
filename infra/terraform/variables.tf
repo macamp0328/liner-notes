@@ -31,9 +31,54 @@ variable "allow_ssh_cidr" {
 }
 
 variable "allow_app_cidr" {
-  description = "CIDR blocks permitted to reach the graph-service NodePort (30080). Default is open to the world; narrow this for tighter exposure."
+  description = "CIDR blocks permitted to reach the graph-service NodePort (30080). Default is open to the world; narrow this for tighter exposure. Ignored when restrict_app_to_cloudflare is true — the security group then only admits Cloudflare's IP ranges."
   type        = list(string)
   default     = ["0.0.0.0/0"]
+}
+
+# --- TLS + custom domain via Cloudflare (issue #119) -------------------------
+# All four default to the current behaviour: no Cloudflare, plain HTTP on
+# :30080. Enabling is a two-phase rollout — see infra/RUNBOOK.md "TLS + custom
+# domain (Cloudflare)". The Cloudflare API token is supplied out-of-band via
+# the CLOUDFLARE_API_TOKEN environment variable, not as a variable.
+
+variable "cloudflare_enabled" {
+  description = "Create the Cloudflare DNS record, TLS zone settings, and origin-port rule that put Cloudflare in front of the graph-service NodePort. Requires cloudflare_zone_id, custom_domain, and the CLOUDFLARE_API_TOKEN env var. Default false leaves the deploy on plain HTTP and never configures the Cloudflare provider."
+  type        = bool
+  default     = false
+}
+
+variable "restrict_app_to_cloudflare" {
+  description = "Lock the NodePort security group to Cloudflare's published IPv4 ranges (instead of allow_app_cidr) and repoint the Route 53 health check at the HTTPS domain. Set true only after verifying the Cloudflare path works end to end. Requires cloudflare_enabled = true — rejected at plan otherwise, and structurally gated via local.restrict_to_cloudflare as a backstop, so it can never lock the origin down without the Cloudflare DNS record and origin rule existing."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.restrict_app_to_cloudflare || var.cloudflare_enabled
+    error_message = "restrict_app_to_cloudflare requires cloudflare_enabled = true."
+  }
+}
+
+variable "cloudflare_zone_id" {
+  description = "Cloudflare zone ID that owns custom_domain. Copy it from the Cloudflare dashboard (Overview → API → Zone ID). Required when cloudflare_enabled is true — left empty it fails at plan."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = !var.cloudflare_enabled || var.cloudflare_zone_id != ""
+    error_message = "cloudflare_zone_id must be set when cloudflare_enabled is true."
+  }
+}
+
+variable "custom_domain" {
+  description = "Fully-qualified hostname Cloudflare serves graph-service on, e.g. api.example.com. Kept out of committed defaults (public-repo safety) — supply it via a gitignored *.tfvars. Required when cloudflare_enabled is true — left empty it fails at plan."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = !var.cloudflare_enabled || var.custom_domain != ""
+    error_message = "custom_domain must be set when cloudflare_enabled is true."
+  }
 }
 
 variable "nightly_schedule_enabled" {

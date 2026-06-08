@@ -36,8 +36,13 @@ output "secrets_manager_name" {
 }
 
 output "service_url" {
-  description = "Where graph-service will be reachable once deployed."
-  value       = "http://${aws_eip.k3s.public_dns}:30080"
+  description = "Where graph-service will be reachable once deployed. HTTPS via the custom domain when Cloudflare is enabled (issue #119), otherwise plain HTTP on the NodePort."
+  value       = var.cloudflare_enabled ? "https://${var.custom_domain}" : "http://${aws_eip.k3s.public_dns}:30080"
+}
+
+output "custom_domain" {
+  description = "Custom hostname Cloudflare serves graph-service on. Empty until cloudflare_enabled is set (issue #119)."
+  value       = var.cloudflare_enabled ? var.custom_domain : ""
 }
 
 output "log_group_name" {

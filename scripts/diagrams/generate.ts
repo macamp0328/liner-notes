@@ -37,7 +37,16 @@
 // README documents install.
 
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
@@ -635,15 +644,36 @@ function postProcessDot(dot: string, extraNodes: Set<string> = new Set()): strin
   return out.join('\n');
 }
 
-function renderResourceGraph(outFile: string, extraNodes: Set<string>): void {
-  const dot = run('inframap', ['generate', '--hcl', '--raw', TF_DIR]).toString();
-  const svg = run(
-    'docker',
-    ['run', '--rm', '-i', '--platform=linux/amd64', GRAPHVIZ_IMAGE, 'dot', '-Tsvg'],
-    { input: postProcessDot(dot, extraNodes) },
-  );
-  writeFileSync(outFile, svg);
-  console.log(`  wrote ${outFile.replace(REPO_ROOT + '/', '')}`);
+// Run inframap against only the resource-bearing .tf files (those with at
+// least one `resource`/`data` block). inframap's HCL parser is pinned at
+// v0.8.1 — the latest release, and not upgradable — which predates modern
+// Terraform schema and rejects both `precondition` blocks and cross-variable
+// `validation` conditions (the plan-time guards we use in variables.tf). Those
+// blocks only ever live in resource-free files (variables.tf, outputs.tf),
+// which contribute nothing to the resource graph, so feeding inframap a temp
+// dir of just the resource-bearing files sidesteps the parser limitation while
+// keeping resource-graph.svg byte-identical. See issue #265.
+function renderResourceGraph(
+  outFile: string,
+  resourceFiles: string[],
+  extraNodes: Set<string>,
+): void {
+  const inframapDir = mkdtempSync(join(tmpdir(), 'liner-notes-inframap-'));
+  try {
+    for (const file of resourceFiles) {
+      copyFileSync(join(TF_DIR, file), join(inframapDir, file));
+    }
+    const dot = run('inframap', ['generate', '--hcl', '--raw', inframapDir]).toString();
+    const svg = run(
+      'docker',
+      ['run', '--rm', '-i', '--platform=linux/amd64', GRAPHVIZ_IMAGE, 'dot', '-Tsvg'],
+      { input: postProcessDot(dot, extraNodes) },
+    );
+    writeFileSync(outFile, svg);
+    console.log(`  wrote ${outFile.replace(REPO_ROOT + '/', '')}`);
+  } finally {
+    rmSync(inframapDir, { recursive: true, force: true });
+  }
 }
 
 function main(): void {
@@ -703,7 +733,11 @@ function main(): void {
   for (const b of allBlocks) {
     if (b.decl.kind === 'resource') declaredResourceAddrs.add(addressOf(b.decl));
   }
-  renderResourceGraph(join(OUT_DIR, 'resource-graph.svg'), declaredResourceAddrs);
+  // Only hand inframap the files that actually declare resources/data; the
+  // resource-free files (variables.tf, outputs.tf, backend.tf) add nothing to
+  // the graph and may carry guard blocks inframap can't parse (see #265).
+  const resourceFiles = files.filter((f) => (blocksByFile.get(f)?.length ?? 0) > 0);
+  renderResourceGraph(join(OUT_DIR, 'resource-graph.svg'), resourceFiles, declaredResourceAddrs);
 
   console.log('\nInlining Mermaid sources into markdown...');
   for (const [mmdName, targets] of Object.entries(MARKDOWN_TARGETS)) {

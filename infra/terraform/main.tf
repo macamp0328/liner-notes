@@ -19,6 +19,10 @@ terraform {
       source  = "hashicorp/archive"
       version = "~> 2.0"
     }
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 5.0"
+    }
   }
 }
 
@@ -42,6 +46,13 @@ provider "aws" {
     tags = local.default_tags
   }
 }
+
+# Cloudflare fronts graph-service for TLS + custom domain (issue #119). The
+# token is read from the CLOUDFLARE_API_TOKEN environment variable — never a
+# tfvar, never in state. When cloudflare_enabled is false (the default) no
+# Cloudflare resource or data source is evaluated, so Terraform never
+# configures this provider and no token is required.
+provider "cloudflare" {}
 
 data "aws_caller_identity" "current" {}
 

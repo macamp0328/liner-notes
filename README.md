@@ -51,6 +51,7 @@ The production deployment is a single-node k3s cluster on EC2, with [Neo4j AuraD
 ```mermaid
 flowchart LR
   user([Your laptop / browser]):::ext
+  cloudflare["Cloudflare<br/>DNS · TLS · origin rule :30080"]:::ext
 
   subgraph aws["AWS account · region us-east-1"]
     direction TB
@@ -97,7 +98,8 @@ flowchart LR
     discogs[("Discogs API<br/>https · 60 req/min")]:::ext
   end
 
-  user -- "http :30080 (NodePort)" --> svc
+  user -- "https" --> cloudflare
+  cloudflare -- "http :30080 (origin rule)" --> svc
   pod == "Cypher · neo4j+s://" ==> aura
   pod -.ingest.-> discogs
   cron == "ecr get-login-password<br/>(IMDS → instance role)" ==> ecr
@@ -113,28 +115,29 @@ flowchart LR
   end
 
   %% Edge indices follow declaration order across the entire file.
-  %% Main edges (0–11):
+  %% Main edges (0–12):
   %%   0  svc --> pod                          (request)
   %%   1  k8s_secret -.envFrom.-> pod          (mount, gray default)
   %%   2  k8s_pull -.imagePullSecret.-> pod    (mount, gray default)
   %%   3  cron -- "writes refreshed token" --> k8s_pull   (secret sync)
   %%   4  eso_op -- "syncs every 1h" --> k8s_secret       (secret sync)
   %%   5  iam -.attached.-> ec2                (attachment, gray default)
-  %%   6  user --> svc                         (request)
-  %%   7  pod ==> aura                         (data path)
-  %%   8  pod -.ingest.-> discogs              (external egress)
-  %%   9  cron ==> ecr                         (secret sync — image-pull token)
-  %%  10  eso_op ==> sm                        (secret sync)
-  %%  11  pod ==> ecr                          (data path — image pull)
-  %% Legend edges (12–15):
-  %%  12  lr1 --> lr2                          (request)
-  %%  13  ld1 ==> ld2                          (data path)
-  %%  14  lc1 -.-> lc2                         (secret sync)
-  %%  15  le1 -.-> le2                         (external egress)
-  linkStyle 0,6,12 stroke:#0f172a,stroke-width:2px
-  linkStyle 7,11,13 stroke:#1d4ed8,stroke-width:2.5px
-  linkStyle 3,4,9,10,14 stroke:#7c3aed,stroke-width:1.8px
-  linkStyle 8,15 stroke:#15803d,stroke-width:1.8px
+  %%   6  user --> cloudflare                  (request)
+  %%   7  cloudflare --> svc                   (request)
+  %%   8  pod ==> aura                         (data path)
+  %%   9  pod -.ingest.-> discogs              (external egress)
+  %%  10  cron ==> ecr                         (secret sync — image-pull token)
+  %%  11  eso_op ==> sm                        (secret sync)
+  %%  12  pod ==> ecr                          (data path — image pull)
+  %% Legend edges (13–16):
+  %%  13  lr1 --> lr2                          (request)
+  %%  14  ld1 ==> ld2                          (data path)
+  %%  15  lc1 -.-> lc2                         (secret sync)
+  %%  16  le1 -.-> le2                         (external egress)
+  linkStyle 0,6,7,13 stroke:#0f172a,stroke-width:2px
+  linkStyle 8,12,14 stroke:#1d4ed8,stroke-width:2.5px
+  linkStyle 3,4,10,11,15 stroke:#7c3aed,stroke-width:1.8px
+  linkStyle 9,16 stroke:#15803d,stroke-width:1.8px
 
   classDef ext fill:#f4f4f4,stroke:#999,stroke-dasharray:5 3
   classDef legendNode fill:#ffffff,stroke:#cbd5e1,color:#475569
