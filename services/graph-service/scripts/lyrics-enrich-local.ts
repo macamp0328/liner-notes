@@ -19,6 +19,10 @@
  *
  *   (or `pnpm lyrics:enrich:local`, which uses the default services/graph-service/.env.local)
  *
+ *   Flags: --env <path> (env file; default ../.env.local). --allow-local permits a
+ *   localhost/loopback NEO4J_URI; without it the script refuses one as a likely wrong --env,
+ *   since the harvest is meant for the prod graph.
+ *
  * The --env file must hold the read-WRITE PROD creds plus GENIUS_TOKEN:
  *   NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, GENIUS_TOKEN   (optional GENIUS_USER_AGENT)
  * Keep it SEPARATE from your dev .env.local so the harvest can't accidentally target localhost —
@@ -75,6 +79,16 @@ function hostOf(uri: string): string {
   }
 }
 
+// localhost / loopback detection for the prod-write guard. `host` may carry a :port and IPv6
+// brackets (e.g. "localhost:7687", "[::1]:7687"); strip both before comparing.
+function isLocalHost(host: string): boolean {
+  const name = host
+    .replace(/:\d+$/, '')
+    .replace(/^\[|\]$/g, '')
+    .toLowerCase();
+  return name === 'localhost' || name === '127.0.0.1' || name === '::1' || name === '0.0.0.0';
+}
+
 async function main(): Promise<void> {
   loadEnv();
   const uri = requireEnv('NEO4J_URI');
@@ -96,8 +110,18 @@ async function main(): Promise<void> {
   }
 
   // This script WRITES (SET) to whatever DB the env points at. Surface the target host (no
-  // creds) so a wrong --env (e.g. a dev .env.local -> localhost) is caught before any write.
-  console.log(`[lyrics-enrich-local] target Neo4j host: ${hostOf(uri)}`);
+  // creds) so a wrong --env (e.g. a dev .env.local -> localhost) is caught before any write, and
+  // hard-refuse a local target unless --allow-local is passed — the harvest's purpose is the prod
+  // Aura graph, so a localhost run is almost always an accidental wrong --env.
+  const targetHost = hostOf(uri);
+  console.log(`[lyrics-enrich-local] target Neo4j host: ${targetHost}`);
+  if (isLocalHost(targetHost) && !process.argv.includes('--allow-local')) {
+    throw new Error(
+      `Refusing to run against a local target (${targetHost}) — this harvest writes to the graph ` +
+        `at NEO4J_URI and is meant for the prod Aura graph. Point --env at the prod creds, or pass ` +
+        `--allow-local to target localhost deliberately.`,
+    );
+  }
   console.log(
     `[lyrics-enrich-local] ENRICHMENT_STALENESS_DAYS=${process.env['ENRICHMENT_STALENESS_DAYS']}`,
   );
