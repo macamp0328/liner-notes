@@ -49,21 +49,36 @@ variable "cloudflare_enabled" {
 }
 
 variable "restrict_app_to_cloudflare" {
-  description = "Lock the NodePort security group to Cloudflare's published IPv4 ranges (instead of allow_app_cidr) and repoint the Route 53 health check at the HTTPS domain. Set true only after verifying the Cloudflare path works end to end. No-op unless cloudflare_enabled is also true (enforced via local.restrict_to_cloudflare) so it can never lock the origin down without the Cloudflare DNS record and origin rule existing."
+  description = "Lock the NodePort security group to Cloudflare's published IPv4 ranges (instead of allow_app_cidr) and repoint the Route 53 health check at the HTTPS domain. Set true only after verifying the Cloudflare path works end to end. Requires cloudflare_enabled = true — rejected at plan otherwise, and structurally gated via local.restrict_to_cloudflare as a backstop, so it can never lock the origin down without the Cloudflare DNS record and origin rule existing."
   type        = bool
   default     = false
+
+  validation {
+    condition     = !var.restrict_app_to_cloudflare || var.cloudflare_enabled
+    error_message = "restrict_app_to_cloudflare requires cloudflare_enabled = true."
+  }
 }
 
 variable "cloudflare_zone_id" {
-  description = "Cloudflare zone ID that owns custom_domain. Copy it from the Cloudflare dashboard (Overview → API → Zone ID). Required when cloudflare_enabled is true — left empty it fails at apply when Cloudflare creates the DNS record."
+  description = "Cloudflare zone ID that owns custom_domain. Copy it from the Cloudflare dashboard (Overview → API → Zone ID). Required when cloudflare_enabled is true — left empty it fails at plan."
   type        = string
   default     = ""
+
+  validation {
+    condition     = !var.cloudflare_enabled || var.cloudflare_zone_id != ""
+    error_message = "cloudflare_zone_id must be set when cloudflare_enabled is true."
+  }
 }
 
 variable "custom_domain" {
-  description = "Fully-qualified hostname Cloudflare serves graph-service on, e.g. api.example.com. Kept out of committed defaults (public-repo safety) — supply it via a gitignored *.tfvars. Required when cloudflare_enabled is true — left empty it fails at apply when Cloudflare creates the DNS record."
+  description = "Fully-qualified hostname Cloudflare serves graph-service on, e.g. api.example.com. Kept out of committed defaults (public-repo safety) — supply it via a gitignored *.tfvars. Required when cloudflare_enabled is true — left empty it fails at plan."
   type        = string
   default     = ""
+
+  validation {
+    condition     = !var.cloudflare_enabled || var.custom_domain != ""
+    error_message = "custom_domain must be set when cloudflare_enabled is true."
+  }
 }
 
 variable "nightly_schedule_enabled" {

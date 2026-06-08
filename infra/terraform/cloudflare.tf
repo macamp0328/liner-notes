@@ -20,10 +20,11 @@
 # restrict_app_to_cloudflare only takes effect alongside cloudflare_enabled.
 # Gating on both flags makes it structurally impossible to lock the origin
 # security group / flip the health check to the (then non-existent) Cloudflare
-# domain without the DNS record and origin rule also being created. Terraform
-# can't express this as a cross-variable validation here — the diagram
-# generator runs inframap, whose HCL parser rejects both precondition blocks
-# and cross-variable validation conditions.
+# domain without the DNS record and origin rule also being created. The
+# fail-fast plan-time guard lives as a cross-variable validation on
+# restrict_app_to_cloudflare in variables.tf (unblocked once the diagram
+# generator stopped feeding inframap the resource-free files — see #265); this
+# structural local is kept as a backstop.
 locals {
   restrict_to_cloudflare = var.restrict_app_to_cloudflare && var.cloudflare_enabled
 }
