@@ -108,10 +108,15 @@ resource "aws_cloudwatch_metric_alarm" "pod_restarts" {
 # always reads from the right region regardless of var.aws_region.
 # ---------------------------------------------------------------------------
 
+# When the security group is locked to Cloudflare (restrict_app_to_cloudflare),
+# probing the origin IP:30080 directly would be blocked, so the check follows
+# the real user path: HTTPS against the custom domain through Cloudflare.
+# Otherwise it probes the origin directly over HTTP on :30080.
 resource "aws_route53_health_check" "graph_service" {
-  type              = "HTTP"
-  ip_address        = aws_eip.k3s.public_ip
-  port              = 30080
+  type              = local.restrict_to_cloudflare ? "HTTPS" : "HTTP"
+  ip_address        = local.restrict_to_cloudflare ? null : aws_eip.k3s.public_ip
+  fqdn              = local.restrict_to_cloudflare ? var.custom_domain : null
+  port              = local.restrict_to_cloudflare ? 443 : 30080
   resource_path     = "/api/v1/health"
   request_interval  = 30
   failure_threshold = 3

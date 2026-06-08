@@ -27,6 +27,7 @@ This is the operator's guide to standing up, redeploying, and recovering the pro
 ```mermaid
 flowchart LR
   user([Your laptop / browser]):::ext
+  cloudflare["Cloudflare<br/>DNS · TLS · origin rule :30080"]:::ext
 
   subgraph aws["AWS account · region us-east-1"]
     direction TB
@@ -73,7 +74,8 @@ flowchart LR
     discogs[("Discogs API<br/>https · 60 req/min")]:::ext
   end
 
-  user -- "http :30080 (NodePort)" --> svc
+  user -- "https" --> cloudflare
+  cloudflare -- "http :30080 (origin rule)" --> svc
   pod == "Cypher · neo4j+s://" ==> aura
   pod -.ingest.-> discogs
   cron == "ecr get-login-password<br/>(IMDS → instance role)" ==> ecr
@@ -89,28 +91,29 @@ flowchart LR
   end
 
   %% Edge indices follow declaration order across the entire file.
-  %% Main edges (0–11):
+  %% Main edges (0–12):
   %%   0  svc --> pod                          (request)
   %%   1  k8s_secret -.envFrom.-> pod          (mount, gray default)
   %%   2  k8s_pull -.imagePullSecret.-> pod    (mount, gray default)
   %%   3  cron -- "writes refreshed token" --> k8s_pull   (secret sync)
   %%   4  eso_op -- "syncs every 1h" --> k8s_secret       (secret sync)
   %%   5  iam -.attached.-> ec2                (attachment, gray default)
-  %%   6  user --> svc                         (request)
-  %%   7  pod ==> aura                         (data path)
-  %%   8  pod -.ingest.-> discogs              (external egress)
-  %%   9  cron ==> ecr                         (secret sync — image-pull token)
-  %%  10  eso_op ==> sm                        (secret sync)
-  %%  11  pod ==> ecr                          (data path — image pull)
-  %% Legend edges (12–15):
-  %%  12  lr1 --> lr2                          (request)
-  %%  13  ld1 ==> ld2                          (data path)
-  %%  14  lc1 -.-> lc2                         (secret sync)
-  %%  15  le1 -.-> le2                         (external egress)
-  linkStyle 0,6,12 stroke:#0f172a,stroke-width:2px
-  linkStyle 7,11,13 stroke:#1d4ed8,stroke-width:2.5px
-  linkStyle 3,4,9,10,14 stroke:#7c3aed,stroke-width:1.8px
-  linkStyle 8,15 stroke:#15803d,stroke-width:1.8px
+  %%   6  user --> cloudflare                  (request)
+  %%   7  cloudflare --> svc                   (request)
+  %%   8  pod ==> aura                         (data path)
+  %%   9  pod -.ingest.-> discogs              (external egress)
+  %%  10  cron ==> ecr                         (secret sync — image-pull token)
+  %%  11  eso_op ==> sm                        (secret sync)
+  %%  12  pod ==> ecr                          (data path — image pull)
+  %% Legend edges (13–16):
+  %%  13  lr1 --> lr2                          (request)
+  %%  14  ld1 ==> ld2                          (data path)
+  %%  15  lc1 -.-> lc2                         (secret sync)
+  %%  16  le1 -.-> le2                         (external egress)
+  linkStyle 0,6,7,13 stroke:#0f172a,stroke-width:2px
+  linkStyle 8,12,14 stroke:#1d4ed8,stroke-width:2.5px
+  linkStyle 3,4,10,11,15 stroke:#7c3aed,stroke-width:1.8px
+  linkStyle 9,16 stroke:#15803d,stroke-width:1.8px
 
   classDef ext fill:#f4f4f4,stroke:#999,stroke-dasharray:5 3
   classDef legendNode fill:#ffffff,stroke:#cbd5e1,color:#475569
@@ -124,7 +127,7 @@ flowchart LR
 
 - **Secrets**: AWS Secrets Manager → External Secrets Operator → k8s `Secret` → pod env. ESO authenticates via the EC2 instance role through IMDS — no static AWS keys live in the cluster.
 - **Image pulls**: a CronJob mints a fresh 12h ECR auth token every 6h using the same instance role, writes it into `Secret/ecr-pull-secret`, and the Deployment references it via `imagePullSecrets`. Plain k3s/containerd doesn't speak IAM directly, so this k8s-native loop fills the gap.
-- **Ingress**: NodePort `:30080`, opened to the world (or to a narrowed CIDR) by the EC2 security group. Read endpoints are public; mutating endpoints require `ADMIN_TOKEN`.
+- **Ingress**: Cloudflare fronts the API — it terminates TLS for the custom domain and forwards to NodePort `:30080` via an Origin Rule, and the EC2 security group admits `:30080` only from Cloudflare's IP ranges (`restrict_app_to_cloudflare`). Direct `http://<eip>:30080` is refused. (With Cloudflare disabled — the fork default — `:30080` is served directly per `allow_app_cidr`.) Read endpoints are public; mutating endpoints require `ADMIN_TOKEN`. See [TLS + custom domain (Cloudflare)](#tls--custom-domain-cloudflare).
 - **Graph data**: Aura Free in GCP. Cross-cloud Cypher latency is ~tens of ms — acceptable for this workload.
 
 ---
@@ -432,7 +435,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 ### Step 8 — Verify
 
-Run from your laptop. `kubectl` calls need the Step 4b port-forward; `curl` reaches the service over the public internet on `:30080` (different port from the k3s API).
+Run from your laptop. `kubectl` calls need the Step 4b port-forward; `curl` reaches the service at `$SERVICE_URL` — the Cloudflare HTTPS domain once the [TLS + custom domain](#tls--custom-domain-cloudflare) step is applied, or the NodePort `:30080` directly before that (a different port from the k3s API).
 
 ```bash
 # Pod is Running and Ready
@@ -720,6 +723,83 @@ The Deployment uses `strategy: Recreate` — there will be ~30 seconds of downti
 
 ---
 
+## TLS + custom domain (Cloudflare)
+
+Puts Cloudflare in front of the NodePort so the API is served over HTTPS on a custom hostname instead of plain HTTP on `http://<eip-dns>:30080` (issue [#119](https://github.com/macamp0328/liner-notes/issues/119)). Cloudflare proxies the hostname, terminates TLS for free, and an **Origin Rule** rewrites the destination port to `30080` — without it Cloudflare connects to the origin on a standard port derived from the request (`80` for HTTP/Flexible, `443` for HTTPS), never a non-standard NodePort like `:30080`. TLS mode is **Flexible** (browser↔Cloudflare is HTTPS; Cloudflare↔origin stays HTTP on `:30080`, as the issue specifies). All of it is defined in [`infra/terraform/cloudflare.tf`](terraform/cloudflare.tf).
+
+**This is applied in the liner-notes production deployment** — the API is live over HTTPS at `https://ln-api.impressivelyadequate.com`, origin locked to Cloudflare. It's opt-in (`cloudflare_enabled`, default off, so a fork stays on plain HTTP until configured); the two-phase rollout below is the setup procedure, and the reference for how the live config was built.
+
+### Prerequisites
+
+- A domain (zone) added to Cloudflare, and a subdomain to serve graph-service on (e.g. `api.example.com`).
+- The zone ID — Cloudflare dashboard → the zone → **Overview** → API → **Zone ID**.
+- A Cloudflare API token (My Profile → API Tokens → Create Token) scoped to that zone with **Zone → DNS → Edit** and **Zone → Zone Settings → Edit**. Export it before every `terraform` run — it is read from the environment, never stored in tfvars or state:
+
+  ```bash
+  export CLOUDFLARE_API_TOKEN=...
+  ```
+
+> The domain and zone ID live in a **gitignored `terraform.tfvars`** (public-repo safety), not in committed defaults. See the Cloudflare block in [`terraform.tfvars.example`](terraform/terraform.tfvars.example).
+
+### Phase 1 — put Cloudflare in front (origin still publicly reachable)
+
+In `terraform.tfvars`:
+
+```hcl
+cloudflare_enabled = true
+cloudflare_zone_id = "<your-zone-id>"
+custom_domain      = "api.example.com"
+```
+
+Apply (from the primary checkout, with `CLOUDFLARE_API_TOKEN` and AWS creds in the environment):
+
+```bash
+terraform -chdir=infra/terraform plan      # creates a CNAME, 3 zone settings, 1 origin ruleset
+terraform -chdir=infra/terraform apply
+```
+
+Verify the full path while `:30080` is still open (so you can A/B against the origin):
+
+```bash
+curl -fsS https://api.example.com/api/v1/health      # {"status":"ok","neo4j":"connected"}
+curl -fsS http://"$(terraform -chdir=infra/terraform output -raw ec2_public_dns)":30080/api/v1/health
+```
+
+Both should return `200`. If the HTTPS one fails, give Cloudflare a minute to issue the edge cert, then re-check; confirm the DNS record shows **Proxied** (orange cloud) in the dashboard.
+
+### Phase 2 — lock the origin to Cloudflare only
+
+Once HTTPS is green, stop the world from reaching `:30080` directly. Add to `terraform.tfvars`:
+
+```hcl
+restrict_app_to_cloudflare = true
+allow_app_cidr             = []
+```
+
+```bash
+terraform -chdir=infra/terraform apply
+```
+
+This swaps the security group's public NodePort rule for one scoped to Cloudflare's published IPv4 ranges (`cloudflare_ip_ranges`), and **repoints the Route 53 health check** from the now-blocked direct IP probe onto `HTTPS https://api.example.com/api/v1/health` (otherwise the health alarm would fire). Verify:
+
+```bash
+curl -fsS https://api.example.com/api/v1/health                       # still 200
+curl --max-time 8 http://<eip-dns>:30080/api/v1/health || echo "blocked (expected)"   # times out
+```
+
+> After the lockdown the origin is reachable **only through Cloudflare** — direct `http://<eip>:30080` from anywhere (including your laptop) is refused. Any habit of hitting the public IP on `:30080` (e.g. quick `/stats` or `/health` checks) must move to the HTTPS domain: `https://<custom-domain>/api/v1/...`.
+
+### Bot protection
+
+Free-tier **Bot Fight Mode** (dashboard → Security → Bots) is a coarse on/off toggle that isn't reliably Terraform-manageable, so it is left as a manual step rather than codified. It is defense-in-depth on top of the SG lock — enable it if you want it, but note it can challenge the Route 53 health prober and turn the health alarm red; if that happens, turn it back off (the SG restriction is the primary control).
+
+### Rollback / hardening notes
+
+- To revert, set the flags back to `false` and `apply` — the CNAME, zone settings, and origin rule are destroyed and the SG reopens per `allow_app_cidr`.
+- Flexible SSL leaves the Cloudflare→origin hop in plaintext (mitigated by the SG lock). Future hardening: a Cloudflare **Origin CA** cert + **Full (Strict)** mode (requires the origin to terminate TLS), or a **Cloudflare Tunnel** (removes inbound exposure entirely).
+
+---
+
 ## CD — IAM bootstrap
 
 One-time setup that lets the CD workflow ([#120](https://github.com/macamp0328/liner-notes/issues/120)) deploy without long-lived AWS keys. [`infra/terraform/cicd.tf`](terraform/cicd.tf) declares a GitHub Actions OIDC identity provider and a scoped `github-deploy` IAM role; a hosted runner assumes the role via `sts:AssumeRoleWithWebIdentity`. The role can push images to ECR and open an SSM port-forward to the k3s API server — nothing more.
@@ -847,7 +927,7 @@ The `KUBECONFIG_B64` **secret** was set in [CD — cluster bootstrap](#cd--clust
 
 > **Two caveats.**
 >
-> - **Health gate reachability.** The final step curls `SERVICE_URL` (`:30080`) from the GitHub runner. That works because `allow_app_cidr` defaults to `0.0.0.0/0` (open). If you've narrowed it (see `terraform.tfvars.example`) to your own IP, the runner can't reach `:30080` and the gate will fail — either keep `:30080` open or drop the health-gate step.
+> - **Health gate reachability.** The final step curls `SERVICE_URL` from the GitHub runner. With Cloudflare enabled, `SERVICE_URL` is the public HTTPS domain, which the runner reaches through Cloudflare — the origin SG lockdown (`restrict_app_to_cloudflare`) is irrelevant because the runner never touches `:30080` directly. (Without Cloudflare, `SERVICE_URL` is `:30080` and the runner needs `allow_app_cidr` to include it — keep `:30080` open or drop the health-gate step.)
 > - **Asleep node.** If the node is stopped (scale-to-zero), the pre-flight step fails fast with a "power on" message rather than hanging. Run `pnpm power:on`, wait for the SSM agent to register, then re-run the workflow from the **Actions** tab (`workflow_dispatch`) — no dummy commit needed.
 
 ---
@@ -863,7 +943,7 @@ Since [#175](https://github.com/macamp0328/liner-notes/issues/175) this is **two
 **Prereqs.** Set `GRAPH_SERVICE_URL` and `ADMIN_TOKEN` once (the `pnpm` admin scripts read them from a gitignored `.env.local`, or export inline):
 
 ```bash
-export GRAPH_SERVICE_URL="$SERVICE_URL"   # e.g. http://<EC2_DNS>:30080 — from the deploy env block
+export GRAPH_SERVICE_URL="$SERVICE_URL"   # the HTTPS custom domain (or http://<EC2_DNS>:30080 if Cloudflare isn't enabled)
 export ADMIN_TOKEN="$(aws secretsmanager get-secret-value \
   --secret-id liner-notes/graph-service/prod \
   --query SecretString --output text | jq -r '.ADMIN_TOKEN')"
@@ -1083,7 +1163,7 @@ To avoid getting here in the first place while the node is up, see "Keeping Aura
 | `liner-notes-pod-restarts` alarm stays `INSUFFICIENT_DATA`                                                           | fluent-bit's systemd input isn't shipping the k3s journal. Check that a `pod.k3s.k3s.service` log stream exists in the log group, and that `kubectl -n amazon-cloudwatch logs -l app.kubernetes.io/name=aws-for-fluent-bit \| grep systemd` returns non-empty. If both are empty, re-run Step 10 — the `additionalInputs` block in [`infra/k8s/aws-for-fluent-bit/values.yaml`](k8s/aws-for-fluent-bit/values.yaml) is the source of truth. Note: a graceful `kubectl delete pod` doesn't trigger this alarm; only liveness-probe failures and crash loops do — see the smoke-test in Step 11. |
 | `helm install` fails with `cannot re-use a name that is still in use`                                                | A previous install left a stuck release record. Clean up: `kubectl delete secret -n external-secrets -l owner=helm` and `kubectl get crd -o name \| grep external-secrets.io \| xargs kubectl delete`. Then retry.                                                                                                                                                                                                                                                                                                                                                                             |
 | `helm install` fails with TLS handshake timeouts from your laptop                                                    | The SSM port-forward chokes on helm's parallel API calls. Switch to running helm on the node via an interactive SSM session — Step 5 documents the pattern.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Health endpoint unreachable from the internet                                                                        | EC2 security group: `aws_vpc_security_group_ingress_rule.app_nodeport` must allow your IP on `:30080`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Health endpoint unreachable from the internet                                                                        | With Cloudflare enabled, hit the HTTPS domain (`$SERVICE_URL`), **not** `:30080` — the origin SG admits only Cloudflare's IPs (`app_nodeport_cloudflare`) and refuses direct `:30080` by design; check the Cloudflare DNS record is **Proxied** and the origin pod is up. Without Cloudflare, `aws_vpc_security_group_ingress_rule.app_nodeport` must allow your IP on `:30080`.                                                                                                                                                                                                               |
 | `kubectl` from laptop hangs / times out                                                                              | The Step 4b SSM port-forward died (laptop sleep, network change). Re-run the `AWS-StartPortForwardingSession` command and retry. The k3s API is intentionally not exposed in the security group — SSM is the only path in.                                                                                                                                                                                                                                                                                                                                                                     |
 | `kubectl` returns `x509: certificate valid for 127.0.0.1, …`                                                         | The kubeconfig server URL was rewritten away from `127.0.0.1`. Re-fetch with `aws ssm start-session ... 'command=["sudo cat /etc/rancher/k3s/k3s.yaml"]'` and leave `https://127.0.0.1:6443` intact; the port-forward bridges that local address to the API server.                                                                                                                                                                                                                                                                                                                            |
 | k3s itself unhealthy                                                                                                 | In an SSM session: `sudo journalctl -u k3s -n 200`, `sudo systemctl status k3s`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
