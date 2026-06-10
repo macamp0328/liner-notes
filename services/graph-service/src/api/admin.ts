@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify';
+import type { Driver } from 'neo4j-driver';
 import { adminAuthHook } from './middleware/admin-auth.js';
 import { getDriver } from '../db/client.js';
 import { wipeGraph } from '../db/ingestion-repository.js';
 import { buildDiscogsClientFromEnv, runIngestion } from '../ingestion/ingest.js';
+import type { Logger } from '../ingestion/discogs-client.js';
 import {
   getJobState,
   startJob,
@@ -14,10 +16,7 @@ import { clearGeniusLyrics } from '../db/lyrics-repository.js';
 import { enrichLyrics } from '../enrichment/lyrics.js';
 import { buildMusicBrainzClientFromEnv } from '../ingestion/musicbrainz-client.js';
 import { buildWikidataClientFromEnv } from '../ingestion/wikidata-client.js';
-import {
-  enrichNationality,
-  type NationalityEnrichmentSummary,
-} from '../enrichment/artist-nationality.js';
+import { enrichNationality } from '../enrichment/artist-nationality.js';
 import { resetNationalityEnrichment } from '../db/artist-nationality-repository.js';
 import { enrichMasterData } from '../enrichment/master-data.js';
 import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
@@ -182,63 +181,528 @@ export function overlayLiveProgress(
   };
 }
 
-interface PipelineState<T> {
+interface PipelineState {
   running: boolean;
   startedAt: string | null;
   completedAt: string | null;
   durationMs: number | null;
-  lastResult: T | null;
+  lastResult: Record<string, unknown> | null;
 }
 
-function makePipelineState<T>(): PipelineState<T> {
+function makePipelineState(): PipelineState {
   return { running: false, startedAt: null, completedAt: null, durationMs: null, lastResult: null };
 }
 
-type EnrichSummary = { enriched: number; skipped: number; failed: number; durationMs: number };
-type MbReleaseEventsSummary = {
-  mastersProcessed: number;
-  mastersSkipped: number;
-  mastersFailed: number;
-  eventsWritten: number;
-  durationMs: number;
-};
-type TrackMusicBrainzSummary = {
-  releasesProcessed: number;
-  releasesSkipped: number;
-  releasesFailed: number;
-  tracksMatched: number;
-  tracksUnmatched: number;
-  durationMs: number;
-};
-type TrackAcousticBrainzSummary = {
-  tracksProcessed: number;
-  tracksSkipped: number;
-  tracksFailed: number;
-  durationMs: number;
-};
-type TrackDeezerSummary = {
-  tracksProcessed: number;
-  tracksSkipped: number;
-  tracksFailed: number;
-  durationMs: number;
-};
-type ArtistGenresSummary = {
-  genresEnriched: number;
-  stylesEnriched: number;
-  skipped: number;
-  failed: number;
-  durationMs: number;
+/**
+ * The outcome of building a pipeline's external client(s) from env: either a runnable
+ * closure over the prepared clients, or the 503 message naming the missing variable.
+ * `prepare` MUST stay synchronous — the enrich handler has no await between the 409
+ * running-check and `running = true`, which is what keeps that guard atomic.
+ */
+type PreparedRun =
+  | { ok: true; run: (driver: Driver) => Promise<Record<string, unknown>> }
+  | { ok: false; message: string };
+
+interface PipelineResetConfig {
+  summary: string;
+  description: string;
+  runningMessage: string;
+  run(driver: Driver): Promise<number>;
+}
+
+/**
+ * One standalone-enrichment pipeline (issue #222 phase ③). The registry replaces nine
+ * hand-written `/enrich` + `/status` (+ six `/reset`) route blocks and their per-pipeline
+ * mutable state globals; `adminRoutes` generates the routes from this array. Entries hold
+ * the OpenAPI strings/schemas VERBATIM from the routes they replaced — `docs:generate`
+ * output must not change.
+ */
+interface PipelineEntry {
+  /** Path segment: POST /<name>/enrich, GET /<name>/status, optional POST /<name>/reset. */
+  name: string;
+  /** Fills "Status of the most recent <statusLabel> run". */
+  statusLabel: string;
+  /** 409 body message while this pipeline is running. */
+  runningMessage: string;
+  enrichSummary: string;
+  enrichDescription: string;
+  /** 200 `data` schema for /enrich — declares `required` (the run fully populates it). */
+  enrichDataSchema: Record<string, unknown>;
+  /** `lastResult` schema for /status — historically most variants declare no `required`. */
+  statusSummarySchema: Record<string, unknown>;
+  /**
+   * Whether the /enrich schema declares a 503 response. Independent of whether `prepare`
+   * can actually fail: lyrics declares one but its prepare never fails.
+   */
+  schemaHas503: boolean;
+  /**
+   * master-data and artist-profiles historically checked the client BEFORE the running
+   * flag (503 wins over 409); every other pipeline checks 409 first. Preserved as data.
+   */
+  clientCheckFirst: boolean;
+  prepare(log: Logger): PreparedRun;
+  reset?: PipelineResetConfig;
+  state: PipelineState;
+}
+
+// Status (`lastResult`) summary shapes — no `required`, matching the original status routes.
+const standardSummarySchema = {
+  type: 'object',
+  properties: {
+    enriched: { type: 'integer' },
+    skipped: { type: 'integer' },
+    failed: { type: 'integer' },
+    durationMs: { type: 'integer' },
+  },
 };
 
-const lyricsState = makePipelineState<EnrichSummary>();
-const nationalityState = makePipelineState<NationalityEnrichmentSummary>();
-const masterDataState = makePipelineState<EnrichSummary>();
-const mbReleaseEventsState = makePipelineState<MbReleaseEventsSummary>();
-const trackMusicBrainzState = makePipelineState<TrackMusicBrainzSummary>();
-const trackAcousticBrainzState = makePipelineState<TrackAcousticBrainzSummary>();
-const trackDeezerState = makePipelineState<TrackDeezerSummary>();
-const artistProfilesState = makePipelineState<EnrichSummary>();
-const artistGenresState = makePipelineState<ArtistGenresSummary>();
+const trackFeatureSummarySchema = {
+  type: 'object',
+  properties: {
+    tracksProcessed: { type: 'integer' },
+    tracksSkipped: { type: 'integer' },
+    tracksFailed: { type: 'integer' },
+    durationMs: { type: 'integer' },
+  },
+};
+
+// Enrich-200 `data` shapes — same fields plus `required`, matching the original enrich routes.
+const standardSummaryRequiredSchema = {
+  type: 'object',
+  required: ['enriched', 'skipped', 'failed', 'durationMs'],
+  properties: standardSummarySchema.properties,
+};
+
+const trackFeatureSummaryRequiredSchema = {
+  type: 'object',
+  required: ['tracksProcessed', 'tracksSkipped', 'tracksFailed', 'durationMs'],
+  properties: trackFeatureSummarySchema.properties,
+};
+
+const mbReleaseEventsSummarySchema = {
+  type: 'object',
+  properties: {
+    mastersProcessed: { type: 'integer' },
+    mastersSkipped: { type: 'integer' },
+    mastersFailed: { type: 'integer' },
+    eventsWritten: { type: 'integer' },
+    durationMs: { type: 'integer' },
+  },
+};
+
+const trackMusicBrainzSummarySchema = {
+  type: 'object',
+  properties: {
+    releasesProcessed: { type: 'integer' },
+    releasesSkipped: { type: 'integer' },
+    releasesFailed: { type: 'integer' },
+    tracksMatched: { type: 'integer' },
+    tracksUnmatched: { type: 'integer' },
+    durationMs: { type: 'integer' },
+  },
+};
+
+const artistGenresSummarySchema = {
+  type: 'object',
+  properties: {
+    genresEnriched: { type: 'integer' },
+    stylesEnriched: { type: 'integer' },
+    skipped: { type: 'integer' },
+    failed: { type: 'integer' },
+    durationMs: { type: 'integer' },
+  },
+};
+
+// Array order = route registration order = the order the original hand-written blocks
+// appeared in this file. fastify-swagger emits paths in registration order and the
+// committed docs/openapi.json is a raw stringify, so reordering entries churns the docs.
+const PIPELINES: PipelineEntry[] = [
+  {
+    name: 'lyrics',
+    statusLabel: 'lyrics enrichment',
+    runningMessage: 'Lyrics enrichment already in progress',
+    enrichSummary: 'Run lyrics enrichment standalone',
+    enrichDescription:
+      'Enriches all Track nodes that have no lyrics yet (LRCLIB primary, Genius fallback). Blocks until complete.\n\n' +
+      '**This step also runs automatically as part of `POST /api/v1/admin/ingest`.** ' +
+      'Use this endpoint to re-run lyrics enrichment in isolation — e.g. after clearing Genius lyrics via ' +
+      '`POST /api/v1/admin/lyrics/clear-genius`, after adding new tracks, or when LRCLIB coverage improves.\n\n' +
+      'Requires `GENIUS_TOKEN` env var for the Genius fallback; LRCLIB works without any key. ' +
+      'The Genius fallback sends a browser-like User-Agent to clear Cloudflare (issue #195) — ' +
+      'override it with `GENIUS_USER_AGENT` if the default needs refreshing.',
+    enrichDataSchema: standardSummaryRequiredSchema,
+    statusSummarySchema: standardSummarySchema,
+    schemaHas503: true,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => ({
+      ok: true,
+      run: async (driver) => ({ ...(await enrichLyrics(driver, log)) }),
+    }),
+    state: makePipelineState(),
+  },
+  {
+    name: 'nationality',
+    statusLabel: 'nationality enrichment',
+    runningMessage: 'Nationality enrichment already in progress',
+    enrichSummary: 'Enrich Artist and Musician nodes with nationality (ORIGIN_COUNTRY)',
+    enrichDescription:
+      'Looks up country of origin for every Artist and Musician node that has not yet been enriched, ' +
+      'creating `ORIGIN_COUNTRY` relationships to `Country` nodes. Blocks until complete.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n' +
+      '**Sources (tried in order per node):**\n' +
+      '1. MusicBrainz + Wikidata by Discogs ID (parallel). ' +
+      'MusicBrainz uses a two-step lookup via Discogs URL → MBID → artist record. ' +
+      'Wikidata uses SPARQL via P1953 → P27 → P297.\n' +
+      '2. Wikidata via Wikipedia URL: fetches the Discogs artist page, extracts any English ' +
+      'Wikipedia URLs from `urls[]`, and queries Wikidata via `schema:about` triple. ' +
+      'Covers artists whose Discogs ID is not in Wikidata but who have a Wikipedia article. ' +
+      'Requires `DISCOGS_TOKEN`.\n\n' +
+      '**Conflict resolution:** when MB and WD disagree on source 1, Wikidata is preferred and the discrepancy is logged.\n\n' +
+      'For musicians without a Discogs ID, MusicBrainz name search is used instead ' +
+      '(score ≥ 90 only). Source 2 is skipped for these musicians.\n\n' +
+      'Selects nodes that still have no `ORIGIN_COUNTRY` and whose last attempt has aged past ' +
+      '`ENRICHMENT_STALENESS_DAYS` (default 30), stamping `nationalityFetchedAt` after each attempt — so a ' +
+      'node no source could resolve is retried at most once per window while already-countried nodes are ' +
+      'skipped. Run `POST /api/v1/admin/nationality/reset` to force a full re-run.\n\n' +
+      'Requires `MUSICBRAINZ_USER_AGENT` env var.',
+    enrichDataSchema: nationalitySummarySchema,
+    statusSummarySchema: nationalitySummarySchema,
+    schemaHas503: true,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => {
+      const mbClient = buildMusicBrainzClientFromEnv(log);
+      if (!mbClient) return { ok: false, message: 'MUSICBRAINZ_USER_AGENT not configured' };
+      const wdClient = buildWikidataClientFromEnv(log);
+      const discogsClient = buildDiscogsClientFromEnv(log);
+      return {
+        ok: true,
+        run: async (driver) => ({
+          ...(await enrichNationality(
+            mbClient,
+            driver,
+            log,
+            wdClient ?? undefined,
+            discogsClient ?? undefined,
+          )),
+        }),
+      };
+    },
+    reset: {
+      summary: 'Reset nationality enrichment markers for a full re-run',
+      description:
+        'Removes the `nationalityFetchedAt` property from all Artist and Musician nodes, ' +
+        'causing the next `POST /api/v1/admin/nationality/enrich` call to re-process every node from scratch.\n\n' +
+        'Use this when:\n' +
+        '- You have added or updated enrichment sources (e.g. added Wikidata)\n' +
+        '- You want to correct stale data (e.g. a known wrong country from MusicBrainz)\n' +
+        '- You have new Artist or Musician nodes from a re-ingest\n\n' +
+        'This endpoint is blocked while `POST /api/v1/admin/nationality/enrich` is running.',
+      runningMessage:
+        'Nationality enrichment is currently running — wait for it to finish before resetting',
+      run: (driver) => resetNationalityEnrichment(driver),
+    },
+    state: makePipelineState(),
+  },
+  {
+    name: 'master-data',
+    statusLabel: 'master data enrichment',
+    runningMessage: 'Master data enrichment already in progress',
+    enrichSummary: 'Enrich Master nodes with global pressing countries and formats',
+    enrichDescription:
+      'Enrich Master nodes with global pressing countries and formats from the Discogs versions API. ' +
+      'Also fetches originalYear. **This step runs automatically as part of `POST /ingest`.** ' +
+      'Use this endpoint to run it in isolation without a full re-ingest. ' +
+      'Deduplicates by masterDiscogsId — releases sharing the same master trigger only one API call. ' +
+      'Requires `DISCOGS_TOKEN` env var.',
+    enrichDataSchema: standardSummaryRequiredSchema,
+    statusSummarySchema: standardSummarySchema,
+    schemaHas503: true,
+    clientCheckFirst: true,
+    prepare: (log): PreparedRun => {
+      const discogsClient = buildDiscogsClientFromEnv(log);
+      if (!discogsClient) return { ok: false, message: 'DISCOGS_TOKEN not configured' };
+      return {
+        ok: true,
+        run: async (driver) => ({ ...(await enrichMasterData(discogsClient, driver, log)) }),
+      };
+    },
+    state: makePipelineState(),
+  },
+  {
+    name: 'mb-release-events',
+    statusLabel: 'MusicBrainz release events enrichment',
+    runningMessage: 'MusicBrainz release event enrichment already in progress',
+    enrichSummary: 'Enrich Master nodes with MusicBrainz release events (MB_RELEASED_IN)',
+    enrichDescription:
+      'For each unenriched Master node, walks Discogs master ID → MusicBrainz release group → ' +
+      'all official releases → release events, writing `MB_RELEASED_IN` relationships to `Country` ' +
+      'nodes with ISO-3166-1 alpha-2 codes and release dates. Blocks until complete.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n' +
+      'Selects Master nodes that still have no `MB_RELEASED_IN` relationship and whose last attempt has ' +
+      'aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `mbReleaseEventsFetchedAt` after each ' +
+      'attempt — so a master MusicBrainz had no events for is retried at most once per window while ' +
+      'already-populated masters are skipped. Run `POST /api/v1/admin/mb-release-events/reset` to force a full re-run.\n\n' +
+      'Events without a country code are skipped (only ISO-coded events can be linked to Country nodes). ' +
+      'Same country with different release IDs creates separate relationships, enabling `min(r.date)` ' +
+      'queries for first-release-per-country.\n\n' +
+      'Requires `MUSICBRAINZ_USER_AGENT` env var.',
+    enrichDataSchema: {
+      type: 'object',
+      required: [
+        'mastersProcessed',
+        'mastersSkipped',
+        'mastersFailed',
+        'eventsWritten',
+        'durationMs',
+      ],
+      properties: mbReleaseEventsSummarySchema.properties,
+    },
+    statusSummarySchema: mbReleaseEventsSummarySchema,
+    schemaHas503: true,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => {
+      const mbClient = buildMusicBrainzClientFromEnv(log);
+      if (!mbClient) return { ok: false, message: 'MUSICBRAINZ_USER_AGENT not configured' };
+      return {
+        ok: true,
+        run: async (driver) => ({ ...(await enrichMbReleaseEvents(mbClient, driver, log)) }),
+      };
+    },
+    reset: {
+      summary: 'Reset MusicBrainz release event enrichment markers for a full re-run',
+      description:
+        'Removes the `mbReleaseEventsFetchedAt` property from all Master nodes and deletes all ' +
+        '`MB_RELEASED_IN` relationships, causing the next ' +
+        '`POST /api/v1/admin/mb-release-events/enrich` call to re-process every master from scratch.\n\n' +
+        'This endpoint is blocked while enrichment is running.',
+      runningMessage:
+        'MusicBrainz release event enrichment is currently running — wait for it to finish before resetting',
+      run: (driver) => resetMbReleaseEventsEnrichment(driver),
+    },
+    state: makePipelineState(),
+  },
+  {
+    name: 'track-musicbrainz',
+    statusLabel: 'MusicBrainz track enrichment',
+    runningMessage: 'MusicBrainz track enrichment already in progress',
+    enrichSummary: 'Enrich Track nodes with MusicBrainz recording MBID + ISRC',
+    enrichDescription:
+      'For each Release with unenriched tracks, resolves the MusicBrainz release via the ' +
+      'Discogs URL relation, fetches its tracklist with recording IDs/ISRCs, and aligns it to ' +
+      'Track nodes by validated ordinal position. Tracks left unmatched fall back to a direct ' +
+      'recording search accepted only on a high MusicBrainz score. Blocks until complete.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n' +
+      'Writes `recordingMbid` and `isrc` (both nullable) onto Track nodes — the cross-database ' +
+      'identifiers downstream AcousticBrainz and Deezer enrichment depend on. Tracklist alignment ' +
+      'validates title similarity and duration proximity before writing; a mismatched track is ' +
+      'skipped rather than assigned a guessed MBID.\n\n' +
+      'Re-selects a release while any of its tracks still has no `recordingMbid` and that track’s last ' +
+      'attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `musicBrainzFetchedAt` after ' +
+      'each attempt — so a track with no MusicBrainz match is retried at most once per window while ' +
+      'already-resolved tracks are skipped. Run `POST /api/v1/admin/track-musicbrainz/reset` to force a full re-run.\n\n' +
+      'Requires `MUSICBRAINZ_USER_AGENT` env var.',
+    enrichDataSchema: {
+      type: 'object',
+      required: [
+        'releasesProcessed',
+        'releasesSkipped',
+        'releasesFailed',
+        'tracksMatched',
+        'tracksUnmatched',
+        'durationMs',
+      ],
+      properties: trackMusicBrainzSummarySchema.properties,
+    },
+    statusSummarySchema: trackMusicBrainzSummarySchema,
+    schemaHas503: true,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => {
+      const mbClient = buildMusicBrainzClientFromEnv(log);
+      if (!mbClient) return { ok: false, message: 'MUSICBRAINZ_USER_AGENT not configured' };
+      return {
+        ok: true,
+        run: async (driver) => ({ ...(await enrichTrackMusicBrainz(mbClient, driver, log)) }),
+      };
+    },
+    reset: {
+      summary: 'Reset MusicBrainz track enrichment markers for a full re-run',
+      description:
+        'Removes MusicBrainz fields (`musicBrainzFetchedAt`, `recordingMbid`, `isrc`) from all ' +
+        'Track nodes, causing the next `POST /api/v1/admin/track-musicbrainz/enrich` call to ' +
+        're-process every track from scratch.\n\n' +
+        '**Cascade:** because AcousticBrainz enrichment depends on `recordingMbid` and Deezer ' +
+        'enrichment depends on `isrc`, this reset also clears all AcousticBrainz fields ' +
+        '(`acousticBrainzFetchedAt`, `tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, ' +
+        '`dynamicComplexity`, `danceabilityEstimate`, `voiceInstrumental`) and all Deezer fields ' +
+        '(`deezerFetchedAt`, `deezerBpm`, `deezerGain`) from the same nodes.\n\n' +
+        'This endpoint is blocked while enrichment is running.',
+      runningMessage:
+        'MusicBrainz track enrichment is currently running — wait for it to finish before resetting',
+      run: (driver) => resetTrackMusicBrainzEnrichment(driver),
+    },
+    state: makePipelineState(),
+  },
+  {
+    name: 'track-acousticbrainz',
+    statusLabel: 'AcousticBrainz track enrichment',
+    runningMessage: 'AcousticBrainz track enrichment already in progress',
+    enrichSummary: 'Enrich Track nodes with AcousticBrainz audio features',
+    enrichDescription:
+      'For each Track that carries a `recordingMbid` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), ' +
+      'fetches Essentia acoustic analysis from AcousticBrainz in bulk and writes audio-feature ' +
+      'properties onto the Track node. Blocks until complete.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, ' +
+      'and only after track-musicbrainz enrichment has populated `recordingMbid`.**\n\n' +
+      '**Physically measured (trustworthy):** `tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, ' +
+      '`dynamicComplexity`.\n\n' +
+      '**Model-estimated:** `danceabilityEstimate`, `voiceInstrumental` are AcousticBrainz ' +
+      'classifier outputs — a different model from Spotify/Echo Nest. They are this project’s ' +
+      'own estimates and must never be presented as Spotify-equivalent values. No time signature ' +
+      'is provided: AcousticBrainz does not expose a reliable categorical time signature.\n\n' +
+      'All fields are nullable and best-effort — AcousticBrainz coverage is crowd-sourced and ' +
+      'frozen at 2022. Re-selects a track that still has no features (null `tempo`) once its last ' +
+      'attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `acousticBrainzFetchedAt` ' +
+      'after each attempt — so a track with no AcousticBrainz data is retried at most once per window ' +
+      'while already-featured tracks are skipped. Run `POST /api/v1/admin/track-acousticbrainz/reset` ' +
+      'to force a full re-run.',
+    enrichDataSchema: trackFeatureSummaryRequiredSchema,
+    statusSummarySchema: trackFeatureSummarySchema,
+    schemaHas503: false,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => {
+      const abClient = buildAcousticBrainzClientFromEnv(log);
+      return {
+        ok: true,
+        run: async (driver) => ({ ...(await enrichTrackAcousticBrainz(abClient, driver, log)) }),
+      };
+    },
+    reset: {
+      summary: 'Reset AcousticBrainz track enrichment markers for a full re-run',
+      description:
+        'Removes the `acousticBrainzFetchedAt` marker and every audio-feature property ' +
+        '(`tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, `dynamicComplexity`, ' +
+        '`danceabilityEstimate`, `voiceInstrumental`) from all Track nodes, causing the next ' +
+        '`POST /api/v1/admin/track-acousticbrainz/enrich` call to re-process every track from ' +
+        'scratch.\n\n' +
+        'This endpoint is blocked while enrichment is running.',
+      runningMessage:
+        'AcousticBrainz track enrichment is currently running — wait for it to finish before resetting',
+      run: (driver) => resetTrackAcousticBrainzEnrichment(driver),
+    },
+    state: makePipelineState(),
+  },
+  {
+    name: 'track-deezer',
+    statusLabel: 'Deezer track enrichment',
+    runningMessage: 'Deezer track enrichment already in progress',
+    enrichSummary: 'Enrich Track nodes with Deezer BPM and loudness',
+    enrichDescription:
+      'For each Track that carries an `isrc` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), ' +
+      'looks the ISRC up against the free Deezer public API and writes `deezerBpm` and ' +
+      '`deezerGain` (a loudness figure) onto the Track node. Blocks until complete.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, ' +
+      'and only after track-musicbrainz enrichment has populated `isrc`.**\n\n' +
+      'Deezer is an independent, ISRC-keyed source. `deezerBpm`/`deezerGain` are stored under ' +
+      'distinct property names rather than overwriting the AcousticBrainz `tempo`/`loudnessDb` ' +
+      'fields, so the source stays traceable and the two BPM figures can be compared. Deezer ' +
+      'returns `0` for unknown values — those are stored as null.\n\n' +
+      'All fields are nullable and best-effort. Re-selects a track that still has no Deezer data ' +
+      '(null `deezerBpm` and `deezerGain`) once its last attempt has aged past `ENRICHMENT_STALENESS_DAYS` ' +
+      '(default 30), stamping `deezerFetchedAt` after each attempt — so a track Deezer had nothing for is ' +
+      'retried at most once per window while already-populated tracks are skipped. Run ' +
+      '`POST /api/v1/admin/track-deezer/reset` to force a full re-run.',
+    enrichDataSchema: trackFeatureSummaryRequiredSchema,
+    statusSummarySchema: trackFeatureSummarySchema,
+    schemaHas503: false,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => {
+      const deezerClient = buildDeezerClientFromEnv(log);
+      return {
+        ok: true,
+        run: async (driver) => ({ ...(await enrichTrackDeezer(deezerClient, driver, log)) }),
+      };
+    },
+    reset: {
+      summary: 'Reset Deezer track enrichment markers for a full re-run',
+      description:
+        'Removes the `deezerFetchedAt` marker and the `deezerBpm` and `deezerGain` properties ' +
+        'from all Track nodes, causing the next `POST /api/v1/admin/track-deezer/enrich` call ' +
+        'to re-process every track from scratch.\n\n' +
+        'This endpoint is blocked while enrichment is running.',
+      runningMessage:
+        'Deezer track enrichment is currently running — wait for it to finish before resetting',
+      run: (driver) => resetTrackDeezerEnrichment(driver),
+    },
+    state: makePipelineState(),
+  },
+  {
+    name: 'artist-profiles',
+    statusLabel: 'artist profiles enrichment',
+    runningMessage: 'Artist profiles enrichment already in progress',
+    enrichSummary: 'Enrich Artist nodes with realName and profile from the Discogs artist API',
+    enrichDescription:
+      'For each Artist node that still has neither `realName` nor `profile` and whose last attempt ' +
+      'has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), fetches `GET /artists/{id}` and writes ' +
+      '`realName` and `profile`, stamping `profileFetchedAt`. Blocks until complete.\n\n' +
+      '**This step also runs automatically as part of `POST /api/v1/admin/ingest`.** ' +
+      'Use this endpoint to run it in isolation — e.g. after adding new artists from a re-ingest. ' +
+      'Artists that already have a realName or profile are skipped; one Discogs had nothing for is ' +
+      'retried at most once per window via the `profileFetchedAt` marker; run ' +
+      '`POST /api/v1/admin/artist-profiles/reset` first to re-fetch every artist.\n\n' +
+      'Requires `DISCOGS_TOKEN` env var.',
+    enrichDataSchema: standardSummaryRequiredSchema,
+    statusSummarySchema: standardSummarySchema,
+    schemaHas503: true,
+    clientCheckFirst: true,
+    prepare: (log): PreparedRun => {
+      const discogsClient = buildDiscogsClientFromEnv(log);
+      if (!discogsClient) return { ok: false, message: 'DISCOGS_TOKEN not configured' };
+      return {
+        ok: true,
+        run: async (driver) => ({ ...(await enrichArtistProfiles(discogsClient, driver, log)) }),
+      };
+    },
+    reset: {
+      summary: 'Reset artist profile enrichment markers for a full re-run',
+      description:
+        'Removes the `profileFetchedAt` marker and the `realName` and `profile` properties from ' +
+        'all Artist nodes, causing the next `POST /api/v1/admin/artist-profiles/enrich` call to ' +
+        're-fetch every artist from scratch.\n\n' +
+        'This endpoint is blocked while enrichment is running.',
+      runningMessage:
+        'Artist profiles enrichment is currently running — wait for it to finish before resetting',
+      run: (driver) => resetArtistProfilesEnrichment(driver),
+    },
+    state: makePipelineState(),
+  },
+  {
+    name: 'artist-genres',
+    statusLabel: 'artist genres enrichment',
+    runningMessage: 'Artist genres enrichment already in progress',
+    enrichSummary: 'Aggregate genres and styles from releases onto Artist nodes',
+    enrichDescription:
+      "Rolls each Artist's release genres/styles (via IN_GENRE and IN_STYLE) up onto the " +
+      'Artist node as `genres[]` and `styles[]`. Pure graph computation — no external API. ' +
+      'Blocks until complete.\n\n' +
+      '**This step also runs automatically as part of `POST /api/v1/admin/ingest`.** ' +
+      'Use this endpoint to recompute in isolation after a re-ingest adds releases.\n\n' +
+      '**No reset endpoint:** the aggregation recomputes each Artist from scratch every run, ' +
+      'so it is inherently idempotent and there is nothing to reset.',
+    enrichDataSchema: {
+      type: 'object',
+      required: ['genresEnriched', 'stylesEnriched', 'skipped', 'failed', 'durationMs'],
+      properties: artistGenresSummarySchema.properties,
+    },
+    statusSummarySchema: artistGenresSummarySchema,
+    schemaHas503: false,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => ({
+      ok: true,
+      run: async (driver) => ({ ...(await enrichArtistGenres(driver, log)) }),
+    }),
+    state: makePipelineState(),
+  },
+];
 
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
@@ -483,1093 +947,128 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     },
   );
 
-  fastify.post<{
-    Reply:
-      | { data: { enriched: number; skipped: number; failed: number; durationMs: number } }
-      | { error: { code: string; message: string } };
-  }>(
-    '/lyrics/enrich',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Run lyrics enrichment standalone',
-        description:
-          'Enriches all Track nodes that have no lyrics yet (LRCLIB primary, Genius fallback). Blocks until complete.\n\n' +
-          '**This step also runs automatically as part of `POST /api/v1/admin/ingest`.** ' +
-          'Use this endpoint to re-run lyrics enrichment in isolation — e.g. after clearing Genius lyrics via ' +
-          '`POST /api/v1/admin/lyrics/clear-genius`, after adding new tracks, or when LRCLIB coverage improves.\n\n' +
-          'Requires `GENIUS_TOKEN` env var for the Genius fallback; LRCLIB works without any key. ' +
-          'The Genius fallback sends a browser-like User-Agent to clear Cloudflare (issue #195) — ' +
-          'override it with `GENIUS_USER_AGENT` if the default needs refreshing.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: {
-                type: 'object',
-                required: ['enriched', 'skipped', 'failed', 'durationMs'],
-                properties: {
-                  enriched: { type: 'integer' },
-                  skipped: { type: 'integer' },
-                  failed: { type: 'integer' },
-                  durationMs: { type: 'integer' },
-                },
-              },
+  // ── Standalone enrichment pipelines (issue #222 phase ③) ───────────────────
+  // POST /<name>/enrich and POST /<name>/reset are generated per registry entry,
+  // interleaved so route registration order matches the original hand-written blocks
+  // (the committed OpenAPI doc emits paths in registration order).
+  for (const entry of PIPELINES) {
+    fastify.post<{
+      Reply: { data: Record<string, unknown> } | { error: { code: string; message: string } };
+    }>(
+      `/${entry.name}/enrich`,
+      {
+        schema: {
+          tags: ['admin'],
+          summary: entry.enrichSummary,
+          description: entry.enrichDescription,
+          security: [{ bearerAuth: [] }],
+          response: {
+            200: {
+              type: 'object',
+              required: ['data'],
+              properties: { data: entry.enrichDataSchema },
             },
+            401: errorResponseRef,
+            409: errorResponseRef,
+            ...(entry.schemaHas503 ? { 503: errorResponseRef } : {}),
           },
-          401: errorResponseRef,
-          409: errorResponseRef,
-          503: errorResponseRef,
         },
+        preHandler: adminAuthHook,
       },
-      preHandler: adminAuthHook,
-    },
-    async (request, reply) => {
-      if (lyricsState.running) {
-        return reply.code(409).send({
-          error: { code: 'ENRICHMENT_RUNNING', message: 'Lyrics enrichment already in progress' },
-        });
-      }
-      lyricsState.running = true;
-      lyricsState.startedAt = new Date().toISOString();
-      lyricsState.completedAt = null;
-      lyricsState.durationMs = null;
-      lyricsState.lastResult = null;
-      try {
-        const summary = await enrichLyrics(getDriver(), request.log);
-        lyricsState.lastResult = summary;
-        lyricsState.completedAt = new Date().toISOString();
-        lyricsState.durationMs = summary.durationMs;
-        return reply.send({ data: summary });
-      } finally {
-        lyricsState.running = false;
-      }
-    },
-  );
+      async (request, reply) => {
+        let prepared: PreparedRun | null = null;
 
-  fastify.post<{
-    Reply: { data: NationalityEnrichmentSummary } | { error: { code: string; message: string } };
-  }>(
-    '/nationality/enrich',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Enrich Artist and Musician nodes with nationality (ORIGIN_COUNTRY)',
-        description:
-          'Looks up country of origin for every Artist and Musician node that has not yet been enriched, ' +
-          'creating `ORIGIN_COUNTRY` relationships to `Country` nodes. Blocks until complete.\n\n' +
-          '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n' +
-          '**Sources (tried in order per node):**\n' +
-          '1. MusicBrainz + Wikidata by Discogs ID (parallel). ' +
-          'MusicBrainz uses a two-step lookup via Discogs URL → MBID → artist record. ' +
-          'Wikidata uses SPARQL via P1953 → P27 → P297.\n' +
-          '2. Wikidata via Wikipedia URL: fetches the Discogs artist page, extracts any English ' +
-          'Wikipedia URLs from `urls[]`, and queries Wikidata via `schema:about` triple. ' +
-          'Covers artists whose Discogs ID is not in Wikidata but who have a Wikipedia article. ' +
-          'Requires `DISCOGS_TOKEN`.\n\n' +
-          '**Conflict resolution:** when MB and WD disagree on source 1, Wikidata is preferred and the discrepancy is logged.\n\n' +
-          'For musicians without a Discogs ID, MusicBrainz name search is used instead ' +
-          '(score ≥ 90 only). Source 2 is skipped for these musicians.\n\n' +
-          'Selects nodes that still have no `ORIGIN_COUNTRY` and whose last attempt has aged past ' +
-          '`ENRICHMENT_STALENESS_DAYS` (default 30), stamping `nationalityFetchedAt` after each attempt — so a ' +
-          'node no source could resolve is retried at most once per window while already-countried nodes are ' +
-          'skipped. Run `POST /api/v1/admin/nationality/reset` to force a full re-run.\n\n' +
-          'Requires `MUSICBRAINZ_USER_AGENT` env var.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: nationalitySummarySchema,
-            },
-          },
-          401: errorResponseRef,
-          409: errorResponseRef,
-          503: errorResponseRef,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (request, reply) => {
-      if (nationalityState.running) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message: 'Nationality enrichment already in progress',
-          },
-        });
-      }
-
-      const mbClient = buildMusicBrainzClientFromEnv(request.log);
-      if (!mbClient) {
-        return reply.code(503).send({
-          error: {
-            code: 'SERVICE_UNAVAILABLE',
-            message: 'MUSICBRAINZ_USER_AGENT not configured',
-          },
-        });
-      }
-
-      const wdClient = buildWikidataClientFromEnv(request.log);
-      const discogsClient = buildDiscogsClientFromEnv(request.log);
-
-      nationalityState.running = true;
-      nationalityState.startedAt = new Date().toISOString();
-      nationalityState.completedAt = null;
-      nationalityState.durationMs = null;
-      nationalityState.lastResult = null;
-      try {
-        const summary = await enrichNationality(
-          mbClient,
-          getDriver(),
-          request.log,
-          wdClient ?? undefined,
-          discogsClient ?? undefined,
-        );
-        nationalityState.lastResult = summary;
-        nationalityState.completedAt = new Date().toISOString();
-        nationalityState.durationMs = summary.durationMs;
-        return reply.send({ data: summary });
-      } finally {
-        nationalityState.running = false;
-      }
-    },
-  );
-
-  fastify.post<{
-    Reply: { data: { reset: number } } | { error: { code: string; message: string } };
-  }>(
-    '/nationality/reset',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Reset nationality enrichment markers for a full re-run',
-        description:
-          'Removes the `nationalityFetchedAt` property from all Artist and Musician nodes, ' +
-          'causing the next `POST /api/v1/admin/nationality/enrich` call to re-process every node from scratch.\n\n' +
-          'Use this when:\n' +
-          '- You have added or updated enrichment sources (e.g. added Wikidata)\n' +
-          '- You want to correct stale data (e.g. a known wrong country from MusicBrainz)\n' +
-          '- You have new Artist or Musician nodes from a re-ingest\n\n' +
-          'This endpoint is blocked while `POST /api/v1/admin/nationality/enrich` is running.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: {
-                type: 'object',
-                required: ['reset'],
-                properties: { reset: { type: 'integer' } },
-              },
-            },
-          },
-          401: errorResponseRef,
-          409: errorResponseRef,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => {
-      if (nationalityState.running) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message:
-              'Nationality enrichment is currently running — wait for it to finish before resetting',
-          },
-        });
-      }
-      const reset = await resetNationalityEnrichment(getDriver());
-      return reply.send({ data: { reset } });
-    },
-  );
-
-  fastify.post<{
-    Reply:
-      | { data: { enriched: number; skipped: number; failed: number; durationMs: number } }
-      | { error: { code: string; message: string } };
-  }>(
-    '/master-data/enrich',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Enrich Master nodes with global pressing countries and formats',
-        description:
-          'Enrich Master nodes with global pressing countries and formats from the Discogs versions API. ' +
-          'Also fetches originalYear. **This step runs automatically as part of `POST /ingest`.** ' +
-          'Use this endpoint to run it in isolation without a full re-ingest. ' +
-          'Deduplicates by masterDiscogsId — releases sharing the same master trigger only one API call. ' +
-          'Requires `DISCOGS_TOKEN` env var.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: {
-                type: 'object',
-                required: ['enriched', 'skipped', 'failed', 'durationMs'],
-                properties: {
-                  enriched: { type: 'integer' },
-                  skipped: { type: 'integer' },
-                  failed: { type: 'integer' },
-                  durationMs: { type: 'integer' },
-                },
-              },
-            },
-          },
-          401: errorResponseRef,
-          409: errorResponseRef,
-          503: errorResponseRef,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (request, reply) => {
-      const discogsClient = buildDiscogsClientFromEnv(request.log);
-      if (!discogsClient) {
-        return reply.code(503).send({
-          error: {
-            code: 'SERVICE_UNAVAILABLE',
-            message: 'DISCOGS_TOKEN not configured',
-          },
-        });
-      }
-
-      if (masterDataState.running) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message: 'Master data enrichment already in progress',
-          },
-        });
-      }
-
-      masterDataState.running = true;
-      masterDataState.startedAt = new Date().toISOString();
-      masterDataState.completedAt = null;
-      masterDataState.durationMs = null;
-      masterDataState.lastResult = null;
-      try {
-        const summary = await enrichMasterData(discogsClient, getDriver(), request.log);
-        masterDataState.lastResult = summary;
-        masterDataState.completedAt = new Date().toISOString();
-        masterDataState.durationMs = summary.durationMs;
-        return reply.send({ data: summary });
-      } finally {
-        masterDataState.running = false;
-      }
-    },
-  );
-
-  fastify.post<{
-    Reply:
-      | {
-          data: {
-            mastersProcessed: number;
-            mastersSkipped: number;
-            mastersFailed: number;
-            eventsWritten: number;
-            durationMs: number;
-          };
+        if (entry.clientCheckFirst) {
+          prepared = entry.prepare(request.log);
+          if (!prepared.ok) {
+            return reply.code(503).send({
+              error: { code: 'SERVICE_UNAVAILABLE', message: prepared.message },
+            });
+          }
         }
-      | { error: { code: string; message: string } };
-  }>(
-    '/mb-release-events/enrich',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Enrich Master nodes with MusicBrainz release events (MB_RELEASED_IN)',
-        description:
-          'For each unenriched Master node, walks Discogs master ID → MusicBrainz release group → ' +
-          'all official releases → release events, writing `MB_RELEASED_IN` relationships to `Country` ' +
-          'nodes with ISO-3166-1 alpha-2 codes and release dates. Blocks until complete.\n\n' +
-          '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n' +
-          'Selects Master nodes that still have no `MB_RELEASED_IN` relationship and whose last attempt has ' +
-          'aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `mbReleaseEventsFetchedAt` after each ' +
-          'attempt — so a master MusicBrainz had no events for is retried at most once per window while ' +
-          'already-populated masters are skipped. Run `POST /api/v1/admin/mb-release-events/reset` to force a full re-run.\n\n' +
-          'Events without a country code are skipped (only ISO-coded events can be linked to Country nodes). ' +
-          'Same country with different release IDs creates separate relationships, enabling `min(r.date)` ' +
-          'queries for first-release-per-country.\n\n' +
-          'Requires `MUSICBRAINZ_USER_AGENT` env var.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: {
-                type: 'object',
-                required: [
-                  'mastersProcessed',
-                  'mastersSkipped',
-                  'mastersFailed',
-                  'eventsWritten',
-                  'durationMs',
-                ],
-                properties: {
-                  mastersProcessed: { type: 'integer' },
-                  mastersSkipped: { type: 'integer' },
-                  mastersFailed: { type: 'integer' },
-                  eventsWritten: { type: 'integer' },
-                  durationMs: { type: 'integer' },
-                },
-              },
-            },
-          },
-          401: errorResponseRef,
-          409: errorResponseRef,
-          503: errorResponseRef,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (request, reply) => {
-      if (mbReleaseEventsState.running) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message: 'MusicBrainz release event enrichment already in progress',
-          },
-        });
-      }
 
-      const mbClient = buildMusicBrainzClientFromEnv(request.log);
-      if (!mbClient) {
-        return reply.code(503).send({
-          error: {
-            code: 'SERVICE_UNAVAILABLE',
-            message: 'MUSICBRAINZ_USER_AGENT not configured',
-          },
-        });
-      }
-
-      mbReleaseEventsState.running = true;
-      mbReleaseEventsState.startedAt = new Date().toISOString();
-      mbReleaseEventsState.completedAt = null;
-      mbReleaseEventsState.durationMs = null;
-      mbReleaseEventsState.lastResult = null;
-      try {
-        const summary = await enrichMbReleaseEvents(mbClient, getDriver(), request.log);
-        mbReleaseEventsState.lastResult = summary;
-        mbReleaseEventsState.completedAt = new Date().toISOString();
-        mbReleaseEventsState.durationMs = summary.durationMs;
-        return reply.send({ data: summary });
-      } finally {
-        mbReleaseEventsState.running = false;
-      }
-    },
-  );
-
-  fastify.post<{
-    Reply: { data: { reset: number } } | { error: { code: string; message: string } };
-  }>(
-    '/mb-release-events/reset',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Reset MusicBrainz release event enrichment markers for a full re-run',
-        description:
-          'Removes the `mbReleaseEventsFetchedAt` property from all Master nodes and deletes all ' +
-          '`MB_RELEASED_IN` relationships, causing the next ' +
-          '`POST /api/v1/admin/mb-release-events/enrich` call to re-process every master from scratch.\n\n' +
-          'This endpoint is blocked while enrichment is running.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: {
-                type: 'object',
-                required: ['reset'],
-                properties: { reset: { type: 'integer' } },
-              },
-            },
-          },
-          401: errorResponseRef,
-          409: errorResponseRef,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => {
-      if (mbReleaseEventsState.running) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message:
-              'MusicBrainz release event enrichment is currently running — wait for it to finish before resetting',
-          },
-        });
-      }
-      mbReleaseEventsState.running = true;
-      try {
-        const reset = await resetMbReleaseEventsEnrichment(getDriver());
-        return reply.send({ data: { reset } });
-      } finally {
-        mbReleaseEventsState.running = false;
-      }
-    },
-  );
-
-  fastify.post<{
-    Reply:
-      | {
-          data: {
-            releasesProcessed: number;
-            releasesSkipped: number;
-            releasesFailed: number;
-            tracksMatched: number;
-            tracksUnmatched: number;
-            durationMs: number;
-          };
+        if (entry.state.running) {
+          return reply.code(409).send({
+            error: { code: 'ENRICHMENT_RUNNING', message: entry.runningMessage },
+          });
         }
-      | { error: { code: string; message: string } };
-  }>(
-    '/track-musicbrainz/enrich',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Enrich Track nodes with MusicBrainz recording MBID + ISRC',
-        description:
-          'For each Release with unenriched tracks, resolves the MusicBrainz release via the ' +
-          'Discogs URL relation, fetches its tracklist with recording IDs/ISRCs, and aligns it to ' +
-          'Track nodes by validated ordinal position. Tracks left unmatched fall back to a direct ' +
-          'recording search accepted only on a high MusicBrainz score. Blocks until complete.\n\n' +
-          '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n' +
-          'Writes `recordingMbid` and `isrc` (both nullable) onto Track nodes — the cross-database ' +
-          'identifiers downstream AcousticBrainz and Deezer enrichment depend on. Tracklist alignment ' +
-          'validates title similarity and duration proximity before writing; a mismatched track is ' +
-          'skipped rather than assigned a guessed MBID.\n\n' +
-          'Re-selects a release while any of its tracks still has no `recordingMbid` and that track’s last ' +
-          'attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `musicBrainzFetchedAt` after ' +
-          'each attempt — so a track with no MusicBrainz match is retried at most once per window while ' +
-          'already-resolved tracks are skipped. Run `POST /api/v1/admin/track-musicbrainz/reset` to force a full re-run.\n\n' +
-          'Requires `MUSICBRAINZ_USER_AGENT` env var.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: {
-                type: 'object',
-                required: [
-                  'releasesProcessed',
-                  'releasesSkipped',
-                  'releasesFailed',
-                  'tracksMatched',
-                  'tracksUnmatched',
-                  'durationMs',
-                ],
-                properties: {
-                  releasesProcessed: { type: 'integer' },
-                  releasesSkipped: { type: 'integer' },
-                  releasesFailed: { type: 'integer' },
-                  tracksMatched: { type: 'integer' },
-                  tracksUnmatched: { type: 'integer' },
-                  durationMs: { type: 'integer' },
-                },
-              },
-            },
-          },
-          401: errorResponseRef,
-          409: errorResponseRef,
-          503: errorResponseRef,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (request, reply) => {
-      if (trackMusicBrainzState.running) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message: 'MusicBrainz track enrichment already in progress',
-          },
-        });
-      }
 
-      const mbClient = buildMusicBrainzClientFromEnv(request.log);
-      if (!mbClient) {
-        return reply.code(503).send({
-          error: {
-            code: 'SERVICE_UNAVAILABLE',
-            message: 'MUSICBRAINZ_USER_AGENT not configured',
-          },
-        });
-      }
-
-      trackMusicBrainzState.running = true;
-      trackMusicBrainzState.startedAt = new Date().toISOString();
-      trackMusicBrainzState.completedAt = null;
-      trackMusicBrainzState.durationMs = null;
-      trackMusicBrainzState.lastResult = null;
-      try {
-        const summary = await enrichTrackMusicBrainz(mbClient, getDriver(), request.log);
-        trackMusicBrainzState.lastResult = summary;
-        trackMusicBrainzState.completedAt = new Date().toISOString();
-        trackMusicBrainzState.durationMs = summary.durationMs;
-        return reply.send({ data: summary });
-      } finally {
-        trackMusicBrainzState.running = false;
-      }
-    },
-  );
-
-  fastify.post<{
-    Reply: { data: { reset: number } } | { error: { code: string; message: string } };
-  }>(
-    '/track-musicbrainz/reset',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Reset MusicBrainz track enrichment markers for a full re-run',
-        description:
-          'Removes MusicBrainz fields (`musicBrainzFetchedAt`, `recordingMbid`, `isrc`) from all ' +
-          'Track nodes, causing the next `POST /api/v1/admin/track-musicbrainz/enrich` call to ' +
-          're-process every track from scratch.\n\n' +
-          '**Cascade:** because AcousticBrainz enrichment depends on `recordingMbid` and Deezer ' +
-          'enrichment depends on `isrc`, this reset also clears all AcousticBrainz fields ' +
-          '(`acousticBrainzFetchedAt`, `tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, ' +
-          '`dynamicComplexity`, `danceabilityEstimate`, `voiceInstrumental`) and all Deezer fields ' +
-          '(`deezerFetchedAt`, `deezerBpm`, `deezerGain`) from the same nodes.\n\n' +
-          'This endpoint is blocked while enrichment is running.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: {
-                type: 'object',
-                required: ['reset'],
-                properties: { reset: { type: 'integer' } },
-              },
-            },
-          },
-          401: errorResponseRef,
-          409: errorResponseRef,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => {
-      if (trackMusicBrainzState.running) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message:
-              'MusicBrainz track enrichment is currently running — wait for it to finish before resetting',
-          },
-        });
-      }
-      trackMusicBrainzState.running = true;
-      try {
-        const reset = await resetTrackMusicBrainzEnrichment(getDriver());
-        return reply.send({ data: { reset } });
-      } finally {
-        trackMusicBrainzState.running = false;
-      }
-    },
-  );
-
-  fastify.post<{
-    Reply:
-      | {
-          data: {
-            tracksProcessed: number;
-            tracksSkipped: number;
-            tracksFailed: number;
-            durationMs: number;
-          };
+        if (prepared === null) {
+          prepared = entry.prepare(request.log);
+          if (!prepared.ok) {
+            return reply.code(503).send({
+              error: { code: 'SERVICE_UNAVAILABLE', message: prepared.message },
+            });
+          }
         }
-      | { error: { code: string; message: string } };
-  }>(
-    '/track-acousticbrainz/enrich',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Enrich Track nodes with AcousticBrainz audio features',
-        description:
-          'For each Track that carries a `recordingMbid` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), ' +
-          'fetches Essentia acoustic analysis from AcousticBrainz in bulk and writes audio-feature ' +
-          'properties onto the Track node. Blocks until complete.\n\n' +
-          '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, ' +
-          'and only after track-musicbrainz enrichment has populated `recordingMbid`.**\n\n' +
-          '**Physically measured (trustworthy):** `tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, ' +
-          '`dynamicComplexity`.\n\n' +
-          '**Model-estimated:** `danceabilityEstimate`, `voiceInstrumental` are AcousticBrainz ' +
-          'classifier outputs — a different model from Spotify/Echo Nest. They are this project’s ' +
-          'own estimates and must never be presented as Spotify-equivalent values. No time signature ' +
-          'is provided: AcousticBrainz does not expose a reliable categorical time signature.\n\n' +
-          'All fields are nullable and best-effort — AcousticBrainz coverage is crowd-sourced and ' +
-          'frozen at 2022. Re-selects a track that still has no features (null `tempo`) once its last ' +
-          'attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `acousticBrainzFetchedAt` ' +
-          'after each attempt — so a track with no AcousticBrainz data is retried at most once per window ' +
-          'while already-featured tracks are skipped. Run `POST /api/v1/admin/track-acousticbrainz/reset` ' +
-          'to force a full re-run.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: {
-                type: 'object',
-                required: ['tracksProcessed', 'tracksSkipped', 'tracksFailed', 'durationMs'],
-                properties: {
-                  tracksProcessed: { type: 'integer' },
-                  tracksSkipped: { type: 'integer' },
-                  tracksFailed: { type: 'integer' },
-                  durationMs: { type: 'integer' },
-                },
-              },
-            },
-          },
-          401: errorResponseRef,
-          409: errorResponseRef,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (request, reply) => {
-      if (trackAcousticBrainzState.running) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message: 'AcousticBrainz track enrichment already in progress',
-          },
-        });
-      }
 
-      const abClient = buildAcousticBrainzClientFromEnv(request.log);
-
-      trackAcousticBrainzState.running = true;
-      trackAcousticBrainzState.startedAt = new Date().toISOString();
-      trackAcousticBrainzState.completedAt = null;
-      trackAcousticBrainzState.durationMs = null;
-      trackAcousticBrainzState.lastResult = null;
-      try {
-        const summary = await enrichTrackAcousticBrainz(abClient, getDriver(), request.log);
-        trackAcousticBrainzState.lastResult = summary;
-        trackAcousticBrainzState.completedAt = new Date().toISOString();
-        trackAcousticBrainzState.durationMs = summary.durationMs;
-        return reply.send({ data: summary });
-      } finally {
-        trackAcousticBrainzState.running = false;
-      }
-    },
-  );
-
-  fastify.post<{
-    Reply: { data: { reset: number } } | { error: { code: string; message: string } };
-  }>(
-    '/track-acousticbrainz/reset',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Reset AcousticBrainz track enrichment markers for a full re-run',
-        description:
-          'Removes the `acousticBrainzFetchedAt` marker and every audio-feature property ' +
-          '(`tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, `dynamicComplexity`, ' +
-          '`danceabilityEstimate`, `voiceInstrumental`) from all Track nodes, causing the next ' +
-          '`POST /api/v1/admin/track-acousticbrainz/enrich` call to re-process every track from ' +
-          'scratch.\n\n' +
-          'This endpoint is blocked while enrichment is running.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: {
-                type: 'object',
-                required: ['reset'],
-                properties: { reset: { type: 'integer' } },
-              },
-            },
-          },
-          401: errorResponseRef,
-          409: errorResponseRef,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => {
-      if (trackAcousticBrainzState.running) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message:
-              'AcousticBrainz track enrichment is currently running — wait for it to finish before resetting',
-          },
-        });
-      }
-      trackAcousticBrainzState.running = true;
-      try {
-        const reset = await resetTrackAcousticBrainzEnrichment(getDriver());
-        return reply.send({ data: { reset } });
-      } finally {
-        trackAcousticBrainzState.running = false;
-      }
-    },
-  );
-
-  fastify.post<{
-    Reply:
-      | {
-          data: {
-            tracksProcessed: number;
-            tracksSkipped: number;
-            tracksFailed: number;
-            durationMs: number;
-          };
+        entry.state.running = true;
+        entry.state.startedAt = new Date().toISOString();
+        entry.state.completedAt = null;
+        entry.state.durationMs = null;
+        entry.state.lastResult = null;
+        try {
+          const summary = await prepared.run(getDriver());
+          entry.state.lastResult = summary;
+          entry.state.completedAt = new Date().toISOString();
+          entry.state.durationMs =
+            typeof summary['durationMs'] === 'number' ? summary['durationMs'] : null;
+          return reply.send({ data: summary });
+        } finally {
+          entry.state.running = false;
         }
-      | { error: { code: string; message: string } };
-  }>(
-    '/track-deezer/enrich',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Enrich Track nodes with Deezer BPM and loudness',
-        description:
-          'For each Track that carries an `isrc` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), ' +
-          'looks the ISRC up against the free Deezer public API and writes `deezerBpm` and ' +
-          '`deezerGain` (a loudness figure) onto the Track node. Blocks until complete.\n\n' +
-          '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, ' +
-          'and only after track-musicbrainz enrichment has populated `isrc`.**\n\n' +
-          'Deezer is an independent, ISRC-keyed source. `deezerBpm`/`deezerGain` are stored under ' +
-          'distinct property names rather than overwriting the AcousticBrainz `tempo`/`loudnessDb` ' +
-          'fields, so the source stays traceable and the two BPM figures can be compared. Deezer ' +
-          'returns `0` for unknown values — those are stored as null.\n\n' +
-          'All fields are nullable and best-effort. Re-selects a track that still has no Deezer data ' +
-          '(null `deezerBpm` and `deezerGain`) once its last attempt has aged past `ENRICHMENT_STALENESS_DAYS` ' +
-          '(default 30), stamping `deezerFetchedAt` after each attempt — so a track Deezer had nothing for is ' +
-          'retried at most once per window while already-populated tracks are skipped. Run ' +
-          '`POST /api/v1/admin/track-deezer/reset` to force a full re-run.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: {
+      },
+    );
+
+    const reset = entry.reset;
+    if (reset) {
+      fastify.post<{
+        Reply: { data: { reset: number } } | { error: { code: string; message: string } };
+      }>(
+        `/${entry.name}/reset`,
+        {
+          schema: {
+            tags: ['admin'],
+            summary: reset.summary,
+            description: reset.description,
+            security: [{ bearerAuth: [] }],
+            response: {
+              200: {
                 type: 'object',
-                required: ['tracksProcessed', 'tracksSkipped', 'tracksFailed', 'durationMs'],
+                required: ['data'],
                 properties: {
-                  tracksProcessed: { type: 'integer' },
-                  tracksSkipped: { type: 'integer' },
-                  tracksFailed: { type: 'integer' },
-                  durationMs: { type: 'integer' },
+                  data: {
+                    type: 'object',
+                    required: ['reset'],
+                    properties: { reset: { type: 'integer' } },
+                  },
                 },
               },
+              401: errorResponseRef,
+              409: errorResponseRef,
             },
           },
-          401: errorResponseRef,
-          409: errorResponseRef,
+          preHandler: adminAuthHook,
         },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (request, reply) => {
-      if (trackDeezerState.running) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message: 'Deezer track enrichment already in progress',
-          },
-        });
-      }
-
-      const deezerClient = buildDeezerClientFromEnv(request.log);
-
-      trackDeezerState.running = true;
-      trackDeezerState.startedAt = new Date().toISOString();
-      trackDeezerState.completedAt = null;
-      trackDeezerState.durationMs = null;
-      trackDeezerState.lastResult = null;
-      try {
-        const summary = await enrichTrackDeezer(deezerClient, getDriver(), request.log);
-        trackDeezerState.lastResult = summary;
-        trackDeezerState.completedAt = new Date().toISOString();
-        trackDeezerState.durationMs = summary.durationMs;
-        return reply.send({ data: summary });
-      } finally {
-        trackDeezerState.running = false;
-      }
-    },
-  );
-
-  fastify.post<{
-    Reply: { data: { reset: number } } | { error: { code: string; message: string } };
-  }>(
-    '/track-deezer/reset',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Reset Deezer track enrichment markers for a full re-run',
-        description:
-          'Removes the `deezerFetchedAt` marker and the `deezerBpm` and `deezerGain` properties ' +
-          'from all Track nodes, causing the next `POST /api/v1/admin/track-deezer/enrich` call ' +
-          'to re-process every track from scratch.\n\n' +
-          'This endpoint is blocked while enrichment is running.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: {
-                type: 'object',
-                required: ['reset'],
-                properties: { reset: { type: 'integer' } },
-              },
-            },
-          },
-          401: errorResponseRef,
-          409: errorResponseRef,
+        async (_request, reply) => {
+          if (entry.state.running) {
+            return reply.code(409).send({
+              error: { code: 'ENRICHMENT_RUNNING', message: reset.runningMessage },
+            });
+          }
+          // Every reset holds the running flag so a concurrent /enrich 409s while markers
+          // are being cleared (nationality historically skipped this — normalized in #222).
+          entry.state.running = true;
+          try {
+            const count = await reset.run(getDriver());
+            return reply.send({ data: { reset: count } });
+          } finally {
+            entry.state.running = false;
+          }
         },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => {
-      if (trackDeezerState.running) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message:
-              'Deezer track enrichment is currently running — wait for it to finish before resetting',
-          },
-        });
-      }
-      trackDeezerState.running = true;
-      try {
-        const reset = await resetTrackDeezerEnrichment(getDriver());
-        return reply.send({ data: { reset } });
-      } finally {
-        trackDeezerState.running = false;
-      }
-    },
-  );
-
-  fastify.post<{
-    Reply:
-      | { data: { enriched: number; skipped: number; failed: number; durationMs: number } }
-      | { error: { code: string; message: string } };
-  }>(
-    '/artist-profiles/enrich',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Enrich Artist nodes with realName and profile from the Discogs artist API',
-        description:
-          'For each Artist node that still has neither `realName` nor `profile` and whose last attempt ' +
-          'has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), fetches `GET /artists/{id}` and writes ' +
-          '`realName` and `profile`, stamping `profileFetchedAt`. Blocks until complete.\n\n' +
-          '**This step also runs automatically as part of `POST /api/v1/admin/ingest`.** ' +
-          'Use this endpoint to run it in isolation — e.g. after adding new artists from a re-ingest. ' +
-          'Artists that already have a realName or profile are skipped; one Discogs had nothing for is ' +
-          'retried at most once per window via the `profileFetchedAt` marker; run ' +
-          '`POST /api/v1/admin/artist-profiles/reset` first to re-fetch every artist.\n\n' +
-          'Requires `DISCOGS_TOKEN` env var.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: {
-                type: 'object',
-                required: ['enriched', 'skipped', 'failed', 'durationMs'],
-                properties: {
-                  enriched: { type: 'integer' },
-                  skipped: { type: 'integer' },
-                  failed: { type: 'integer' },
-                  durationMs: { type: 'integer' },
-                },
-              },
-            },
-          },
-          401: errorResponseRef,
-          409: errorResponseRef,
-          503: errorResponseRef,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (request, reply) => {
-      const discogsClient = buildDiscogsClientFromEnv(request.log);
-      if (!discogsClient) {
-        return reply.code(503).send({
-          error: {
-            code: 'SERVICE_UNAVAILABLE',
-            message: 'DISCOGS_TOKEN not configured',
-          },
-        });
-      }
-
-      if (artistProfilesState.running) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message: 'Artist profiles enrichment already in progress',
-          },
-        });
-      }
-
-      artistProfilesState.running = true;
-      artistProfilesState.startedAt = new Date().toISOString();
-      artistProfilesState.completedAt = null;
-      artistProfilesState.durationMs = null;
-      artistProfilesState.lastResult = null;
-      try {
-        const summary = await enrichArtistProfiles(discogsClient, getDriver(), request.log);
-        artistProfilesState.lastResult = summary;
-        artistProfilesState.completedAt = new Date().toISOString();
-        artistProfilesState.durationMs = summary.durationMs;
-        return reply.send({ data: summary });
-      } finally {
-        artistProfilesState.running = false;
-      }
-    },
-  );
-
-  fastify.post<{
-    Reply: { data: { reset: number } } | { error: { code: string; message: string } };
-  }>(
-    '/artist-profiles/reset',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Reset artist profile enrichment markers for a full re-run',
-        description:
-          'Removes the `profileFetchedAt` marker and the `realName` and `profile` properties from ' +
-          'all Artist nodes, causing the next `POST /api/v1/admin/artist-profiles/enrich` call to ' +
-          're-fetch every artist from scratch.\n\n' +
-          'This endpoint is blocked while enrichment is running.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: {
-                type: 'object',
-                required: ['reset'],
-                properties: { reset: { type: 'integer' } },
-              },
-            },
-          },
-          401: errorResponseRef,
-          409: errorResponseRef,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => {
-      if (artistProfilesState.running) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message:
-              'Artist profiles enrichment is currently running — wait for it to finish before resetting',
-          },
-        });
-      }
-      artistProfilesState.running = true;
-      try {
-        const reset = await resetArtistProfilesEnrichment(getDriver());
-        return reply.send({ data: { reset } });
-      } finally {
-        artistProfilesState.running = false;
-      }
-    },
-  );
-
-  fastify.post<{
-    Reply:
-      | {
-          data: {
-            genresEnriched: number;
-            stylesEnriched: number;
-            skipped: number;
-            failed: number;
-            durationMs: number;
-          };
-        }
-      | { error: { code: string; message: string } };
-  }>(
-    '/artist-genres/enrich',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Aggregate genres and styles from releases onto Artist nodes',
-        description:
-          "Rolls each Artist's release genres/styles (via IN_GENRE and IN_STYLE) up onto the " +
-          'Artist node as `genres[]` and `styles[]`. Pure graph computation — no external API. ' +
-          'Blocks until complete.\n\n' +
-          '**This step also runs automatically as part of `POST /api/v1/admin/ingest`.** ' +
-          'Use this endpoint to recompute in isolation after a re-ingest adds releases.\n\n' +
-          '**No reset endpoint:** the aggregation recomputes each Artist from scratch every run, ' +
-          'so it is inherently idempotent and there is nothing to reset.',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: {
-            type: 'object',
-            required: ['data'],
-            properties: {
-              data: {
-                type: 'object',
-                required: ['genresEnriched', 'stylesEnriched', 'skipped', 'failed', 'durationMs'],
-                properties: {
-                  genresEnriched: { type: 'integer' },
-                  stylesEnriched: { type: 'integer' },
-                  skipped: { type: 'integer' },
-                  failed: { type: 'integer' },
-                  durationMs: { type: 'integer' },
-                },
-              },
-            },
-          },
-          401: errorResponseRef,
-          409: errorResponseRef,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (request, reply) => {
-      if (artistGenresState.running) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message: 'Artist genres enrichment already in progress',
-          },
-        });
-      }
-      artistGenresState.running = true;
-      artistGenresState.startedAt = new Date().toISOString();
-      artistGenresState.completedAt = null;
-      artistGenresState.durationMs = null;
-      artistGenresState.lastResult = null;
-      try {
-        const summary = await enrichArtistGenres(getDriver(), request.log);
-        artistGenresState.lastResult = summary;
-        artistGenresState.completedAt = new Date().toISOString();
-        artistGenresState.durationMs = summary.durationMs;
-        return reply.send({ data: summary });
-      } finally {
-        artistGenresState.running = false;
-      }
-    },
-  );
+      );
+    }
+  }
 
   // ── Status endpoints ───────────────────────────────────────────────────────
 
@@ -1591,200 +1090,21 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     },
   });
 
-  const standardSummarySchema = {
-    type: 'object',
-    properties: {
-      enriched: { type: 'integer' },
-      skipped: { type: 'integer' },
-      failed: { type: 'integer' },
-      durationMs: { type: 'integer' },
-    },
-  };
-
-  fastify.get(
-    '/lyrics/status',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Status of the most recent lyrics enrichment run',
-        security: [{ bearerAuth: [] }],
-        response: { 200: enrichStatusSchema(standardSummarySchema), 401: errorResponseRef },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => reply.send({ data: structuredClone(lyricsState) }),
-  );
-
-  fastify.get(
-    '/nationality/status',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Status of the most recent nationality enrichment run',
-        security: [{ bearerAuth: [] }],
-        response: { 200: enrichStatusSchema(nationalitySummarySchema), 401: errorResponseRef },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => reply.send({ data: structuredClone(nationalityState) }),
-  );
-
-  fastify.get(
-    '/master-data/status',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Status of the most recent master data enrichment run',
-        security: [{ bearerAuth: [] }],
-        response: { 200: enrichStatusSchema(standardSummarySchema), 401: errorResponseRef },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => reply.send({ data: structuredClone(masterDataState) }),
-  );
-
-  fastify.get(
-    '/mb-release-events/status',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Status of the most recent MusicBrainz release events enrichment run',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: enrichStatusSchema({
-            type: 'object',
-            properties: {
-              mastersProcessed: { type: 'integer' },
-              mastersSkipped: { type: 'integer' },
-              mastersFailed: { type: 'integer' },
-              eventsWritten: { type: 'integer' },
-              durationMs: { type: 'integer' },
-            },
-          }),
-          401: errorResponseRef,
+  for (const entry of PIPELINES) {
+    fastify.get(
+      `/${entry.name}/status`,
+      {
+        schema: {
+          tags: ['admin'],
+          summary: `Status of the most recent ${entry.statusLabel} run`,
+          security: [{ bearerAuth: [] }],
+          response: { 200: enrichStatusSchema(entry.statusSummarySchema), 401: errorResponseRef },
         },
+        preHandler: adminAuthHook,
       },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => reply.send({ data: structuredClone(mbReleaseEventsState) }),
-  );
-
-  fastify.get(
-    '/track-musicbrainz/status',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Status of the most recent MusicBrainz track enrichment run',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: enrichStatusSchema({
-            type: 'object',
-            properties: {
-              releasesProcessed: { type: 'integer' },
-              releasesSkipped: { type: 'integer' },
-              releasesFailed: { type: 'integer' },
-              tracksMatched: { type: 'integer' },
-              tracksUnmatched: { type: 'integer' },
-              durationMs: { type: 'integer' },
-            },
-          }),
-          401: errorResponseRef,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => reply.send({ data: structuredClone(trackMusicBrainzState) }),
-  );
-
-  fastify.get(
-    '/track-acousticbrainz/status',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Status of the most recent AcousticBrainz track enrichment run',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: enrichStatusSchema({
-            type: 'object',
-            properties: {
-              tracksProcessed: { type: 'integer' },
-              tracksSkipped: { type: 'integer' },
-              tracksFailed: { type: 'integer' },
-              durationMs: { type: 'integer' },
-            },
-          }),
-          401: errorResponseRef,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => reply.send({ data: structuredClone(trackAcousticBrainzState) }),
-  );
-
-  fastify.get(
-    '/track-deezer/status',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Status of the most recent Deezer track enrichment run',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: enrichStatusSchema({
-            type: 'object',
-            properties: {
-              tracksProcessed: { type: 'integer' },
-              tracksSkipped: { type: 'integer' },
-              tracksFailed: { type: 'integer' },
-              durationMs: { type: 'integer' },
-            },
-          }),
-          401: errorResponseRef,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => reply.send({ data: structuredClone(trackDeezerState) }),
-  );
-
-  fastify.get(
-    '/artist-profiles/status',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Status of the most recent artist profiles enrichment run',
-        security: [{ bearerAuth: [] }],
-        response: { 200: enrichStatusSchema(standardSummarySchema), 401: errorResponseRef },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => reply.send({ data: structuredClone(artistProfilesState) }),
-  );
-
-  fastify.get(
-    '/artist-genres/status',
-    {
-      schema: {
-        tags: ['admin'],
-        summary: 'Status of the most recent artist genres enrichment run',
-        security: [{ bearerAuth: [] }],
-        response: {
-          200: enrichStatusSchema({
-            type: 'object',
-            properties: {
-              genresEnriched: { type: 'integer' },
-              stylesEnriched: { type: 'integer' },
-              skipped: { type: 'integer' },
-              failed: { type: 'integer' },
-              durationMs: { type: 'integer' },
-            },
-          }),
-          401: errorResponseRef,
-        },
-      },
-      preHandler: adminAuthHook,
-    },
-    async (_request, reply) => reply.send({ data: structuredClone(artistGenresState) }),
-  );
+      async (_request, reply) => reply.send({ data: structuredClone(entry.state) }),
+    );
+  }
 
   fastify.post<{
     Reply:
@@ -1917,13 +1237,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 }
 
 export function resetAllPipelineStates(): void {
-  Object.assign(lyricsState, makePipelineState<EnrichSummary>());
-  Object.assign(nationalityState, makePipelineState<NationalityEnrichmentSummary>());
-  Object.assign(masterDataState, makePipelineState<EnrichSummary>());
-  Object.assign(mbReleaseEventsState, makePipelineState<MbReleaseEventsSummary>());
-  Object.assign(trackMusicBrainzState, makePipelineState<TrackMusicBrainzSummary>());
-  Object.assign(trackAcousticBrainzState, makePipelineState<TrackAcousticBrainzSummary>());
-  Object.assign(trackDeezerState, makePipelineState<TrackDeezerSummary>());
-  Object.assign(artistProfilesState, makePipelineState<EnrichSummary>());
-  Object.assign(artistGenresState, makePipelineState<ArtistGenresSummary>());
+  for (const entry of PIPELINES) {
+    Object.assign(entry.state, makePipelineState());
+  }
 }
