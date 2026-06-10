@@ -99,7 +99,13 @@ export async function runEnrichment<TItem, TResolved>(
   log.info(`[${stage.name}] Found ${total} candidates`);
   onProgress(0, total);
 
-  const progressEvery = stage.progressEveryItems ?? DEFAULT_PROGRESS_EVERY_ITEMS;
+  // Guard the cadence: `i % 0` is NaN (which would silently disable progress entirely),
+  // and a negative or fractional cadence never matches — fall back to the default instead.
+  const declared = stage.progressEveryItems;
+  const progressEvery =
+    declared !== undefined && Number.isInteger(declared) && declared > 0
+      ? declared
+      : DEFAULT_PROGRESS_EVERY_ITEMS;
 
   let i = 0;
   for (const item of items) {

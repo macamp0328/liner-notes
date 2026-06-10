@@ -292,6 +292,21 @@ describe('runEnrichment', () => {
     );
   });
 
+  it('falls back to the default cadence when progressEveryItems is invalid', async () => {
+    // `i % 0` is NaN — an accidental 0 must not silently disable progress reporting.
+    const items = Array.from({ length: 25 }, (_, k) => ({ id: k }));
+    const onProgress = vi.fn();
+    const stage = makeStage({
+      selectCandidates: vi.fn().mockResolvedValue(items),
+      resolve: vi.fn().mockResolvedValue(null),
+      progressEveryItems: 0,
+    });
+
+    await runEnrichment(fakeDriver, stage, { onProgress });
+
+    expect(onProgress).toHaveBeenCalledWith(25, 25); // default 25 cadence applied
+  });
+
   it('emits no mid-loop progress log below the default 25-item cadence', async () => {
     const items = Array.from({ length: 24 }, (_, k) => ({ id: k }));
     const logger = makeMockLogger();
