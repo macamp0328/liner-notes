@@ -50,13 +50,22 @@ export interface EnrichmentStage<TItem, TResolved> {
   isExpectedError?(err: unknown): boolean;
   /** Optional: a short human label for the item, used only in per-item log lines. */
   describeItem?(item: TItem): string;
+  /**
+   * Optional: items between progress reports — each report is an `onProgress` call plus a
+   * `Progress: i/total` info line. Defaults to 25; the slow rate-limited stages (~1 item/s,
+   * hours-long runs) declare 10 to keep the log/status freshness their hand-rolled loops had.
+   */
+  readonly progressEveryItems?: number;
 }
+
+const DEFAULT_PROGRESS_EVERY_ITEMS = 25;
 
 /**
  * Drive a {@link EnrichmentStage} over its candidates, owning the per-item isolation and
  * stamp-on-attempt contract so each stage stays a thin declaration of what varies. A failure
  * in one item never aborts the rest, and a transient failure leaves the item unstamped so it
- * retries on the next run. Mirrors the original hand-rolled lyrics loop's progress cadence and
+ * retries on the next run. Every `progressEveryItems` items it reports progress (an
+ * `onProgress` call plus a counters info line); mirrors the original hand-rolled loops'
  * early-fail behaviour.
  */
 export async function runEnrichment<TItem, TResolved>(
@@ -86,10 +95,11 @@ export async function runEnrichment<TItem, TResolved>(
   log.info(`[${stage.name}] Found ${total} candidates`);
   onProgress(0, total);
 
+  const progressEvery = stage.progressEveryItems ?? DEFAULT_PROGRESS_EVERY_ITEMS;
+
   let i = 0;
   for (const item of items) {
     i++;
-    if (i % 25 === 0) onProgress(i, total);
 
     try {
       const resolved = await stage.resolve(item);
@@ -110,6 +120,14 @@ export async function runEnrichment<TItem, TResolved>(
         log.error(line);
       }
       failed++;
+    }
+
+    // Reported after the item completes so the counters are coherent with `i`.
+    if (i % progressEvery === 0) {
+      log.info(
+        `[${stage.name}] Progress: ${i}/${total} — enriched=${enriched}, skipped=${skipped}, failed=${failed}`,
+      );
+      onProgress(i, total);
     }
   }
 

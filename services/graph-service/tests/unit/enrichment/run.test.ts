@@ -254,4 +254,57 @@ describe('runEnrichment', () => {
     expect(onProgress).toHaveBeenCalledWith(25, 26); // i % 25 === 0 at i = 25
     expect(onProgress).toHaveBeenLastCalledWith(26, 26);
   });
+
+  it('honors a stage-declared progressEveryItems cadence', async () => {
+    const items = Array.from({ length: 20 }, (_, k) => ({ id: k }));
+    const onProgress = vi.fn();
+    const stage = makeStage({
+      selectCandidates: vi.fn().mockResolvedValue(items),
+      resolve: vi.fn().mockResolvedValue('x'),
+      progressEveryItems: 10,
+    });
+
+    await runEnrichment(fakeDriver, stage, { onProgress });
+
+    expect(onProgress).toHaveBeenCalledWith(10, 20);
+    expect(onProgress).toHaveBeenCalledWith(20, 20);
+    expect(onProgress).toHaveBeenLastCalledWith(20, 20);
+  });
+
+  it('logs a mid-loop progress line whose counters reflect the completed items', async () => {
+    const items = Array.from({ length: 10 }, (_, k) => ({ id: k }));
+    const logger = makeMockLogger();
+    const stage = makeStage({
+      selectCandidates: vi.fn().mockResolvedValue(items),
+      // 8 enriched, 1 skipped (id 3), 1 failed (id 7)
+      resolve: vi.fn().mockImplementation((item: Item) => {
+        if (item.id === 3) return Promise.resolve(null);
+        if (item.id === 7) return Promise.reject(new Error('boom'));
+        return Promise.resolve('x');
+      }),
+      progressEveryItems: 10,
+    });
+
+    await runEnrichment(fakeDriver, stage, { logger });
+
+    expect(logger.info).toHaveBeenCalledWith(
+      '[fake] Progress: 10/10 — enriched=8, skipped=1, failed=1',
+    );
+  });
+
+  it('emits no mid-loop progress log below the default 25-item cadence', async () => {
+    const items = Array.from({ length: 24 }, (_, k) => ({ id: k }));
+    const logger = makeMockLogger();
+    const stage = makeStage({
+      selectCandidates: vi.fn().mockResolvedValue(items),
+      resolve: vi.fn().mockResolvedValue(null),
+    });
+
+    await runEnrichment(fakeDriver, stage, { logger });
+
+    const progressLines = logger.info.mock.calls.filter(([msg]) =>
+      String(msg).includes('Progress:'),
+    );
+    expect(progressLines).toHaveLength(0);
+  });
 });
