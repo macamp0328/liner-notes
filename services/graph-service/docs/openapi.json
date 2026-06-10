@@ -383,7 +383,7 @@
       "post": {
         "summary": "Clear all Genius-sourced lyrics for re-enrichment",
         "tags": ["admin"],
-        "description": "Sets `lyrics` and `lyricsSource` to null on every Track node where `lyricsSource = \"genius\"`. Those tracks will be picked up on the next lyrics enrichment pass.\n\nUse this when Genius data quality is poor or after correcting the Genius token. After clearing, trigger re-enrichment via `POST /api/v1/admin/lyrics/enrich` or `POST /api/v1/admin/ingest`.",
+        "description": "Sets `lyrics` and `lyricsSource` to null on every Track node where `lyricsSource = \"genius\"`. Those tracks become lyrics-null candidates again for the next enrichment pass.\n\nUse this when Genius data quality is poor, or before re-running the Genius harvest. After clearing, re-fetch via the operator-side residential harvest `pnpm lyrics:enrich:local` (see `services/graph-service/scripts/lyrics-enrich-local.ts`) — NOT `POST /api/v1/admin/lyrics/enrich`, which in prod is LRCLIB-only and re-fetches nothing from Genius (prod leaves `GENIUS_TOKEN` unset, #258; Genius 403s the prod IP, #240).",
         "security": [
           {
             "bearerAuth": []
@@ -439,7 +439,7 @@
       "post": {
         "summary": "Run lyrics enrichment standalone",
         "tags": ["admin"],
-        "description": "Enriches all Track nodes that have no lyrics yet (LRCLIB primary, Genius fallback). Blocks until complete.\n\n**This step also runs automatically as part of `POST /api/v1/admin/ingest`.** Use this endpoint to re-run lyrics enrichment in isolation — e.g. after clearing Genius lyrics via `POST /api/v1/admin/lyrics/clear-genius`, after adding new tracks, or when LRCLIB coverage improves.\n\nRequires `GENIUS_TOKEN` env var for the Genius fallback; LRCLIB works without any key. The Genius fallback sends a browser-like User-Agent to clear Cloudflare (issue #195) — override it with `GENIUS_USER_AGENT` if the default needs refreshing.",
+        "description": "Enriches all Track nodes that have no lyrics yet (LRCLIB primary, Genius fallback). Blocks until complete.\n\n**This step also runs automatically as part of `POST /api/v1/admin/ingest`.** Use this endpoint to re-run lyrics enrichment in isolation — e.g. after clearing Genius lyrics via `POST /api/v1/admin/lyrics/clear-genius`, after adding new tracks, or when LRCLIB coverage improves.\n\n**In prod this is effectively LRCLIB-only.** The Genius fallback fires only when `GENIUS_TOKEN` is set AND the egress IP is not blocked. Prod leaves `GENIUS_TOKEN` unset (#258) because Genius 403s the prod datacenter IP regardless (#240), so the fallback self-disables there and setting the token in prod does NOT enable Genius. LRCLIB needs no key.\n\nTo backfill the Genius lyrics LRCLIB missed, run the operator-side residential harvest `pnpm lyrics:enrich:local` (see `services/graph-service/scripts/lyrics-enrich-local.ts` and infra/RUNBOOK.md \"Harvest Genius lyrics locally\"); it reuses this same pipeline from a non-blocked IP. When Genius does run it sends a browser-like User-Agent to clear Cloudflare (#195); override via `GENIUS_USER_AGENT` if the default needs refreshing.",
         "security": [
           {
             "bearerAuth": []
