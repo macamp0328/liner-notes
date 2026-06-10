@@ -19,6 +19,9 @@ flowchart LR
   subgraph ext_ecr_tf["ecr.tf"]
     aws_ecr_repository_graph_service(["📦 graph_service<br/><small>ECR repo</small>"]):::storage
   end
+  subgraph ext_main_tf["main.tf"]
+    data_aws_caller_identity_current(["🆔 current<br/><small>📥 AWS account</small>"]):::iam
+  end
   subgraph ext_secrets_tf["secrets.tf"]
     aws_secretsmanager_secret_graph_service(["🔒 graph_service<br/><small>Secrets Manager</small>"]):::secrets
   end
@@ -27,8 +30,10 @@ flowchart LR
   aws_iam_role_github_deploy -.-> aws_ecr_repository_graph_service
   aws_iam_role_github_deploy -.-> aws_instance_k3s
   aws_iam_role_github_deploy -.-> aws_secretsmanager_secret_graph_service
+  aws_iam_role_github_deploy -.-> data_aws_caller_identity_current
   aws_iam_role_github_deploy --> data_aws_iam_policy_document_github_deploy
   aws_iam_role_github_deploy --> data_aws_iam_policy_document_github_deploy_assume
   data_aws_iam_policy_document_github_deploy -.-> aws_ecr_repository_graph_service
   data_aws_iam_policy_document_github_deploy -.-> aws_instance_k3s
   data_aws_iam_policy_document_github_deploy -.-> aws_secretsmanager_secret_graph_service
+  data_aws_iam_policy_document_github_deploy -.-> data_aws_caller_identity_current
