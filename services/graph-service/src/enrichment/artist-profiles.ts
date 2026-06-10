@@ -1,15 +1,18 @@
 import type { Driver } from 'neo4j-driver';
 import type { DiscogsClient } from '../ingestion/discogs-client.js';
 import type { Logger } from '../ingestion/discogs-client.js';
-import { getUnenrichedArtists, setArtistProfile } from '../db/artist-profiles-repository.js';
+import {
+  getUnenrichedArtists,
+  setArtistProfile,
+  type UnenrichedArtist,
+} from '../db/artist-profiles-repository.js';
+import { runEnrichment, type EnrichmentStage, type EnrichmentSummary } from './run.js';
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 
-export interface ArtistProfilesEnrichmentSummary {
-  enriched: number;
-  skipped: number;
-  failed: number;
-  durationMs: number;
-}
+export type ArtistProfilesEnrichmentSummary = EnrichmentSummary;
+
+/** Profile data resolved from the Discogs artist endpoint; absent fields normalized to null. */
+type ResolvedProfile = { realName: string | null; profileText: string | null };
 
 /**
  * Enrich Artist nodes with realName and profile from the Discogs artist API.
@@ -30,57 +33,22 @@ export async function enrichArtistProfiles(
   onProgress: ProgressReporter = NOOP_PROGRESS,
 ): Promise<ArtistProfilesEnrichmentSummary> {
   const log: Logger = logger ?? console;
-  const startTime = Date.now();
-  let enriched = 0;
-  let skipped = 0;
-  let failed = 0;
 
-  log.info('[artist-profiles] Starting artist profile enrichment');
-
-  let artists;
-  try {
-    artists = await getUnenrichedArtists(driver);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error(`[artist-profiles] Failed to fetch unenriched artists: ${msg}`);
-    return { enriched: 0, skipped: 0, failed: 1, durationMs: Date.now() - startTime };
-  }
-
-  const total = artists.length;
-  log.info(`[artist-profiles] Found ${total} artists without profile`);
-  onProgress(0, total);
-
-  let i = 0;
-  for (const artist of artists) {
-    i++;
-    if (i % 25 === 0) onProgress(i, total);
-    try {
+  const stage: EnrichmentStage<UnenrichedArtist, ResolvedProfile> = {
+    name: 'artist-profiles',
+    selectCandidates: (d) => getUnenrichedArtists(d),
+    async resolve(artist) {
       const profile = await client.getArtist(artist.discogsId);
-
       const realName = profile.realname?.trim() || null;
       const profileText = profile.profile?.trim() || null;
+      return realName === null && profileText === null ? null : { realName, profileText };
+    },
+    write: (d, artist, resolved) =>
+      setArtistProfile(d, artist.discogsId, resolved.realName, resolved.profileText),
+    // Stamps profileFetchedAt with both fields null, throttling retries of still-empty artists.
+    markAttempted: (d, artist) => setArtistProfile(d, artist.discogsId, null, null),
+    describeItem: (artist) => `artist ${artist.discogsId}`,
+  };
 
-      // Always call setArtistProfile — it stamps profileFetchedAt regardless of whether
-      // profile data was present, throttling retries of still-empty artists.
-      await setArtistProfile(driver, artist.discogsId, realName, profileText);
-
-      if (realName === null && profileText === null) {
-        skipped++;
-      } else {
-        enriched++;
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.error(`[artist-profiles] Failed for artist ${artist.discogsId}: ${msg}`);
-      failed++;
-    }
-  }
-
-  onProgress(total, total);
-  const durationMs = Date.now() - startTime;
-  log.info(
-    `[artist-profiles] Enrichment complete: enriched=${enriched}, skipped=${skipped}, failed=${failed}, duration=${durationMs}ms`,
-  );
-
-  return { enriched, skipped, failed, durationMs };
+  return runEnrichment(driver, stage, { logger: log, onProgress });
 }

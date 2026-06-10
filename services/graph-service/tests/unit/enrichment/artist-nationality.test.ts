@@ -187,6 +187,25 @@ describe('enrichNationality', () => {
     });
   });
 
+  it('still runs the musician group when the artist candidate fetch throws', async () => {
+    // Group isolation (#222): a failure fetching one group's candidates counts as failed
+    // but no longer aborts the other group — symmetric with the musician-fetch case.
+    mockGetUnenrichedArtists.mockRejectedValue(new Error('DB connection lost'));
+    mockGetUnenrichedMusicians.mockResolvedValue([{ discogsId: 2, name: 'Musician B' }]);
+    const client = makeMbClient(async () => 'FR');
+
+    const summary = await enrichNationality(client, fakeDriver);
+
+    expect(summary.failed).toBe(1);
+    expect(summary.enriched).toBe(1);
+    expect(mockSetMusicianNationality).toHaveBeenCalledWith(
+      fakeDriver,
+      { discogsId: 2, name: 'Musician B' },
+      'FR',
+      'musicbrainz',
+    );
+  });
+
   it('is idempotent — second call enriches zero because repo returns empty', async () => {
     const client = makeMbClient();
 

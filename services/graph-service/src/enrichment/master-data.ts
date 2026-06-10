@@ -6,16 +6,20 @@ import {
   mergeMasterData,
   setMasterFetchedAndOriginalYear,
   setMasterFetched,
+  type UnenrichedMaster,
 } from '../db/master-data-repository.js';
 import type { CountryWithFormats } from '../db/master-data-repository.js';
+import { runEnrichment, type EnrichmentStage, type EnrichmentSummary } from './run.js';
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 
-export interface MasterDataEnrichmentSummary {
-  enriched: number;
-  skipped: number;
-  failed: number;
-  durationMs: number;
-}
+export type MasterDataEnrichmentSummary = EnrichmentSummary;
+
+/** Master metadata resolved from the Discogs master + versions endpoints. */
+type ResolvedMasterData = {
+  title: string;
+  year: number;
+  countriesWithFormats: CountryWithFormats[];
+};
 
 export async function enrichMasterData(
   client: DiscogsClient,
@@ -24,40 +28,16 @@ export async function enrichMasterData(
   onProgress: ProgressReporter = NOOP_PROGRESS,
 ): Promise<MasterDataEnrichmentSummary> {
   const log: Logger = logger ?? console;
-  const startTime = Date.now();
-  let enriched = 0;
-  let skipped = 0;
-  let failed = 0;
 
-  log.info('[master-data] Starting master data enrichment');
-
-  let masters;
-  try {
-    masters = await getUnenrichedMasters(driver);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error(`[master-data] Failed to fetch unenriched masters: ${msg}`);
-    return { enriched: 0, skipped: 0, failed: 1, durationMs: Date.now() - startTime };
-  }
-
-  const total = masters.length;
-  log.info(`[master-data] Found ${total} masters to enrich`);
-  onProgress(0, total);
-
-  let processed = 0;
-  for (const master of masters) {
-    processed++;
-    if (processed % 10 === 0) onProgress(processed, total);
-    try {
+  const stage: EnrichmentStage<UnenrichedMaster, ResolvedMasterData> = {
+    name: 'master-data',
+    selectCandidates: (d) => getUnenrichedMasters(d),
+    async resolve(master) {
       // Step 1: Get originalYear from master endpoint
       const masterRelease = await client.getMaster(master.masterDiscogsId);
       const year = masterRelease.year;
 
-      if (!year || year <= 0) {
-        await setMasterFetched(driver, master.releaseIds);
-        skipped++;
-        continue;
-      }
+      if (!year || year <= 0) return null;
 
       // Step 2: Paginate versions to collect all pressing countries + formats
       const countryFormats = new Map<string, Set<string>>();
@@ -87,35 +67,26 @@ export async function enrichMasterData(
         ([country, formats]) => ({ country, formats: Array.from(formats) }),
       );
 
-      // Step 3: Write Master node + RELEASED_IN relationships
+      return { title: masterRelease.title, year, countriesWithFormats };
+    },
+    async write(d, master, resolved) {
+      // Write Master node + RELEASED_IN relationships, then mark all releases sharing
+      // this master as done.
       await mergeMasterData(
-        driver,
+        d,
         master.masterDiscogsId,
-        masterRelease.title,
-        year,
-        countriesWithFormats,
+        resolved.title,
+        resolved.year,
+        resolved.countriesWithFormats,
       );
+      await setMasterFetchedAndOriginalYear(d, master.releaseIds, resolved.year);
+    },
+    // The master exists but has no usable year — stamp its releases so it isn't re-fetched
+    // until the staleness window expires.
+    markAttempted: (d, master) => setMasterFetched(d, master.releaseIds),
+    describeItem: (master) => `master ${master.masterDiscogsId}`,
+    progressEveryItems: 10,
+  };
 
-      // Step 4: Mark all releases sharing this master as done
-      await setMasterFetchedAndOriginalYear(driver, master.releaseIds, year);
-
-      enriched++;
-
-      if (enriched % 10 === 0) {
-        log.info(`[master-data] Progress: ${enriched} masters enriched`);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.error(`[master-data] Failed for master ${master.masterDiscogsId}: ${msg}`);
-      failed++;
-    }
-  }
-
-  onProgress(total, total);
-  const durationMs = Date.now() - startTime;
-  log.info(
-    `[master-data] Enrichment complete: enriched=${enriched}, skipped=${skipped}, failed=${failed}, duration=${durationMs}ms`,
-  );
-
-  return { enriched, skipped, failed, durationMs };
+  return runEnrichment(driver, stage, { logger: log, onProgress });
 }

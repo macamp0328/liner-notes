@@ -15,6 +15,10 @@ export interface ArtistGenresEnrichmentSummary {
  * Sets a.genres and a.styles as String[] properties derived from the Artist's
  * releases via IN_GENRE and IN_STYLE relationships.
  * Pure graph computation — no external API calls.
+ *
+ * Deliberately NOT a runEnrichment stage (#222): there is no candidate loop, no external
+ * resolve, and no per-node `*FetchedAt` stamping — just two whole-graph Cypher aggregations
+ * that recompute every Artist from scratch each run.
  */
 export async function enrichArtistGenres(
   driver: Driver,

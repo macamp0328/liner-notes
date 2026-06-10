@@ -8,7 +8,12 @@ import {
   setArtistNationality,
   setMusicianNationality,
 } from '../db/artist-nationality-repository.js';
-import type { UnenrichedMusician, NationalitySource } from '../db/artist-nationality-repository.js';
+import type {
+  UnenrichedArtist,
+  UnenrichedMusician,
+  NationalitySource,
+} from '../db/artist-nationality-repository.js';
+import { runEnrichment, type EnrichmentStage } from './run.js';
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 
 /** A resolved country plus the source that produced it, or null when unresolved. */
@@ -23,13 +28,6 @@ type ResolvedNationality = { country: string; source: NationalitySource };
 export interface NationalityExtras {
   resolvedByMusicbrainz: number;
   resolvedByWikidata: number;
-}
-
-function zeroNationalityExtras(): NationalityExtras {
-  return {
-    resolvedByMusicbrainz: 0,
-    resolvedByWikidata: 0,
-  };
 }
 
 export interface NationalityEnrichmentSummary extends NationalityExtras {
@@ -123,11 +121,14 @@ async function resolveCountryByName(
  * For nodes without a Discogs ID:
  * 1. MusicBrainz name search (score ≥ 90)
  *
- * Stamps nationalityFetchedAt on every node where a result (country code or null) is
- * successfully determined — so a node no source could resolve is retried at most once per
- * staleness window rather than every run. Nodes that throw an exception are counted as
- * failed and are NOT stamped, so the next enrichment run will retry them immediately.
- * Per-node errors are caught and never crash the caller.
+ * Runs as two sequential runEnrichment stages — Artists, then Musicians (producers and
+ * engineers are Musician nodes too; the role lives on CREDITED_ON, not the label, so the
+ * single Musician scan covers them). Stamps nationalityFetchedAt on every node where a
+ * result (country code or null) is successfully determined — so a node no source could
+ * resolve is retried at most once per staleness window rather than every run. Nodes that
+ * throw an exception are counted as failed and are NOT stamped, so the next enrichment run
+ * will retry them immediately. Per-node errors are caught and never crash the caller; a
+ * failure fetching one group's candidates no longer prevents the other group from running.
  */
 export async function enrichNationality(
   mbClient: MusicBrainzClient,
@@ -141,9 +142,6 @@ export async function enrichNationality(
   const wd = wdClient ?? null;
   const dc = discogsClient ?? null;
   const startTime = Date.now();
-  let enriched = 0;
-  let skipped = 0;
-  let failed = 0;
   const bySource: Record<NationalitySource, number> = { musicbrainz: 0, wikidata: 0 };
   // switch (not bySource[source]++) to keep eslint-plugin-security's object-injection rule happy.
   const recordSource = (source: NationalitySource): void => {
@@ -157,150 +155,68 @@ export async function enrichNationality(
     }
   };
 
-  log.info('[artist-nationality] Starting nationality enrichment');
+  // The musician count isn't known until the artist phase finishes, so the reported
+  // denominator grows when the musician stage begins: the artist stage reports (i, artists)
+  // and the musician stage reports (artists + i, artists + musicians).
+  let artistTotal = 0;
 
-  // Enrich Artist nodes
-  let artists;
-  try {
-    artists = await getUnenrichedArtistsForNationality(driver);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error(`[artist-nationality] Failed to fetch unenriched artists: ${msg}`);
-    return {
-      enriched: 0,
-      skipped: 0,
-      failed: 1,
-      durationMs: Date.now() - startTime,
-      ...zeroNationalityExtras(),
-    };
-  }
-
-  // `total` grows once per person group: the musician count isn't known until its fetch
-  // runs below, so the denominator jumps up when the musician phase begins. `processed`
-  // spans both loops so the bar advances continuously across the phase boundary.
-  let total = artists.length;
-  let processed = 0;
-  log.info(`[artist-nationality] Found ${total} artists without nationality`);
-  onProgress(processed, total);
-
-  for (const artist of artists) {
-    processed++;
-    if (processed % 25 === 0) onProgress(processed, total);
-    try {
-      const resolved = await resolveCountry(
-        mbClient,
-        wd,
-        dc,
-        artist.discogsId,
-        artist.name,
-        'Artist',
-        log,
-      );
-      await setArtistNationality(
-        driver,
-        artist.discogsId,
-        resolved?.country ?? null,
-        resolved?.source ?? null,
-      );
-      if (resolved !== null) {
-        enriched++;
-        recordSource(resolved.source);
-      } else {
-        skipped++;
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.error(`[artist-nationality] Failed for artist ${artist.discogsId}: ${msg}`);
-      failed++;
-    }
-  }
-
-  // Enrich Musician nodes. Producers and engineers are Musician nodes too (the
-  // role lives on CREDITED_ON, not the label), so this single scan covers them.
-  const personGroups: Array<{
-    label: string;
-    fetch: () => Promise<UnenrichedMusician[]>;
-    save: (
-      driver: Driver,
-      person: UnenrichedMusician,
-      code: string | null,
-      source: NationalitySource | null,
-    ) => Promise<void>;
-  }> = [
-    {
-      label: 'musicians',
-      fetch: () => getUnenrichedMusiciansForNationality(driver),
-      save: setMusicianNationality,
+  const artistStage: EnrichmentStage<UnenrichedArtist, ResolvedNationality> = {
+    name: 'artist-nationality',
+    async selectCandidates(d) {
+      const artists = await getUnenrichedArtistsForNationality(d);
+      artistTotal = artists.length;
+      return artists;
     },
-  ];
+    resolve: (artist) =>
+      resolveCountry(mbClient, wd, dc, artist.discogsId, artist.name, 'Artist', log),
+    async write(d, artist, resolved) {
+      await setArtistNationality(d, artist.discogsId, resolved.country, resolved.source);
+      recordSource(resolved.source);
+    },
+    markAttempted: (d, artist) => setArtistNationality(d, artist.discogsId, null, null),
+    describeItem: (artist) => `artist ${artist.discogsId}`,
+  };
 
-  for (const { label, fetch, save } of personGroups) {
-    let people;
-    try {
-      people = await fetch();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.error(`[artist-nationality] Failed to fetch unenriched ${label}: ${msg}`);
-      failed++;
-      continue;
-    }
+  const artistSummary = await runEnrichment(driver, artistStage, {
+    logger: log,
+    // Swallow the artist stage's final 100% report — the musician stage immediately
+    // re-reports against the grown denominator, avoiding a momentary 100% blip.
+    onProgress: (i, total) => {
+      if (total > 0 && i === total) return;
+      onProgress(i, total);
+    },
+  });
 
-    total += people.length;
-    log.info(`[artist-nationality] Found ${people.length} ${label} without nationality`);
-    onProgress(processed, total);
+  const musicianStage: EnrichmentStage<UnenrichedMusician, ResolvedNationality> = {
+    name: 'artist-nationality',
+    selectCandidates: (d) => getUnenrichedMusiciansForNationality(d),
+    resolve: (person) =>
+      person.discogsId !== null
+        ? resolveCountry(mbClient, wd, dc, person.discogsId, person.name, 'musician', log)
+        : resolveCountryByName(mbClient, person.name),
+    async write(d, person, resolved) {
+      await setMusicianNationality(d, person, resolved.country, resolved.source);
+      recordSource(resolved.source);
+    },
+    markAttempted: (d, person) => setMusicianNationality(d, person, null, null),
+    describeItem: (person) => `musician "${person.name}" (discogsId=${person.discogsId ?? 'none'})`,
+  };
 
-    for (const person of people) {
-      processed++;
-      if (processed % 25 === 0) onProgress(processed, total);
-      try {
-        let resolved: ResolvedNationality | null = null;
+  const musicianSummary = await runEnrichment(driver, musicianStage, {
+    logger: log,
+    onProgress: (i, total) => onProgress(artistTotal + i, artistTotal + total),
+  });
 
-        if (person.discogsId !== null) {
-          resolved = await resolveCountry(
-            mbClient,
-            wd,
-            dc,
-            person.discogsId,
-            person.name,
-            label.slice(0, -1), // "musicians" → "musician" for log label
-            log,
-          );
-        } else {
-          resolved = await resolveCountryByName(mbClient, person.name);
-        }
-
-        await save(driver, person, resolved?.country ?? null, resolved?.source ?? null);
-
-        if (resolved !== null) {
-          enriched++;
-          recordSource(resolved.source);
-        } else {
-          skipped++;
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(
-          `[artist-nationality] Failed for ${label.slice(0, -1)} "${person.name}" (discogsId=${person.discogsId ?? 'none'}): ${msg}`,
-        );
-        failed++;
-      }
-    }
-  }
-
-  onProgress(processed, total);
   const durationMs = Date.now() - startTime;
 
-  log.info(
-    `[artist-nationality] Enrichment complete: enriched=${enriched}, skipped=${skipped}, failed=${failed}, duration=${durationMs}ms`,
-  );
   log.info(
     `[artist-nationality] Resolved by source: musicbrainz=${bySource.musicbrainz}, wikidata=${bySource.wikidata}`,
   );
 
   return {
-    enriched,
-    skipped,
-    failed,
+    enriched: artistSummary.enriched + musicianSummary.enriched,
+    skipped: artistSummary.skipped + musicianSummary.skipped,
+    failed: artistSummary.failed + musicianSummary.failed,
     durationMs,
     resolvedByMusicbrainz: bySource.musicbrainz,
     resolvedByWikidata: bySource.wikidata,

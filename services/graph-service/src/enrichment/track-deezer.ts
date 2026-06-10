@@ -31,6 +31,12 @@ const WRITE_BATCH_SIZE = 50;
  * late failure only loses one batch. Every track in a successfully-written batch is stamped
  * `deezerFetchedAt` even when Deezer had no data, throttling its retries. A track whose
  * fetch or write fails is left unstamped, so a later run retries it immediately.
+ *
+ * Deliberately NOT a runEnrichment stage (#222): the loop's semantics are batch-scoped, not
+ * per-item — fetch failures isolate per ISRC (fanning out to every track sharing it) while
+ * writes buffer across ISRCs and flush in {@link WRITE_BATCH_SIZE} chunks, so "item",
+ * failure unit, and write unit are three different granularities the per-item
+ * EnrichmentStage contract cannot express without losing the write batching.
  */
 export async function enrichTrackDeezer(
   deezerClient: DeezerClient,

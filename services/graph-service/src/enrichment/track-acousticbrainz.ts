@@ -47,6 +47,12 @@ function hasAnyFeature(features: AcousticBrainzFeatures): boolean {
  * Every track in a successfully-processed batch is stamped `acousticBrainzFetchedAt`
  * even when AcousticBrainz had no data, throttling its retries. A batch whose fetch or
  * write throws leaves its tracks unstamped, so a later run retries them immediately.
+ *
+ * Deliberately NOT a runEnrichment stage (#222): the unit of work is a bulk batch of up to
+ * {@link MAX_RECORDING_IDS_PER_CALL} deduplicated MBIDs per API call — resolve, write, and
+ * failure accounting are all batch-scoped (a failed batch fails every fanned-out track),
+ * which the per-item EnrichmentStage contract cannot express without giving up the bulk
+ * fetch.
  */
 export async function enrichTrackAcousticBrainz(
   abClient: AcousticBrainzClient,

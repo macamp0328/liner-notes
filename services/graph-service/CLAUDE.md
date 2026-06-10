@@ -286,6 +286,29 @@ ranStages)` produces a structured per-metric pass/fail report reused by the gate
 
 ---
 
+### Enrichment runner (issue #222)
+
+`src/enrichment/run.ts` owns the per-item enrichment loop invariants — staleness-windowed
+candidate selection (delegated to each repo's query), per-item failure isolation, the
+stamp-on-attempt contract (data → `write`+stamp/`enriched`; `null` → `markAttempted`+stamp/
+`skipped`; throw → no stamp/`failed`, retried next run), progress reporting (`onProgress` + a
+`Progress: i/total` info line every `progressEveryItems`, default 25; the slow ~1 item/s
+stages declare 10), and summary aggregation. Each pipeline is a thin `EnrichmentStage`
+declaring only what varies.
+
+**Runs through the runner:** `lyrics`, `artist-profiles`, `master-data`, `mb-release-events`,
+`track-musicbrainz` (item = release, one stamping write per release), and `nationality` (two
+sequential stages — Artists then Musicians — sharing source-instrumentation closures).
+
+**Deliberate exceptions** (documented in their file headers): `track-deezer` and
+`track-acousticbrainz` keep hand-rolled loops — their fetch/write/failure semantics are
+batch-scoped (per-ISRC fan-out with 50-track write flushes; bulk 100-MBID API calls), which
+the per-item contract cannot express without losing the batching. `artist-genres` is a pure
+whole-graph Cypher aggregation with no candidate loop or stamping. Do not force-fit these
+onto `EnrichmentStage`.
+
+---
+
 ### Ingestion Implementation Notes (Task 4)
 
 Added in Task 4. Source files:
