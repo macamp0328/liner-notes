@@ -61,6 +61,31 @@ jobs:
           role-session-name: github-deploy
           aws-region: ${{ vars.AWS_REGION }}
 
+      # Read the EC2 instance id + ECR repo URL straight from Terraform state
+      # instead of point-in-time GitHub Actions variable snapshots that silently
+      # go stale (#270). The deploy role has GetObject on exactly this one state
+      # object (cicd.tf). The account-id-suffixed bucket name is derived at
+      # runtime so no account id is committed. AWS_REGION stays a var — it's
+      # needed to configure the very credentials that authorize this read.
+      - name: Derive deploy targets from Terraform state
+        env:
+          PROJECT_NAME: ${{ vars.PROJECT_NAME || 'liner-notes' }}
+        run: |
+          set -euo pipefail
+          acct=$(aws sts get-caller-identity --query Account --output text)
+          state=$(aws s3 cp "s3://${PROJECT_NAME}-tfstate-${acct}/graph-service/terraform.tfstate" -)
+          for pair in "EC2_INSTANCE_ID=ec2_instance_id" "ECR_REPOSITORY_URL=ecr_repository_url"; do
+            name=${pair%%=*}
+            out=${pair#*=}
+            val=$(jq -r --arg k "$out" '.outputs[$k].value // empty' <<<"$state")
+            if [ -z "$val" ]; then
+              echo "::error::Terraform output '${out}' is empty or missing in state." >&2
+              exit 1
+            fi
+            echo "${name}=${val}" >> "$GITHUB_ENV"
+            echo "${name} <- ${out}"
+          done
+
       # session-manager-plugin (for `aws ssm start-session`) and standalone
       # kustomize (kubectl's built-in cannot do `edit set image`) are NOT on the
       # runner; kubectl is but drifts. Pin all three from their official sources.
@@ -90,9 +115,9 @@ jobs:
 
       # Fail fast before the build if the node is asleep (scale-to-zero) — there
       # is no point building an image we can't roll out.
+      # EC2_INSTANCE_ID comes from the "Derive deploy targets" step above (it's
+      # exported to $GITHUB_ENV, so it's already in this shell's environment).
       - name: Pre-flight — node running and SSM-reachable
-        env:
-          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
         run: |
           set -euo pipefail
 
@@ -131,7 +156,7 @@ jobs:
           file: ./services/graph-service/Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ vars.ECR_REPOSITORY_URL }}:${{ steps.meta.outputs.tag }}
+          tags: ${{ env.ECR_REPOSITORY_URL }}:${{ steps.meta.outputs.tag }}
           # Reuse the warm main-branch buildx cache ci.yml's docker-build writes.
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -164,9 +189,8 @@ jobs:
               infra/k8s/graph-service/ecr-pull-secret-refresher.yaml
           fi
 
+      # EC2_INSTANCE_ID is in the shell env from the "Derive deploy targets" step.
       - name: Open SSM port-forward to the k3s API
-        env:
-          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
         run: |
           set -euo pipefail
           aws ssm start-session \
@@ -193,7 +217,7 @@ jobs:
 
       - name: Deploy — set image and apply manifests
         env:
-          IMAGE: ${{ vars.ECR_REPOSITORY_URL }}:${{ steps.meta.outputs.tag }}
+          IMAGE: ${{ env.ECR_REPOSITORY_URL }}:${{ steps.meta.outputs.tag }}
         run: |
           set -euo pipefail
           cd infra/k8s/graph-service
@@ -213,16 +237,22 @@ jobs:
             exit 1
           fi
 
-      # Asserts the service answers 200 over the public NodePort. Polls through
-      # the ~30s Recreate downtime gap + kube-proxy programming. A 503 means the
-      # pod is up but Neo4j/Aura is unreachable — a real failure, but not one a
-      # rollback fixes, so we fail the job without undoing.
-      - name: Health gate — assert /api/v1/health is 200
-        env:
-          SERVICE_URL: ${{ vars.SERVICE_URL }}
+      # Asserts the rolled-out pod answers 200 via an in-cluster port-forward over
+      # the SSM tunnel that's already open — not a public URL. The public path is
+      # verified continuously by the Route 53 health check (infra/terraform/
+      # observability.tf), so the deploy gate can't false-fail on a public-edge
+      # issue the rollout never touched (the #270 incident: HTTP 000 against a
+      # stale/locked SERVICE_URL while the rollout had already succeeded). Runs
+      # after `rollout status`, so a Ready pod exists. A 503 means the pod is up
+      # but Neo4j/Aura is unreachable — a real failure, but not one a rollback
+      # fixes, so we fail the job without undoing.
+      - name: Health gate — assert /api/v1/health on the rolled-out pod
         run: |
           set -euo pipefail
-          url="${SERVICE_URL%/}/api/v1/health"
+          kubectl -n liner-notes port-forward deployment/graph-service 18080:3000 \
+            > "$RUNNER_TEMP/pf.log" 2>&1 &
+          echo "PF_PID=$!" >> "$GITHUB_ENV"
+          url="http://127.0.0.1:18080/api/v1/health"
           for i in $(seq 1 20); do
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || echo 000)
             echo "Attempt ${i}: HTTP ${code}"
@@ -231,7 +261,7 @@ jobs:
               exit 0
             fi
             if [ "$code" = "503" ]; then
-              echo "::error::/api/v1/health returned 503 — service up but Neo4j/Aura unreachable." >&2
+              echo "::error::/api/v1/health returned 503 — pod up but Neo4j/Aura unreachable." >&2
               exit 1
             fi
             sleep 6
@@ -248,6 +278,8 @@ jobs:
       - name: Tear down SSM port-forward
         if: always()
         run: |
+          # Health-gate kubectl port-forward (rides on the SSM tunnel) first.
+          [ -n "${PF_PID:-}" ] && kill "$PF_PID" 2>/dev/null || true
           [ -n "${SSM_PID:-}" ] && kill "$SSM_PID" 2>/dev/null || true
           sid="${SSM_SID:-}"
           if [ -z "$sid" ] && [ -f "$RUNNER_TEMP/ssm.log" ]; then
