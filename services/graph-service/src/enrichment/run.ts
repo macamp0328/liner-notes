@@ -26,6 +26,10 @@ export interface EnrichmentSummary {
  *   known-empty source is retried at most once per staleness window, counted `skipped`.
  * - `resolve`/`write` throws (transient) → no stamp, counted `failed`, retried next run.
  *   The loop never aborts siblings.
+ *
+ * Three pipelines deliberately stay OFF this contract (see their headers): `track-deezer`
+ * and `track-acousticbrainz` (batch-scoped fetch/write/failure semantics) and
+ * `artist-genres` (pure whole-graph Cypher, no candidate loop or stamping).
  */
 export interface EnrichmentStage<TItem, TResolved> {
   readonly name: string;
