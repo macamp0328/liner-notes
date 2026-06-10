@@ -1,5 +1,6 @@
 import type { Logger } from './discogs-client.js';
 import { transientNetworkCode } from './network-errors.js';
+import { jitteredBackoffMs } from './backoff.js';
 
 export interface MbReleaseEvent {
   mbReleaseId: string;
@@ -32,6 +33,8 @@ export interface MusicBrainzClientConfig {
   delayMs: number;
   /** Minimum backoff on 429/503. Defaults to 2000ms. Set to 0 in tests to keep them fast. */
   backoffBaseMs?: number;
+  /** Injectable RNG in [0,1) for deterministic backoff jitter in tests; defaults to Math.random. */
+  random?: () => number;
   logger?: Logger;
 }
 
@@ -127,12 +130,14 @@ export class MusicBrainzClient {
   private readonly userAgent: string;
   private readonly delayMs: number;
   private readonly backoffBaseMs: number;
+  private readonly random: () => number;
   private readonly log: Logger;
 
   constructor(config: MusicBrainzClientConfig) {
     this.userAgent = config.userAgent;
     this.delayMs = config.delayMs;
     this.backoffBaseMs = config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
+    this.random = config.random ?? Math.random;
     this.log = config.logger ?? console;
   }
 
@@ -363,10 +368,11 @@ export class MusicBrainzClient {
       } catch (err) {
         const netCode = transientNetworkCode(err);
         if (netCode === null || attempt >= MAX_RETRIES) throw err;
+        const sleepMs = jitteredBackoffMs(currentDelay, { random: this.random });
         this.log.warn(
-          `[musicbrainz-client] Network error (${netCode}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${currentDelay}ms`,
+          `[musicbrainz-client] Network error (${netCode}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${sleepMs}ms`,
         );
-        await this.sleep(currentDelay);
+        await this.sleep(sleepMs);
         currentDelay = Math.min(currentDelay * 2, 32_000);
         attempt++;
         continue;
@@ -379,12 +385,12 @@ export class MusicBrainzClient {
         const retryAfterHeader = response.headers.get('Retry-After');
         const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
         const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
-        const waitMs = Math.max(currentDelay, retryAfterMs);
+        const sleepMs = jitteredBackoffMs(currentDelay, { retryAfterMs, random: this.random });
         const label = response.status === 429 ? 'Rate limited' : 'Service unavailable';
         this.log.warn(
-          `[musicbrainz-client] ${label} (${response.status}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${waitMs}ms`,
+          `[musicbrainz-client] ${label} (${response.status}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${sleepMs}ms`,
         );
-        await this.sleep(waitMs);
+        await this.sleep(sleepMs);
         currentDelay = Math.min(currentDelay * 2, 32_000);
         attempt++;
         continue;

@@ -176,6 +176,31 @@ describe('MusicBrainzClient', () => {
       expect(fetchSpy).toHaveBeenCalledTimes(3);
     });
 
+    it('applies equal-jitter to backoff: random()=0 sleeps half the base (#245)', async () => {
+      const jitterClient = new MusicBrainzClient({
+        userAgent: 'liner-notes/test',
+        delayMs: 0,
+        backoffBaseMs: 4000,
+        random: () => 0, // equal-jitter floor → base/2
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      });
+      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation((fn) => {
+        (fn as () => void)();
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      });
+      try {
+        fetchSpy
+          .mockResolvedValueOnce(makeErrorResponse(429, 'Too Many Requests'))
+          .mockResolvedValueOnce(makeOkResponse(mbUrlResponse('mbid')))
+          .mockResolvedValueOnce(makeOkResponse(mbArtistResponse('JP')));
+        const result = await jitterClient.getCountryByDiscogsId(5);
+        expect(result).toBe('JP');
+        expect(setTimeoutSpy.mock.calls[0]?.[1]).toBe(2000);
+      } finally {
+        setTimeoutSpy.mockRestore();
+      }
+    });
+
     it('returns null (does not throw) when URL lookup throws a network error', async () => {
       fetchSpy.mockRejectedValueOnce(new Error('Network error'));
       const result = await client.getCountryByDiscogsId(1);

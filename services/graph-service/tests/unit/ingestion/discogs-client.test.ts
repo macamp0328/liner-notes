@@ -262,12 +262,15 @@ describe('DiscogsClient', () => {
       // Use a non-zero backoffBaseMs so the doubling is observable. With
       // backoffBaseMs=0 (the default for other tests) the schedule degenerates
       // to 0,0,0,... and there is nothing to assert. Pass a stub logger so the
-      // 429 warn() calls do not pollute test stdout.
+      // 429 warn() calls do not pollute test stdout. `random: () => 1` pins the
+      // equal-jitter draw to its ceiling so each sleep equals the un-jittered
+      // base, keeping the doubling exact and observable.
       const backoffClient = new DiscogsClient({
         token: 'test-token',
         userAgent: 'liner-notes/test',
         delayMs: 0,
         backoffBaseMs: 100,
+        random: () => 1,
         logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       });
 
@@ -295,6 +298,30 @@ describe('DiscogsClient', () => {
         const secondDelay = setTimeoutSpy.mock.calls[1]?.[1] as number;
         expect(firstDelay).toBe(100);
         expect(secondDelay).toBe(200);
+      } finally {
+        setTimeoutSpy.mockRestore();
+      }
+    });
+
+    it('applies equal-jitter to backoff: random()=0 sleeps half the base (#245)', async () => {
+      const jitterClient = new DiscogsClient({
+        token: 'test-token',
+        userAgent: 'liner-notes/test',
+        delayMs: 0,
+        backoffBaseMs: 4000,
+        random: () => 0, // equal-jitter floor → base/2
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      });
+      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation((fn) => {
+        (fn as () => void)();
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      });
+      try {
+        fetchSpy
+          .mockResolvedValueOnce(makeErrorResponse(429, 'Too Many Requests'))
+          .mockResolvedValueOnce(makeOkResponse(release13570466));
+        await jitterClient.getRelease(13570466);
+        expect(setTimeoutSpy.mock.calls[0]?.[1]).toBe(2000);
       } finally {
         setTimeoutSpy.mockRestore();
       }

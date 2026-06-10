@@ -34,6 +34,25 @@ cloudWatchLogs:
   logStreamPrefix: pod.
   autoCreateGroup: false # terraform owns the log group
 
+# Kubernetes enrichment filter. The chart owns this [FILTER] block; we override
+# only `keepLog` here and inherit every other key from the v0.2.0 chart defaults
+# (Helm deep-merges maps). The defaults we depend on and deliberately keep:
+#   mergeLog: "On"      — parse the container `log` line as JSON
+#   mergeLogKey: "data" — nest the parsed pino payload under `data.*`. This is
+#                         why observability.tf's metric filters / Logs Insights
+#                         queries key off `$.data.level`, `$.data.res.statusCode`.
+#
+# keepLog: "Off" drops the raw `log` string *only after a successful JSON merge*,
+# so each shipped record carries the parsed `data.*` OR the raw `log` — never both
+# (issue #245). Previously every graph-service line shipped twice (raw `log` +
+# parsed `data.*`), doubling CloudWatch ingestion volume/cost and skewing text
+# log analysis by 2×. fluent-bit auto-keeps `log` when the JSON parse FAILS, so
+# non-JSON lines (startup banners, multi-line stack traces) — whose content lives
+# only in `log`, not `data` — are not lost. This is why a blunt
+# record_modifier/Remove_key on `log` would be wrong: it deletes those lines' only copy.
+filter:
+  keepLog: 'Off'
+
 # volumes / volumeMounts are full-override keys in this chart (no
 # extraVolumes / extraVolumeMounts append-style alternative exists in
 # v0.2.0). Re-declare the two chart defaults alongside the /etc/machine-id

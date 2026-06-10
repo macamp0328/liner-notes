@@ -152,6 +152,29 @@ describe('DeezerClient', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
+  it('applies equal-jitter to backoff: random()=0 sleeps half the base (#245)', async () => {
+    const jitterClient = new DeezerClient({
+      delayMs: 0,
+      backoffBaseMs: 4000,
+      random: () => 0, // equal-jitter floor → base/2
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation((fn) => {
+      (fn as () => void)();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    });
+    try {
+      fetchSpy
+        .mockResolvedValueOnce(makeErrorResponse(429, 'Too Many Requests'))
+        .mockResolvedValueOnce(makeOkResponse(makeTrackResponse(100.0, -4.0)));
+      const result = await jitterClient.getTrackByIsrc('JITTER000001');
+      expect(result).toEqual({ bpm: 100.0, gain: -4.0 });
+      expect(setTimeoutSpy.mock.calls[0]?.[1]).toBe(2000);
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
+  });
+
   it('honors Retry-After header (in seconds) on 429', async () => {
     vi.useFakeTimers();
     fetchSpy

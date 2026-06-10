@@ -1,11 +1,14 @@
 import type { Logger } from './discogs-client.js';
 import { transientNetworkCode } from './network-errors.js';
+import { jitteredBackoffMs } from './backoff.js';
 
 export interface DeezerClientConfig {
   /** Milliseconds to sleep after every successful request. 120ms stays well under 50 req/5s. */
   delayMs: number;
   /** Minimum backoff on 429. Defaults to 1000ms. Set to 0 in tests to keep them fast. */
   backoffBaseMs?: number;
+  /** Injectable RNG in [0,1) for deterministic backoff jitter in tests; defaults to Math.random. */
+  random?: () => number;
   logger?: Logger;
 }
 
@@ -37,11 +40,13 @@ const MAX_BACKOFF_MS = 32_000;
 export class DeezerClient {
   private readonly delayMs: number;
   private readonly backoffBaseMs: number;
+  private readonly random: () => number;
   private readonly log: Logger;
 
   constructor(config: DeezerClientConfig) {
     this.delayMs = config.delayMs;
     this.backoffBaseMs = config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
+    this.random = config.random ?? Math.random;
     this.log = config.logger ?? console;
   }
 
@@ -86,10 +91,11 @@ export class DeezerClient {
         // the same attempt budget; rethrow non-transient errors and the final attempt unchanged.
         const netCode = transientNetworkCode(err);
         if (netCode === null || attempt >= MAX_RETRIES) throw err;
+        const sleepMs = jitteredBackoffMs(currentDelay, { random: this.random });
         this.log.warn(
-          `[deezer-client] Network error (${netCode}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${currentDelay}ms`,
+          `[deezer-client] Network error (${netCode}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${sleepMs}ms`,
         );
-        await this.sleep(currentDelay);
+        await this.sleep(sleepMs);
         currentDelay = Math.min(currentDelay * 2, MAX_BACKOFF_MS);
         attempt++;
         continue;
@@ -105,12 +111,12 @@ export class DeezerClient {
         const retryAfterHeader = response.headers.get('Retry-After');
         const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
         const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
-        const waitMs = Math.max(currentDelay, retryAfterMs);
+        const sleepMs = jitteredBackoffMs(currentDelay, { retryAfterMs, random: this.random });
         const reason = response.status === 429 ? 'Rate limited' : 'Service unavailable';
         this.log.warn(
-          `[deezer-client] ${reason} (${response.status}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${waitMs}ms`,
+          `[deezer-client] ${reason} (${response.status}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${sleepMs}ms`,
         );
-        await this.sleep(waitMs);
+        await this.sleep(sleepMs);
         currentDelay = Math.min(currentDelay * 2, MAX_BACKOFF_MS);
         attempt++;
         continue;
