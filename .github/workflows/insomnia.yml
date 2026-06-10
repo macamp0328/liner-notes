@@ -1,0 +1,75 @@
+name: Insomnia Collection
+
+# Regenerate the API client artifacts under services/graph-service/docs/
+# (openapi.json + insomnia.collection.yaml) and FAIL the PR if the committed
+# files don't match what the generator produces. Triggers when:
+#   - route/source code changes (spec or collection stale)
+#   - the committed docs artifacts change (hand-edit must match regeneration)
+#   - this workflow or either generator script changes
+#
+# Why fail-on-drift instead of auto-commit: same rationale as diagrams.yml —
+# GitHub's anti-recursion rule does not trigger downstream workflows on pushes
+# made with the default GITHUB_TOKEN, which would leave the PR HEAD with zero
+# checks and branch protection blocking the merge. Regeneration is one local
+# command (`pnpm insomnia:generate`).
+#
+# Bonus: this is the first drift guard for openapi.json itself — generation is
+# DB-free (buildDocsServer registers routes + swagger without Neo4j), so no
+# service container is needed here.
+#
+# PROD_API_URL: forks that regenerate with their own production URL must set
+# the same value as a repo *variable* named PROD_API_URL, or this check will
+# (correctly) flag the mismatch between their committed file and the default.
+
+on:
+  # PRs to any base branch (stacked PRs included), not just main.
+  pull_request:
+    paths:
+      - 'services/graph-service/src/**'
+      - 'services/graph-service/docs/**'
+      - 'services/graph-service/scripts/generate-openapi.ts'
+      - 'scripts/insomnia/**'
+      - '.github/workflows/insomnia.yml'
+
+# Least-privilege default for the GITHUB_TOKEN. The single job only reads the
+# checkout and compares regenerated artifacts (fail-on-drift); it never pushes.
+permissions:
+  contents: read
+
+jobs:
+  regenerate:
+    name: Regenerate Insomnia collection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate OpenAPI spec + Insomnia collection
+        env:
+          PROD_API_URL: ${{ vars.PROD_API_URL || '' }}
+        run: pnpm insomnia:generate
+
+      - name: Fail if generated API artifacts are out of date
+        # Any drift between the committed artifacts and what the generator
+        # produces means the contributor forgot to run
+        # `pnpm insomnia:generate` locally before pushing. Print the diff so
+        # the failure is self-explanatory, then exit non-zero.
+        run: |
+          if ! git diff --quiet -- services/graph-service/docs; then
+            echo "::error::API docs are out of date. Run 'pnpm insomnia:generate' locally and commit the result."
+            echo "Drift:"
+            git --no-pager diff --stat -- services/graph-service/docs
+            git --no-pager diff -- services/graph-service/docs | head -200
+            exit 1
+          fi

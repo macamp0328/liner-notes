@@ -14,6 +14,7 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "diagrams:generate": "tsx scripts/diagrams/generate.ts",
+    "insomnia:generate": "pnpm --filter graph-service docs:generate && tsx scripts/insomnia/generate.ts && prettier --write services/graph-service/docs/insomnia.collection.yaml",
     "enrich:lyrics": "scripts/admin/post.sh /api/v1/admin/lyrics/enrich",
     "enrich:master-data": "scripts/admin/post.sh /api/v1/admin/master-data/enrich",
     "enrich:nationality": "scripts/admin/post.sh /api/v1/admin/nationality/enrich",
@@ -46,6 +47,7 @@
     }
   },
   "devDependencies": {
+    "@types/node": "^22",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     "dotenv": "^17.4.2",
@@ -55,6 +57,7 @@
     "lint-staged": "^17.0.7",
     "prettier": "^3.3.3",
     "tsx": "^4.22.4",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "yaml": "^2.9.0"
   }
 }
