@@ -251,7 +251,24 @@ jobs:
           set -euo pipefail
           kubectl -n liner-notes port-forward deployment/graph-service 18080:3000 \
             > "$RUNNER_TEMP/pf.log" 2>&1 &
-          echo "PF_PID=$!" >> "$GITHUB_ENV"
+          pf_pid=$!
+          echo "PF_PID=$pf_pid" >> "$GITHUB_ENV"
+
+          # Wait for the tunnel, but fail fast (dumping pf.log) if port-forward
+          # exits immediately — missing pods/portforward RBAC, no matching pod,
+          # etc. Backgrounding means such a failure wouldn't trip `set -e`, so
+          # without this the step would burn the whole retry budget on HTTP 000
+          # and report a misleading "service unhealthy".
+          for _ in $(seq 1 10); do
+            if ! kill -0 "$pf_pid" 2>/dev/null; then
+              echo "::error::kubectl port-forward exited before the tunnel came up (see log below)." >&2
+              cat "$RUNNER_TEMP/pf.log" >&2 || true
+              exit 1
+            fi
+            grep -q "Forwarding from" "$RUNNER_TEMP/pf.log" && break
+            sleep 1
+          done
+
           url="http://127.0.0.1:18080/api/v1/health"
           for i in $(seq 1 20); do
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || echo 000)
@@ -267,6 +284,7 @@ jobs:
             sleep 6
           done
           echo "::error::/api/v1/health did not return 200 within the retry budget (last: ${code})." >&2
+          cat "$RUNNER_TEMP/pf.log" >&2 || true
           exit 1
 
       # Always release the tunnel. terminate-session by id frees one of the two
