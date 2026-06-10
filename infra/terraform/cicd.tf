@@ -154,6 +154,19 @@ data "aws_iam_policy_document" "github_deploy" {
     actions   = ["secretsmanager:DescribeSecret"]
     resources = [aws_secretsmanager_secret.graph_service.arn]
   }
+
+  # Read graph-service Terraform outputs (ec2_instance_id, ecr_repository_url) at
+  # deploy time so the workflow no longer depends on point-in-time GitHub Actions
+  # variable snapshots that silently go stale (#270). Scoped to GetObject on the
+  # single state object — no ListBucket, no write, no other key. The account-id
+  # suffixed bucket name resolves at apply time, so no account id is committed
+  # (mirrors backend.tf's fork-safe naming). State carries no secret values
+  # (no aws_secretsmanager_secret_version is managed here), only resource metadata.
+  statement {
+    sid       = "ReadTerraformStateOutputs"
+    actions   = ["s3:GetObject"]
+    resources = ["arn:aws:s3:::${var.project_name}-tfstate-${data.aws_caller_identity.current.account_id}/graph-service/terraform.tfstate"]
+  }
 }
 
 resource "aws_iam_role_policy" "github_deploy" {

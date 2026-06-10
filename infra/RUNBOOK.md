@@ -802,7 +802,7 @@ Free-tier **Bot Fight Mode** (dashboard → Security → Bots) is a coarse on/of
 
 ## CD — IAM bootstrap
 
-One-time setup that lets the CD workflow ([#120](https://github.com/macamp0328/liner-notes/issues/120)) deploy without long-lived AWS keys. [`infra/terraform/cicd.tf`](terraform/cicd.tf) declares a GitHub Actions OIDC identity provider and a scoped `github-deploy` IAM role; a hosted runner assumes the role via `sts:AssumeRoleWithWebIdentity`. The role can push images to ECR and open an SSM port-forward to the k3s API server — nothing more.
+One-time setup that lets the CD workflow ([#120](https://github.com/macamp0328/liner-notes/issues/120)) deploy without long-lived AWS keys. [`infra/terraform/cicd.tf`](terraform/cicd.tf) declares a GitHub Actions OIDC identity provider and a scoped `github-deploy` IAM role; a hosted runner assumes the role via `sts:AssumeRoleWithWebIdentity`. The role can push images to ECR, open an SSM port-forward to the k3s API server, and read **only** the project's Terraform state object (`s3:GetObject` on `graph-service/terraform.tfstate`) so the workflow can derive its deploy targets at deploy time instead of from stale snapshot variables ([#270](https://github.com/macamp0328/liner-notes/issues/270)) — nothing more.
 
 > **Run this manually, from the primary checkout, never in CI.** Terraform state lives in S3 ([Remote Terraform state](#remote-terraform-state)), and `use_lockfile` serializes applies — but still run this from the **primary checkout** to keep the local `.terraform/` backend cache and `backend.config` in one place, and never from a worktree or CI. Apply with your **admin `root` AWS profile** (the `liner-notes-admin` IAM user) — _not_ the scoped `default` profile (the `liner-notes-cli` operator user). This bootstrap creates an **account-wide** GitHub Actions OIDC provider (`aws_iam_openid_connect_provider.github`), and `iam:CreateOpenIDConnectProvider` is deliberately outside the operator's scope: [`operator-iam-policy.json`](iam/operator-iam-policy.json) scopes the operator's IAM role and instance-profile actions to `role/liner-notes-*` / `instance-profile/liner-notes-*` (`CreateRole`, `PutRolePolicy`, `PassRole`, and the like) plus read-only `iam:GetOpenIDConnectProvider` / `iam:ListOpenIDConnectProviderTags` (just enough for day-to-day operator applies to _refresh_ the provider and its `default_tags`), but grants **no** `iam:CreateOpenIDConnectProvider` or `iam:ListOpenIDConnectProviders`. Run with the operator profile and the create fails; even the `aws iam list-open-id-connect-providers` pre-check below returns `AccessDenied`. CI has no Terraform credentials and must never run `apply`. The role this creates is exactly what CI later _assumes_ — bootstrapping it from CI would be circular.
 
@@ -863,6 +863,8 @@ One-time setup of the scoped identity the CD workflow ([#120](https://github.com
 
 It is **deliberately not** part of the graph-service kustomization — the deployer can't create the identity it authenticates as — so you apply it once, by hand, with the admin kubeconfig. Run all three steps from your laptop with `KUBECONFIG` set and the [Step 4b](#step-4--get-a-kubeconfig-pointed-at-the-k3s-api-via-ssm-port-forward) port-forward still running.
 
+> **Existing clusters — re-apply for the #270 health gate.** The Role now also grants `create` on `pods/portforward` so the deploy's post-rollout health gate can `kubectl port-forward deployment/graph-service` to assert `/api/v1/health` in-cluster (replacing the old public-`SERVICE_URL` curl). If you bootstrapped before [#270](https://github.com/macamp0328/liner-notes/issues/270), re-run Step 1 below to apply the new rule (the token/Secret is unchanged, so `KUBECONFIG_B64` does **not** need re-minting).
+
 **1. Apply the identity (admin kubeconfig):**
 
 ```bash
@@ -898,7 +900,7 @@ gh secret list --repo macamp0328/liner-notes    # KUBECONFIG_B64 should now be l
 
 ## CD — workflow setup
 
-Final one-time wiring that turns the two bootstraps above into an automated pipeline. [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) ([#120](https://github.com/macamp0328/liner-notes/issues/120)) runs on every merge to `main` that touches `services/graph-service/**` or `infra/k8s/**` (and on manual `workflow_dispatch`): it assumes the deploy role via OIDC, builds + pushes the image to ECR, opens its own SSM port-forward to `6443`, then `kustomize edit set image` + `kubectl apply -k` + `rollout status` (auto-`rollout undo` on failure), and finally asserts `/api/v1/health` returns 200. The build + push live **inside** the gated deploy job — `ci.yml`'s `docker-build` stays build-only.
+Final one-time wiring that turns the two bootstraps above into an automated pipeline. [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) ([#120](https://github.com/macamp0328/liner-notes/issues/120)) runs on every merge to `main` that touches `services/graph-service/**` or `infra/k8s/**` (and on manual `workflow_dispatch`): it assumes the deploy role via OIDC, reads its deploy targets (instance id, ECR repo) straight from Terraform state ([#270](https://github.com/macamp0328/liner-notes/issues/270)), builds + pushes the image to ECR, opens its own SSM port-forward to `6443`, then `kustomize edit set image` + `kubectl apply -k` + `rollout status` (auto-`rollout undo` on failure), and finally asserts `/api/v1/health` returns 200 by port-forwarding to the rolled-out pod **in-cluster** over that same tunnel. The build + push live **inside** the gated deploy job — `ci.yml`'s `docker-build` stays build-only.
 
 **1. Create the `production` GitHub environment with required reviewers.** This is the manual-approval gate: the deploy role's trust policy only mints the `:environment:production` OIDC sub claim _after_ a reviewer approves, so the role is unassumable until then.
 
@@ -908,20 +910,17 @@ Final one-time wiring that turns the two bootstraps above into an automated pipe
 gh api -X PUT repos/macamp0328/liner-notes/environments/production >/dev/null   # creates it; set reviewers in the UI
 ```
 
-**2. Set the repo variables** the workflow reads (all non-secret — ARNs, IDs, and URLs are not sensitive). `AWS_DEPLOY_ROLE_ARN` was set in [CD — IAM bootstrap](#cd--iam-bootstrap) Step 3; the rest come from `terraform output`:
+**2. Set the two static repo variables** the workflow reads (non-secret — an ARN and a region are not sensitive). `AWS_DEPLOY_ROLE_ARN` was set in [CD — IAM bootstrap](#cd--iam-bootstrap) Step 3; the only one to set here is the region:
 
 ```bash
 cd infra/terraform
-gh variable set AWS_REGION         --body "$(terraform output -raw aws_region)"
-gh variable set EC2_INSTANCE_ID    --body "$(terraform output -raw ec2_instance_id)"
-gh variable set ECR_REPOSITORY_URL --body "$(terraform output -raw ecr_repository_url)"
-gh variable set SERVICE_URL        --body "$(terraform output -raw service_url)"
+gh variable set AWS_REGION --body "$(terraform output -raw aws_region)"
 cd "$(git rev-parse --show-toplevel)"
 
-gh variable list   # AWS_DEPLOY_ROLE_ARN, AWS_REGION, EC2_INSTANCE_ID, ECR_REPOSITORY_URL, SERVICE_URL
+gh variable list   # AWS_DEPLOY_ROLE_ARN, AWS_REGION
 ```
 
-> **These variables are point-in-time snapshots of `terraform output` — re-run the matching `gh variable set` line whenever the underlying output changes.** Most importantly, **enabling Cloudflare (#119) flips `service_url`** from `http://<eip>:30080` to the HTTPS domain: a stale `SERVICE_URL` makes the health gate curl the now-locked-down origin and fail with `HTTP 000` even though the rollout itself succeeded. The same applies if the instance is replaced (`EC2_INSTANCE_ID`) or the ECR repo changes (`ECR_REPOSITORY_URL`). Deriving these at deploy time instead of snapshotting is tracked in [#270](https://github.com/macamp0328/liner-notes/issues/270).
+> **Everything else is read from Terraform state at deploy time — no snapshots to keep fresh ([#270](https://github.com/macamp0328/liner-notes/issues/270)).** The workflow reads `ec2_instance_id` and `ecr_repository_url` from the state object on each run (the deploy role has read-only `s3:GetObject` on it — apply the [CD — IAM bootstrap](#cd--iam-bootstrap) change before the next deploy), and the health gate hits the pod in-cluster, so the CD workflow no longer needs a `SERVICE_URL` **GitHub Actions variable** at all. (The `service_url` Terraform _output_ is still useful — the manual `curl`/smoke-test commands elsewhere in this runbook `export SERVICE_URL=$(terraform output -raw service_url)` as a shell variable; that's unrelated to the deleted Actions variable.) `AWS_REGION` stays a variable because it's needed to configure the AWS credentials that authorize that state read. If you bootstrapped before #270, drop the now-unused snapshots: `gh variable delete SERVICE_URL EC2_INSTANCE_ID ECR_REPOSITORY_URL`.
 
 The `KUBECONFIG_B64` **secret** was set in [CD — cluster bootstrap](#cd--cluster-bootstrap) Step 3 — that's the only secret the workflow needs.
 
@@ -929,7 +928,7 @@ The `KUBECONFIG_B64` **secret** was set in [CD — cluster bootstrap](#cd--clust
 
 > **Two caveats.**
 >
-> - **Health gate reachability.** The final step curls `SERVICE_URL` from the GitHub runner. With Cloudflare enabled, `SERVICE_URL` is the public HTTPS domain, which the runner reaches through Cloudflare — the origin SG lockdown (`restrict_app_to_cloudflare`) is irrelevant because the runner never touches `:30080` directly. (Without Cloudflare, `SERVICE_URL` is `:30080` and the runner needs `allow_app_cidr` to include it — keep `:30080` open or drop the health-gate step.)
+> - **Health gate is in-cluster.** The final step `kubectl port-forward`s to the rolled-out `graph-service` Deployment over the SSM tunnel and curls `/api/v1/health` on `127.0.0.1`, so it works the same with or without Cloudflare and never depends on the public URL or the origin SG lockdown (`restrict_app_to_cloudflare`). Continuous verification of the real public path is the Route 53 health check's job ([`observability.tf`](terraform/observability.tf)), which probes `/api/v1/health` every 30s and alarms via SNS — independent of any deploy.
 > - **Asleep node.** If the node is stopped (scale-to-zero), the pre-flight step fails fast with a "power on" message rather than hanging. Run `pnpm power:on`, wait for the SSM agent to register, then re-run the workflow from the **Actions** tab (`workflow_dispatch`) — no dummy commit needed.
 
 ---
