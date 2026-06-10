@@ -558,6 +558,8 @@ Until this is on, the billing alarm stays in `INSUFFICIENT_DATA` indefinitely �
 
 Same pattern as Step 5 (External Secrets Operator): helm against the local k3s API from an SSM session, not the laptop tunnel. The chart values are checked in at [`infra/k8s/aws-for-fluent-bit/values.yaml`](k8s/aws-for-fluent-bit/values.yaml) and pulled from the repo at apply time — do not paste them into the SSM terminal (Session Manager occasionally collapses newlines in long heredoc pastes, which silently drops sections of the values file).
 
+This same `helm upgrade --install` is also how you roll out a **values-only** change (it's idempotent): e.g. picking up the `filter.keepLog: "Off"` log de-duplication (issue #245) is just a re-run of the steps below, then the verification in Step 11.
+
 Open an interactive SSM session:
 
 ```bash
@@ -646,6 +648,28 @@ Expect a mix of `pod.kube.var.log.containers.*` streams (one per pod) and a sing
 # Tail interleaved
 aws logs tail /liner-notes/graph-service --region "$REGION" --since 5m --follow
 ```
+
+#### Confirming log de-duplication (`Keep_Log Off`, issue #245)
+
+The kubernetes filter runs `Keep_Log Off`, so a graph-service JSON line ships **only**
+as the parsed `data.*` payload — not also as a duplicate raw `log` string. After a
+re-apply, confirm a recent structured `pod.kube.*` record has `data` but **no** top-level
+`log` (this is what halves ingestion volume; it is not CI-verifiable):
+
+```bash
+aws logs filter-log-events --region "$REGION" \
+  --log-group-name /liner-notes/graph-service \
+  --log-stream-name-prefix pod.kube. \
+  --filter-pattern '{ $.data.level = * }' --max-items 1 \
+  --query 'events[0].message' --output text | jq '{ hasLog: has("log"), hasData: has("data") }'
+# Expect: { "hasLog": false, "hasData": true }
+```
+
+`Keep_Log Off` only drops `log` **after a successful JSON merge**, so a genuinely
+non-JSON line (a startup banner, a multi-line stack trace) — whose text lives **only**
+in `log` — is still kept and shipped. Sanity-check that such lines did not vanish (they
+should still appear in the tail above), and that the dashboard's Logs Insights panels,
+which key off `$.data.*`, still render.
 
 #### Smoke-testing the alarms
 
