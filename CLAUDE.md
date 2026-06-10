@@ -44,6 +44,18 @@ pnpm --filter graph-service build
 # Generate OpenAPI docs
 pnpm --filter graph-service docs:generate
 
+# Insomnia collection (committed: services/graph-service/docs/insomnia.collection.yaml).
+# Chains docs:generate → scripts/insomnia/generate.ts → prettier, refreshing BOTH
+# committed API artifacts (openapi.json + the Insomnia v5 YAML) from the live
+# route definitions. Deterministic (hashed ids, no timestamps) and self-validated
+# on every run. Regenerate locally and commit after ANY route/schema change —
+# .github/workflows/insomnia.yml re-runs it on PRs touching
+# services/graph-service/src/** and FAILS the check on drift (same fail-on-drift
+# rationale as diagrams.yml). This doubles as the drift guard for openapi.json.
+# Forks: set PROD_API_URL (env) to override the Production sub-environment URL,
+# and add the same value as a GitHub repo variable so CI regenerates with it.
+pnpm insomnia:generate
+
 # Architecture diagrams (Inframap + Mermaid).
 #   Mac local: `brew install inframap` and ensure Docker Desktop is running.
 #   The script renders SVG via a pinned Docker image (nshine/dot:2.40.1) so
