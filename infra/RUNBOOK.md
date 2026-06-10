@@ -921,6 +921,8 @@ cd "$(git rev-parse --show-toplevel)"
 gh variable list   # AWS_DEPLOY_ROLE_ARN, AWS_REGION, EC2_INSTANCE_ID, ECR_REPOSITORY_URL, SERVICE_URL
 ```
 
+> **These variables are point-in-time snapshots of `terraform output` — re-run the matching `gh variable set` line whenever the underlying output changes.** Most importantly, **enabling Cloudflare (#119) flips `service_url`** from `http://<eip>:30080` to the HTTPS domain: a stale `SERVICE_URL` makes the health gate curl the now-locked-down origin and fail with `HTTP 000` even though the rollout itself succeeded. The same applies if the instance is replaced (`EC2_INSTANCE_ID`) or the ECR repo changes (`ECR_REPOSITORY_URL`). Deriving these at deploy time instead of snapshotting is tracked in [#270](https://github.com/macamp0328/liner-notes/issues/270).
+
 The `KUBECONFIG_B64` **secret** was set in [CD — cluster bootstrap](#cd--cluster-bootstrap) Step 3 — that's the only secret the workflow needs.
 
 **3. Verify on the first deploy.** Merge a graph-service change (or run the workflow manually from the **Actions** tab), approve the `production` gate, and watch: the image lands in ECR under the short-SHA tag, `rollout status` completes, and the health gate goes green. To confirm the rollback path, once push a deliberately broken image (e.g. a bad start command) and check that the failed `rollout status` triggers `rollout undo` and the previous revision keeps serving.
