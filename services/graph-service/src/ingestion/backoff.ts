@@ -19,9 +19,10 @@
  * is `base`).
  *
  * `random` is non-cryptographic (it spreads retries; it is not a secret) and is
- * injectable so tests can make the jitter deterministic. It must return a value in
- * `[0, 1)` and defaults to `Math.random`. With `random: () => 1` the result collapses
- * to exactly `base` — i.e. the pre-jitter behavior.
+ * injectable so tests can make the jitter deterministic. It defaults to `Math.random`;
+ * its output is clamped to `[0, 1]`, so an out-of-range stub can never push the wait
+ * above `base` and break the cap. `random: () => 1` yields exactly `base` — the
+ * pre-jitter value.
  */
 export function jitteredBackoffMs(
   baseMs: number,
@@ -29,6 +30,10 @@ export function jitteredBackoffMs(
 ): number {
   const random = options.random ?? Math.random;
   const retryAfterMs = options.retryAfterMs ?? 0;
-  const jittered = Math.round(baseMs / 2 + random() * (baseMs / 2));
+  // Clamp the draw to [0, 1] so an out-of-range stub can't push the jittered wait above
+  // `base` and break the per-client 32s cap. (Retry-After is a separate floor, applied
+  // below, and may legitimately exceed `base`.)
+  const roll = Math.min(Math.max(random(), 0), 1);
+  const jittered = Math.round(baseMs / 2 + roll * (baseMs / 2));
   return Math.max(jittered, retryAfterMs);
 }

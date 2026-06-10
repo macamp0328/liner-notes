@@ -26,6 +26,15 @@ describe('jitteredBackoffMs', () => {
     }
   });
 
+  it('clamps an out-of-range draw above 1 down to the ceiling (base)', () => {
+    // a misbehaving stub returning > 1 must not produce a sleep above base (cap safety)
+    expect(jitteredBackoffMs(4000, { random: () => 2 })).toBe(4000);
+  });
+
+  it('clamps a negative draw up to the floor (base/2)', () => {
+    expect(jitteredBackoffMs(4000, { random: () => -1 })).toBe(2000);
+  });
+
   it('floors at Retry-After when it exceeds the jittered backoff', () => {
     // equal jitter of 4000 ∈ [2000, 4000]; a 5000ms Retry-After wins at either extreme
     expect(jitteredBackoffMs(4000, { retryAfterMs: 5000, random: () => 0 })).toBe(5000);
