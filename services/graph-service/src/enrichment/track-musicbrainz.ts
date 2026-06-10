@@ -7,9 +7,11 @@ import {
   setTrackMusicBrainzIds,
 } from '../db/track-musicbrainz-repository.js';
 import type {
+  ReleaseForMusicBrainz,
   TrackForMusicBrainz,
   TrackMusicBrainzResult,
 } from '../db/track-musicbrainz-repository.js';
+import { runEnrichment, type EnrichmentStage } from './run.js';
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 
 export interface TrackMusicBrainzEnrichmentSummary {
@@ -151,6 +153,9 @@ export function alignTracklist(
  * so a track with no MusicBrainz match is retried at most once per staleness window. Failed
  * releases are NOT stamped, so they retry on the next run.
  */
+/** The per-release alignment outcome: identifiers for every track, nulls for unmatched. */
+type ResolvedTrackIds = { results: TrackMusicBrainzResult[]; matchedCount: number };
+
 export async function enrichTrackMusicBrainz(
   mbClient: MusicBrainzClient,
   driver: Driver,
@@ -158,46 +163,13 @@ export async function enrichTrackMusicBrainz(
   onProgress: ProgressReporter = NOOP_PROGRESS,
 ): Promise<TrackMusicBrainzEnrichmentSummary> {
   const log: Logger = logger ?? console;
-  const startTime = Date.now();
-  let releasesProcessed = 0;
-  let releasesSkipped = 0;
-  let releasesFailed = 0;
   let tracksMatched = 0;
   let tracksUnmatched = 0;
 
-  log.info('[track-musicbrainz] Starting MusicBrainz track identifier enrichment');
-
-  let releases;
-  try {
-    releases = await getTracksForMusicBrainzEnrichment(driver);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error(`[track-musicbrainz] Failed to fetch releases for enrichment: ${msg}`);
-    return {
-      releasesProcessed: 0,
-      releasesSkipped: 0,
-      releasesFailed: 1,
-      tracksMatched: 0,
-      tracksUnmatched: 0,
-      durationMs: Date.now() - startTime,
-    };
-  }
-
-  const total = releases.length;
-  log.info(`[track-musicbrainz] Found ${total} releases with unenriched tracks`);
-  onProgress(0, total);
-
-  let i = 0;
-  for (const release of releases) {
-    if (i > 0 && i % 10 === 0) {
-      log.info(
-        `[track-musicbrainz] Progress: ${i}/${total} — processed=${releasesProcessed}, skipped=${releasesSkipped}, failed=${releasesFailed}, matched=${tracksMatched}`,
-      );
-      onProgress(i, total);
-    }
-    i++;
-
-    try {
+  const stage: EnrichmentStage<ReleaseForMusicBrainz, ResolvedTrackIds> = {
+    name: 'track-musicbrainz',
+    selectCandidates: (d) => getTracksForMusicBrainzEnrichment(d),
+    async resolve(release) {
       const matchByElementId = new Map<string, { recordingMbid: string; isrc: string | null }>();
 
       // Primary path: Discogs release → MusicBrainz release → aligned tracklist.
@@ -224,6 +196,13 @@ export async function enrichTrackMusicBrainz(
         }
       }
 
+      if (matchByElementId.size === 0) {
+        log.info(
+          `[track-musicbrainz] No MusicBrainz matches for release ${release.releaseDiscogsId}`,
+        );
+        return null;
+      }
+
       const results: TrackMusicBrainzResult[] = release.tracks.map((track) => {
         const match = matchByElementId.get(track.elementId);
         return {
@@ -233,39 +212,39 @@ export async function enrichTrackMusicBrainz(
         };
       });
 
-      await setTrackMusicBrainzIds(driver, results);
+      return { results, matchedCount: matchByElementId.size };
+    },
+    async write(d, release, resolved) {
+      await setTrackMusicBrainzIds(d, resolved.results);
+      // Tallied only after a successful write — a failed release leaves its tracks uncounted.
+      tracksMatched += resolved.matchedCount;
+      tracksUnmatched += release.tracks.length - resolved.matchedCount;
+    },
+    // No matches anywhere — stamp every track with null identifiers so the release isn't
+    // re-fetched until the staleness window expires.
+    async markAttempted(d, release) {
+      await setTrackMusicBrainzIds(
+        d,
+        release.tracks.map((track) => ({
+          elementId: track.elementId,
+          recordingMbid: null,
+          isrc: null,
+        })),
+      );
+      tracksUnmatched += release.tracks.length;
+    },
+    describeItem: (release) => `release ${release.releaseDiscogsId}`,
+    progressEveryItems: 10,
+  };
 
-      const matched = matchByElementId.size;
-      tracksMatched += matched;
-      tracksUnmatched += release.tracks.length - matched;
-
-      if (matched > 0) {
-        releasesProcessed++;
-      } else {
-        releasesSkipped++;
-        log.info(
-          `[track-musicbrainz] No MusicBrainz matches for release ${release.releaseDiscogsId}`,
-        );
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.error(`[track-musicbrainz] Failed for release ${release.releaseDiscogsId}: ${msg}`);
-      releasesFailed++;
-    }
-  }
-
-  onProgress(total, total);
-  const durationMs = Date.now() - startTime;
-  log.info(
-    `[track-musicbrainz] Enrichment complete: processed=${releasesProcessed}, skipped=${releasesSkipped}, failed=${releasesFailed}, tracksMatched=${tracksMatched}, tracksUnmatched=${tracksUnmatched}, duration=${durationMs}ms`,
-  );
+  const summary = await runEnrichment(driver, stage, { logger: log, onProgress });
 
   return {
-    releasesProcessed,
-    releasesSkipped,
-    releasesFailed,
+    releasesProcessed: summary.enriched,
+    releasesSkipped: summary.skipped,
+    releasesFailed: summary.failed,
     tracksMatched,
     tracksUnmatched,
-    durationMs,
+    durationMs: summary.durationMs,
   };
 }
