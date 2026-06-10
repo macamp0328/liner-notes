@@ -131,8 +131,10 @@ const ADMIN_PATH_PREFIX = '/api/v1/admin/';
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'];
 const SORT_KEY_STEP = 100;
 
-// Example values for the 4 path params the spec defines. Illustrative only —
-// a 404 on "send" is fine; they exist so requests are runnable without edits.
+// Example values for path params. The spec defines 4 distinct params; the
+// fourth, {name}, is resolved per explore segment via EXPLORE_NAME_SAMPLES
+// below instead of one fixed value here. Illustrative only — a 404 on "send"
+// is fine; they exist so requests are runnable without edits.
 const PATH_PARAM_VALUES = new Map<string, string>([
   ['discogsId', '249504'],
   ['year', '1977'],

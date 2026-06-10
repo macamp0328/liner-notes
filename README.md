@@ -47,7 +47,7 @@ variable. Requires Insomnia ≥ 11.0.2 (earlier 11.0.x had a broken v5 folder im
 
 Notes:
 
-- The destructive `POST /admin/reset` request ships with its `confirm=wipe-all` query param
+- The destructive `POST /api/v1/admin/reset` request ships with its `confirm=wipe-all` query param
   **disabled** — tick the checkbox to arm it deliberately.
 - Re-importing **duplicates** the collection (Insomnia regenerates ids on import). To pick up
   changes: delete the old collection, import fresh, re-paste `admin_token`.
