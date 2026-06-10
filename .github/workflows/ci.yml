@@ -7,7 +7,7 @@ name: CI
 #
 #   format, lint, typecheck                                       ┐
 #   tests-and-coverage (unit + integration, Neo4j, 70% threshold) │  all start at
-#   schema-validation (Neo4j service container)                   │  t=0, in
+#   schema-validation (Neo4j container, started via composite action) │  t=0, in
 #   audit, secrets-scan, codeql, actionlint                       ┘  parallel
 #
 #   lint, typecheck ──→ docker-build   (the ONLY gate: the multi-stage build
@@ -132,23 +132,17 @@ jobs:
     #
     # Note: the neo4j:5 image is Community edition — only the single default "neo4j" database
     # exists. CREATE DATABASE is not supported. Test isolation is by full graph wipe between files.
+    #
+    # Neo4j is started by the ./.github/actions/start-neo4j composite action instead of a
+    # `services:` block: the runner pulls `services:` images with a fixed, untunable retry that
+    # intermittently fails on a Docker Hub blip; the action pulls neo4j:5 with our own
+    # retry/backoff and then waits on Docker's healthcheck. Connection is bolt://localhost:7687,
+    # unchanged.
     runs-on: ubuntu-latest
-    services:
-      neo4j:
-        image: neo4j:5
-        env:
-          NEO4J_AUTH: neo4j/test-password
-        ports:
-          - 7687:7687
-          - 7474:7474
-        options: >-
-          --health-cmd "wget -q --spider http://localhost:7474 || exit 1"
-          --health-interval 3s
-          --health-timeout 5s
-          --health-retries 20
-          --health-start-period 5s
     steps:
       - uses: actions/checkout@v6
+      - name: Start Neo4j (pull with retry, then wait for healthy)
+        uses: ./.github/actions/start-neo4j
       - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
         with:
           version: 9
@@ -174,23 +168,12 @@ jobs:
     # the script runs schema setup twice and asserts no error on either run.
     # Fix locally: start Neo4j via docker-compose, then pnpm tsx services/graph-service/scripts/validate-schema.ts
     # No `needs:` — runs in parallel from t=0 (same trade as tests-and-coverage above).
+    # Neo4j is started by ./.github/actions/start-neo4j (pull-with-retry; see that job's note).
     runs-on: ubuntu-latest
-    services:
-      neo4j:
-        image: neo4j:5
-        env:
-          NEO4J_AUTH: neo4j/test-password
-        ports:
-          - 7687:7687
-          - 7474:7474
-        options: >-
-          --health-cmd "wget -q --spider http://localhost:7474 || exit 1"
-          --health-interval 3s
-          --health-timeout 5s
-          --health-retries 20
-          --health-start-period 5s
     steps:
       - uses: actions/checkout@v6
+      - name: Start Neo4j (pull with retry, then wait for healthy)
+        uses: ./.github/actions/start-neo4j
       - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
         with:
           version: 9
