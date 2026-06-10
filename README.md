@@ -31,6 +31,32 @@ open http://localhost:3000/api/v1/health
 open http://localhost:3000/api/docs
 ```
 
+## Testing the API with Insomnia
+
+A ready-to-import [Insomnia](https://insomnia.rest) collection is committed at
+[`services/graph-service/docs/insomnia.collection.yaml`](services/graph-service/docs/insomnia.collection.yaml)
+— every endpoint pre-built, foldered by tag (admin sub-foldered per enrichment stage), with
+**Local** (`http://localhost:3000`) and **Production** sub-environments sharing a `base_url`
+variable. Requires Insomnia ≥ 11.0.2 (earlier 11.0.x had a broken v5 folder importer).
+
+1. Insomnia → `Import` → select the YAML file.
+2. Pick the environment (Local/Production) from the environment switcher.
+3. For admin routes, open the **Base Environment** and paste your `ADMIN_TOKEN` into the empty
+   `admin_token` value. The admin folder carries bearer auth that every admin request inherits.
+   Never commit a real token — the committed file always ships it empty.
+
+Notes:
+
+- The destructive `POST /api/v1/admin/reset` request ships with its `confirm=wipe-all` query param
+  **disabled** — tick the checkbox to arm it deliberately.
+- Re-importing **duplicates** the collection (Insomnia regenerates ids on import). To pick up
+  changes: delete the old collection, import fresh, re-paste `admin_token`.
+- The file is generated from the OpenAPI spec — never edit it by hand. `pnpm insomnia:generate`
+  rebuilds `openapi.json` + the collection from the live route definitions;
+  [CI fails on drift](.github/workflows/insomnia.yml). Forks with their own production domain:
+  set `PROD_API_URL` when regenerating **and** add the same value as a GitHub repo variable
+  named `PROD_API_URL` so the drift check regenerates with it.
+
 ## Requirements
 
 - [mise](https://mise.jdx.dev) — manages Node.js, pnpm, terraform, kubectl, helm, gh, and aws-cli at the versions pinned in `.mise.toml`. Install once with `brew install mise`, then `mise install` from the repo root.
