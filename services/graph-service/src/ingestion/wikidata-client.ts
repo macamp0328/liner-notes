@@ -1,5 +1,6 @@
 import type { Logger } from './discogs-client.js';
 import { transientNetworkCode } from './network-errors.js';
+import { jitteredBackoffMs } from './backoff.js';
 
 export interface WikidataClientConfig {
   userAgent: string;
@@ -7,6 +8,8 @@ export interface WikidataClientConfig {
   delayMs: number;
   /** Initial backoff ms on 429/502/503 retries. Defaults to 2000ms. Set to 0 in tests. */
   backoffBaseMs?: number;
+  /** Injectable RNG in [0,1) for deterministic backoff jitter in tests; defaults to Math.random. */
+  random?: () => number;
   logger?: Logger;
 }
 
@@ -25,12 +28,14 @@ export class WikidataClient {
   private readonly userAgent: string;
   private readonly delayMs: number;
   private readonly backoffBaseMs: number;
+  private readonly random: () => number;
   private readonly log: Logger;
 
   constructor(config: WikidataClientConfig) {
     this.userAgent = config.userAgent;
     this.delayMs = config.delayMs;
     this.backoffBaseMs = config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
+    this.random = config.random ?? Math.random;
     this.log = config.logger ?? console;
   }
 
@@ -115,7 +120,7 @@ export class WikidataClient {
           const retryAfterHeader = response.headers.get('Retry-After');
           const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
           const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
-          const waitMs = Math.max(backoffMs, retryAfterMs);
+          const waitMs = jitteredBackoffMs(backoffMs, { retryAfterMs, random: this.random });
           this.log.warn(
             `[wikidata-client] HTTP ${response.status} for ${logLabel} on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${waitMs}ms`,
           );
@@ -133,10 +138,11 @@ export class WikidataClient {
         const contentType = response.headers.get('content-type') ?? '';
         if (contentType.includes('text/html')) {
           if (attempt >= MAX_RETRIES) break;
+          const waitMs = jitteredBackoffMs(backoffMs, { random: this.random });
           this.log.warn(
-            `[wikidata-client] HTML response (status ${response.status}) for ${logLabel} on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${backoffMs}ms`,
+            `[wikidata-client] HTML response (status ${response.status}) for ${logLabel} on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${waitMs}ms`,
           );
-          await this.sleep(backoffMs);
+          await this.sleep(waitMs);
           backoffMs = Math.min(backoffMs * 2, 32_000);
           attempt++;
           continue;
@@ -160,10 +166,11 @@ export class WikidataClient {
           return null;
         }
         if (attempt >= MAX_RETRIES) break;
+        const waitMs = jitteredBackoffMs(backoffMs, { random: this.random });
         this.log.warn(
-          `[wikidata-client] Network error (${netCode}) for ${logLabel} on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${backoffMs}ms`,
+          `[wikidata-client] Network error (${netCode}) for ${logLabel} on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${waitMs}ms`,
         );
-        await this.sleep(backoffMs);
+        await this.sleep(waitMs);
         backoffMs = Math.min(backoffMs * 2, 32_000);
         attempt++;
         continue;

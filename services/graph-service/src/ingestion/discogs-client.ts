@@ -6,6 +6,7 @@ import type {
   DiscogsRelease,
 } from './types.js';
 import { transientNetworkCode } from './network-errors.js';
+import { jitteredBackoffMs } from './backoff.js';
 
 /** Minimal logger interface — satisfied by Fastify's app.log (pino) and by console. */
 export interface Logger {
@@ -21,6 +22,8 @@ export interface DiscogsClientConfig {
   delayMs: number;
   /** Minimum backoff in ms for 429 retry. Defaults to 1000. Set to 0 in tests to keep them fast. */
   backoffBaseMs?: number;
+  /** Injectable RNG in [0,1) for deterministic backoff jitter in tests; defaults to Math.random. */
+  random?: () => number;
   /** Optional structured logger; defaults to console when omitted. Pass app.log in production. */
   logger?: Logger;
 }
@@ -36,6 +39,7 @@ export class DiscogsClient {
   private readonly userAgent: string;
   private readonly delayMs: number;
   private readonly backoffBaseMs: number;
+  private readonly random: () => number;
   private readonly log: Logger;
 
   constructor(config: DiscogsClientConfig) {
@@ -43,6 +47,7 @@ export class DiscogsClient {
     this.userAgent = config.userAgent;
     this.delayMs = config.delayMs;
     this.backoffBaseMs = config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
+    this.random = config.random ?? Math.random;
     this.log = config.logger ?? console;
   }
 
@@ -100,10 +105,11 @@ export class DiscogsClient {
         // same attempt budget; rethrow non-transient errors and the final attempt unchanged.
         const netCode = transientNetworkCode(err);
         if (netCode === null || attempt >= MAX_RETRIES) throw err;
+        const sleepMs = jitteredBackoffMs(currentDelay, { random: this.random });
         this.log.warn(
-          `[discogs-client] Network error (${netCode}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${currentDelay}ms`,
+          `[discogs-client] Network error (${netCode}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${sleepMs}ms`,
         );
-        await this.sleep(currentDelay);
+        await this.sleep(sleepMs);
         currentDelay = Math.min(Math.max(currentDelay, this.backoffBaseMs) * 2, MAX_BACKOFF_MS);
         attempt++;
         continue;
@@ -124,11 +130,12 @@ export class DiscogsClient {
         const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
         const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
         const waitMs = Math.max(currentDelay, retryAfterMs);
+        const sleepMs = jitteredBackoffMs(waitMs, { retryAfterMs, random: this.random });
         this.log.warn(
-          `[discogs-client] Rate limited (429) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${waitMs}ms`,
+          `[discogs-client] Rate limited (429) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${sleepMs}ms`,
         );
-        await this.sleep(waitMs);
-        // Exponential backoff, capped at MAX_BACKOFF_MS
+        await this.sleep(sleepMs);
+        // Exponential backoff, capped at MAX_BACKOFF_MS (advanced from the un-jittered waitMs)
         currentDelay = Math.min(Math.max(waitMs, this.backoffBaseMs) * 2, MAX_BACKOFF_MS);
         attempt++;
         continue;
