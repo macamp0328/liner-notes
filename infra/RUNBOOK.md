@@ -1069,7 +1069,7 @@ pnpm --filter graph-service exec tsx scripts/lyrics-enrich-local.ts \
   --env "$PWD/services/graph-service/.env.prod.local"
 ```
 
-The `--env` path must be **absolute** (here `$PWD` expands to the repo root before pnpm runs): `pnpm --filter graph-service exec` runs the script with its CWD set to `services/graph-service/`, so a relative `--env services/graph-service/.env.prod.local` double-resolves to a path that doesn't exist and the harvest dies with `Missing required env var NEO4J_URI`.
+Run this from the **repo root**, so the shell expands `$PWD` to it before pnpm runs. The `--env` path must be **absolute**: `pnpm --filter graph-service exec` runs the script with its CWD set to `services/graph-service/`, so a relative `--env services/graph-service/.env.prod.local` double-resolves to a path that doesn't exist and the harvest dies with `Missing required env var NEO4J_URI`. (If you run from elsewhere, substitute the absolute path to your env file directly.)
 
 The script prints the **target Neo4j host** first — confirm it's your Aura prod host, not localhost, before it writes. (`pnpm lyrics:enrich:local` is a shorthand that uses the default `services/graph-service/.env.local`; only use it if that file holds prod creds.)
 
