@@ -1,6 +1,8 @@
-import type { Logger } from './discogs-client.js';
-import { transientNetworkCode } from './network-errors.js';
-import { jitteredBackoffMs } from './backoff.js';
+import {
+  createRateLimitedFetch,
+  type Logger,
+  type RateLimitedFetch,
+} from './rate-limited-fetch.js';
 
 export interface DeezerClientConfig {
   /** Milliseconds to sleep after every successful request. 120ms stays well under 50 req/5s. */
@@ -27,7 +29,6 @@ interface DeezerTrackResponse {
 const BASE_URL = 'https://api.deezer.com';
 const MAX_RETRIES = 3;
 const DEFAULT_BACKOFF_BASE_MS = 1_000;
-const MAX_BACKOFF_MS = 32_000;
 
 /**
  * HTTP client for the Deezer public API.
@@ -38,16 +39,19 @@ const MAX_BACKOFF_MS = 32_000;
  * provides nothing else useful for audio-feature enrichment.
  */
 export class DeezerClient {
-  private readonly delayMs: number;
-  private readonly backoffBaseMs: number;
-  private readonly random: () => number;
-  private readonly log: Logger;
+  private readonly rlFetch: RateLimitedFetch;
 
   constructor(config: DeezerClientConfig) {
-    this.delayMs = config.delayMs;
-    this.backoffBaseMs = config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
-    this.random = config.random ?? Math.random;
-    this.log = config.logger ?? console;
+    this.rlFetch = createRateLimitedFetch({
+      label: 'deezer-client',
+      apiName: 'Deezer API',
+      delayMs: config.delayMs,
+      maxRetries: MAX_RETRIES,
+      backoffBaseMs: config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS,
+      retryStatuses: [429, 503],
+      ...(config.random !== undefined ? { random: config.random } : {}),
+      ...(config.logger !== undefined ? { logger: config.logger } : {}),
+    });
   }
 
   /**
@@ -76,70 +80,20 @@ export class DeezerClient {
   }
 
   private async fetchWithBackoff<T>(url: string): Promise<T | null> {
-    let attempt = 0;
-    let currentDelay = this.backoffBaseMs;
+    const response = await this.rlFetch(url, {
+      headers: { Accept: 'application/json' },
+    });
 
-    while (attempt <= MAX_RETRIES) {
-      let response: Response;
-      try {
-        response = await fetch(url, {
-          headers: { Accept: 'application/json' },
-        });
-      } catch (err) {
-        // Transient network-level failure (fetch failed / ECONNRESET / ...) — not an HTTP
-        // status, so it lands here rather than in the 429/503 branch. Retry with backoff on
-        // the same attempt budget; rethrow non-transient errors and the final attempt unchanged.
-        const netCode = transientNetworkCode(err);
-        if (netCode === null || attempt >= MAX_RETRIES) throw err;
-        const sleepMs = jitteredBackoffMs(currentDelay, { random: this.random });
-        this.log.warn(
-          `[deezer-client] Network error (${netCode}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${sleepMs}ms`,
-        );
-        await this.sleep(sleepMs);
-        currentDelay = Math.min(currentDelay * 2, MAX_BACKOFF_MS);
-        attempt++;
-        continue;
-      }
-
-      if (response.status === 429 || response.status === 503) {
-        // No further fetch will follow on the final allowed attempt, so throw immediately
-        // instead of sleeping out a full backoff / Retry-After window for nothing —
-        // matching the short-circuit in musicbrainz-client.ts / discogs-client.ts.
-        if (attempt >= MAX_RETRIES) {
-          throw new Error(`Deezer API: exceeded max retries (${MAX_RETRIES}) for ${url}`);
-        }
-        const retryAfterHeader = response.headers.get('Retry-After');
-        const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
-        const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
-        const sleepMs = jitteredBackoffMs(currentDelay, { retryAfterMs, random: this.random });
-        const reason = response.status === 429 ? 'Rate limited' : 'Service unavailable';
-        this.log.warn(
-          `[deezer-client] ${reason} (${response.status}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${sleepMs}ms`,
-        );
-        await this.sleep(sleepMs);
-        currentDelay = Math.min(currentDelay * 2, MAX_BACKOFF_MS);
-        attempt++;
-        continue;
-      }
-
-      if (response.status === 404) {
-        return null;
-      }
-
-      if (!response.ok) {
-        throw new Error(`Deezer API error ${response.status} ${response.statusText} for ${url}`);
-      }
-
-      const data = (await response.json()) as T;
-      await this.sleep(this.delayMs);
-      return data;
+    // 404 means the ISRC is not in Deezer's catalog — a normal "no data" outcome, not an error.
+    if (response.status === 404) {
+      return null;
     }
 
-    throw new Error(`Deezer API: exceeded max retries (${MAX_RETRIES}) for ${url}`);
-  }
+    if (!response.ok) {
+      throw new Error(`Deezer API error ${response.status} ${response.statusText} for ${url}`);
+    }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return (await response.json()) as T;
   }
 }
 
