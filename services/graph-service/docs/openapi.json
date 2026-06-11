@@ -163,7 +163,7 @@
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message", "jobId"],
+                      "required": ["code", "message"],
                       "properties": {
                         "code": {
                           "type": "string"
@@ -366,6 +366,16 @@
               }
             }
           },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Default Response",
             "content": {
@@ -413,6 +423,16 @@
             }
           },
           "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "Default Response",
             "content": {
               "application/json": {

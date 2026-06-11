@@ -676,6 +676,37 @@ const PIPELINES: PipelineEntry[] = [
   },
 ];
 
+// Shared "is another graph-writing job in flight?" guard (#300). Consults the three in-memory,
+// synchronous signals — the ingest job (`job-state.ts`), the reload-active flag
+// (`reload-progress.ts`), and the per-pipeline running flags — and returns the 409 body to send, or
+// null if idle. Every mutating admin route calls it so the whole surface enforces "only one
+// graph-writing job at a time" (the reload, an /ingest job, and the enrichments all contend on the
+// same rate-limited Discogs/MusicBrainz clients). Callers pass `ignore` to skip the signal they
+// already guard with their own, richer 409 — ingest/reload carry a jobId, and enrich/reset own a
+// *per-pipeline* flag (so they ignore the global `enrich` scan here, which would otherwise block a
+// different concurrent stage that shares no client — the #176 lanes overlap by design). All three
+// reads are synchronous, so a caller can drop this in before any atomic `running = true` set without
+// introducing an await (preserving the #281 guard invariant). Point-in-time only: a job that starts
+// *after* the check passes isn't blocked mid-run — this closes the operator-error window, not every
+// interleave; MERGE-idempotency is the backstop, same as #281.
+export function busyWith(
+  ignore: { ingest?: boolean; reload?: boolean; enrich?: boolean } = {},
+): { code: string; message: string } | null {
+  if (!ignore.ingest && getJobState().status === 'running') {
+    return { code: 'JOB_RUNNING', message: 'Ingestion is in progress' };
+  }
+  if (!ignore.reload && isReloadActive()) {
+    return { code: 'RELOAD_RUNNING', message: 'A reload is in progress' };
+  }
+  if (!ignore.enrich) {
+    const running = PIPELINES.find((e) => e.state.running);
+    if (running) {
+      return { code: 'ENRICHMENT_RUNNING', message: `${running.statusLabel} is in progress` };
+    }
+  }
+  return null;
+}
+
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post<{
@@ -719,13 +750,16 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
             },
           },
           401: errorResponseRef,
+          // Two 409 variants: this route's own JOB_RUNNING carries the conflicting ingest job's
+          // jobId; the cross-job RELOAD_RUNNING / ENRICHMENT_RUNNING from busyWith() (#300) have
+          // none — so jobId is optional, not required (fast-json-stringify omits it when absent).
           409: {
             type: 'object',
             required: ['error'],
             properties: {
               error: {
                 type: 'object',
-                required: ['code', 'message', 'jobId'],
+                required: ['code', 'message'],
                 properties: {
                   code: { type: 'string' },
                   message: { type: 'string' },
@@ -749,6 +783,13 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
             jobId: current.jobId,
           },
         });
+      }
+
+      // runIngestion itself runs the lyrics/master-data/artist-genres/artist-profiles enrichments,
+      // so it contends with a reload or a standalone enrich on the same rate-limited clients (#300).
+      const busy = busyWith({ ingest: true });
+      if (busy) {
+        return reply.code(409).send({ error: busy });
       }
 
       const username = process.env['DISCOGS_USERNAME'];
@@ -858,6 +899,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           },
           400: errorResponseRef,
           401: errorResponseRef,
+          409: errorResponseRef,
           503: errorResponseRef,
         },
       },
@@ -871,6 +913,12 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
             message: 'Refusing to wipe the graph without ?confirm=wipe-all',
           },
         });
+      }
+      // A wipe DETACH DELETEs nodes a concurrent reload/ingest/enrich is MERGE-writing — the most
+      // destructive race, so refuse while any graph-writing job is in flight (#300).
+      const busy = busyWith();
+      if (busy) {
+        return reply.code(409).send({ error: busy });
       }
       const deleted = await wipeGraph(getDriver());
       // Log at error level (Pino 50) so this destructive action trips the
@@ -911,12 +959,20 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
             },
           },
           401: errorResponseRef,
+          409: errorResponseRef,
           503: errorResponseRef,
         },
       },
       preHandler: adminAuthHook,
     },
     async (_request, reply) => {
+      // Nulling Genius lyrics mid reload-lyrics-stage (or mid lyrics-enrich) would clobber freshly
+      // written rows, so refuse while any graph-writing job is in flight (#300). This route owns no
+      // running flag of its own, so the shared check is its whole guard.
+      const busy = busyWith();
+      if (busy) {
+        return reply.code(409).send({ error: busy });
+      }
       const cleared = await clearGeniusLyrics(getDriver());
       return reply.send({ data: { cleared } });
     },
@@ -962,9 +1018,10 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         // A reload owns the shared rate-limited clients (and the #176 scheduler serialises its
         // lanes), so refuse a standalone enrich while one is in flight (#281). isReloadActive() is
         // synchronous, so this adds no await before the running-flag guard below — that guard stays
-        // atomic. Deliberate precedence: RELOAD_RUNNING > SERVICE_UNAVAILABLE > ENRICHMENT_RUNNING.
-        // Point-in-time only: a reload starting *after* this passes isn't blocked mid-run, but
-        // writes are MERGE-idempotent, so this closes the operator-error window, not every race.
+        // atomic. Deliberate precedence: RELOAD_RUNNING > JOB_RUNNING > SERVICE_UNAVAILABLE >
+        // ENRICHMENT_RUNNING. Point-in-time only: a reload starting *after* this passes isn't
+        // blocked mid-run, but writes are MERGE-idempotent, so this closes the operator-error
+        // window, not every race.
         if (isReloadActive()) {
           return reply.code(409).send({
             error: {
@@ -972,6 +1029,16 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
               message: `Cannot run ${entry.statusLabel} while a reload is in progress`,
             },
           });
+        }
+
+        // Also refuse while an /ingest job runs — runIngestion enriches too, contending on the same
+        // clients (#300). `ignore.enrich` here is deliberate: a *different* standalone enrich stage
+        // may legitimately run concurrently (the #176 lanes overlap); this stage's own contention is
+        // covered by the per-pipeline `entry.state.running` guard below. Still synchronous, so the
+        // atomic running-flag set stays await-free.
+        const busy = busyWith({ reload: true, enrich: true });
+        if (busy) {
+          return reply.code(409).send({ error: busy });
         }
 
         let prepared: PreparedRun | null = null;
@@ -1071,6 +1138,14 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           preHandler: adminAuthHook,
         },
         async (_request, reply) => {
+          // Clearing this stage's markers / deleting its relationships mid-reload (or mid-ingest)
+          // would make an in-flight stage re-process from scratch (#300). `ignore.enrich` is
+          // deliberate: a reset clears only its own stage and contends on no other stage's client,
+          // so a concurrent *different* enrich stays allowed — its own pipeline is guarded below.
+          const busy = busyWith({ enrich: true });
+          if (busy) {
+            return reply.code(409).send({ error: busy });
+          }
           if (entry.state.running) {
             return reply.code(409).send({
               error: { code: 'ENRICHMENT_RUNNING', message: reset.runningMessage },
@@ -1189,18 +1264,15 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const driver = getDriver();
 
-      // Mutual exclusion with the standalone /<stage>/enrich routes (#281): a reload and an enrich
-      // contend on the same rate-limited clients. Sync, zero-I/O check first, so a busy enrich
-      // short-circuits before the Neo4j round-trip below. (The reverse guard lives in the generated
-      // enrich handler via isReloadActive().)
-      const busy = PIPELINES.find((e) => e.state.running);
+      // Mutual exclusion with the standalone /<stage>/enrich routes (#281) and the /ingest job
+      // (#300): a reload contends with both on the same rate-limited clients. Sync, zero-I/O check
+      // first, so a busy enrich/ingest short-circuits before the Neo4j round-trip below. (The
+      // reverse guards live in the enrich handler via isReloadActive() and in /ingest via
+      // busyWith().) `ignore.reload` because another reload is caught by the DB guard just below,
+      // which carries the conflicting job's id.
+      const busy = busyWith({ reload: true });
       if (busy) {
-        return reply.code(409).send({
-          error: {
-            code: 'ENRICHMENT_RUNNING',
-            message: `Cannot start a reload while ${busy.statusLabel} is running`,
-          },
-        });
+        return reply.code(409).send({ error: busy });
       }
 
       // Coarse mutual exclusion against another reload: refuse if a reload job is still running.

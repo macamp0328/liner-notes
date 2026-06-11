@@ -41,6 +41,11 @@ EXPOSE 3000
 # Drop root: the app binds :3000 (unprivileged) and writes nothing to disk, so the
 # stock node user (uid 1000) in the base image is all it needs. Pairs with the
 # runAsNonRoot securityContext in infra/k8s/graph-service/deployment.yaml.
-USER node
+#
+# NUMERIC on purpose: `USER node` (a name) leaves k8s unable to verify the UID at
+# admission, so `runAsNonRoot: true` fails the container with CreateContainerConfigError.
+# `node` is uid/gid 1000 in node:22-alpine; spelling it numerically keeps the image and
+# the manifest's runAsUser in agreement.
+USER 1000:1000
 
 CMD ["node", "dist/index.js"]
