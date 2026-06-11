@@ -990,6 +990,9 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         // Fire-and-forget (like POST /ingest): the slow run continues in the background while we
         // return 202, so the request never sits past Cloudflare's ~100s proxy timeout (#280).
         // Outcome lands on the pipeline state, observable via GET /<name>/status.
+        // Capture just the logger — these runs last hours, and closing over `request` would pin
+        // its headers/body/raw socket in memory for the whole run; the pino child logger doesn't.
+        const log = request.log;
         void prepared
           .run(getDriver())
           .then((summary) => {
@@ -1001,7 +1004,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           .catch((err: unknown) => {
             entry.state.lastError = err instanceof Error ? err.message : String(err);
             entry.state.completedAt = new Date().toISOString();
-            request.log.error({ err }, `[enrich] ${entry.name} enrichment failed`);
+            log.error({ err }, `[enrich] ${entry.name} enrichment failed`);
           })
           .finally(() => {
             entry.state.running = false;
