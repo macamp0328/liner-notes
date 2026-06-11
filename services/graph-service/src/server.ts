@@ -1,11 +1,12 @@
 import 'dotenv-flow/config';
-import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
+import Fastify, { FastifyInstance, FastifyServerOptions, FastifyRequest } from 'fastify';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
 import { healthRoutes } from './api/health.js';
 import { adminRoutes } from './api/admin.js';
+import { isAuthorizedAdmin } from './api/middleware/admin-auth.js';
 import { collectionRoutes } from './api/collection.js';
 import { exploreRoutes } from './api/explore.js';
 import { searchRoutes } from './api/search.js';
@@ -74,6 +75,72 @@ export function resolveRateLimitMax(option?: number): number {
 }
 
 /**
+ * Resolve whether to key the rate limiter on `cf-connecting-ip`.
+ *
+ * Precedence: explicit option > TRUST_CF_CONNECTING_IP env > false. Off by default is
+ * load-bearing: with it on but no header-overwriting proxy in front, a direct caller
+ * could spoof the header per request and bypass the limiter entirely. Local dev and
+ * forks not behind such a proxy therefore key on the direct peer (request.ip).
+ */
+export function resolveTrustCfIp(option?: boolean): boolean {
+  if (option !== undefined) return option;
+  return process.env['TRUST_CF_CONNECTING_IP'] === 'true';
+}
+
+/**
+ * Pull a single client IP from a possibly array-valued or comma-joined header, returning
+ * the first non-empty token (trimmed) or null when nothing usable is present.
+ */
+function firstHeaderIp(header: string | string[] | undefined): string | null {
+  const raw = Array.isArray(header) ? header[0] : header;
+  if (typeof raw !== 'string') return null;
+  const first = raw.split(',')[0]?.trim();
+  return first ? first : null;
+}
+
+/**
+ * Per-client key for the global rate limiter. When `trustCfIp`, the real client IP comes
+ * from Cloudflare's `cf-connecting-ip`; otherwise — and whenever that header is absent or
+ * blank — the direct peer `request.ip`.
+ */
+export function rateLimitKeyGenerator(trustCfIp: boolean): (request: FastifyRequest) => string {
+  return (request: FastifyRequest): string => {
+    if (trustCfIp) {
+      // Cloudflare *overwrites* cf-connecting-ip every request (unlike X-Forwarded-For,
+      // which it appends to), so it can't be spoofed past a CF edge — but only the
+      // origin's CF-only security group makes that guarantee hold.
+      const clientIp = firstHeaderIp(request.headers['cf-connecting-ip']);
+      if (clientIp) return clientIp;
+    }
+    return request.ip;
+  };
+}
+
+/**
+ * Shared rate-limit registration options, so buildServer and buildDocsServer can't drift.
+ * Authenticated admin calls are exempt (allowList) so a public flood can't 429 the operator
+ * out of the admin surface — a wrong or absent token is NOT exempt and stays limited under
+ * its own per-client key (isAuthorizedAdmin returns false unless ADMIN_TOKEN is set and the
+ * bearer matches), so admin exemption does not weaken brute-force protection.
+ */
+function buildRateLimitOptions(
+  rateLimitMax?: number,
+  trustCfIp = false,
+): {
+  max: number;
+  timeWindow: string;
+  keyGenerator: (request: FastifyRequest) => string;
+  allowList: (request: FastifyRequest) => boolean;
+} {
+  return {
+    max: resolveRateLimitMax(rateLimitMax),
+    timeWindow: RATE_LIMIT_TIME_WINDOW,
+    keyGenerator: rateLimitKeyGenerator(trustCfIp),
+    allowList: (request: FastifyRequest): boolean => isAuthorizedAdmin(request),
+  };
+}
+
+/**
  * Minimal server for OpenAPI spec generation — registers swagger + routes but
  * skips the onReady DB hook, so it runs without a Neo4j connection.
  * Used by scripts/generate-openapi.ts.
@@ -81,7 +148,7 @@ export function resolveRateLimitMax(option?: number): number {
 export async function buildDocsServer(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   registerSharedSchemas(app);
-  await app.register(rateLimit, { max: resolveRateLimitMax(), timeWindow: RATE_LIMIT_TIME_WINDOW });
+  await app.register(rateLimit, buildRateLimitOptions());
   await app.register(swagger, OPENAPI_CONFIG);
   await app.register(swaggerUi, {
     routePrefix: '/api/docs',
@@ -110,6 +177,12 @@ export interface BuildServerOptions {
    */
   rateLimitMax?: number;
   /**
+   * Key the global rate limiter on Cloudflare's `cf-connecting-ip` header instead of the
+   * direct peer (request.ip). Defaults via resolveTrustCfIp (TRUST_CF_CONNECTING_IP env, or
+   * false). Tests pass true to exercise per-client bucketing behind a proxy.
+   */
+  trustCfIp?: boolean;
+  /**
    * Fastify logger configuration. Mirrors Fastify's own `logger` option type
    * (boolean | a logger instance | pino options) so callers get proper TS
    * validation/autocomplete. Defaults to true unless NODE_ENV=test.
@@ -129,16 +202,21 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   registerSharedSchemas(app);
 
   // Global rate limiting — a runtime DoS backstop. Registered before routes so its onRequest
-  // hook covers every endpoint. The cap is per client IP (request.ip) — note that behind a
-  // proxy/NodePort that SNATs the source address, callers can share a bucket unless Fastify
-  // `trustProxy` + X-Forwarded-For are configured; the planned Cloudflare layer is the primary
-  // edge defence. Note: this does NOT clear the CodeQL js/missing-rate-limiting alerts — that
-  // query models only the express-rate-limit family, not @fastify/rate-limit (global hook or
-  // per-route config), so its findings here were dismissed as false positives (issue #238).
-  await app.register(rateLimit, {
-    max: resolveRateLimitMax(options.rateLimitMax),
-    timeWindow: RATE_LIMIT_TIME_WINDOW,
-  });
+  // hook covers every endpoint. Keyed per client IP: behind Cloudflare (live since #119) the
+  // direct peer (request.ip) is a CF edge / NodePort-SNAT address shared by ALL public traffic,
+  // collapsing the cap into one global bucket — so when TRUST_CF_CONNECTING_IP is set we key on
+  // CF's `cf-connecting-ip` header instead (CF overwrites it every request; the origin SG admits
+  // only CF ranges, so it's authoritative here). The flag is OFF by default: on without a
+  // header-overwriting proxy in front, a direct caller could spoof the header per request and
+  // bypass the limiter. Authenticated admin calls are exempt (see buildRateLimitOptions) so a
+  // public flood can't 429 the operator out. Note: this does NOT clear the CodeQL
+  // js/missing-rate-limiting alerts — that query models only the express-rate-limit family, not
+  // @fastify/rate-limit (global hook or per-route config), so its findings here were dismissed as
+  // false positives (issue #238).
+  await app.register(
+    rateLimit,
+    buildRateLimitOptions(options.rateLimitMax, resolveTrustCfIp(options.trustCfIp)),
+  );
 
   // Security headers. The default Content-Security-Policy blocks Swagger UI's inline
   // scripts/styles, and swagger is only mounted outside production — so CSP rides the
