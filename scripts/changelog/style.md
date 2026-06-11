@@ -60,7 +60,9 @@ change something they're doing?" If no, it's `false`.
 - **Adding** anything — a feature, endpoint, route, field, dashboard, metric, or _permission_. New
   capabilities don't break existing ones, even if they need one-time setup to use.
 - Internal refactors, consolidations, or renames not visible outside the code.
-- CI/CD, deploy-pipeline, Terraform, Kubernetes, or other infrastructure-plumbing changes.
+- CI/CD, deploy-pipeline, Terraform, Kubernetes, or other infrastructure-plumbing changes **that
+  don't require an operator action** — one that does (e.g. migrating Terraform state, re-applying a
+  policy on deploy) is breaking, per the list above.
 - Bug fixes that restore intended behaviour, and performance improvements.
 - Removing something _internal_ (a pipeline stage, a metric, an unused field) that no API consumer
   or operator invoked directly.
