@@ -45,6 +45,13 @@ on:
 permissions:
   contents: read
 
+# Rapid agent push cadence means a PR head is often superseded within seconds —
+# cancel the obsolete run instead of letting the full 10-job fan-out finish for
+# nothing. Pushes to main never cancel (each merged commit keeps its CI record).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # ── Static checks ────────────────────────────────────────────────────────────
   # These three jobs run in parallel and gate everything downstream.
@@ -54,6 +61,8 @@ jobs:
     name: Format Check
     # Prettier must report zero diffs. Fix locally: pnpm prettier --write .
     runs-on: ubuntu-latest
+    # Backstop against wedged installs/pulls — GitHub default is 360 min.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
@@ -73,6 +82,8 @@ jobs:
     # ESLint with eslint-plugin-security. Zero warnings or errors allowed.
     # Fix locally: pnpm lint (most issues auto-fixable with --fix).
     runs-on: ubuntu-latest
+    # Backstop against wedged installs/pulls — GitHub default is 360 min.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
@@ -93,6 +104,8 @@ jobs:
     # Fix locally: pnpm typecheck
     # Note: NodeNext resolution requires .js extensions on local relative imports.
     runs-on: ubuntu-latest
+    # Backstop against wedged installs/pulls — GitHub default is 360 min.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
@@ -139,6 +152,8 @@ jobs:
     # retry/backoff and then waits on Docker's healthcheck. Connection is bolt://localhost:7687,
     # unchanged.
     runs-on: ubuntu-latest
+    # Backstop against wedged installs/pulls — GitHub default is 360 min.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - name: Start Neo4j (pull with retry, then wait for healthy)
@@ -170,6 +185,8 @@ jobs:
     # No `needs:` — runs in parallel from t=0 (same trade as tests-and-coverage above).
     # Neo4j is started by ./.github/actions/start-neo4j (pull-with-retry; see that job's note).
     runs-on: ubuntu-latest
+    # Backstop against wedged installs/pulls — GitHub default is 360 min.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - name: Start Neo4j (pull with retry, then wait for healthy)
@@ -203,6 +220,8 @@ jobs:
     # fail the build anyway, so there's no point starting it before typecheck.
     needs: [lint, typecheck]
     runs-on: ubuntu-latest
+    # Backstop against wedged installs/pulls — GitHub default is 360 min.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - name: Set up Docker Buildx
@@ -226,6 +245,8 @@ jobs:
     # New CVEs in existing dependencies will surface here even with no code changes.
     # If this fails: check `pnpm audit` output, update the affected package, and re-push.
     runs-on: ubuntu-latest
+    # Backstop against wedged installs/pulls — GitHub default is 360 min.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
@@ -249,6 +270,8 @@ jobs:
     # If this fails: the credential is in git history — rotate it immediately, then
     # use `git filter-branch` or BFG to scrub the history before re-pushing.
     runs-on: ubuntu-latest
+    # Backstop against wedged installs/pulls — GitHub default is 360 min.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -271,6 +294,8 @@ jobs:
     # wait-for-processing: false avoids a conflict with GitHub's default CodeQL setup
     # (now disabled) where both upload SARIF and the async rejection blocks CI.
     runs-on: ubuntu-latest
+    # Backstop against wedged installs/pulls — GitHub default is 360 min.
+    timeout-minutes: 15
     permissions:
       security-events: write
       actions: read
@@ -298,6 +323,8 @@ jobs:
     # Fix locally: `brew install actionlint shellcheck` (or download the pinned
     # binaries), then run `actionlint` from the repo root.
     runs-on: ubuntu-latest
+    # Backstop against wedged installs/pulls — GitHub default is 360 min.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - name: Run actionlint

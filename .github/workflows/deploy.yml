@@ -27,6 +27,13 @@ on:
       - 'services/graph-service/**'
       - 'infra/k8s/**'
       - '.github/workflows/deploy.yml'
+      # Root-level build inputs the Dockerfile COPYs — without these a
+      # lockfile-only change (e.g. a Dependabot transitive security bump)
+      # would merge to main but never deploy the rebuilt image.
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.base.json'
   # Manual re-deploy of the current main from the Actions UI — same approval gate.
   # Use this to retry after a pre-flight failure (power the node on, then re-run).
   workflow_dispatch: {}

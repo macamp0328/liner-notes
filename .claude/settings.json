@@ -21,10 +21,6 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/bash-guard.sh"
-          },
-          {
-            "type": "command",
-            "command": "if echo \"$CLAUDE_TOOL_INPUT\" | grep -q 'git commit'; then REPO_ROOT=$(dirname \"$(cd \"$(git rev-parse --git-common-dir 2>/dev/null)\" 2>/dev/null && pwd)\") && PRETTIER=\"$REPO_ROOT/node_modules/.bin/prettier\" && [ -x \"$PRETTIER\" ] && \"$PRETTIER\" --write . --log-level warn && git add -u; fi"
           }
         ]
       }
