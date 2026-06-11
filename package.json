@@ -14,6 +14,10 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "diagrams:generate": "tsx scripts/diagrams/generate.ts",
+    "changelog:update": "tsx scripts/changelog/update.ts",
+    "changelog:reconcile": "tsx scripts/changelog/reconcile.ts",
+    "changelog:backfill": "tsx scripts/changelog/backfill.ts",
+    "changelog:test": "tsx --test scripts/changelog/*.test.ts",
     "insomnia:generate": "pnpm --filter graph-service docs:generate && tsx scripts/insomnia/generate.ts && prettier --write services/graph-service/docs/insomnia.collection.yaml",
     "enrich:lyrics": "scripts/admin/post.sh /api/v1/admin/lyrics/enrich",
     "enrich:master-data": "scripts/admin/post.sh /api/v1/admin/master-data/enrich",
@@ -47,6 +51,7 @@
     }
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.104.1",
     "@types/node": "^22",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",

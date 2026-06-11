@@ -1,0 +1,77 @@
+name: Changelog
+
+# Keep the rolling "unreleased" draft GitHub Release current. On every squash-merge
+# to main, summarise the merged PR (Claude → one plain-English sentence) and fold it
+# into the draft release body + its changelog.jsonl asset.
+#
+# Why this is safe and loop-free: editing a release creates NO commit, so this never
+# touches protected main and never re-triggers `on: push` (same anti-recursion
+# concern that makes diagrams.yml / insomnia.yml fail-on-drift instead of auto-commit
+# — here there's simply no commit to make).
+#
+# The weekly self-healing pass is changelog-reconcile.yml; the one-shot historical
+# seed is `pnpm changelog:backfill` (run once after setup). Forks without an
+# ANTHROPIC_API_KEY secret still work — the script falls back to a cleaned PR title.
+
+on:
+  push:
+    branches: [main]
+
+# contents:write → `gh release create/edit/upload`; pull-requests:read → `gh pr view`.
+# Nothing here pushes a commit.
+permissions:
+  contents: write
+  pull-requests: read
+
+# Serialise the read-modify-write of the release store across back-to-back merges,
+# and against the reconciler (shared group).
+concurrency:
+  group: changelog
+  cancel-in-progress: false
+
+jobs:
+  changelog:
+    name: Update changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Extract merged PR number from the squash commit
+        id: pr
+        # GitHub appends `(#NNN)` to the squash-merge subject. Read it from the
+        # checked-out HEAD (robust to a null head_commit). No match (a direct doc
+        # push, or a rewritten message) → skip the rest of the job cleanly.
+        run: |
+          # `|| true`: Actions' default bash sets `pipefail`, so a no-match grep
+          # (a direct push) would otherwise fail the step instead of skipping.
+          pr=$(git log -1 --format=%s | grep -oE '\(#[0-9]+\)$' | tr -dc '0-9' || true)
+          if [ -z "$pr" ]; then
+            echo "No PR number in commit subject — skipping (likely a direct push)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Merged PR: #$pr"
+            echo "pr=$pr" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+        if: steps.pr.outputs.skip != 'true'
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v6
+        if: steps.pr.outputs.skip != 'true'
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        if: steps.pr.outputs.skip != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Summarise PR and update the draft release
+        if: steps.pr.outputs.skip != 'true'
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.pr }}
+          GH_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: pnpm changelog:update

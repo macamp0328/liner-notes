@@ -71,7 +71,31 @@ pnpm diagrams:generate
 # CI re-runs the generator on PRs touching infra/terraform/** and FAILS if the
 # committed diagrams differ — regenerate locally and commit before pushing.
 # See .github/workflows/diagrams.yml.
+
+# Changelog (plain-English, AI-written, self-healing). See scripts/changelog/README.md.
+# A rolling "unreleased" DRAFT GitHub Release is kept current with one plain-English
+# sentence per merged PR — grouped by week, categorised, breaking changes pinned.
+# Open the repo's Releases tab to read it. NOT a committed file and NOT a PR check:
+# editing a release makes no commit, so it never touches protected main.
+pnpm changelog:test                            # unit tests (scripts/changelog/lib.ts)
+DRY_RUN=1 PR_NUMBER=283 pnpm changelog:update  # preview one PR's entry, no writes
+pnpm changelog:backfill                        # one-shot seed of the whole merged history
+pnpm changelog:reconcile --since 2026-06-01    # heal any PRs the merge hook missed
 ```
+
+### Changelog
+
+The changelog is **data, not prose**: a single `changelog.jsonl` store (one record per PR,
+keyed by number) attached as an asset on the `unreleased` draft release, plus a deterministic
+`render()` of it as the release body. Two writers keep it current — the per-merge hook
+([`.github/workflows/changelog.yml`](.github/workflows/changelog.yml), runs `changelog:update`)
+and a weekly self-healing reconciler
+([`.github/workflows/changelog-reconcile.yml`](.github/workflows/changelog-reconcile.yml)) that
+backfills anything the hook missed. Summaries come from Claude via structured outputs
+(default `claude-opus-4-8`; `CHANGELOG_MODEL=claude-haiku-4-5` for cost), with a PR-title
+fallback when `ANTHROPIC_API_KEY` is unset so the merge path never fails. **One-time setup:**
+`gh secret set ANTHROPIC_API_KEY`, then `pnpm changelog:backfill` once to seed history. Full
+details in [`scripts/changelog/README.md`](scripts/changelog/README.md).
 
 ### When to refresh diagrams
 
