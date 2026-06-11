@@ -12,6 +12,7 @@ import {
   parsePrNumber,
   parseRecords,
   recordsByNumber,
+  resolvePrNumber,
   render,
   serializeRecords,
   upsert,
@@ -47,6 +48,20 @@ test('parsePrNumber: ignores body lines and earlier parentheticals', () => {
 test('parsePrNumber: null when no PR marker (direct push / rewritten message)', () => {
   assert.equal(parsePrNumber('docs: tweak readme'), null);
   assert.equal(parsePrNumber(''), null);
+});
+
+test('resolvePrNumber: empty/whitespace env is treated as absent, CLI arg wins', () => {
+  assert.equal(resolvePrNumber('', '304'), 304); // PR_NUMBER= set-but-blank
+  assert.equal(resolvePrNumber('   ', '304'), 304);
+  assert.equal(resolvePrNumber(undefined, '304'), 304);
+});
+
+test('resolvePrNumber: env wins when present; invalid input → null', () => {
+  assert.equal(resolvePrNumber('283', '304'), 283);
+  assert.equal(resolvePrNumber('', ''), null);
+  assert.equal(resolvePrNumber('abc', undefined), null);
+  assert.equal(resolvePrNumber('-5', undefined), null);
+  assert.equal(resolvePrNumber('0', undefined), null);
 });
 
 test('isoWeekMonday: returns the Monday (UTC) of the week', () => {

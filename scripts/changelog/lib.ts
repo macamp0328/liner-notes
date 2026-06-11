@@ -68,6 +68,22 @@ export function parsePrNumber(commitMessage: string): number | null {
 }
 
 /**
+ * Resolve a PR number for `update` from the PR_NUMBER env (CI) or a CLI arg
+ * (manual run). Empty/whitespace is treated as **absent** — not `??`-defined — so
+ * a stray `PR_NUMBER=` in the shell or an env file doesn't shadow `update <n>`.
+ * Returns null for missing/invalid input so the caller can show a usage hint.
+ */
+export function resolvePrNumber(
+  envValue: string | undefined,
+  argValue: string | undefined,
+): number | null {
+  const raw = envValue?.trim() || argValue?.trim() || '';
+  if (raw === '') return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
  * The Monday (UTC) of the ISO week containing `isoDate`, formatted `YYYY-MM-DD`.
  * Weeks are Monday-based and computed in UTC so an entry merged at 23:59 Sunday
  * UTC lands in the week that just ended, deterministically — never a local-tz

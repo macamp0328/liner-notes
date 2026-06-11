@@ -10,7 +10,7 @@ import './env.js';
 import { appendFileSync } from 'node:fs';
 import { summarize } from './claude.js';
 import { getPrInput, readStore, writeStore } from './store.js';
-import { type ChangelogRecord, render, upsert } from './lib.js';
+import { type ChangelogRecord, render, resolvePrNumber, upsert } from './lib.js';
 
 function isDryRun(): boolean {
   const v = process.env['DRY_RUN'];
@@ -39,11 +39,11 @@ function writeStepSummary(r: ChangelogRecord, note: string): void {
 
 async function main(): Promise<void> {
   // PR number from the PR_NUMBER env (CI) or the first CLI arg (manual run).
-  const raw = process.env['PR_NUMBER'] ?? process.argv[2] ?? '';
-  const number = Number(raw);
-  if (!Number.isInteger(number) || number <= 0) {
+  const number = resolvePrNumber(process.env['PR_NUMBER'], process.argv[2]);
+  if (number === null) {
+    const got = process.env['PR_NUMBER']?.trim() || process.argv[2]?.trim() || '';
     throw new Error(
-      `Need a PR number. Run "pnpm changelog:update <number>" or set PR_NUMBER=<number> (got "${raw}").`,
+      `Need a PR number. Run "pnpm changelog:update <number>" or set PR_NUMBER=<number> (got "${got}").`,
     );
   }
 
