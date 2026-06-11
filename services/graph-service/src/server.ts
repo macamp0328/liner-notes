@@ -178,7 +178,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
       // In production a missing token silently turns every /admin route into a 503 —
       // fail the pod at startup (k8s rollout health gate catches it) instead of
       // shipping an instance whose admin surface can never work.
-      if (process.env['NODE_ENV'] === 'production') {
+      if (isProduction) {
         throw new Error('ADMIN_TOKEN must be set in production');
       }
       app.log.warn('ADMIN_TOKEN not set — admin endpoints will return 503');
