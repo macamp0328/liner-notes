@@ -66,6 +66,14 @@ spec:
               value: production
             - name: PORT
               value: '3000'
+            # Key the rate limiter on Cloudflare's cf-connecting-ip rather than the
+            # direct peer (a CF edge / NodePort-SNAT IP shared by all traffic). Safe
+            # ONLY because the origin SG is locked to Cloudflare ranges
+            # (restrict_app_to_cloudflare), so the header can't be spoofed past the
+            # edge. Forks NOT behind such a proxy must drop this — otherwise a direct
+            # caller spoofs the header and bypasses the limiter. See #287.
+            - name: TRUST_CF_CONNECTING_IP
+              value: 'true'
           readinessProbe:
             httpGet:
               path: /api/v1/health
