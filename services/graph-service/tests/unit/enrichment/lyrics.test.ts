@@ -10,11 +10,15 @@ import { GeniusClient } from '../../../src/ingestion/genius-client.js';
 const mockGetUnenrichedTracks = vi.hoisted(() => vi.fn());
 const mockSetTrackLyrics = vi.hoisted(() => vi.fn());
 const mockMarkLyricsFetched = vi.hoisted(() => vi.fn());
+const mockMarkTrackInstrumental = vi.hoisted(() => vi.fn());
+const mockMarkTrackProbableInstrumental = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/db/lyrics-repository.js', () => ({
   getUnenrichedTracks: mockGetUnenrichedTracks,
   setTrackLyrics: mockSetTrackLyrics,
   markLyricsFetched: mockMarkLyricsFetched,
+  markTrackInstrumental: mockMarkTrackInstrumental,
+  markTrackProbableInstrumental: mockMarkTrackProbableInstrumental,
 }));
 
 // ---------------------------------------------------------------------------
@@ -79,6 +83,7 @@ const sampleTrack = {
   position: 'A1',
   releaseDiscogsId: 13570466,
   artistName: 'Test Artist',
+  voiceInstrumental: null as string | null,
 };
 
 // ---------------------------------------------------------------------------
@@ -99,6 +104,8 @@ describe('enrichLyrics', () => {
     mockGetUnenrichedTracks.mockResolvedValue([]);
     mockSetTrackLyrics.mockResolvedValue(undefined);
     mockMarkLyricsFetched.mockResolvedValue(undefined);
+    mockMarkTrackInstrumental.mockResolvedValue(undefined);
+    mockMarkTrackProbableInstrumental.mockResolvedValue(undefined);
 
     fetchSpy = vi.spyOn(globalThis, 'fetch');
   });
@@ -158,6 +165,80 @@ describe('enrichLyrics', () => {
 
     const headers = (fetchSpy.mock.calls[0]?.[1] as RequestInit).headers as Record<string, string>;
     expect(headers['User-Agent']).toBe('liner-notes/test');
+  });
+
+  // -------------------------------------------------------------------------
+  // LRCLIB instrumental flag — terminal, short-circuits Genius (#246)
+  // -------------------------------------------------------------------------
+  it('classifies an LRCLIB instrumental terminally and never calls Genius (even with a token)', async () => {
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+    // LRCLIB 200 with instrumental:true and no plainLyrics — its normal instrumental shape.
+    fetchSpy.mockResolvedValueOnce(makeOkResponse({ instrumental: true }));
+
+    // Genius client injected and configured, to prove it is never reached on an instrumental.
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
+
+    expect(summary.enriched).toBe(1);
+    expect(summary.skipped).toBe(0);
+    expect(summary.failed).toBe(0);
+    expect(mockMarkTrackInstrumental).toHaveBeenCalledOnce();
+    expect(mockMarkTrackInstrumental).toHaveBeenCalledWith(
+      fakeDriver,
+      sampleTrack.releaseDiscogsId,
+      sampleTrack.position,
+    );
+    expect(mockSetTrackLyrics).not.toHaveBeenCalled();
+    expect(mockMarkTrackProbableInstrumental).not.toHaveBeenCalled();
+    // Only the single LRCLIB fetch — no Genius search/scrape on an instrumental.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // probable-instrumental — AcousticBrainz signal short-circuits Genius (#246)
+  // -------------------------------------------------------------------------
+  it('classifies probable-instrumental from voiceInstrumental when LRCLIB has no record, skipping Genius', async () => {
+    mockGetUnenrichedTracks.mockResolvedValue([
+      { ...sampleTrack, voiceInstrumental: 'instrumental' },
+    ]);
+    fetchSpy.mockResolvedValueOnce(makeOkResponse({}, 404)); // LRCLIB 404 — no record
+
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
+
+    expect(summary.enriched).toBe(1);
+    expect(mockMarkTrackProbableInstrumental).toHaveBeenCalledOnce();
+    expect(mockMarkTrackProbableInstrumental).toHaveBeenCalledWith(
+      fakeDriver,
+      sampleTrack.releaseDiscogsId,
+      sampleTrack.position,
+    );
+    expect(mockSetTrackLyrics).not.toHaveBeenCalled();
+    expect(mockMarkTrackInstrumental).not.toHaveBeenCalled();
+    // voiceInstrumental check precedes Genius — only the LRCLIB fetch happened.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // voiceInstrumental='voice' does NOT short-circuit — Genius still runs (#246)
+  // -------------------------------------------------------------------------
+  it('falls through to Genius when voiceInstrumental is "voice" and LRCLIB has no record', async () => {
+    mockGetUnenrichedTracks.mockResolvedValue([{ ...sampleTrack, voiceInstrumental: 'voice' }]);
+    fetchSpy
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
+      .mockResolvedValueOnce(makeHtmlResponse('<div data-lyrics-container="true">Hi</div>'));
+
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
+
+    expect(summary.enriched).toBe(1);
+    expect(mockMarkTrackProbableInstrumental).not.toHaveBeenCalled();
+    expect(mockSetTrackLyrics).toHaveBeenCalledWith(
+      fakeDriver,
+      sampleTrack.releaseDiscogsId,
+      sampleTrack.position,
+      'Hi',
+      'genius',
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
 
   // -------------------------------------------------------------------------

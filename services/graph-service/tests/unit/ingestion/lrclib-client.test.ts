@@ -53,12 +53,20 @@ describe('LrclibClient', () => {
 
     const result = await client.getLyrics('Test Artist', 'Song Title');
 
-    expect(result).toBe('la la la');
+    expect(result).toEqual({ lyrics: 'la la la', instrumental: false });
     expect(fetchSpy).toHaveBeenCalledOnce();
     const url = fetchSpy.mock.calls[0]?.[0] as string;
     expect(url).toContain('lrclib.net/api/get');
     expect(url).toContain('track_name=Song+Title');
     expect(url).toContain('artist_name=Test+Artist');
+  });
+
+  it('reports the authoritative instrumental flag (#246)', async () => {
+    fetchSpy.mockResolvedValueOnce(makeOkResponse({ instrumental: true }));
+
+    const result = await client.getLyrics('A', 'B');
+
+    expect(result).toEqual({ lyrics: null, instrumental: true });
   });
 
   it('sends an identifying User-Agent header', async () => {
@@ -79,10 +87,10 @@ describe('LrclibClient', () => {
     expect(fetchSpy).toHaveBeenCalledOnce(); // 404 is not retried
   });
 
-  it('returns null when the 200 response has no plainLyrics', async () => {
+  it('returns lyrics:null (not a top-level null) when the 200 response has no plainLyrics', async () => {
     fetchSpy.mockResolvedValueOnce(makeOkResponse({ plainLyrics: null }));
 
-    expect(await client.getLyrics('A', 'B')).toBeNull();
+    expect(await client.getLyrics('A', 'B')).toEqual({ lyrics: null, instrumental: false });
   });
 
   it('retries a transient 5xx and then succeeds', async () => {
@@ -92,7 +100,7 @@ describe('LrclibClient', () => {
 
     const result = await client.getLyrics('A', 'B');
 
-    expect(result).toBe('recovered');
+    expect(result).toEqual({ lyrics: 'recovered', instrumental: false });
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
@@ -103,7 +111,7 @@ describe('LrclibClient', () => {
 
     const result = await client.getLyrics('A', 'B');
 
-    expect(result).toBe('ok');
+    expect(result).toEqual({ lyrics: 'ok', instrumental: false });
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 

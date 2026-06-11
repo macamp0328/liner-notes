@@ -23,6 +23,20 @@ export interface LrclibClientConfig {
 
 interface LrclibResponse {
   plainLyrics?: string | null;
+  // LRCLIB's authoritative instrumental flag. `true` means the track has no lyrics by
+  // nature (issue #246) — a terminal answer, never a miss to retry or fall back on.
+  instrumental?: boolean;
+}
+
+/**
+ * What a 200 from LRCLIB carries: the plain lyrics (null when absent) and whether LRCLIB
+ * marked the track instrumental (#246). `getLyrics` returns this on 200 and `null` only on a
+ * 404 (no record at all). An instrumental track comes back as `{ lyrics: null, instrumental:
+ * true }`, which the caller treats as a terminal classification rather than a miss.
+ */
+export interface LrclibResult {
+  lyrics: string | null;
+  instrumental: boolean;
 }
 
 const BASE_URL = 'https://lrclib.net/api/get';
@@ -58,11 +72,12 @@ export class LrclibClient {
   }
 
   /**
-   * Look up plain lyrics for a track. Returns the lyrics on 200, `null` on a 404 (LRCLIB
-   * has no match) or a 200 with no `plainLyrics`, and throws on any other non-ok status
-   * (after the retry budget is spent — a retryable status exhausts to `RetriesExhaustedError`).
+   * Look up a track on LRCLIB. Returns an {@link LrclibResult} on 200 (carrying the plain
+   * lyrics — null when absent — and the authoritative `instrumental` flag, #246), `null` on a
+   * 404 (no record at all), and throws on any other non-ok status (after the retry budget is
+   * spent — a retryable status exhausts to `RetriesExhaustedError`).
    */
-  async getLyrics(artistName: string, title: string): Promise<string | null> {
+  async getLyrics(artistName: string, title: string): Promise<LrclibResult | null> {
     const url = new URL(BASE_URL);
     url.searchParams.set('track_name', title);
     url.searchParams.set('artist_name', artistName);
@@ -77,7 +92,7 @@ export class LrclibClient {
     }
 
     const data = (await response.json()) as LrclibResponse;
-    return data.plainLyrics ?? null;
+    return { lyrics: data.plainLyrics ?? null, instrumental: data.instrumental === true };
   }
 }
 

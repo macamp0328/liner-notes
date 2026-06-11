@@ -10,6 +10,8 @@ import {
   getUnenrichedTracks,
   setTrackLyrics,
   markLyricsFetched,
+  markTrackInstrumental,
+  markTrackProbableInstrumental,
   type UnenrichedTrack,
 } from '../db/lyrics-repository.js';
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
@@ -17,11 +19,21 @@ import { runEnrichment, type EnrichmentStage, type EnrichmentSummary } from './r
 
 export type LyricsEnrichmentSummary = EnrichmentSummary;
 
-/** What a successful lyrics lookup resolves to: the text and the source that provided it. */
-interface LyricsResolved {
-  lyrics: string;
-  source: 'lrclib' | 'genius';
-}
+/**
+ * A terminal classification of a track's lyrics (issue #246). `resolve` returns one of these
+ * or `null` (= not-found, retry per staleness):
+ * - `resolved` — lyrics found, with the source that provided them.
+ * - `instrumental` — LRCLIB's authoritative `instrumental` flag; no lyrics exist.
+ * - `probable-instrumental` — LRCLIB has no record, but the AcousticBrainz `voiceInstrumental`
+ *   we already store classifies the track instrumental. Lower certainty than `instrumental`.
+ *
+ * All three flow through `write` (the runner counts them `enriched`); only `null` reaches
+ * `markAttempted`. The two instrumental kinds are terminal — excluded from candidate retries.
+ */
+type LyricsResolved =
+  | { kind: 'resolved'; lyrics: string; source: 'lrclib' | 'genius' }
+  | { kind: 'instrumental' }
+  | { kind: 'probable-instrumental' };
 
 /**
  * Injectable clients — defaults are built from the environment. The seam exists so unit tests
@@ -48,9 +60,19 @@ function resolveConcurrency(): number {
 }
 
 /**
- * Enrich all Track nodes that lack lyrics. Queries LRCLIB first (primary); falls back to Genius
- * only when a client is configured (`GENIUS_TOKEN` set). Missing lyrics are logged and skipped —
- * never crashes the caller.
+ * Enrich all Track nodes that lack lyrics.
+ * Resolution order (issue #246): LRCLIB's instrumental flag → LRCLIB lyrics → the stored
+ * AcousticBrainz `voiceInstrumental` signal → Genius fallback (when a client is configured) →
+ * not-found. The two instrumental classifications are terminal and **short-circuit before
+ * Genius**, which is where most of the wasted Genius-call / 403-spam savings come from
+ * (#240/#243). Missing lyrics are logged and skipped — never crashes the caller.
+ *
+ * Stage-ordering caveat: `voiceInstrumental` is populated by the `track-acousticbrainz`
+ * enrichment, which finishes long after `lyrics` in a fresh reload (it deps the slow
+ * `track-musicbrainz` stage). So `probable-instrumental` rarely fires on the primary reload —
+ * it classifies on the later staleness re-run. We deliberately do NOT make lyrics depend on
+ * track-acousticbrainz (that would chain it behind the ~2.5hr stage and defeat #176's
+ * early-lane design); a `not-found` track stays re-eligible to be upgraded later.
  *
  * The stage runs N-way concurrent (`LYRICS_CONCURRENCY`, default 6) — safe because each lyrics
  * write is one Track per transaction (deadlock-immune; see the #176 scheduler notes). The
@@ -74,18 +96,43 @@ export async function enrichLyrics(
     selectCandidates: (d) => getUnenrichedTracks(d),
     async resolve(track) {
       const lrclibResult = await lrclib.getLyrics(track.artistName ?? '', track.title);
-      if (lrclibResult !== null) return { lyrics: lrclibResult, source: 'lrclib' };
+      if (lrclibResult !== null) {
+        // LRCLIB's authoritative instrumental flag — terminal, no Genius (#246).
+        if (lrclibResult.instrumental) return { kind: 'instrumental' };
+        if (lrclibResult.lyrics !== null)
+          return { kind: 'resolved', lyrics: lrclibResult.lyrics, source: 'lrclib' };
+      }
 
-      // LRCLIB returned null (404 / no plainLyrics) — try Genius fallback when configured.
+      // LRCLIB had no usable lyrics (404, or a record with no plain lyrics). Before spending a
+      // Genius call, trust the AcousticBrainz signal we already store: a track classified
+      // instrumental there is probably lyric-less, so short-circuit (most of the #240/#243 saving).
+      if (track.voiceInstrumental === 'instrumental') return { kind: 'probable-instrumental' };
+
+      // Try Genius fallback when configured.
       if (!genius) {
         log.debug?.('[lyrics] Genius client not configured — skipping Genius fallback');
         return null;
       }
       const geniusResult = await genius.getLyrics(track.artistName ?? '', track.title);
-      return geniusResult === null ? null : { lyrics: geniusResult, source: 'genius' };
+      return geniusResult === null
+        ? null
+        : { kind: 'resolved', lyrics: geniusResult, source: 'genius' };
     },
-    write: (d, track, resolved) =>
-      setTrackLyrics(d, track.releaseDiscogsId, track.position, resolved.lyrics, resolved.source),
+    write: (d, track, resolved) => {
+      if (resolved.kind === 'resolved') {
+        return setTrackLyrics(
+          d,
+          track.releaseDiscogsId,
+          track.position,
+          resolved.lyrics,
+          resolved.source,
+        );
+      }
+      if (resolved.kind === 'instrumental') {
+        return markTrackInstrumental(d, track.releaseDiscogsId, track.position);
+      }
+      return markTrackProbableInstrumental(d, track.releaseDiscogsId, track.position);
+    },
     markAttempted: (d, track) => markLyricsFetched(d, track.releaseDiscogsId, track.position),
     isExpectedError: isExpectedGeniusBlock,
     describeItem: (track) => `"${track.title}"`,

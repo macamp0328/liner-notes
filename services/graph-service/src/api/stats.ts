@@ -43,6 +43,19 @@ const sourcedCoverageSchema = {
   },
 } as const;
 
+// The four-state lyrics funnel (#246): the buckets partition `total` exactly.
+const lyricsFunnelSchema = {
+  type: 'object',
+  required: ['resolved', 'instrumental', 'probableInstrumental', 'notFound', 'total'],
+  properties: {
+    resolved: { type: 'integer' },
+    instrumental: { type: 'integer' },
+    probableInstrumental: { type: 'integer' },
+    notFound: { type: 'integer' },
+    total: { type: 'integer' },
+  },
+} as const;
+
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
   let cache: { at: number; data: StatsData } | null = null;
@@ -92,6 +105,7 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
                       'producersWithNationality',
                       'engineersWithNationality',
                       'tracksWithLyrics',
+                      'lyricsFunnel',
                       'tracksWithRecordingMbid',
                       'tracksWithIsrc',
                       'tracksWithTempo',
@@ -109,6 +123,7 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
                       producersWithNationality: sourcedCoverageSchema,
                       engineersWithNationality: sourcedCoverageSchema,
                       tracksWithLyrics: sourcedCoverageSchema,
+                      lyricsFunnel: lyricsFunnelSchema,
                       tracksWithRecordingMbid: coverageSchema,
                       tracksWithIsrc: coverageSchema,
                       tracksWithTempo: coverageSchema,
