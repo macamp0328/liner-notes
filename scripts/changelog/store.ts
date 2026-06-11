@@ -5,6 +5,11 @@
 // commits to protected `main`. The human-readable release body is always a full
 // re-render of that store (see lib.render); we never edit the body by hand.
 //
+// A draft release doesn't create its git tag ref until published, so this never
+// tags `main`. GitHub still shows auto-generated "Source code" archives for the
+// draft's target commit; they're an unused GitHub artifact — readers consume the
+// body and the jsonl asset, so we deliberately don't keep the tag/target fresh.
+//
 // `gh` reads its token from GH_TOKEN / GITHUB_TOKEN (CI) or the local `gh auth`
 // session, and infers the repo from the checkout — no extra wiring needed.
 

@@ -21,8 +21,11 @@ backfill — properties a string-appending bot can't have.
 ```
 
 - **Store** — `changelog.jsonl`, attached as an **asset** on the `unreleased` draft release.
-  Drafts hold assets and need no git tag, so the source of truth lives in the Releases
-  surface and **never commits to `main`**. Keyed by PR number ⇒ every write is idempotent.
+  A draft release is associated with a tag _name_ but **does not create the git tag ref until
+  it's published**, so this rolling draft never tags or commits to `main`. (GitHub still shows
+  auto-generated "Source code" archives for the draft's target commit — those are a GitHub
+  artifact, not part of the changelog; readers consume the body and the `changelog.jsonl`
+  asset.) Keyed by PR number ⇒ every write is idempotent.
 - **Render** ([`lib.ts`](lib.ts) `render()`) — a pure function `records → markdown`. The
   release body is _always_ a full re-render of the store; we never hand-edit it.
 - **Writer 1 — fast path** ([`update.ts`](update.ts), [`changelog.yml`](../../.github/workflows/changelog.yml)):

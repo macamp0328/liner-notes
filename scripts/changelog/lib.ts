@@ -103,20 +103,45 @@ export function upsert(
   return next;
 }
 
-/** Parse the JSONL store. Tolerant of blank lines; skips records missing a number. */
+/** A line is a usable record only if every field `render()` depends on is well-typed. */
+export function isValidRecord(value: unknown): value is ChangelogRecord {
+  if (typeof value !== 'object' || value === null) return false;
+  const r = value as Record<string, unknown>;
+  const mergedAt = r['mergedAt'];
+  return (
+    typeof r['number'] === 'number' &&
+    typeof r['title'] === 'string' &&
+    typeof r['url'] === 'string' &&
+    typeof r['author'] === 'string' &&
+    typeof r['summary'] === 'string' &&
+    typeof mergedAt === 'string' &&
+    !Number.isNaN(new Date(mergedAt).getTime()) &&
+    isCategory(r['category']) &&
+    isImpact(r['impact']) &&
+    typeof r['breaking'] === 'boolean'
+  );
+}
+
+/**
+ * Parse the JSONL store. Tolerant by design: skips blank lines, **unparseable
+ * JSON**, and lines that don't validate as a record — so a truncated download or
+ * a hand-edited asset degrades gracefully instead of throwing and breaking the
+ * writers. Any PR dropped here is re-added on the next reconcile, so the store
+ * self-corrects. Pure: no I/O, so the drop is silent (the reconciler is the
+ * recovery path, not a log line here).
+ */
 export function parseRecords(jsonl: string): ChangelogRecord[] {
   const out: ChangelogRecord[] = [];
   for (const line of jsonl.split('\n')) {
     const trimmed = line.trim();
     if (trimmed === '') continue;
-    const parsed: unknown = JSON.parse(trimmed);
-    if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      typeof (parsed as { number?: unknown }).number === 'number'
-    ) {
-      out.push(parsed as ChangelogRecord);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      continue; // corrupt/partial line — skip, don't throw
     }
+    if (isValidRecord(parsed)) out.push(parsed);
   }
   return out;
 }

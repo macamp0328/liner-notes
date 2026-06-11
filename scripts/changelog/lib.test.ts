@@ -86,9 +86,11 @@ test('serialize -> parse round-trips and sorts by number', () => {
   assert.equal(parseRecords(jsonl).length, 3);
 });
 
-test('parseRecords: tolerant of blank lines, skips number-less records', () => {
-  const jsonl = '\n{"title":"x"}\n{"number":7,"summary":"ok"}\n\n';
-  const parsed = parseRecords(jsonl);
+test('parseRecords: tolerant — skips blanks, unparseable JSON, and invalid records', () => {
+  const good = JSON.stringify(rec({ number: 7 }));
+  // blank line, the good record, an unparseable line, and a record missing required fields
+  const jsonl = `\n${good}\n{not valid json\n{"number":8,"summary":"missing the rest"}\n\n`;
+  const parsed = parseRecords(jsonl); // must NOT throw on the corrupt line
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0]?.number, 7);
 });
