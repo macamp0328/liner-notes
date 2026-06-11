@@ -153,14 +153,17 @@ export async function runEnrichment<TItem, TResolved>(
   };
 
   // Shared-index worker pool: each worker draws the next item until the list is drained.
-  // `min(concurrency, total)` workers — at concurrency 1 this is a single serial drainer.
+  // `min(concurrency, total)` workers — at concurrency 1 this is a single serial drainer. The
+  // claim (`next < total` then `items[next++]`) is one synchronous step with no await between, so
+  // workers never double-draw. Termination is the index bound, not the value: the `undefined`
+  // guard is only TypeScript narrowing under `noUncheckedIndexedAccess` — a stage whose `TItem`
+  // legitimately includes `undefined` skips that slot without ending the drain early.
   let next = 0;
   const workerCount = Math.min(concurrency, total);
   const workers = Array.from({ length: workerCount }, async () => {
-    for (;;) {
+    while (next < total) {
       const item = items[next++];
-      if (item === undefined) break;
-      await handleItem(item);
+      if (item !== undefined) await handleItem(item);
     }
   });
   await Promise.all(workers);

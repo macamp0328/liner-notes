@@ -87,6 +87,7 @@ describe('enrichLyrics integration', () => {
   afterEach(() => {
     if (savedConcurrency === undefined) delete process.env['LYRICS_CONCURRENCY'];
     else process.env['LYRICS_CONCURRENCY'] = savedConcurrency;
+    fetchSpy.mockRestore();
   });
 
   // -------------------------------------------------------------------------
