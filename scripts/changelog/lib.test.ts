@@ -8,8 +8,11 @@ import assert from 'node:assert/strict';
 import {
   type ChangelogRecord,
   isoWeekMonday,
+  needsSummary,
   parsePrNumber,
   parseRecords,
+  recordsByNumber,
+  resolvePrNumber,
   render,
   serializeRecords,
   upsert,
@@ -45,6 +48,20 @@ test('parsePrNumber: ignores body lines and earlier parentheticals', () => {
 test('parsePrNumber: null when no PR marker (direct push / rewritten message)', () => {
   assert.equal(parsePrNumber('docs: tweak readme'), null);
   assert.equal(parsePrNumber(''), null);
+});
+
+test('resolvePrNumber: empty/whitespace env is treated as absent, CLI arg wins', () => {
+  assert.equal(resolvePrNumber('', '304'), 304); // PR_NUMBER= set-but-blank
+  assert.equal(resolvePrNumber('   ', '304'), 304);
+  assert.equal(resolvePrNumber(undefined, '304'), 304);
+});
+
+test('resolvePrNumber: env wins when present; invalid input → null', () => {
+  assert.equal(resolvePrNumber('283', '304'), 283);
+  assert.equal(resolvePrNumber('', ''), null);
+  assert.equal(resolvePrNumber('abc', undefined), null);
+  assert.equal(resolvePrNumber('-5', undefined), null);
+  assert.equal(resolvePrNumber('0', undefined), null);
 });
 
 test('isoWeekMonday: returns the Monday (UTC) of the week', () => {
@@ -135,4 +152,30 @@ test('render: deterministic — same records, same bytes', () => {
 
 test('render: empty store has a placeholder', () => {
   assert.match(render([]), /No entries yet/);
+});
+
+test('recordsByNumber: indexes by PR number', () => {
+  const map = recordsByNumber([rec({ number: 3 }), rec({ number: 7 })]);
+  assert.equal(map.size, 2);
+  assert.equal(map.get(7)?.number, 7);
+  assert.equal(map.get(99), undefined);
+});
+
+test('needsSummary: a PR not yet in the store always needs summarising', () => {
+  assert.equal(needsSummary(undefined, { refresh: false, hasKey: true }), true);
+  assert.equal(needsSummary(undefined, { refresh: false, hasKey: false }), true);
+});
+
+test('needsSummary: existing fallback upgrades only when a key is available', () => {
+  const fb = rec({ number: 1, summarySource: 'fallback' });
+  assert.equal(needsSummary(fb, { refresh: false, hasKey: true }), true);
+  assert.equal(needsSummary(fb, { refresh: false, hasKey: false }), false);
+});
+
+test('needsSummary: existing Claude entry only re-summarises under --refresh', () => {
+  const ai = rec({ number: 1, summarySource: 'claude' });
+  assert.equal(needsSummary(ai, { refresh: false, hasKey: true }), false);
+  assert.equal(needsSummary(ai, { refresh: true, hasKey: true }), true);
+  // ...but never without a key (a refresh can't improve anything offline).
+  assert.equal(needsSummary(ai, { refresh: true, hasKey: false }), false);
 });

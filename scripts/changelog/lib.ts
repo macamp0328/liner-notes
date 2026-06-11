@@ -68,6 +68,22 @@ export function parsePrNumber(commitMessage: string): number | null {
 }
 
 /**
+ * Resolve a PR number for `update` from the PR_NUMBER env (CI) or a CLI arg
+ * (manual run). Empty/whitespace is treated as **absent** — not `??`-defined — so
+ * a stray `PR_NUMBER=` in the shell or an env file doesn't shadow `update <n>`.
+ * Returns null for missing/invalid input so the caller can show a usage hint.
+ */
+export function resolvePrNumber(
+  envValue: string | undefined,
+  argValue: string | undefined,
+): number | null {
+  const raw = envValue?.trim() || argValue?.trim() || '';
+  if (raw === '') return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
  * The Monday (UTC) of the ISO week containing `isoDate`, formatted `YYYY-MM-DD`.
  * Weeks are Monday-based and computed in UTC so an entry merged at 23:59 Sunday
  * UTC lands in the week that just ended, deterministically — never a local-tz
@@ -101,6 +117,30 @@ export function upsert(
     next.push(record);
   }
   return next;
+}
+
+/** Index a record set by PR number — for fast "do we already have this PR?" lookups. */
+export function recordsByNumber(records: readonly ChangelogRecord[]): Map<number, ChangelogRecord> {
+  return new Map(records.map((r) => [r.number, r]));
+}
+
+/**
+ * Decide whether a PR needs (re)summarising:
+ *   - a PR not yet in the store → always (it gets a Claude summary, or a fallback if no key);
+ *   - an existing **fallback** (PR-title) entry → yes, but only when a key is available to
+ *     improve it (so a keyless run doesn't churn title→title);
+ *   - an existing Claude entry → only when `refresh` is set (e.g. the editorial style changed).
+ * This is what lets backfill/reconcile upgrade title-only entries to real summaries once the
+ * key is present, without re-doing work that's already good.
+ */
+export function needsSummary(
+  existing: ChangelogRecord | undefined,
+  opts: { refresh: boolean; hasKey: boolean },
+): boolean {
+  if (!existing) return true;
+  if (!opts.hasKey) return false;
+  if (opts.refresh) return true;
+  return existing.summarySource === 'fallback';
 }
 
 /** A line is a usable record only if every field `render()` depends on is well-typed. */

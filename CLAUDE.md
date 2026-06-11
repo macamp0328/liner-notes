@@ -82,9 +82,11 @@ pnpm diagrams:generate
 # Open the repo's Releases tab to read it. NOT a committed file and NOT a PR check:
 # editing a release makes no commit, so it never touches protected main.
 pnpm changelog:test                            # unit tests (scripts/changelog/lib.ts)
-DRY_RUN=1 PR_NUMBER=283 pnpm changelog:update  # preview one PR's entry, no writes
-pnpm changelog:backfill                        # one-shot seed of the whole merged history
+pnpm changelog:update 304                      # summarise one PR by number (also refreshes it)
+pnpm changelog:backfill                        # seed history (also upgrades PR-title fallbacks)
+pnpm changelog:backfill --refresh              # re-summarise every entry (e.g. after style.md edits)
 pnpm changelog:reconcile --since 2026-06-01    # heal any PRs the merge hook missed
+# Local runs auto-load ANTHROPIC_API_KEY from .env.local/.env (no export needed).
 ```
 
 ### Changelog

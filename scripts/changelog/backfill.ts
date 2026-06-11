@@ -1,15 +1,21 @@
 #!/usr/bin/env tsx
-// One-shot historical seed: summarise EVERY merged PR not already in the store,
-// in a single Message Batch (50% cheaper, non-latency-sensitive). Run once after
-// setup so the project ships with a complete, readable history instead of an
-// empty log; thereafter the hook + reconciler keep it current.
+// One-shot historical seed: summarise merged PRs into the store in a single
+// Message Batch (50% cheaper, non-latency-sensitive). Run once after setup so the
+// project ships with a complete history instead of an empty log; thereafter the
+// hook + reconciler keep it current.
 //
-// Idempotent and resumable: PRs already in the store are skipped, so re-running
-// only fills what's missing. DRY_RUN=1 prints the rebuilt body without writing.
+// What it summarises (idempotent / resumable):
+//   - PRs not yet in the store — always;
+//   - existing PR-title *fallback* entries — upgraded to Claude summaries, but
+//     only when ANTHROPIC_API_KEY is set (so a keyless run never churns);
+//   - with `--refresh`: re-summarise EVERY entry (e.g. after editing style.md).
+//
+// DRY_RUN=1 prints the rebuilt body without writing.
 
-import { summarizeBatch } from './claude.js';
+import './env.js';
+import { hasApiKey, summarizeBatch } from './claude.js';
 import { getPrInput, listAllMergedPrNumbers, readStore, writeStore } from './store.js';
-import { type ChangelogRecord, render, upsert } from './lib.js';
+import { type ChangelogRecord, needsSummary, recordsByNumber, render, upsert } from './lib.js';
 
 function isDryRun(): boolean {
   const v = process.env['DRY_RUN'];
@@ -17,16 +23,28 @@ function isDryRun(): boolean {
 }
 
 async function main(): Promise<void> {
+  const refresh = process.argv.includes('--refresh');
+  const key = hasApiKey();
+
   const all = listAllMergedPrNumbers();
   const store = readStore();
-  const have = new Set(store.map((r) => r.number));
-  const targets = all.filter((n) => !have.has(n));
+  const have = recordsByNumber(store);
+  const targets = all.filter((n) => needsSummary(have.get(n), { refresh, hasKey: key }));
 
+  const fresh = targets.filter((n) => !have.has(n)).length;
+  const upgrades = targets.length - fresh;
   console.log(
-    `${all.length} merged PRs, ${store.length} already recorded, ${targets.length} to summarise.`,
+    `${all.length} merged PRs, ${store.length} recorded → ${fresh} new + ${upgrades} to re-summarise = ${targets.length} target(s).`,
   );
+  if (!key) {
+    console.log(
+      'No ANTHROPIC_API_KEY — new PRs get the PR-title fallback; existing entries left as-is.',
+    );
+  } else if (refresh) {
+    console.log('--refresh: re-summarising every entry with Claude.');
+  }
   if (targets.length === 0) {
-    console.log('Nothing to backfill.');
+    console.log('Nothing to do.');
     return;
   }
 
@@ -36,9 +54,9 @@ async function main(): Promise<void> {
     return getPrInput(number);
   });
 
-  const newRecords = await summarizeBatch(inputs);
+  const summarised = await summarizeBatch(inputs);
   let records: ChangelogRecord[] = store;
-  for (const r of newRecords) records = upsert(records, r);
+  for (const r of summarised) records = upsert(records, r);
 
   if (isDryRun()) {
     console.log('\n--- DRY RUN: rebuilt body ---\n');
@@ -47,7 +65,9 @@ async function main(): Promise<void> {
   }
 
   writeStore(records);
-  console.log(`\nSeeded ${newRecords.length} entries (${records.length} total).`);
+  console.log(
+    `\nWrote ${summarised.length} entr${summarised.length === 1 ? 'y' : 'ies'} (${records.length} total).`,
+  );
 }
 
 main().catch((err: unknown) => {
