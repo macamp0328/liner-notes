@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import { adminAuthHook } from '../../../src/api/middleware/admin-auth.js';
+import { adminAuthHook, isAuthorizedAdmin } from '../../../src/api/middleware/admin-auth.js';
 import { snapshotEnv } from '../../helpers/env.js';
 
 interface CapturedReply {
@@ -64,5 +64,34 @@ describe('adminAuthHook', () => {
     await adminAuthHook(makeRequest('Bearer secret-token'), makeReply(captured));
     expect(captured.statusCode).toBeUndefined();
     expect(captured.body).toBeUndefined();
+  });
+});
+
+describe('isAuthorizedAdmin', () => {
+  const env = snapshotEnv(['ADMIN_TOKEN']);
+
+  beforeEach(() => {
+    process.env['ADMIN_TOKEN'] = 'secret-token';
+  });
+
+  afterEach(() => {
+    env.restore();
+  });
+
+  it('is false when ADMIN_TOKEN is unset (never exempts an unconfigured instance)', () => {
+    delete process.env['ADMIN_TOKEN'];
+    expect(isAuthorizedAdmin(makeRequest('Bearer secret-token'))).toBe(false);
+  });
+
+  it('is false when the Authorization header is missing', () => {
+    expect(isAuthorizedAdmin(makeRequest())).toBe(false);
+  });
+
+  it('is false for a wrong token', () => {
+    expect(isAuthorizedAdmin(makeRequest('Bearer wrong-token'))).toBe(false);
+  });
+
+  it('is true for the correct bearer token', () => {
+    expect(isAuthorizedAdmin(makeRequest('Bearer secret-token'))).toBe(true);
   });
 });
