@@ -43,6 +43,8 @@ import type { PersistedJob, PersistedStage } from '../db/job-repository.js';
 import {
   getLiveProgress,
   isReloadActive,
+  markReloadActive,
+  markReloadInactive,
   type LiveStageProgress,
 } from '../ingestion/reload-progress.js';
 import { errorResponseRef } from './schemas.js';
@@ -1230,8 +1232,16 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         driver,
         RELOAD_STAGES.map((s) => s.name),
       );
+      // Flag the reload active *synchronously, before the 202*, so the enrich-side
+      // isReloadActive() guard (#281) holds the instant the operator gets their response.
+      // runReload sets this too, but only after awaiting job-state reads — leaving a window
+      // where an enrich triggered right after this reload would slip through. runReload re-marks
+      // it (idempotent) and clears it in its finally on normal completion; the .catch clears it
+      // if runReload rejects before reaching that finally, so the flag can't leak.
+      markReloadActive(jobId);
       void runReload(driver, { username, logger: request.log, resumeJobId: jobId }).catch(
         (err: unknown) => {
+          markReloadInactive(jobId);
           request.log.error({ err }, '[reload] orchestrated reload failed');
         },
       );

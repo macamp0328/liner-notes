@@ -1202,6 +1202,29 @@ describe('Admin API', () => {
       expect(mockEnrichLyrics).not.toHaveBeenCalled();
     });
 
+    it('blocks an enrich the instant a reload is triggered, with no markReloadActive lag', async () => {
+      // Drives the real POST /reload path: the handler must flag the reload active *before* its
+      // 202 (runReload is mocked here and never reaches its own markReloadActive), so an enrich
+      // fired right after the reload's 202 is already blocked.
+      mockEnrichLyrics.mockClear();
+      const reload = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/reload',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(reload.statusCode).toBe(202);
+
+      const enrich = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(enrich.statusCode).toBe(409);
+      const body = JSON.parse(enrich.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('RELOAD_RUNNING');
+      expect(mockEnrichLyrics).not.toHaveBeenCalled();
+    });
+
     it('allows a standalone enrich once the reload is no longer active', async () => {
       markReloadActive('reload-job-1');
       const blocked = await app.inject({

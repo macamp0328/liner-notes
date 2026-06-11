@@ -284,8 +284,13 @@ ranStages)` produces a structured per-metric pass/fail report reused by the gate
   `/<stage>/enrich` is running (`PIPELINES.some(e => e.state.running)`). Conversely every
   `/<stage>/enrich` 409s `RELOAD_RUNNING` while a reload is active, gated by the synchronous
   `isReloadActive()` flag (not `getLiveProgress()`, which is null between stages) so the
-  enrich handler's running-flag guard stays atomic. Both checks are point-in-time — they close
-  the operator-error window, not every race; MERGE-idempotency is the backstop. Out of scope:
+  enrich handler's running-flag guard stays atomic. `/reload` sets `markReloadActive(jobId)`
+  **synchronously before its 202** (not only inside `runReload`, which marks it after awaiting
+  job-state reads — that left a window where an enrich fired right after a reload would slip
+  through); the handler's `.catch` clears it if `runReload` rejects before its own `finally`, so
+  the flag can't leak. The remaining residual is the single-tick interleave where an enrich is
+  _between_ its `isReloadActive()` check and `running = true` when a reload's pipeline-scan runs —
+  irreducible without a lock, and harmless since writes are MERGE-idempotent. Out of scope:
   the legacy `/ingest` (separate `job-state.ts`) and the `/<stage>/reset` routes are not gated
   against a reload. (#177 was rescoped to deploy⇄reload and closed; #281 owns this.)
 - **`ingestReleases`** (in `ingest.ts`) is the shared release fetch/MERGE loop used by both the
