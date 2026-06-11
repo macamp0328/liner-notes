@@ -4,9 +4,12 @@
       "Read(./.env.local)",
       "Read(**/.env.local)",
       "Read(./.env.production)",
+      "Read(**/.env.production)",
       "Read(./.env.production.local)",
+      "Read(**/.env.production.local)",
       "Read(**/*.tfstate)",
-      "Read(**/*.tfstate.backup)"
+      "Read(**/*.tfstate.*)",
+      "Read(**/.terraform/**)"
     ],
     "ask": ["Bash(terraform apply:*)", "Bash(terraform destroy:*)", "Bash(kubectl delete:*)"]
   },
