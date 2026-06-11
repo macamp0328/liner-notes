@@ -156,19 +156,20 @@ Route handler (src/api/) → Repository (src/db/) → Neo4j driver (src/db/clien
 
 **Key source files:**
 
-| File                              | Purpose                                                                   |
-| --------------------------------- | ------------------------------------------------------------------------- |
-| `src/server.ts`                   | Fastify instance builder, plugin registration                             |
-| `src/db/schema.ts`                | Idempotent constraint/index application on startup                        |
-| `src/ingestion/transforms.ts`     | Pure parsing functions — no I/O, fully unit-testable                      |
-| `src/ingestion/discogs-client.ts` | Rate-limited Discogs HTTP client (60 req/min, 429 backoff)                |
-| `src/ingestion/ingest.ts`         | First-5-stage pipeline (`runIngestion`) + shared `ingestReleases`         |
-| `src/ingestion/stages.ts`         | `RELOAD_STAGES` — full reload sequence + per-stage `deps`/`resources`     |
-| `src/ingestion/scheduler.ts`      | `scheduleStages` — generic dependency/resource-aware concurrent scheduler |
-| `src/ingestion/orchestrator.ts`   | `runReload` — drives the scheduler, DB-checkpointed, resumable            |
-| `src/db/job-repository.ts`        | `ReloadJob`/`ReloadStage` persistence (checkpoint/resume)                 |
-| `src/db/ingestion-repository.ts`  | All Cypher MERGE writes                                                   |
-| `src/enrichment/`                 | Post-ingest lyrics, originalYear, artist genre/profile pipelines          |
+| File                                  | Purpose                                                                            |
+| ------------------------------------- | ---------------------------------------------------------------------------------- |
+| `src/server.ts`                       | Fastify instance builder, plugin registration                                      |
+| `src/db/schema.ts`                    | Idempotent constraint/index application on startup                                 |
+| `src/ingestion/transforms.ts`         | Pure parsing functions — no I/O, fully unit-testable                               |
+| `src/ingestion/rate-limited-fetch.ts` | `createRateLimitedFetch` — shared retry/backoff/spacing core for the 5 API clients |
+| `src/ingestion/discogs-client.ts`     | Rate-limited Discogs HTTP client (60 req/min, 429 backoff)                         |
+| `src/ingestion/ingest.ts`             | First-5-stage pipeline (`runIngestion`) + shared `ingestReleases`                  |
+| `src/ingestion/stages.ts`             | `RELOAD_STAGES` — full reload sequence + per-stage `deps`/`resources`              |
+| `src/ingestion/scheduler.ts`          | `scheduleStages` — generic dependency/resource-aware concurrent scheduler          |
+| `src/ingestion/orchestrator.ts`       | `runReload` — drives the scheduler, DB-checkpointed, resumable                     |
+| `src/db/job-repository.ts`            | `ReloadJob`/`ReloadStage` persistence (checkpoint/resume)                          |
+| `src/db/ingestion-repository.ts`      | All Cypher MERGE writes                                                            |
+| `src/enrichment/`                     | Post-ingest lyrics, originalYear, artist genre/profile pipelines                   |
 
 **Ingestion fires async** (`void runIngestion(...)`) — it does not block `onReady`, so the HTTP server starts immediately while ingestion runs in the background.
 

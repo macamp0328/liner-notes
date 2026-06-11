@@ -1,6 +1,8 @@
-import type { Logger } from './discogs-client.js';
-import { transientNetworkCode } from './network-errors.js';
-import { jitteredBackoffMs } from './backoff.js';
+import {
+  createRateLimitedFetch,
+  type Logger,
+  type RateLimitedFetch,
+} from './rate-limited-fetch.js';
 
 /**
  * Acoustic features for a single recording, as resolved from AcousticBrainz.
@@ -61,7 +63,6 @@ interface HighLevelDocument {
 const BASE_URL = 'https://acousticbrainz.org/api/v1';
 const MAX_RETRIES = 3;
 const DEFAULT_BACKOFF_BASE_MS = 2_000;
-const MAX_BACKOFF_MS = 32_000;
 
 /** AcousticBrainz caps a single bulk request at 25 recording MBIDs. */
 export const MAX_RECORDING_IDS_PER_CALL = 25;
@@ -88,17 +89,20 @@ function toStringOrNull(value: unknown): string | null {
  */
 export class AcousticBrainzClient {
   private readonly userAgent: string;
-  private readonly delayMs: number;
-  private readonly backoffBaseMs: number;
-  private readonly random: () => number;
-  private readonly log: Logger;
+  private readonly rlFetch: RateLimitedFetch;
 
   constructor(config: AcousticBrainzClientConfig) {
     this.userAgent = config.userAgent;
-    this.delayMs = config.delayMs;
-    this.backoffBaseMs = config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
-    this.random = config.random ?? Math.random;
-    this.log = config.logger ?? console;
+    this.rlFetch = createRateLimitedFetch({
+      label: 'acousticbrainz-client',
+      apiName: 'AcousticBrainz API',
+      delayMs: config.delayMs,
+      maxRetries: MAX_RETRIES,
+      backoffBaseMs: config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS,
+      retryStatuses: [429, 503],
+      ...(config.random !== undefined ? { random: config.random } : {}),
+      ...(config.logger !== undefined ? { logger: config.logger } : {}),
+    });
   }
 
   /**
@@ -147,71 +151,20 @@ export class AcousticBrainzClient {
   }
 
   private async fetchWithBackoff<T>(url: string): Promise<T> {
-    let attempt = 0;
-    let currentDelay = this.backoffBaseMs;
+    const response = await this.rlFetch(url, {
+      headers: {
+        'User-Agent': this.userAgent,
+        Accept: 'application/json',
+      },
+    });
 
-    while (attempt <= MAX_RETRIES) {
-      let response: Response;
-      try {
-        response = await fetch(url, {
-          headers: {
-            'User-Agent': this.userAgent,
-            Accept: 'application/json',
-          },
-        });
-      } catch (err) {
-        // Transient network-level failure (fetch failed / ECONNRESET / ...) — not an HTTP
-        // status, so it lands here rather than in the 429/503 branch. Retry with backoff on
-        // the same attempt budget; rethrow non-transient errors and the final attempt unchanged.
-        const netCode = transientNetworkCode(err);
-        if (netCode === null || attempt >= MAX_RETRIES) throw err;
-        const sleepMs = jitteredBackoffMs(currentDelay, { random: this.random });
-        this.log.warn(
-          `[acousticbrainz-client] Network error (${netCode}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${sleepMs}ms`,
-        );
-        await this.sleep(sleepMs);
-        currentDelay = Math.min(currentDelay * 2, MAX_BACKOFF_MS);
-        attempt++;
-        continue;
-      }
-
-      if (response.status === 429 || response.status === 503) {
-        // No further fetch will follow on the final allowed attempt, so throw immediately
-        // instead of sleeping out a full backoff / Retry-After window for nothing —
-        // matching the short-circuit in musicbrainz-client.ts / discogs-client.ts.
-        if (attempt >= MAX_RETRIES) {
-          throw new Error(`AcousticBrainz API: exceeded max retries (${MAX_RETRIES}) for ${url}`);
-        }
-        const retryAfterHeader = response.headers.get('Retry-After');
-        const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
-        const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
-        const sleepMs = jitteredBackoffMs(currentDelay, { retryAfterMs, random: this.random });
-        const reason = response.status === 429 ? 'Rate limited' : 'Service unavailable';
-        this.log.warn(
-          `[acousticbrainz-client] ${reason} (${response.status}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${sleepMs}ms`,
-        );
-        await this.sleep(sleepMs);
-        currentDelay = Math.min(currentDelay * 2, MAX_BACKOFF_MS);
-        attempt++;
-        continue;
-      }
-
-      if (!response.ok) {
-        throw new Error(
-          `AcousticBrainz API error ${response.status} ${response.statusText} for ${url}`,
-        );
-      }
-
-      const data = (await response.json()) as T;
-      await this.sleep(this.delayMs);
-      return data;
+    if (!response.ok) {
+      throw new Error(
+        `AcousticBrainz API error ${response.status} ${response.statusText} for ${url}`,
+      );
     }
 
-    throw new Error(`AcousticBrainz API: exceeded max retries (${MAX_RETRIES}) for ${url}`);
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return (await response.json()) as T;
   }
 }
 

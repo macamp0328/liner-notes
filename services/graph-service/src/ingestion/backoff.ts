@@ -1,10 +1,10 @@
 /**
- * Shared backoff jitter for the external API clients (discogs, musicbrainz,
- * acousticbrainz, deezer, wikidata). Each client keeps its own exponential
- * schedule; this only randomizes the individual sleep so concurrent clients
- * don't retry in lockstep.
+ * Backoff jitter for the shared rate-limited fetch core (rate-limited-fetch.ts),
+ * which every external API client (discogs, musicbrainz, acousticbrainz, deezer,
+ * wikidata) runs on. Each client instance keeps its own exponential schedule; this
+ * only randomizes the individual sleep so concurrent clients don't retry in lockstep.
  *
- * @see issue #245 — relates to #225 (consolidate the clients behind one fetch core).
+ * @see issue #245 — landed alongside #225 (the clients now share one fetch core).
  */
 
 /**

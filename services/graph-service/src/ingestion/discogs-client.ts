@@ -5,16 +5,15 @@ import type {
   DiscogsMasterVersionsPage,
   DiscogsRelease,
 } from './types.js';
-import { transientNetworkCode } from './network-errors.js';
-import { jitteredBackoffMs } from './backoff.js';
+import {
+  createRateLimitedFetch,
+  type Logger,
+  type RateLimitedFetch,
+} from './rate-limited-fetch.js';
 
-/** Minimal logger interface — satisfied by Fastify's app.log (pino) and by console. */
-export interface Logger {
-  info(msg: string): void;
-  warn(msg: string): void;
-  error(msg: string): void;
-  debug?(msg: string): void;
-}
+// Logger lives in rate-limited-fetch.ts now; re-exported here so the many existing
+// importers of `Logger` from this module keep working unchanged.
+export type { Logger } from './rate-limited-fetch.js';
 
 export interface DiscogsClientConfig {
   token: string;
@@ -30,25 +29,27 @@ export interface DiscogsClientConfig {
 
 const BASE_URL = 'https://api.discogs.com';
 const MAX_RETRIES = 5;
-const MAX_BACKOFF_MS = 32_000;
 // Backoff starts here on 429 — independent of delayMs so it's always non-zero in production.
 const DEFAULT_BACKOFF_BASE_MS = 1_000;
 
 export class DiscogsClient {
   private readonly token: string;
   private readonly userAgent: string;
-  private readonly delayMs: number;
-  private readonly backoffBaseMs: number;
-  private readonly random: () => number;
-  private readonly log: Logger;
+  private readonly rlFetch: RateLimitedFetch;
 
   constructor(config: DiscogsClientConfig) {
     this.token = config.token;
     this.userAgent = config.userAgent;
-    this.delayMs = config.delayMs;
-    this.backoffBaseMs = config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
-    this.random = config.random ?? Math.random;
-    this.log = config.logger ?? console;
+    this.rlFetch = createRateLimitedFetch({
+      label: 'discogs-client',
+      apiName: 'Discogs API',
+      delayMs: config.delayMs,
+      maxRetries: MAX_RETRIES,
+      backoffBaseMs: config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS,
+      retryStatuses: [429],
+      ...(config.random !== undefined ? { random: config.random } : {}),
+      ...(config.logger !== undefined ? { logger: config.logger } : {}),
+    });
   }
 
   async getCollectionReleases(
@@ -85,80 +86,18 @@ export class DiscogsClient {
   }
 
   private async fetchWithBackoff<T>(url: string): Promise<T> {
-    let attempt = 0;
-    // Backoff starts at backoffBaseMs (independent of delayMs so it's safe even when delayMs=0).
-    let currentDelay = this.backoffBaseMs;
+    const response = await this.rlFetch(url, {
+      headers: {
+        Authorization: `Discogs token=${this.token}`,
+        'User-Agent': this.userAgent,
+        Accept: 'application/json',
+      },
+    });
 
-    while (attempt <= MAX_RETRIES) {
-      let response: Response;
-      try {
-        response = await fetch(url, {
-          headers: {
-            Authorization: `Discogs token=${this.token}`,
-            'User-Agent': this.userAgent,
-            Accept: 'application/json',
-          },
-        });
-      } catch (err) {
-        // Transient network-level failure (fetch failed / ECONNRESET / ...) — not an HTTP
-        // status, so it lands here rather than in the 429 branch. Retry with backoff on the
-        // same attempt budget; rethrow non-transient errors and the final attempt unchanged.
-        const netCode = transientNetworkCode(err);
-        if (netCode === null || attempt >= MAX_RETRIES) throw err;
-        const sleepMs = jitteredBackoffMs(currentDelay, { random: this.random });
-        this.log.warn(
-          `[discogs-client] Network error (${netCode}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${sleepMs}ms`,
-        );
-        await this.sleep(sleepMs);
-        currentDelay = Math.min(Math.max(currentDelay, this.backoffBaseMs) * 2, MAX_BACKOFF_MS);
-        attempt++;
-        continue;
-      }
-
-      if (response.status === 429) {
-        // No further fetch will follow on the final allowed attempt, so skip the wait and
-        // throw immediately instead of sleeping out a full Retry-After window for nothing.
-        if (attempt >= MAX_RETRIES) {
-          throw new Error(
-            `Discogs API: exceeded max retries (${MAX_RETRIES}) due to rate limiting for ${url}`,
-          );
-        }
-        // Honour the server-specified Retry-After delay when present.
-        // Validate the parsed value — a non-integer header produces NaN which Math.max
-        // propagates, effectively disabling backoff. Fall back to 0 on invalid values.
-        const retryAfterHeader = response.headers.get('Retry-After');
-        const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
-        const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
-        const waitMs = Math.max(currentDelay, retryAfterMs);
-        const sleepMs = jitteredBackoffMs(waitMs, { retryAfterMs, random: this.random });
-        this.log.warn(
-          `[discogs-client] Rate limited (429) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${sleepMs}ms`,
-        );
-        await this.sleep(sleepMs);
-        // Exponential backoff, capped at MAX_BACKOFF_MS (advanced from the un-jittered waitMs)
-        currentDelay = Math.min(Math.max(waitMs, this.backoffBaseMs) * 2, MAX_BACKOFF_MS);
-        attempt++;
-        continue;
-      }
-
-      if (!response.ok) {
-        throw new Error(`Discogs API error ${response.status} ${response.statusText} for ${url}`);
-      }
-
-      const data = (await response.json()) as T;
-
-      // Polite delay between successful requests to stay within rate limits (60 req/min)
-      await this.sleep(this.delayMs);
-
-      return data;
+    if (!response.ok) {
+      throw new Error(`Discogs API error ${response.status} ${response.statusText} for ${url}`);
     }
 
-    throw new Error(
-      `Discogs API: exceeded max retries (${MAX_RETRIES}) due to rate limiting for ${url}`,
-    );
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return (await response.json()) as T;
   }
 }

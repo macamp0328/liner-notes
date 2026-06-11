@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../../../src/server.js';
 import { resetAllPipelineStates } from '../../../src/api/admin.js';
+import { markReloadActive, __resetReloadProgress } from '../../../src/ingestion/reload-progress.js';
 import type { IngestionSummary } from '../../../src/ingestion/ingest.js';
 import type { JobState } from '../../../src/ingestion/job-state.js';
 
@@ -28,9 +29,21 @@ vi.mock('../../../src/db/schema.js', () => ({
   applySchema: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Reload-job persistence — needed because POST /reload (used by the #281 mutual-exclusion tests)
+// calls createReloadJob, and the 409-when-enrich-running case asserts it is NOT called.
+const mockFindResumableReloadJob = vi.hoisted(() => vi.fn());
+const mockCreateReloadJob = vi.hoisted(() => vi.fn());
+const mockGetLatestReloadJob = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/db/job-repository.js', () => ({
-  findResumableReloadJob: vi.fn().mockResolvedValue(null),
+  findResumableReloadJob: mockFindResumableReloadJob,
+  createReloadJob: mockCreateReloadJob,
+  getLatestReloadJob: mockGetLatestReloadJob,
 }));
+
+// orchestrator.runReload is fired-and-forgotten by POST /reload; mock it so a real reload never
+// runs against the mock driver.
+const mockRunReload = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/ingestion/orchestrator.js', () => ({ runReload: mockRunReload }));
 
 vi.mock('../../../src/db/ingestion-repository.js', () => ({
   hasReleases: vi.fn().mockResolvedValue(true),
@@ -106,6 +119,12 @@ vi.mock('../../../src/ingestion/job-state.js', () => ({
 
 // ── helpers ───────────────────────────────────────────────────────────────
 const VALID_TOKEN = 'test-admin-token';
+
+// Since #280 the /enrich routes are fire-and-forget: they return 202 and the run settles
+// on a later microtask. Drain that queue before polling /status (so lastResult/lastError/
+// running reflect the finished run) and before a test ends (so a still-pending run can't
+// mutate the shared per-pipeline state object the next test reuses via resetAllPipelineStates).
+const flushBackground = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
 // A fully-populated nationality summary including the per-source counts. Used to guard
 // against the Fastify response schema silently stripping the per-source fields.
@@ -214,7 +233,14 @@ describe('Admin API', () => {
       durationMs: 300,
     });
     mockEnrichNationality.mockResolvedValue(nationalitySummary);
+    mockFindResumableReloadJob.mockResolvedValue(null);
+    mockCreateReloadJob.mockResolvedValue('job-new');
+    mockGetLatestReloadJob.mockResolvedValue(null);
+    mockRunReload.mockResolvedValue({ jobId: 'job-new', status: 'complete' });
     resetAllPipelineStates();
+    // Clear the real (unmocked) reload-progress singleton so a markReloadActive() from one test
+    // can't leak its active flag into the next (every later enrich would then 409).
+    __resetReloadProgress();
     app = await buildServer();
     await app.ready();
   });
@@ -383,7 +409,7 @@ describe('Admin API', () => {
 
   // ── GET /lyrics/status ───────────────────────────────────────────────────
   describe('GET /api/v1/admin/lyrics/status', () => {
-    it('returns 200 with running:false and null lastResult before any run', async () => {
+    it('returns 200 with running:false and null lastResult/lastError before any run', async () => {
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/admin/lyrics/status',
@@ -391,10 +417,12 @@ describe('Admin API', () => {
       });
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.payload) as {
-        data: { running: boolean; lastResult: unknown };
+        data: { running: boolean; lastResult: unknown; lastError: unknown };
       };
       expect(body.data.running).toBe(false);
       expect(body.data.lastResult).toBeNull();
+      // lastError must be present in the schema (#280) — else Fastify strips it.
+      expect(body.data.lastError).toBeNull();
     });
 
     it('returns 401 when token is missing', async () => {
@@ -408,21 +436,20 @@ describe('Admin API', () => {
 
   // ── POST /lyrics/enrich ───────────────────────────────────────────────────
   describe('POST /api/v1/admin/lyrics/enrich', () => {
-    it('returns 200 with enrichment summary when called with valid token', async () => {
+    it('returns 202 and starts the run in the background when called with valid token', async () => {
       const response = await app.inject({
         method: 'POST',
         url: '/api/v1/admin/lyrics/enrich',
         headers: { authorization: `Bearer ${VALID_TOKEN}` },
       });
 
-      expect(response.statusCode).toBe(200);
+      expect(response.statusCode).toBe(202);
       const body = JSON.parse(response.payload) as {
-        data: { enriched: number; skipped: number; failed: number; durationMs: number };
+        data: { message: string; statusUrl: string };
       };
-      expect(body.data.enriched).toBe(10);
-      expect(body.data.skipped).toBe(5);
-      expect(body.data.failed).toBe(0);
-      expect(body.data.durationMs).toBe(3000);
+      expect(body.data.message).toContain('started');
+      expect(body.data.statusUrl).toBe('/api/v1/admin/lyrics/status');
+      await flushBackground();
     });
 
     it('returns 401 when Authorization header is missing', async () => {
@@ -460,12 +487,15 @@ describe('Admin API', () => {
       expect(body.error.code).toBe('SERVICE_UNAVAILABLE');
     });
 
-    it('returns 200 with lastResult populated after a successful run', async () => {
-      await app.inject({
+    it('populates lastResult on /status once the background run completes', async () => {
+      const accepted = await app.inject({
         method: 'POST',
         url: '/api/v1/admin/lyrics/enrich',
         headers: { authorization: `Bearer ${VALID_TOKEN}` },
       });
+      expect(accepted.statusCode).toBe(202);
+      await flushBackground();
+
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/admin/lyrics/status',
@@ -473,20 +503,53 @@ describe('Admin API', () => {
       });
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.payload) as {
-        data: { running: boolean; lastResult: { enriched: number } };
+        data: { running: boolean; lastResult: { enriched: number }; lastError: unknown };
       };
       expect(body.data.running).toBe(false);
       expect(body.data.lastResult).not.toBeNull();
       expect(body.data.lastResult?.enriched).toBe(10);
+      expect(body.data.lastError).toBeNull();
+    });
+
+    it('records lastError on /status when the background run throws', async () => {
+      // Reject with a non-Error to exercise the String(err) branch of the catch.
+      mockEnrichLyrics.mockRejectedValueOnce('boom');
+
+      const accepted = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(accepted.statusCode).toBe(202);
+      await flushBackground();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/lyrics/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { running: boolean; lastResult: unknown; lastError: string | null };
+      };
+      expect(body.data.running).toBe(false);
+      expect(body.data.lastResult).toBeNull();
+      expect(body.data.lastError).toBe('boom');
     });
 
     it('returns 409 when enrichment is already in progress', async () => {
-      // First call is slow so the second arrives while it's still running
+      // Hold the first run open with a deferred so the second request arrives mid-run.
+      let release!: (value: {
+        enriched: number;
+        skipped: number;
+        failed: number;
+        durationMs: number;
+      }) => void;
       mockEnrichLyrics.mockImplementationOnce(
         () =>
-          new Promise((resolve) =>
-            setTimeout(() => resolve({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 }), 100),
-          ),
+          new Promise((resolve) => {
+            release = resolve;
+          }),
       );
 
       const [r1, r2] = await Promise.all([
@@ -503,17 +566,20 @@ describe('Admin API', () => {
       ]);
 
       const codes = [r1.statusCode, r2.statusCode].sort((a, b) => a - b);
-      expect(codes).toEqual([200, 409]);
+      expect(codes).toEqual([202, 409]);
 
       const body409 = r1.statusCode === 409 ? r1 : r2;
       const parsed = JSON.parse(body409.payload) as { error: { code: string } };
       expect(parsed.error.code).toBe('ENRICHMENT_RUNNING');
+
+      release({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
+      await flushBackground();
     });
   });
 
   // ── POST /nationality/enrich ──────────────────────────────────────────────
   describe('POST /api/v1/admin/nationality/enrich', () => {
-    it('returns the full instrumented summary without stripping per-source fields', async () => {
+    it('returns 202 and starts the run in the background', async () => {
       process.env['MUSICBRAINZ_USER_AGENT'] = 'liner-notes/test (test@example.com)';
       const response = await app.inject({
         method: 'POST',
@@ -521,21 +587,22 @@ describe('Admin API', () => {
         headers: { authorization: `Bearer ${VALID_TOKEN}` },
       });
 
-      expect(response.statusCode).toBe(200);
-      const body = JSON.parse(response.payload) as { data: Record<string, number> };
-      // toEqual (not toMatchObject): the response schema must expose every per-source field, and
-      // Fastify strips any property not declared in the schema — so a missing field here means
-      // the schema regressed.
-      expect(body.data).toEqual(nationalitySummary);
+      expect(response.statusCode).toBe(202);
+      const body = JSON.parse(response.payload) as { data: { message: string; statusUrl: string } };
+      expect(body.data.message).toContain('started');
+      expect(body.data.statusUrl).toBe('/api/v1/admin/nationality/status');
+      await flushBackground();
     });
 
-    it('surfaces the instrumented summary as lastResult on /nationality/status after a run', async () => {
+    it('surfaces the full instrumented summary as lastResult on /nationality/status after a run', async () => {
       process.env['MUSICBRAINZ_USER_AGENT'] = 'liner-notes/test (test@example.com)';
-      await app.inject({
+      const accepted = await app.inject({
         method: 'POST',
         url: '/api/v1/admin/nationality/enrich',
         headers: { authorization: `Bearer ${VALID_TOKEN}` },
       });
+      expect(accepted.statusCode).toBe(202);
+      await flushBackground();
 
       const response = await app.inject({
         method: 'GET',
@@ -548,6 +615,10 @@ describe('Admin API', () => {
         data: { running: boolean; lastResult: Record<string, number> | null };
       };
       expect(body.data.running).toBe(false);
+      // toEqual (not toMatchObject): the /status lastResult schema must expose every per-source
+      // field, and Fastify strips any property not declared in the schema — so a missing field
+      // here means the schema regressed. (Since #280 this is the sole guard against that, as the
+      // enrich response no longer carries the summary.)
       expect(body.data.lastResult).toEqual(nationalitySummary);
     });
 
@@ -665,20 +736,18 @@ describe('Admin API', () => {
 
   // ── POST /track-acousticbrainz/enrich ────────────────────────────────────
   describe('POST /api/v1/admin/track-acousticbrainz/enrich', () => {
-    it('returns 200 with enrichment summary on success', async () => {
+    it('returns 202 and starts the run in the background on success', async () => {
       const response = await app.inject({
         method: 'POST',
         url: '/api/v1/admin/track-acousticbrainz/enrich',
         headers: { authorization: `Bearer ${VALID_TOKEN}` },
       });
 
-      expect(response.statusCode).toBe(200);
-      const body = JSON.parse(response.payload) as {
-        data: { tracksProcessed: number; tracksSkipped: number; tracksFailed: number };
-      };
-      expect(body.data.tracksProcessed).toBe(5);
-      expect(body.data.tracksSkipped).toBe(2);
-      expect(body.data.tracksFailed).toBe(0);
+      expect(response.statusCode).toBe(202);
+      const body = JSON.parse(response.payload) as { data: { message: string; statusUrl: string } };
+      expect(body.data.message).toContain('started');
+      expect(body.data.statusUrl).toBe('/api/v1/admin/track-acousticbrainz/status');
+      await flushBackground();
     });
 
     it('returns 401 when token is missing', async () => {
@@ -692,15 +761,17 @@ describe('Admin API', () => {
     });
 
     it('returns 409 when enrichment is already in progress', async () => {
+      let release!: (value: {
+        tracksProcessed: number;
+        tracksSkipped: number;
+        tracksFailed: number;
+        durationMs: number;
+      }) => void;
       mockEnrichTrackAcousticBrainz.mockImplementationOnce(
         () =>
-          new Promise((resolve) =>
-            setTimeout(
-              () =>
-                resolve({ tracksProcessed: 0, tracksSkipped: 0, tracksFailed: 0, durationMs: 0 }),
-              100,
-            ),
-          ),
+          new Promise((resolve) => {
+            release = resolve;
+          }),
       );
 
       const [r1, r2] = await Promise.all([
@@ -717,10 +788,13 @@ describe('Admin API', () => {
       ]);
 
       const codes = [r1.statusCode, r2.statusCode].sort((a, b) => a - b);
-      expect(codes).toEqual([200, 409]);
+      expect(codes).toEqual([202, 409]);
       const body409 = r1.statusCode === 409 ? r1 : r2;
       const parsed = JSON.parse(body409.payload) as { error: { code: string } };
       expect(parsed.error.code).toBe('ENRICHMENT_RUNNING');
+
+      release({ tracksProcessed: 0, tracksSkipped: 0, tracksFailed: 0, durationMs: 0 });
+      await flushBackground();
     });
   });
 
@@ -774,20 +848,18 @@ describe('Admin API', () => {
 
   // ── POST /track-deezer/enrich ─────────────────────────────────────────────
   describe('POST /api/v1/admin/track-deezer/enrich', () => {
-    it('returns 200 with enrichment summary on success', async () => {
+    it('returns 202 and starts the run in the background on success', async () => {
       const response = await app.inject({
         method: 'POST',
         url: '/api/v1/admin/track-deezer/enrich',
         headers: { authorization: `Bearer ${VALID_TOKEN}` },
       });
 
-      expect(response.statusCode).toBe(200);
-      const body = JSON.parse(response.payload) as {
-        data: { tracksProcessed: number; tracksSkipped: number; tracksFailed: number };
-      };
-      expect(body.data.tracksProcessed).toBe(3);
-      expect(body.data.tracksSkipped).toBe(1);
-      expect(body.data.tracksFailed).toBe(0);
+      expect(response.statusCode).toBe(202);
+      const body = JSON.parse(response.payload) as { data: { message: string; statusUrl: string } };
+      expect(body.data.message).toContain('started');
+      expect(body.data.statusUrl).toBe('/api/v1/admin/track-deezer/status');
+      await flushBackground();
     });
 
     it('returns 401 when token is missing', async () => {
@@ -801,15 +873,17 @@ describe('Admin API', () => {
     });
 
     it('returns 409 when enrichment is already in progress', async () => {
+      let release!: (value: {
+        tracksProcessed: number;
+        tracksSkipped: number;
+        tracksFailed: number;
+        durationMs: number;
+      }) => void;
       mockEnrichTrackDeezer.mockImplementationOnce(
         () =>
-          new Promise((resolve) =>
-            setTimeout(
-              () =>
-                resolve({ tracksProcessed: 0, tracksSkipped: 0, tracksFailed: 0, durationMs: 0 }),
-              100,
-            ),
-          ),
+          new Promise((resolve) => {
+            release = resolve;
+          }),
       );
 
       const [r1, r2] = await Promise.all([
@@ -826,10 +900,13 @@ describe('Admin API', () => {
       ]);
 
       const codes = [r1.statusCode, r2.statusCode].sort((a, b) => a - b);
-      expect(codes).toEqual([200, 409]);
+      expect(codes).toEqual([202, 409]);
       const body409 = r1.statusCode === 409 ? r1 : r2;
       const parsed = JSON.parse(body409.payload) as { error: { code: string } };
       expect(parsed.error.code).toBe('ENRICHMENT_RUNNING');
+
+      release({ tracksProcessed: 0, tracksSkipped: 0, tracksFailed: 0, durationMs: 0 });
+      await flushBackground();
     });
   });
 
@@ -883,21 +960,18 @@ describe('Admin API', () => {
 
   // ── POST /artist-profiles/enrich ─────────────────────────────────────────
   describe('POST /api/v1/admin/artist-profiles/enrich', () => {
-    it('returns 200 with enrichment summary on success', async () => {
+    it('returns 202 and starts the run in the background on success', async () => {
       const response = await app.inject({
         method: 'POST',
         url: '/api/v1/admin/artist-profiles/enrich',
         headers: { authorization: `Bearer ${VALID_TOKEN}` },
       });
 
-      expect(response.statusCode).toBe(200);
-      const body = JSON.parse(response.payload) as {
-        data: { enriched: number; skipped: number; failed: number; durationMs: number };
-      };
-      expect(body.data.enriched).toBe(12);
-      expect(body.data.skipped).toBe(3);
-      expect(body.data.failed).toBe(0);
-      expect(body.data.durationMs).toBe(9000);
+      expect(response.statusCode).toBe(202);
+      const body = JSON.parse(response.payload) as { data: { message: string; statusUrl: string } };
+      expect(body.data.message).toContain('started');
+      expect(body.data.statusUrl).toBe('/api/v1/admin/artist-profiles/status');
+      await flushBackground();
     });
 
     it('returns 401 when token is missing', async () => {
@@ -911,11 +985,17 @@ describe('Admin API', () => {
     });
 
     it('returns 409 when enrichment is already in progress', async () => {
+      let release!: (value: {
+        enriched: number;
+        skipped: number;
+        failed: number;
+        durationMs: number;
+      }) => void;
       mockEnrichArtistProfiles.mockImplementationOnce(
         () =>
-          new Promise((resolve) =>
-            setTimeout(() => resolve({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 }), 100),
-          ),
+          new Promise((resolve) => {
+            release = resolve;
+          }),
       );
 
       const [r1, r2] = await Promise.all([
@@ -932,10 +1012,13 @@ describe('Admin API', () => {
       ]);
 
       const codes = [r1.statusCode, r2.statusCode].sort((a, b) => a - b);
-      expect(codes).toEqual([200, 409]);
+      expect(codes).toEqual([202, 409]);
       const body409 = r1.statusCode === 409 ? r1 : r2;
       const parsed = JSON.parse(body409.payload) as { error: { code: string } };
       expect(parsed.error.code).toBe('ENRICHMENT_RUNNING');
+
+      release({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
+      await flushBackground();
     });
   });
 
@@ -989,21 +1072,18 @@ describe('Admin API', () => {
 
   // ── POST /artist-genres/enrich ───────────────────────────────────────────
   describe('POST /api/v1/admin/artist-genres/enrich', () => {
-    it('returns 200 with the non-standard genres/styles summary on success', async () => {
+    it('returns 202 and starts the run in the background on success', async () => {
       const response = await app.inject({
         method: 'POST',
         url: '/api/v1/admin/artist-genres/enrich',
         headers: { authorization: `Bearer ${VALID_TOKEN}` },
       });
 
-      expect(response.statusCode).toBe(200);
-      const body = JSON.parse(response.payload) as {
-        data: { genresEnriched: number; stylesEnriched: number; skipped: number; failed: number };
-      };
-      expect(body.data.genresEnriched).toBe(20);
-      expect(body.data.stylesEnriched).toBe(18);
-      expect(body.data.skipped).toBe(0);
-      expect(body.data.failed).toBe(0);
+      expect(response.statusCode).toBe(202);
+      const body = JSON.parse(response.payload) as { data: { message: string; statusUrl: string } };
+      expect(body.data.message).toContain('started');
+      expect(body.data.statusUrl).toBe('/api/v1/admin/artist-genres/status');
+      await flushBackground();
     });
 
     it('returns 401 when token is missing', async () => {
@@ -1017,21 +1097,18 @@ describe('Admin API', () => {
     });
 
     it('returns 409 when enrichment is already in progress', async () => {
+      let release!: (value: {
+        genresEnriched: number;
+        stylesEnriched: number;
+        skipped: number;
+        failed: number;
+        durationMs: number;
+      }) => void;
       mockEnrichArtistGenres.mockImplementationOnce(
         () =>
-          new Promise((resolve) =>
-            setTimeout(
-              () =>
-                resolve({
-                  genresEnriched: 0,
-                  stylesEnriched: 0,
-                  skipped: 0,
-                  failed: 0,
-                  durationMs: 0,
-                }),
-              100,
-            ),
-          ),
+          new Promise((resolve) => {
+            release = resolve;
+          }),
       );
 
       const [r1, r2] = await Promise.all([
@@ -1048,10 +1125,13 @@ describe('Admin API', () => {
       ]);
 
       const codes = [r1.statusCode, r2.statusCode].sort((a, b) => a - b);
-      expect(codes).toEqual([200, 409]);
+      expect(codes).toEqual([202, 409]);
       const body409 = r1.statusCode === 409 ? r1 : r2;
       const parsed = JSON.parse(body409.payload) as { error: { code: string } };
       expect(parsed.error.code).toBe('ENRICHMENT_RUNNING');
+
+      release({ genresEnriched: 0, stylesEnriched: 0, skipped: 0, failed: 0, durationMs: 0 });
+      await flushBackground();
     });
   });
 
@@ -1072,11 +1152,14 @@ describe('Admin API', () => {
     });
 
     it('returns the genres/styles summary in lastResult after a successful run', async () => {
-      await app.inject({
+      const accepted = await app.inject({
         method: 'POST',
         url: '/api/v1/admin/artist-genres/enrich',
         headers: { authorization: `Bearer ${VALID_TOKEN}` },
       });
+      expect(accepted.statusCode).toBe(202);
+      await flushBackground();
+
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/admin/artist-genres/status',
@@ -1096,6 +1179,146 @@ describe('Admin API', () => {
         url: '/api/v1/admin/artist-genres/status',
       });
       expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── Reload ⇄ enrich mutual exclusion (#281) ───────────────────────────────
+  describe('reload ⇄ enrich mutual exclusion', () => {
+    it('409s a standalone enrich while a reload is active', async () => {
+      markReloadActive('reload-job-1');
+      mockEnrichLyrics.mockClear();
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(409);
+      const body = JSON.parse(response.payload) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe('RELOAD_RUNNING');
+      expect(body.error.message).toContain('lyrics enrichment');
+      // The guard returns before running=true, so no background run started — nothing to flush.
+      expect(mockEnrichLyrics).not.toHaveBeenCalled();
+    });
+
+    it('blocks an enrich the instant a reload is triggered, with no markReloadActive lag', async () => {
+      // Drives the real POST /reload path: the handler must flag the reload active *before* its
+      // 202 (runReload is mocked here and never reaches its own markReloadActive), so an enrich
+      // fired right after the reload's 202 is already blocked.
+      mockEnrichLyrics.mockClear();
+      const reload = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/reload',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(reload.statusCode).toBe(202);
+
+      const enrich = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(enrich.statusCode).toBe(409);
+      const body = JSON.parse(enrich.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('RELOAD_RUNNING');
+      expect(mockEnrichLyrics).not.toHaveBeenCalled();
+    });
+
+    it('allows a standalone enrich once the reload is no longer active', async () => {
+      markReloadActive('reload-job-1');
+      const blocked = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(blocked.statusCode).toBe(409);
+
+      __resetReloadProgress(); // the reload finished
+
+      const allowed = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(allowed.statusCode).toBe(202);
+      await flushBackground();
+    });
+
+    it('409s a reload while a standalone enrich is running, without starting the reload', async () => {
+      // Hold the lyrics run open so its pipeline state stays running=true across the /reload call.
+      let release!: (value: {
+        enriched: number;
+        skipped: number;
+        failed: number;
+        durationMs: number;
+      }) => void;
+      mockEnrichLyrics.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+      mockCreateReloadJob.mockClear();
+      mockRunReload.mockClear();
+
+      const enrich = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(enrich.statusCode).toBe(202);
+
+      const reload = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/reload',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(reload.statusCode).toBe(409);
+      const body = JSON.parse(reload.payload) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe('ENRICHMENT_RUNNING');
+      expect(body.error.message).toContain('lyrics enrichment');
+      expect(mockCreateReloadJob).not.toHaveBeenCalled();
+      expect(mockRunReload).not.toHaveBeenCalled();
+
+      release({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
+      await flushBackground();
+    });
+
+    it('names the specific running pipeline in the reload 409', async () => {
+      // A non-lyrics pipeline proves the guard scans the whole registry, not just lyrics.
+      let release!: (value: {
+        tracksProcessed: number;
+        tracksSkipped: number;
+        tracksFailed: number;
+        durationMs: number;
+      }) => void;
+      mockEnrichTrackAcousticBrainz.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+
+      const enrich = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/track-acousticbrainz/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(enrich.statusCode).toBe(202);
+
+      const reload = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/reload',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(reload.statusCode).toBe(409);
+      const body = JSON.parse(reload.payload) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe('ENRICHMENT_RUNNING');
+      expect(body.error.message).toContain('AcousticBrainz track enrichment');
+
+      release({ tracksProcessed: 0, tracksSkipped: 0, tracksFailed: 0, durationMs: 0 });
+      await flushBackground();
     });
   });
 });
