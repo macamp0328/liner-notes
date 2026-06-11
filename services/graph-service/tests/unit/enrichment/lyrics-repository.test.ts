@@ -3,6 +3,9 @@ import type { Driver, Session, Result, Record as Neo4jRecord } from 'neo4j-drive
 import {
   getUnenrichedTracks,
   setTrackLyrics,
+  markLyricsFetched,
+  markTrackInstrumental,
+  markTrackProbableInstrumental,
   clearGeniusLyrics,
 } from '../../../src/db/lyrics-repository.js';
 
@@ -63,6 +66,7 @@ describe('getUnenrichedTracks', () => {
       position: 'A2',
       releaseDiscogsId: fakeId,
       artistName: 'Miles Davis',
+      voiceInstrumental: 'voice',
     });
     const result = { records: [record] } as unknown as Result;
     const { session } = makeMockSession(result);
@@ -76,6 +80,7 @@ describe('getUnenrichedTracks', () => {
       position: 'A2',
       releaseDiscogsId: 13570466,
       artistName: 'Miles Davis',
+      voiceInstrumental: 'voice',
     });
   });
 
@@ -117,6 +122,22 @@ describe('getUnenrichedTracks', () => {
     expect(query).toContain('WHERE t.lyrics IS NULL');
   });
 
+  it('excludes instrumental and probable-instrumental via a null-safe coalesce guard (#246)', async () => {
+    const result = { records: [] } as unknown as Result;
+    const { session, runSpy } = makeMockSession(result);
+    const driver = makeMockDriver(session);
+
+    await getUnenrichedTracks(driver);
+
+    const [query] = runSpy.mock.calls[0] as [string];
+    // coalesce(...,'') keeps NULL-status (legacy) rows in scope while dropping the two
+    // terminal instrumental statuses — a bare NOT ... IN [...] would drop NULL rows.
+    expect(query).toContain(
+      "NOT (coalesce(t.lyricsStatus, '') IN ['instrumental', 'probable-instrumental'])",
+    );
+    expect(query).toContain('t.voiceInstrumental AS voiceInstrumental');
+  });
+
   it('closes the session even when run throws', async () => {
     const { session } = makeMockSession();
     (session.run as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('DB error'));
@@ -147,6 +168,8 @@ describe('clearGeniusLyrics', () => {
     const [query] = runSpy.mock.calls[0] as [string];
     expect(query).toContain("lyricsSource = 'genius'");
     expect(query).toContain('SET t.lyrics = null');
+    // Status must be reset too, else a cleared track keeps a stale 'resolved' (#246).
+    expect(query).toContain('t.lyricsStatus = null');
   });
 
   it('returns 0 when no records are returned', async () => {
@@ -180,6 +203,7 @@ describe('setTrackLyrics', () => {
       'MATCH (r:Release {discogsId: $releaseDiscogsId})-[:HAS_TRACK]->(t:Track {position: $position})',
     );
     expect(query).toContain('SET t.lyrics = $lyrics, t.lyricsSource = $lyricsSource');
+    expect(query).toContain("t.lyricsStatus = 'resolved'");
     expect(params['position']).toBe('A2');
     expect(params['lyrics']).toBe('Verse\nLine');
     expect(params['lyricsSource']).toBe('lrclib');
@@ -204,6 +228,74 @@ describe('setTrackLyrics', () => {
     const driver = makeMockDriver(session);
 
     await expect(setTrackLyrics(driver, 1, 'A1', 'lyrics', 'lrclib')).rejects.toThrow('DB error');
+    expect(session.close).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// markLyricsFetched — stamps not-found (#246)
+// ---------------------------------------------------------------------------
+describe('markLyricsFetched', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("sets lyricsStatus='not-found' and stamps lyricsFetchedAt without writing lyrics", async () => {
+    const { session, runSpy } = makeMockSession();
+    const driver = makeMockDriver(session);
+
+    await markLyricsFetched(driver, 13570466, 'B1');
+
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain("SET t.lyricsStatus = 'not-found', t.lyricsFetchedAt = datetime()");
+    expect(query).not.toContain('t.lyrics =');
+    expect(params['position']).toBe('B1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// markTrackInstrumental / markTrackProbableInstrumental — terminal status (#246)
+// ---------------------------------------------------------------------------
+describe('markTrackInstrumental', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("sets lyricsStatus='instrumental' and stamps lyricsFetchedAt, leaving lyrics untouched", async () => {
+    const { session, runSpy } = makeMockSession();
+    const driver = makeMockDriver(session);
+
+    await markTrackInstrumental(driver, 13570466, 'A1');
+
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('SET t.lyricsStatus = $status, t.lyricsFetchedAt = datetime()');
+    expect(query).not.toContain('t.lyrics =');
+    expect(params['status']).toBe('instrumental');
+    expect(params['position']).toBe('A1');
+  });
+});
+
+describe('markTrackProbableInstrumental', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("sets lyricsStatus='probable-instrumental' and stamps lyricsFetchedAt", async () => {
+    const { session, runSpy } = makeMockSession();
+    const driver = makeMockDriver(session);
+
+    await markTrackProbableInstrumental(driver, 13570466, 'A1');
+
+    const [, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(params['status']).toBe('probable-instrumental');
+  });
+
+  it('closes the session even when run throws', async () => {
+    const { session } = makeMockSession();
+    (session.run as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('DB error'));
+    const driver = makeMockDriver(session);
+
+    await expect(markTrackProbableInstrumental(driver, 1, 'A1')).rejects.toThrow('DB error');
     expect(session.close).toHaveBeenCalledOnce();
   });
 });
