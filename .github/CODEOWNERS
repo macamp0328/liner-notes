@@ -1,0 +1,4 @@
+# Default owner for everything — keeps review routing explicit even though this is
+# a single-maintainer repo, and means any future collaborator/bot PR auto-requests
+# review instead of merging unseen.
+* @macamp0328

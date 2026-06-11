@@ -1,3 +1,12 @@
+# Wall 1: refuse any push that updates main (including HEAD:main and deletes).
+# git feeds pre-push one "<local-ref> <local-sha> <remote-ref> <remote-sha>" line per ref.
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    echo "✗ Pushing to main is blocked — open a PR (main is squash-merge only)." >&2
+    exit 1
+  fi
+done
+
 pnpm --filter graph-service lint
 pnpm --filter graph-service typecheck
-pnpm --filter graph-service test:unit
+pnpm --filter graph-service test:unit:coverage

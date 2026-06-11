@@ -40,6 +40,8 @@ jobs:
   regenerate:
     name: Regenerate Insomnia collection
     runs-on: ubuntu-latest
+    # Backstop against wedged installs/pulls — GitHub default is 360 min.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -65,11 +67,14 @@ jobs:
         # produces means the contributor forgot to run
         # `pnpm insomnia:generate` locally before pushing. Print the diff so
         # the failure is self-explanatory, then exit non-zero.
+        # `git status --porcelain`, not `git diff --quiet`: diff only sees changes
+        # to TRACKED files, so a newly emitted artifact under docs/ would pass the
+        # check while missing from the commit. status catches untracked files too.
         run: |
-          if ! git diff --quiet -- services/graph-service/docs; then
+          if [ -n "$(git status --porcelain -- services/graph-service/docs)" ]; then
             echo "::error::API docs are out of date. Run 'pnpm insomnia:generate' locally and commit the result."
             echo "Drift:"
-            git --no-pager diff --stat -- services/graph-service/docs
+            git status --porcelain -- services/graph-service/docs
             git --no-pager diff -- services/graph-service/docs | head -200
             exit 1
           fi
