@@ -279,8 +279,15 @@ ranStages)` produces a structured per-metric pass/fail report reused by the gate
   (and `error` on failure), surfaced by `/admin/reload/status`. An empty graph fails the gate.
 - **Wipe stays separate.** The reload never wipes; run `POST /reset?confirm=wipe-all` first for
   a from-scratch reload. It picks up from empty-or-partial.
-- **Coarse 409 only.** `/reload` 409s if a reload is already running; full mutual exclusion
-  against the standalone `/<stage>/enrich` routes is #177.
+- **Reload ⇄ enrich mutual exclusion (#281).** `/reload` 409s `RELOAD_RUNNING` if a reload is
+  already running, and 409s `ENRICHMENT_RUNNING` (naming the stage) if any standalone
+  `/<stage>/enrich` is running (`PIPELINES.some(e => e.state.running)`). Conversely every
+  `/<stage>/enrich` 409s `RELOAD_RUNNING` while a reload is active, gated by the synchronous
+  `isReloadActive()` flag (not `getLiveProgress()`, which is null between stages) so the
+  enrich handler's running-flag guard stays atomic. Both checks are point-in-time — they close
+  the operator-error window, not every race; MERGE-idempotency is the backstop. Out of scope:
+  the legacy `/ingest` (separate `job-state.ts`) and the `/<stage>/reset` routes are not gated
+  against a reload. (#177 was rescoped to deploy⇄reload and closed; #281 owns this.)
 - **`ingestReleases`** (in `ingest.ts`) is the shared release fetch/MERGE loop used by both the
   legacy `runIngestion` and the reload's `releases` stage — one definition, no drift.
 
