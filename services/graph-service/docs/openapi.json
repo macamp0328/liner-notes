@@ -4231,6 +4231,7 @@
                             "producersWithNationality",
                             "engineersWithNationality",
                             "tracksWithLyrics",
+                            "lyricsFunnel",
                             "tracksWithRecordingMbid",
                             "tracksWithIsrc",
                             "tracksWithTempo",
@@ -4475,6 +4476,33 @@
                                       }
                                     }
                                   }
+                                }
+                              }
+                            },
+                            "lyricsFunnel": {
+                              "type": "object",
+                              "required": [
+                                "resolved",
+                                "instrumental",
+                                "probableInstrumental",
+                                "notFound",
+                                "total"
+                              ],
+                              "properties": {
+                                "resolved": {
+                                  "type": "integer"
+                                },
+                                "instrumental": {
+                                  "type": "integer"
+                                },
+                                "probableInstrumental": {
+                                  "type": "integer"
+                                },
+                                "notFound": {
+                                  "type": "integer"
+                                },
+                                "total": {
+                                  "type": "integer"
                                 }
                               }
                             },

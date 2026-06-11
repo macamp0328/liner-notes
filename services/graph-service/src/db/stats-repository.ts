@@ -25,6 +25,21 @@ export interface SourcedCoverageMetric extends CoverageMetric {
   sources: Record<string, CoverageMetric>;
 }
 
+/**
+ * The four-state lyrics funnel (issue #246). The buckets partition `total` exactly:
+ * `resolved` is ground-truth `lyrics IS NOT NULL` (so it counts legacy tracks enriched
+ * before `lyricsStatus` existed), `instrumental`/`probableInstrumental` are the terminal
+ * no-lyrics classifications, and `notFound` is the derived remainder (everything still
+ * eligible for a retry — whether stamped `not-found` or never attempted).
+ */
+export interface LyricsFunnel {
+  resolved: number;
+  instrumental: number;
+  probableInstrumental: number;
+  notFound: number;
+  total: number;
+}
+
 export interface StatsData {
   counts: {
     releases: number;
@@ -42,6 +57,7 @@ export interface StatsData {
     producersWithNationality: SourcedCoverageMetric;
     engineersWithNationality: SourcedCoverageMetric;
     tracksWithLyrics: SourcedCoverageMetric;
+    lyricsFunnel: LyricsFunnel;
     tracksWithRecordingMbid: CoverageMetric;
     tracksWithIsrc: CoverageMetric;
     tracksWithTempo: CoverageMetric;
@@ -120,6 +136,8 @@ const TRACK_QUERY = `
     count(CASE WHEN t.lyrics IS NOT NULL THEN 1 END) AS lyricsCovered,
     count(CASE WHEN t.lyricsSource = 'lrclib' THEN 1 END) AS lyricsLrclibCovered,
     count(CASE WHEN t.lyricsSource = 'genius' THEN 1 END) AS lyricsGeniusCovered,
+    count(CASE WHEN t.lyricsStatus = 'instrumental' THEN 1 END) AS lyricsInstrumental,
+    count(CASE WHEN t.lyricsStatus = 'probable-instrumental' THEN 1 END) AS lyricsProbableInstrumental,
     count(CASE WHEN t.recordingMbid IS NOT NULL THEN 1 END) AS mbidCovered,
     count(CASE WHEN t.isrc IS NOT NULL THEN 1 END) AS isrcCovered,
     count(CASE WHEN t.recordingMbid IS NOT NULL AND t.tempo IS NOT NULL THEN 1 END) AS tempoCovered,
@@ -208,6 +226,16 @@ export async function getStats(driver: Driver): Promise<StatsData> {
   const mbidCovered = n(track, 'mbidCovered');
   const isrcCovered = n(track, 'isrcCovered');
 
+  // Lyrics funnel (#246). `resolved` keys on `lyrics IS NOT NULL` (ground truth) so legacy
+  // tracks enriched before `lyricsStatus` existed still count; the two instrumental buckets
+  // are believed lyric-less, so they leave the honest non-instrumental coverage denominator.
+  const lyricsCovered = n(track, 'lyricsCovered');
+  const lyricsInstrumental = n(track, 'lyricsInstrumental');
+  const lyricsProbableInstrumental = n(track, 'lyricsProbableInstrumental');
+  const nonInstrumentalTracks = trackTotal - lyricsInstrumental - lyricsProbableInstrumental;
+  const lyricsNotFound =
+    trackTotal - lyricsCovered - lyricsInstrumental - lyricsProbableInstrumental;
+
   const nationality = (m: Map<string, number>): SourcedCoverageMetric =>
     sourced(n(m, 'covered'), n(m, 'applicable'), {
       musicbrainz: n(m, 'mb'),
@@ -230,10 +258,19 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       musiciansWithNationality: nationality(natMusician),
       producersWithNationality: nationality(natProducer),
       engineersWithNationality: nationality(natEngineer),
-      tracksWithLyrics: sourced(n(track, 'lyricsCovered'), trackTotal, {
+      // Honest coverage: covered over tracks that *could* have lyrics (excludes the two
+      // instrumental classes). covered stays the ground-truth lyrics count (#246).
+      tracksWithLyrics: sourced(lyricsCovered, nonInstrumentalTracks, {
         lrclib: n(track, 'lyricsLrclibCovered'),
         genius: n(track, 'lyricsGeniusCovered'),
       }),
+      lyricsFunnel: {
+        resolved: lyricsCovered,
+        instrumental: lyricsInstrumental,
+        probableInstrumental: lyricsProbableInstrumental,
+        notFound: lyricsNotFound,
+        total: trackTotal,
+      },
       tracksWithRecordingMbid: coverage(mbidCovered, trackTotal),
       tracksWithIsrc: coverage(isrcCovered, trackTotal),
       // Applicable denominators are the upstream gates: tempo needs a recordingMbid,

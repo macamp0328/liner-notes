@@ -48,11 +48,27 @@ describe('GET /api/v1/stats', () => {
          MERGE (a)-[rel:ORIGIN_COUNTRY]->(c)
          SET rel.source = 'musicbrainz'`,
       );
+      // One resolved track (deliberately left with no lyricsStatus to exercise the
+      // legacy-null-status path: the funnel counts it resolved via lyrics IS NOT NULL).
       await session.run(
         `MATCH (t:Track) WITH t LIMIT 1
          SET t.lyrics = 'la la la', t.lyricsSource = 'lrclib',
              t.recordingMbid = 'mbid-1', t.isrc = 'ISRC0001',
              t.tempo = 120.0, t.deezerBpm = 121.0, t.deezerGain = -7.5`,
+      );
+      // Two instrumental classes + one not-found, so the funnel exercises every bucket
+      // and the non-instrumental denominator differs from the total track count (#246).
+      await session.run(
+        `MATCH (t:Track) WHERE t.lyrics IS NULL WITH t LIMIT 1
+         SET t.lyricsStatus = 'instrumental'`,
+      );
+      await session.run(
+        `MATCH (t:Track) WHERE t.lyrics IS NULL AND t.lyricsStatus IS NULL WITH t LIMIT 1
+         SET t.lyricsStatus = 'probable-instrumental'`,
+      );
+      await session.run(
+        `MATCH (t:Track) WHERE t.lyrics IS NULL AND t.lyricsStatus IS NULL WITH t LIMIT 1
+         SET t.lyricsStatus = 'not-found'`,
       );
       await session.run(`MERGE (m:Master {discogsId: 555555})`);
       // mb-release-events output on the master.
@@ -121,6 +137,25 @@ describe('GET /api/v1/stats', () => {
     expect(enrichment.artistsWithNationality.sources.musicbrainz!.covered).toBeGreaterThanOrEqual(
       1,
     );
+  });
+
+  it('reports the four-state lyrics funnel with a non-instrumental denominator (#246)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/v1/stats' });
+    const { enrichment, counts } = (JSON.parse(res.payload) as StatsBody).data;
+    const f = enrichment.lyricsFunnel;
+
+    // Exactly the classes we seeded; resolved counts the legacy null-status track.
+    expect(f.total).toBe(counts.tracks);
+    expect(f.resolved).toBe(1);
+    expect(f.instrumental).toBe(1);
+    expect(f.probableInstrumental).toBe(1);
+    // The four buckets partition total exactly.
+    expect(f.resolved + f.instrumental + f.probableInstrumental + f.notFound).toBe(f.total);
+
+    // The honest denominator excludes both instrumental classes (2), so it is smaller
+    // than the total track count while still containing the one resolved track.
+    expect(enrichment.tracksWithLyrics.covered).toBe(1);
+    expect(enrichment.tracksWithLyrics.applicable).toBe(counts.tracks - 2);
   });
 
   it('exposes the endpoint without an admin token', async () => {
