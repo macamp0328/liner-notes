@@ -1,0 +1,114 @@
+import {
+  createRateLimitedFetch,
+  type Logger,
+  type RateLimitedFetch,
+} from './rate-limited-fetch.js';
+
+export interface LrclibClientConfig {
+  /**
+   * Identifying User-Agent. LRCLIB's API explicitly asks callers to send an app
+   * name / version / contact string — unlike Genius, this is a polite identifier,
+   * not a browser disguise.
+   */
+  userAgent: string;
+  /** Trailing sleep after every successful request. Concurrency is the rate ceiling, so this is small. */
+  delayMs: number;
+  /** Minimum backoff on a retryable status. Defaults to 1000ms. Set to 0 in tests to keep them fast. */
+  backoffBaseMs?: number;
+  /** Injectable RNG in [0,1) for deterministic backoff jitter in tests; defaults to Math.random. */
+  random?: () => number;
+  /** Optional structured logger; defaults to console when omitted. Pass app.log in production. */
+  logger?: Logger;
+}
+
+interface LrclibResponse {
+  plainLyrics?: string | null;
+  // LRCLIB's authoritative instrumental flag. `true` means the track has no lyrics by
+  // nature (issue #246) — a terminal answer, never a miss to retry or fall back on.
+  instrumental?: boolean;
+}
+
+/**
+ * What a 200 from LRCLIB carries: the plain lyrics (null when absent) and whether LRCLIB
+ * marked the track instrumental (#246). `getLyrics` returns this on 200 and `null` only on a
+ * 404 (no record at all). An instrumental track comes back as `{ lyrics: null, instrumental:
+ * true }`, which the caller treats as a terminal classification rather than a miss.
+ */
+export interface LrclibResult {
+  lyrics: string | null;
+  instrumental: boolean;
+}
+
+const BASE_URL = 'https://lrclib.net/api/get';
+const MAX_RETRIES = 3;
+const DEFAULT_BACKOFF_BASE_MS = 1_000;
+const DEFAULT_USER_AGENT = 'liner-notes/1.0 (+https://github.com/macamp0328/liner-notes)';
+const DEFAULT_DELAY_MS = 0;
+
+/**
+ * HTTP client for LRCLIB's free, key-less lyrics API — the primary lyrics source.
+ *
+ * Promoted from a raw `fetch()` to a hardened client (#247) so it matches the other
+ * external clients: bounded retry on transient/5xx via the shared `createRateLimitedFetch`
+ * core, capped backoff, and an identifying User-Agent (which LRCLIB requests). A transient
+ * `LRCLIB 504` that used to drop a candidate now retries instead.
+ */
+export class LrclibClient {
+  private readonly userAgent: string;
+  private readonly rlFetch: RateLimitedFetch;
+
+  constructor(config: LrclibClientConfig) {
+    this.userAgent = config.userAgent;
+    this.rlFetch = createRateLimitedFetch({
+      label: 'lrclib-client',
+      apiName: 'LRCLIB API',
+      delayMs: config.delayMs,
+      maxRetries: MAX_RETRIES,
+      backoffBaseMs: config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS,
+      retryStatuses: [429, 500, 502, 503, 504],
+      ...(config.random !== undefined ? { random: config.random } : {}),
+      ...(config.logger !== undefined ? { logger: config.logger } : {}),
+    });
+  }
+
+  /**
+   * Look up a track on LRCLIB. Returns an {@link LrclibResult} on 200 (carrying the plain
+   * lyrics — null when absent — and the authoritative `instrumental` flag, #246), `null` on a
+   * 404 (no record at all), and throws on any other non-ok status (after the retry budget is
+   * spent — a retryable status exhausts to `RetriesExhaustedError`).
+   */
+  async getLyrics(artistName: string, title: string): Promise<LrclibResult | null> {
+    const url = new URL(BASE_URL);
+    url.searchParams.set('track_name', title);
+    url.searchParams.set('artist_name', artistName);
+
+    const response = await this.rlFetch(url.toString(), {
+      headers: { 'User-Agent': this.userAgent, Accept: 'application/json' },
+    });
+
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new Error(`LRCLIB API error ${response.status} for ${url.toString()}`);
+    }
+
+    const data = (await response.json()) as LrclibResponse;
+    return { lyrics: data.plainLyrics ?? null, instrumental: data.instrumental === true };
+  }
+}
+
+/**
+ * Build an {@link LrclibClient} from environment variables. LRCLIB needs no key, so this
+ * always returns a client. `LRCLIB_USER_AGENT` overrides the polite default identifier;
+ * `LRCLIB_REQUEST_DELAY_MS` overrides the per-request spacing (clamped — malformed/negative
+ * values fall back to the default).
+ */
+export function buildLrclibClientFromEnv(logger?: Logger): LrclibClient {
+  const userAgent = process.env['LRCLIB_USER_AGENT'] || DEFAULT_USER_AGENT;
+  const parsed = parseInt(process.env['LRCLIB_REQUEST_DELAY_MS'] ?? '', 10);
+  const delayMs = Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_DELAY_MS;
+  return new LrclibClient({
+    userAgent,
+    delayMs,
+    ...(logger !== undefined ? { logger } : {}),
+  });
+}

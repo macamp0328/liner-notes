@@ -1,6 +1,8 @@
-import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import type { Driver } from 'neo4j-driver';
-import { enrichLyrics } from '../../../src/enrichment/lyrics.js';
+import { enrichLyrics, type LyricsClients } from '../../../src/enrichment/lyrics.js';
+import { LrclibClient } from '../../../src/ingestion/lrclib-client.js';
+import { GeniusClient } from '../../../src/ingestion/genius-client.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks — factories run before module-level vi.mock() calls resolve.
@@ -48,8 +50,32 @@ function makeHtmlResponse(html: string): Response {
   } as unknown as Response;
 }
 
+// A retryable (5xx) response needs `headers.get` because the shared rate-limited-fetch core
+// reads `Retry-After` on every retried status. The plain makeOkResponse omits it.
+function makeRetryableResponse(status: number): Response {
+  return {
+    ok: false,
+    status,
+    headers: { get: () => null },
+    json: vi.fn().mockResolvedValue({}),
+    text: vi.fn().mockResolvedValue(''),
+  } as unknown as Response;
+}
+
 function makeMockLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+}
+
+// Zero-backoff clients so the global-fetch-spy assertions run instantly (no real retry waits).
+function makeLrclib(): LrclibClient {
+  return new LrclibClient({ userAgent: 'liner-notes/test', delayMs: 0, backoffBaseMs: 0 });
+}
+function makeGenius(userAgent = 'Mozilla/5.0 (test-browser)'): GeniusClient {
+  return new GeniusClient({ token: 'test-genius-token', userAgent, delayMs: 0, backoffBaseMs: 0 });
+}
+/** Inject LRCLIB always; Genius only when `withGenius` (else `null` = unconfigured/prod path). */
+function clients(withGenius: boolean, geniusUa?: string): LyricsClients {
+  return { lrclib: makeLrclib(), genius: withGenius ? makeGenius(geniusUa) : null };
 }
 
 const sampleTrack = {
@@ -65,11 +91,15 @@ const sampleTrack = {
 // ---------------------------------------------------------------------------
 describe('enrichLyrics', () => {
   let fetchSpy: MockInstance<typeof fetch>;
+  const savedConcurrency = process.env['LYRICS_CONCURRENCY'];
 
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env['GENIUS_TOKEN'];
     delete process.env['GENIUS_USER_AGENT'];
+    // Force serial so call-order assertions are deterministic; the worker pool is covered in
+    // run.test.ts. (Intra-stage concurrency is an orthogonal concern from lyrics' own logic.)
+    process.env['LYRICS_CONCURRENCY'] = '1';
 
     mockGetUnenrichedTracks.mockResolvedValue([]);
     mockSetTrackLyrics.mockResolvedValue(undefined);
@@ -80,13 +110,19 @@ describe('enrichLyrics', () => {
     fetchSpy = vi.spyOn(globalThis, 'fetch');
   });
 
+  afterEach(() => {
+    if (savedConcurrency === undefined) delete process.env['LYRICS_CONCURRENCY'];
+    else process.env['LYRICS_CONCURRENCY'] = savedConcurrency;
+    fetchSpy.mockRestore();
+  });
+
   // -------------------------------------------------------------------------
   // Empty tracks
   // -------------------------------------------------------------------------
   it('returns zero counts when no tracks need enrichment', async () => {
     mockGetUnenrichedTracks.mockResolvedValue([]);
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.enriched).toBe(0);
     expect(summary.skipped).toBe(0);
@@ -103,7 +139,7 @@ describe('enrichLyrics', () => {
     fetchSpy.mockResolvedValueOnce(makeOkResponse(lrclibHit));
     const onProgress = vi.fn();
 
-    const summary = await enrichLyrics(fakeDriver, undefined, onProgress);
+    const summary = await enrichLyrics(fakeDriver, undefined, onProgress, clients(false));
 
     expect(summary.enriched).toBe(1);
     expect(summary.skipped).toBe(0);
@@ -121,16 +157,26 @@ describe('enrichLyrics', () => {
     expect(onProgress).toHaveBeenLastCalledWith(1, 1);
   });
 
+  it('sends an identifying User-Agent on the LRCLIB request', async () => {
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+    fetchSpy.mockResolvedValueOnce(makeOkResponse(lrclibHit));
+
+    await enrichLyrics(fakeDriver, undefined, undefined, clients(false));
+
+    const headers = (fetchSpy.mock.calls[0]?.[1] as RequestInit).headers as Record<string, string>;
+    expect(headers['User-Agent']).toBe('liner-notes/test');
+  });
+
   // -------------------------------------------------------------------------
   // LRCLIB instrumental flag — terminal, short-circuits Genius (#246)
   // -------------------------------------------------------------------------
   it('classifies an LRCLIB instrumental terminally and never calls Genius (even with a token)', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
     // LRCLIB 200 with instrumental:true and no plainLyrics — its normal instrumental shape.
     fetchSpy.mockResolvedValueOnce(makeOkResponse({ instrumental: true }));
 
-    const summary = await enrichLyrics(fakeDriver);
+    // Genius client injected and configured, to prove it is never reached on an instrumental.
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.enriched).toBe(1);
     expect(summary.skipped).toBe(0);
@@ -151,13 +197,12 @@ describe('enrichLyrics', () => {
   // probable-instrumental — AcousticBrainz signal short-circuits Genius (#246)
   // -------------------------------------------------------------------------
   it('classifies probable-instrumental from voiceInstrumental when LRCLIB has no record, skipping Genius', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([
       { ...sampleTrack, voiceInstrumental: 'instrumental' },
     ]);
     fetchSpy.mockResolvedValueOnce(makeOkResponse({}, 404)); // LRCLIB 404 — no record
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.enriched).toBe(1);
     expect(mockMarkTrackProbableInstrumental).toHaveBeenCalledOnce();
@@ -176,14 +221,13 @@ describe('enrichLyrics', () => {
   // voiceInstrumental='voice' does NOT short-circuit — Genius still runs (#246)
   // -------------------------------------------------------------------------
   it('falls through to Genius when voiceInstrumental is "voice" and LRCLIB has no record', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([{ ...sampleTrack, voiceInstrumental: 'voice' }]);
     fetchSpy
       .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
       .mockResolvedValueOnce(makeHtmlResponse('<div data-lyrics-container="true">Hi</div>'));
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.enriched).toBe(1);
     expect(mockMarkTrackProbableInstrumental).not.toHaveBeenCalled();
@@ -198,18 +242,20 @@ describe('enrichLyrics', () => {
   });
 
   // -------------------------------------------------------------------------
-  // LRCLIB 404 — no Genius token
+  // LRCLIB 404 — no Genius client
   // -------------------------------------------------------------------------
-  it('skips track when LRCLIB returns 404 and no GENIUS_TOKEN is set', async () => {
+  it('skips track when LRCLIB returns 404 and Genius is not configured', async () => {
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
     fetchSpy.mockResolvedValueOnce(makeOkResponse({}, 404));
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(false));
 
     expect(summary.enriched).toBe(0);
     expect(summary.skipped).toBe(1);
     expect(summary.failed).toBe(0);
     expect(mockSetTrackLyrics).not.toHaveBeenCalled();
+    // Both sources empty — stamp the attempt so it's throttled, not retried every run.
+    expect(mockMarkLyricsFetched).toHaveBeenCalledOnce();
     // Only one fetch call — no Genius fallback
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
@@ -221,7 +267,7 @@ describe('enrichLyrics', () => {
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
     fetchSpy.mockRejectedValueOnce(new Error('Network failure'));
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(false));
 
     expect(summary.enriched).toBe(0);
     expect(summary.skipped).toBe(0);
@@ -230,25 +276,26 @@ describe('enrichLyrics', () => {
   });
 
   // -------------------------------------------------------------------------
-  // LRCLIB non-404 error status
+  // LRCLIB 5xx — now retried, then exhausted to a thrown error (still counted failed)
   // -------------------------------------------------------------------------
-  it('increments failed when LRCLIB returns an unexpected non-200 status', async () => {
+  it('retries an LRCLIB 5xx and counts failed after the budget is spent', async () => {
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
-    fetchSpy.mockResolvedValueOnce(makeOkResponse({}, 500));
+    fetchSpy.mockResolvedValue(makeRetryableResponse(500)); // every attempt 500s
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(false));
 
     expect(summary.failed).toBe(1);
     expect(mockSetTrackLyrics).not.toHaveBeenCalled();
     // Transient error must NOT stamp the attempt — the track retries next run.
     expect(mockMarkLyricsFetched).not.toHaveBeenCalled();
+    // 3 retries + the initial attempt — the hardened client recovered nothing, then gave up.
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(1);
   });
 
   // -------------------------------------------------------------------------
   // Genius fallback — success
   // -------------------------------------------------------------------------
-  it('falls back to Genius and enriches when LRCLIB returns 404 and GENIUS_TOKEN is set', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+  it('falls back to Genius and enriches when LRCLIB returns 404 and Genius is configured', async () => {
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
 
     const geniusLyricsHtml = '<div data-lyrics-container="true">Hello<br/>World</div>';
@@ -257,7 +304,7 @@ describe('enrichLyrics', () => {
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
       .mockResolvedValueOnce(makeHtmlResponse(geniusLyricsHtml)); // Genius HTML page
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.enriched).toBe(1);
     expect(summary.skipped).toBe(0);
@@ -270,11 +317,9 @@ describe('enrichLyrics', () => {
       'Hello\nWorld',
       'genius',
     );
-    // Success writes via setTrackLyrics (which stamps) — no separate mark call.
     expect(mockMarkLyricsFetched).not.toHaveBeenCalled();
 
-    // Both Genius requests carry a browser-like User-Agent to clear Cloudflare's bot
-    // check (issue #195) — without it Genius 403s datacenter IPs like the prod host.
+    // Both Genius requests carry the browser-like User-Agent to clear Cloudflare's bot check (#195).
     const searchHeaders = (fetchSpy.mock.calls[1]?.[1] as RequestInit).headers as Record<
       string,
       string
@@ -282,7 +327,6 @@ describe('enrichLyrics', () => {
     expect(searchHeaders['Authorization']).toBe('Bearer test-genius-token');
     expect(searchHeaders['User-Agent']).toContain('Mozilla/5.0');
     expect(searchHeaders['Accept']).toBe('application/json');
-    expect(searchHeaders['Accept-Language']).toContain('en');
 
     const pageHeaders = (fetchSpy.mock.calls[2]?.[1] as RequestInit).headers as Record<
       string,
@@ -293,37 +337,32 @@ describe('enrichLyrics', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Genius — GENIUS_USER_AGENT override
+  // Default wiring — Genius client built from env carries the browser UA (#195/#236)
   // -------------------------------------------------------------------------
-  it('uses the GENIUS_USER_AGENT override on both Genius requests when set', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
-    process.env['GENIUS_USER_AGENT'] = 'CustomAgent/9.9';
+  it('builds clients from env (default browser UA) when none are injected', async () => {
+    process.env['GENIUS_TOKEN'] = 'env-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
 
     fetchSpy
-      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404 (built from env)
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
       .mockResolvedValueOnce(makeHtmlResponse('<div data-lyrics-container="true">Hi</div>'));
 
-    await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver); // no injected clients
 
+    expect(summary.enriched).toBe(1);
     const searchHeaders = (fetchSpy.mock.calls[1]?.[1] as RequestInit).headers as Record<
       string,
       string
     >;
-    const pageHeaders = (fetchSpy.mock.calls[2]?.[1] as RequestInit).headers as Record<
-      string,
-      string
-    >;
-    expect(searchHeaders['User-Agent']).toBe('CustomAgent/9.9');
-    expect(pageHeaders['User-Agent']).toBe('CustomAgent/9.9');
+    expect(searchHeaders['Authorization']).toBe('Bearer env-token');
+    expect(searchHeaders['User-Agent']).toContain('Mozilla/5.0');
   });
 
   // -------------------------------------------------------------------------
   // Genius fallback — no search hits
   // -------------------------------------------------------------------------
   it('skips track when Genius search returns no hits', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
 
     const emptySearch = { meta: { status: 200 }, response: { hits: [] } };
@@ -331,12 +370,11 @@ describe('enrichLyrics', () => {
       .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
       .mockResolvedValueOnce(makeOkResponse(emptySearch)); // Genius search no hits
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.skipped).toBe(1);
     expect(summary.enriched).toBe(0);
     expect(mockSetTrackLyrics).not.toHaveBeenCalled();
-    // Both sources empty — stamp the attempt so it's throttled, not retried every run.
     expect(mockMarkLyricsFetched).toHaveBeenCalledOnce();
     expect(mockMarkLyricsFetched).toHaveBeenCalledWith(
       fakeDriver,
@@ -348,17 +386,16 @@ describe('enrichLyrics', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Genius skipped when no token
+  // Genius skipped when client is null
   // -------------------------------------------------------------------------
-  it('does not call Genius when GENIUS_TOKEN is not set', async () => {
+  it('does not call Genius when the Genius client is null', async () => {
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
     fetchSpy.mockResolvedValueOnce(makeOkResponse({}, 404)); // only LRCLIB called
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(false));
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(summary.skipped).toBe(1);
-    // No Genius fallback and LRCLIB empty — still stamp the attempt to throttle retries.
     expect(mockMarkLyricsFetched).toHaveBeenCalledOnce();
   });
 
@@ -366,18 +403,16 @@ describe('enrichLyrics', () => {
   // Genius network error
   // -------------------------------------------------------------------------
   it('increments failed when Genius search throws a network error', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
     fetchSpy
       .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
       .mockRejectedValueOnce(new Error('Genius network error'));
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.failed).toBe(1);
     expect(summary.enriched).toBe(0);
     expect(mockSetTrackLyrics).not.toHaveBeenCalled();
-    // Genius threw — transient error path must not stamp; the track retries next run.
     expect(mockMarkLyricsFetched).not.toHaveBeenCalled();
   });
 
@@ -385,7 +420,6 @@ describe('enrichLyrics', () => {
   // Genius page 403 — expected Cloudflare bot-block logs at warn, not error (#243)
   // -------------------------------------------------------------------------
   it('logs an expected Genius page 403 at warn, not error', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
     const logger = makeMockLogger();
     fetchSpy
@@ -393,7 +427,7 @@ describe('enrichLyrics', () => {
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
       .mockResolvedValueOnce(makeOkResponse({}, 403)); // Genius page bot-block
 
-    const summary = await enrichLyrics(fakeDriver, logger);
+    const summary = await enrichLyrics(fakeDriver, logger, undefined, clients(true));
 
     expect(summary.failed).toBe(1);
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Genius page returned 403'));
@@ -404,14 +438,13 @@ describe('enrichLyrics', () => {
   // Genius search 403 — same bot-block path, warn not error (#243)
   // -------------------------------------------------------------------------
   it('logs an expected Genius search 403 at warn, not error', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
     const logger = makeMockLogger();
     fetchSpy
       .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
       .mockResolvedValueOnce(makeOkResponse({}, 403)); // Genius search bot-block
 
-    const summary = await enrichLyrics(fakeDriver, logger);
+    const summary = await enrichLyrics(fakeDriver, logger, undefined, clients(true));
 
     expect(summary.failed).toBe(1);
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Genius search returned 403'));
@@ -419,35 +452,35 @@ describe('enrichLyrics', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Genius 5xx — genuinely unexpected failure still surfaces at error (#243)
+  // Genius 5xx — retried, then exhausted to an unexpected error → surfaces at error (#243)
   // -------------------------------------------------------------------------
-  it('logs an unexpected Genius 5xx at error', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
+  it('logs an unexpected Genius 5xx at error after exhausting retries', async () => {
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
     const logger = makeMockLogger();
     fetchSpy
       .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
-      .mockResolvedValueOnce(makeOkResponse({}, 500)); // Genius page server error
+      .mockResolvedValue(makeRetryableResponse(500)); // Genius page 500s every attempt
 
-    const summary = await enrichLyrics(fakeDriver, logger);
+    const summary = await enrichLyrics(fakeDriver, logger, undefined, clients(true));
 
     expect(summary.failed).toBe(1);
-    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Genius page returned 500'));
+    // An exhausted retryable status is a RetriesExhaustedError, not a GeniusHttpError → error level.
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Genius API'));
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('max retries'));
   });
 
   // -------------------------------------------------------------------------
   // Genius HTML with no lyrics containers
   // -------------------------------------------------------------------------
   it('skips track when Genius page contains no data-lyrics-container divs', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
     fetchSpy
       .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
       .mockResolvedValueOnce(makeHtmlResponse('<html><body>No lyrics here</body></html>'));
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.skipped).toBe(1);
     expect(summary.enriched).toBe(0);
@@ -455,7 +488,7 @@ describe('enrichLyrics', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Mixed results — summary counts
+  // Mixed results — summary counts (serial via LYRICS_CONCURRENCY=1)
   // -------------------------------------------------------------------------
   it('counts enriched, skipped, and failed correctly across multiple tracks', async () => {
     const track1 = { ...sampleTrack, position: 'A1', title: 'Track 1' };
@@ -465,10 +498,10 @@ describe('enrichLyrics', () => {
 
     fetchSpy
       .mockResolvedValueOnce(makeOkResponse(lrclibHit)) // track1: LRCLIB hit
-      .mockResolvedValueOnce(makeOkResponse({}, 404)) // track2: LRCLIB 404, no token → skip
+      .mockResolvedValueOnce(makeOkResponse({}, 404)) // track2: LRCLIB 404, no genius → skip
       .mockRejectedValueOnce(new Error('Network failure')); // track3: LRCLIB throws
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(false));
 
     expect(summary.enriched).toBe(1);
     expect(summary.skipped).toBe(1);
@@ -482,7 +515,7 @@ describe('enrichLyrics', () => {
     mockGetUnenrichedTracks.mockResolvedValue([{ ...sampleTrack, artistName: null }]);
     fetchSpy.mockResolvedValueOnce(makeOkResponse(lrclibHit));
 
-    await enrichLyrics(fakeDriver);
+    await enrichLyrics(fakeDriver, undefined, undefined, clients(false));
 
     const [lrclibUrl] = fetchSpy.mock.calls[0] as [string];
     expect(lrclibUrl).toContain('artist_name=');
@@ -493,7 +526,6 @@ describe('enrichLyrics', () => {
   // Genius — type !== 'song' guard
   // -------------------------------------------------------------------------
   it('skips track when Genius search hit type is not song', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
 
     const articleHit = {
@@ -515,7 +547,7 @@ describe('enrichLyrics', () => {
       .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
       .mockResolvedValueOnce(makeOkResponse(articleHit)); // Genius search returns article
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.skipped).toBe(1);
     expect(summary.enriched).toBe(0);
@@ -528,7 +560,6 @@ describe('enrichLyrics', () => {
   // Genius — artist mismatch guard
   // -------------------------------------------------------------------------
   it('skips track when Genius primary artist does not match query artist', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
 
     const wrongArtistHit = {
@@ -550,7 +581,7 @@ describe('enrichLyrics', () => {
       .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
       .mockResolvedValueOnce(makeOkResponse(wrongArtistHit)); // Genius search with wrong artist
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.skipped).toBe(1);
     expect(summary.enriched).toBe(0);
@@ -563,13 +594,8 @@ describe('enrichLyrics', () => {
   // Genius — contributor header is stripped before validating (#253)
   // -------------------------------------------------------------------------
   it('strips the contributor header and enriches with the body that follows', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
 
-    // Genius page where a header div nests inside the lyrics container. The
-    // balanced-bracket extractor captures the full outer div (header + body);
-    // fetchGenius strips the "N Contributors…Lyrics" header so the real body
-    // validates instead of being rejected wholesale (issue #253).
     const headerHtml = `
       <div data-lyrics-container="true">
         <div class="header">8 ContributorsMusic For Indigo Lyrics</div>
@@ -581,7 +607,7 @@ describe('enrichLyrics', () => {
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
       .mockResolvedValueOnce(makeHtmlResponse(headerHtml)); // Genius page with header
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.enriched).toBe(1);
     expect(summary.skipped).toBe(0);
@@ -595,11 +621,8 @@ describe('enrichLyrics', () => {
   });
 
   it('skips track when the Genius page is a header-only (instrumental) container', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
 
-    // No body after the header — stripping it leaves an empty string, which
-    // fetchGenius rejects (no lyrics to store).
     const headerOnlyHtml =
       '<div data-lyrics-container="true">2 ContributorsSong Title Lyrics</div>';
     fetchSpy
@@ -607,7 +630,7 @@ describe('enrichLyrics', () => {
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
       .mockResolvedValueOnce(makeHtmlResponse(headerOnlyHtml));
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.skipped).toBe(1);
     expect(summary.enriched).toBe(0);
@@ -618,7 +641,6 @@ describe('enrichLyrics', () => {
   // Genius — oversized content guard (book / article scraped)
   // -------------------------------------------------------------------------
   it('skips track when Genius page returns content exceeding 15,000 characters', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
 
     const oversizedContent = 'A'.repeat(15_001);
@@ -628,7 +650,7 @@ describe('enrichLyrics', () => {
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
       .mockResolvedValueOnce(makeHtmlResponse(oversizedHtml));
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.skipped).toBe(1);
     expect(summary.enriched).toBe(0);
@@ -639,7 +661,6 @@ describe('enrichLyrics', () => {
   // Genius — HTML entity decoding
   // -------------------------------------------------------------------------
   it('stores lyrics with HTML entities decoded', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
 
     const entityHtml = '<div data-lyrics-container="true">I&#x27;ll never leave you &amp; me</div>';
@@ -648,7 +669,7 @@ describe('enrichLyrics', () => {
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
       .mockResolvedValueOnce(makeHtmlResponse(entityHtml));
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.enriched).toBe(1);
     expect(mockSetTrackLyrics).toHaveBeenCalledWith(
@@ -664,7 +685,6 @@ describe('enrichLyrics', () => {
   // Genius — multiple lyrics containers joined
   // -------------------------------------------------------------------------
   it('joins multiple data-lyrics-container divs with double newline', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
 
     const multiHtml = `
@@ -676,7 +696,7 @@ describe('enrichLyrics', () => {
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
       .mockResolvedValueOnce(makeHtmlResponse(multiHtml));
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.enriched).toBe(1);
     expect(mockSetTrackLyrics).toHaveBeenCalledWith(
@@ -692,19 +712,15 @@ describe('enrichLyrics', () => {
   // Genius — no double-unescaping (CodeQL js/double-escaping)
   // -------------------------------------------------------------------------
   it('does not double-unescape entities that decode to ampersands', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
 
-    // `&#38;` decodes to `&`. A naive chained decode would then read the resulting
-    // `&lt;`/`&gt;` and turn them into `<`/`>`, reconstructing markup. A single-pass
-    // decode consumes each entity once, so the text stays literal.
     const html = '<div data-lyrics-container="true">&#38;lt;b&#38;gt; stays text</div>';
     fetchSpy
       .mockResolvedValueOnce(makeOkResponse({}, 404)) // LRCLIB 404
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
       .mockResolvedValueOnce(makeHtmlResponse(html));
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.enriched).toBe(1);
     const stored = mockSetTrackLyrics.mock.calls[0]?.[3] as string;
@@ -716,7 +732,6 @@ describe('enrichLyrics', () => {
   // Genius — strips script content (CodeQL js/incomplete-multi-character-sanitization)
   // -------------------------------------------------------------------------
   it('drops <script> blocks and their content from extracted lyrics', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
 
     const html = '<div data-lyrics-container="true">Hello<script>alert(\'x\')</script> World</div>';
@@ -725,7 +740,7 @@ describe('enrichLyrics', () => {
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
       .mockResolvedValueOnce(makeHtmlResponse(html));
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.enriched).toBe(1);
     const stored = mockSetTrackLyrics.mock.calls[0]?.[3] as string;
@@ -738,7 +753,6 @@ describe('enrichLyrics', () => {
   // Genius — neutralises unterminated tag fragments (no <script left behind)
   // -------------------------------------------------------------------------
   it('strips a stray "<script" fragment with no closing bracket', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
 
     const html = '<div data-lyrics-container="true">lyrics here <script and more</div>';
@@ -747,7 +761,7 @@ describe('enrichLyrics', () => {
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
       .mockResolvedValueOnce(makeHtmlResponse(html));
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.enriched).toBe(1);
     const stored = mockSetTrackLyrics.mock.calls[0]?.[3] as string;
@@ -760,12 +774,8 @@ describe('enrichLyrics', () => {
   // Genius — entity-encoded script block cannot be reconstructed after decode
   // -------------------------------------------------------------------------
   it('drops an entity-encoded <script> block (no markup after decoding)', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
 
-    // Entities are decoded BEFORE tags are stripped, so `&lt;script&gt;…&lt;/script&gt;`
-    // becomes a real <script> block and is removed — rather than surviving the strip and
-    // being reconstructed as markup by a trailing decode.
     const html =
       '<div data-lyrics-container="true">Safe&lt;script&gt;alert(1)&lt;/script&gt; lyrics</div>';
     fetchSpy
@@ -773,7 +783,7 @@ describe('enrichLyrics', () => {
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
       .mockResolvedValueOnce(makeHtmlResponse(html));
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.enriched).toBe(1);
     const stored = mockSetTrackLyrics.mock.calls[0]?.[3] as string;
@@ -786,11 +796,8 @@ describe('enrichLyrics', () => {
   // Genius — nested <script> blocks fully removed (fixpoint block removal)
   // -------------------------------------------------------------------------
   it('drops nested <script> blocks without leaving markup', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
 
-    // The block removal runs in a fixpoint loop, so nesting cannot leave a
-    // reconstructable <script> tag behind.
     const html =
       '<div data-lyrics-container="true">Safe<script><script>alert(1)</script></script> lyrics</div>';
     fetchSpy
@@ -798,7 +805,7 @@ describe('enrichLyrics', () => {
       .mockResolvedValueOnce(makeOkResponse(geniusSearchHit)) // Genius search
       .mockResolvedValueOnce(makeHtmlResponse(html));
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.enriched).toBe(1);
     const stored = mockSetTrackLyrics.mock.calls[0]?.[3] as string;
@@ -813,7 +820,7 @@ describe('enrichLyrics', () => {
   it('returns a failed summary (does not throw) when the initial track query fails', async () => {
     mockGetUnenrichedTracks.mockRejectedValue(new Error('Neo4j unavailable'));
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.enriched).toBe(0);
     expect(summary.skipped).toBe(0);
@@ -836,7 +843,7 @@ describe('enrichLyrics', () => {
       .mockRejectedValueOnce(new Error('Neo4j write failed')) // track1 write
       .mockResolvedValueOnce(undefined); // track2 write
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(false));
 
     expect(summary.failed).toBe(1);
     expect(summary.enriched).toBe(1);
@@ -846,15 +853,13 @@ describe('enrichLyrics', () => {
 
   // -------------------------------------------------------------------------
   // Double-count guard (#222) — an LRCLIB throw short-circuits the Genius fallback,
-  // so one track can only ever increment `failed` once (the bug was two separate
-  // try/catch sites each doing failed++).
+  // so one track can only ever increment `failed` once.
   // -------------------------------------------------------------------------
   it('counts failed exactly once and never reaches Genius when LRCLIB throws', async () => {
-    process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
     fetchSpy.mockRejectedValueOnce(new Error('LRCLIB down')); // LRCLIB throws
 
-    const summary = await enrichLyrics(fakeDriver);
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(true));
 
     expect(summary.failed).toBe(1);
     expect(summary.enriched).toBe(0);

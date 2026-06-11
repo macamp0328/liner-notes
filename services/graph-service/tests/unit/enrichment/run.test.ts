@@ -322,4 +322,101 @@ describe('runEnrichment', () => {
     );
     expect(progressLines).toHaveLength(0);
   });
+
+  // -------------------------------------------------------------------------
+  // Concurrency (#247) — opt-in worker pool
+  // -------------------------------------------------------------------------
+  const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('never runs more than `concurrency` resolves in flight at once', async () => {
+    const items = Array.from({ length: 12 }, (_, k) => ({ id: k }));
+    let inFlight = 0;
+    let peak = 0;
+    const resolve = vi.fn().mockImplementation(async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await tick(); // hold the slot open so siblings can pile up if the cap is broken
+      inFlight--;
+      return 'x';
+    });
+    const stage = makeStage({
+      selectCandidates: vi.fn().mockResolvedValue(items),
+      resolve,
+    });
+
+    const summary = await runEnrichment(fakeDriver, stage, { concurrency: 4 });
+
+    expect(summary.enriched).toBe(12);
+    expect(peak).toBe(4);
+  });
+
+  it('preserves the stamp-on-attempt contract and final totals under concurrency', async () => {
+    const items = Array.from({ length: 9 }, (_, k) => ({ id: k }));
+    const write = vi.fn().mockResolvedValue(undefined);
+    const markAttempted = vi.fn().mockResolvedValue(undefined);
+    // id % 3 === 0 → enriched, === 1 → skipped (null), === 2 → failed (throw)
+    const resolve = vi.fn().mockImplementation(async (item: Item) => {
+      await tick();
+      if (item.id % 3 === 1) return null;
+      if (item.id % 3 === 2) throw new Error('boom');
+      return 'data';
+    });
+    const stage = makeStage({
+      selectCandidates: vi.fn().mockResolvedValue(items),
+      resolve,
+      write,
+      markAttempted,
+    });
+
+    const summary = await runEnrichment(fakeDriver, stage, { concurrency: 5 });
+
+    expect(summary).toMatchObject({ enriched: 3, skipped: 3, failed: 3 });
+    expect(write).toHaveBeenCalledTimes(3);
+    expect(markAttempted).toHaveBeenCalledTimes(3);
+  });
+
+  it('processes every item exactly once and ends progress at (total,total) under concurrency', async () => {
+    const items = Array.from({ length: 7 }, (_, k) => ({ id: k }));
+    const seen = new Set<number>();
+    const onProgress = vi.fn();
+    const resolve = vi.fn().mockImplementation(async (item: Item) => {
+      await tick();
+      seen.add(item.id);
+      return 'x';
+    });
+    const stage = makeStage({
+      selectCandidates: vi.fn().mockResolvedValue(items),
+      resolve,
+    });
+
+    const summary = await runEnrichment(fakeDriver, stage, { concurrency: 3, onProgress });
+
+    expect(summary.enriched).toBe(7);
+    expect(seen.size).toBe(7); // each item handled once, none dropped or doubled
+    expect(resolve).toHaveBeenCalledTimes(7);
+    expect(onProgress).toHaveBeenCalledWith(0, 7);
+    expect(onProgress).toHaveBeenLastCalledWith(7, 7);
+  });
+
+  it('treats an invalid concurrency as serial (1)', async () => {
+    const items = Array.from({ length: 5 }, (_, k) => ({ id: k }));
+    let inFlight = 0;
+    let peak = 0;
+    const resolve = vi.fn().mockImplementation(async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await tick();
+      inFlight--;
+      return 'x';
+    });
+    const stage = makeStage({
+      selectCandidates: vi.fn().mockResolvedValue(items),
+      resolve,
+    });
+
+    // 0 is not a valid worker count — must fall back to strictly serial.
+    await runEnrichment(fakeDriver, stage, { concurrency: 0 });
+
+    expect(peak).toBe(1);
+  });
 });
