@@ -1,6 +1,8 @@
-import type { Logger } from './discogs-client.js';
-import { transientNetworkCode } from './network-errors.js';
-import { jitteredBackoffMs } from './backoff.js';
+import {
+  createRateLimitedFetch,
+  type Logger,
+  type RateLimitedFetch,
+} from './rate-limited-fetch.js';
 
 export interface MbReleaseEvent {
   mbReleaseId: string;
@@ -128,17 +130,20 @@ function escapeLucenePhrase(value: string): string {
 
 export class MusicBrainzClient {
   private readonly userAgent: string;
-  private readonly delayMs: number;
-  private readonly backoffBaseMs: number;
-  private readonly random: () => number;
-  private readonly log: Logger;
+  private readonly rlFetch: RateLimitedFetch;
 
   constructor(config: MusicBrainzClientConfig) {
     this.userAgent = config.userAgent;
-    this.delayMs = config.delayMs;
-    this.backoffBaseMs = config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
-    this.random = config.random ?? Math.random;
-    this.log = config.logger ?? console;
+    this.rlFetch = createRateLimitedFetch({
+      label: 'musicbrainz-client',
+      apiName: 'MusicBrainz API',
+      delayMs: config.delayMs,
+      maxRetries: MAX_RETRIES,
+      backoffBaseMs: config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS,
+      retryStatuses: [429, 503],
+      ...(config.random !== undefined ? { random: config.random } : {}),
+      ...(config.logger !== undefined ? { logger: config.logger } : {}),
+    });
   }
 
   /**
@@ -353,76 +358,27 @@ export class MusicBrainzClient {
   }
 
   private async fetchWithBackoff<T>(url: string): Promise<T> {
-    let attempt = 0;
-    let currentDelay = this.backoffBaseMs;
+    const response = await this.rlFetch(url, {
+      headers: {
+        'User-Agent': this.userAgent,
+        Accept: 'application/json',
+      },
+    });
 
-    while (attempt <= MAX_RETRIES) {
-      let response: Response;
-      try {
-        response = await fetch(url, {
-          headers: {
-            'User-Agent': this.userAgent,
-            Accept: 'application/json',
-          },
-        });
-      } catch (err) {
-        const netCode = transientNetworkCode(err);
-        if (netCode === null || attempt >= MAX_RETRIES) throw err;
-        const sleepMs = jitteredBackoffMs(currentDelay, { random: this.random });
-        this.log.warn(
-          `[musicbrainz-client] Network error (${netCode}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${sleepMs}ms`,
-        );
-        await this.sleep(sleepMs);
-        currentDelay = Math.min(currentDelay * 2, 32_000);
-        attempt++;
-        continue;
-      }
-
-      if (response.status === 429 || response.status === 503) {
-        if (attempt >= MAX_RETRIES) {
-          throw new Error(`MusicBrainz API: exceeded max retries (${MAX_RETRIES}) for ${url}`);
-        }
-        const retryAfterHeader = response.headers.get('Retry-After');
-        const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
-        const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
-        const sleepMs = jitteredBackoffMs(currentDelay, { retryAfterMs, random: this.random });
-        const label = response.status === 429 ? 'Rate limited' : 'Service unavailable';
-        this.log.warn(
-          `[musicbrainz-client] ${label} (${response.status}) on attempt ${attempt + 1}/${MAX_RETRIES + 1} — waiting ${sleepMs}ms`,
-        );
-        await this.sleep(sleepMs);
-        currentDelay = Math.min(currentDelay * 2, 32_000);
-        attempt++;
-        continue;
-      }
-
-      if (response.status === 404) {
-        throw new Error(`MusicBrainz: not found (404) for ${url}`);
-      }
-
-      if (!response.ok) {
-        throw new Error(
-          `MusicBrainz API error ${response.status} ${response.statusText} for ${url}`,
-        );
-      }
-
-      const contentType = response.headers.get('content-type') ?? '';
-      if (contentType.includes('text/html')) {
-        throw new Error(
-          `MusicBrainz: received HTML response (status ${response.status}) for ${url}`,
-        );
-      }
-
-      const data = (await response.json()) as T;
-      await this.sleep(this.delayMs);
-      return data;
+    if (response.status === 404) {
+      throw new Error(`MusicBrainz: not found (404) for ${url}`);
     }
 
-    throw new Error(`MusicBrainz API: exceeded max retries (${MAX_RETRIES}) for ${url}`);
-  }
+    if (!response.ok) {
+      throw new Error(`MusicBrainz API error ${response.status} ${response.statusText} for ${url}`);
+    }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    const contentType = response.headers.get('content-type') ?? '';
+    if (contentType.includes('text/html')) {
+      throw new Error(`MusicBrainz: received HTML response (status ${response.status}) for ${url}`);
+    }
+
+    return (await response.json()) as T;
   }
 }
 

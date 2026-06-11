@@ -24,10 +24,14 @@ docker-compose up
 pnpm --filter graph-service dev
 
 # Hooks (auto-installed on pnpm install via husky):
-#   pre-commit  — prettier via lint-staged (runs on every commit, staged files only)
-#   pre-push    — lint + typecheck + test:unit (runs before every push)
+#   pre-commit  — blocks commits on main, then prettier via lint-staged (staged files only)
+#   pre-push    — blocks pushes targeting main, then lint + typecheck + test:unit:coverage
 # Commit message format is not enforced — the repo squash-merges into main, so
 # the PR title is what lands in history, not individual branch commits.
+
+# One-shot local gauntlet — run before pushing. Mirrors the pre-push hook and the
+# fast half of the CI fan-out (prettier --check → lint → typecheck → unit coverage).
+pnpm verify
 
 # Tests
 pnpm --filter graph-service test              # all tests
@@ -176,19 +180,20 @@ Route handler (src/api/) → Repository (src/db/) → Neo4j driver (src/db/clien
 
 **Key source files:**
 
-| File                              | Purpose                                                                   |
-| --------------------------------- | ------------------------------------------------------------------------- |
-| `src/server.ts`                   | Fastify instance builder, plugin registration                             |
-| `src/db/schema.ts`                | Idempotent constraint/index application on startup                        |
-| `src/ingestion/transforms.ts`     | Pure parsing functions — no I/O, fully unit-testable                      |
-| `src/ingestion/discogs-client.ts` | Rate-limited Discogs HTTP client (60 req/min, 429 backoff)                |
-| `src/ingestion/ingest.ts`         | First-5-stage pipeline (`runIngestion`) + shared `ingestReleases`         |
-| `src/ingestion/stages.ts`         | `RELOAD_STAGES` — full reload sequence + per-stage `deps`/`resources`     |
-| `src/ingestion/scheduler.ts`      | `scheduleStages` — generic dependency/resource-aware concurrent scheduler |
-| `src/ingestion/orchestrator.ts`   | `runReload` — drives the scheduler, DB-checkpointed, resumable            |
-| `src/db/job-repository.ts`        | `ReloadJob`/`ReloadStage` persistence (checkpoint/resume)                 |
-| `src/db/ingestion-repository.ts`  | All Cypher MERGE writes                                                   |
-| `src/enrichment/`                 | Post-ingest lyrics, originalYear, artist genre/profile pipelines          |
+| File                                  | Purpose                                                                            |
+| ------------------------------------- | ---------------------------------------------------------------------------------- |
+| `src/server.ts`                       | Fastify instance builder, plugin registration                                      |
+| `src/db/schema.ts`                    | Idempotent constraint/index application on startup                                 |
+| `src/ingestion/transforms.ts`         | Pure parsing functions — no I/O, fully unit-testable                               |
+| `src/ingestion/rate-limited-fetch.ts` | `createRateLimitedFetch` — shared retry/backoff/spacing core for the 5 API clients |
+| `src/ingestion/discogs-client.ts`     | Rate-limited Discogs HTTP client (60 req/min, 429 backoff)                         |
+| `src/ingestion/ingest.ts`             | First-5-stage pipeline (`runIngestion`) + shared `ingestReleases`                  |
+| `src/ingestion/stages.ts`             | `RELOAD_STAGES` — full reload sequence + per-stage `deps`/`resources`              |
+| `src/ingestion/scheduler.ts`          | `scheduleStages` — generic dependency/resource-aware concurrent scheduler          |
+| `src/ingestion/orchestrator.ts`       | `runReload` — drives the scheduler, DB-checkpointed, resumable                     |
+| `src/db/job-repository.ts`            | `ReloadJob`/`ReloadStage` persistence (checkpoint/resume)                          |
+| `src/db/ingestion-repository.ts`      | All Cypher MERGE writes                                                            |
+| `src/enrichment/`                     | Post-ingest lyrics, originalYear, artist genre/profile pipelines                   |
 
 **Ingestion fires async** (`void runIngestion(...)`) — it does not block `onReady`, so the HTTP server starts immediately while ingestion runs in the background.
 
@@ -303,6 +308,31 @@ collection-mcp → graph-service REST API (/api/v1/*)
 ```
 
 No service talks to Neo4j directly except `graph-service`.
+
+---
+
+## Walls of Defense (Agentic Development)
+
+The repo is built for agent-driven work, so the guardrails are layered — each wall assumes the
+one before it was skipped. Don't fight them; a blocked command means fix the cause, not bypass.
+
+| Layer               | Mechanism                                                                             | What it stops                                                                                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent (Claude Code) | `.claude/hooks/bash-guard.sh` (PreToolUse) + `permissions` in `.claude/settings.json` | `--no-verify` hook bypasses, plain `git push --force`/`-f`; reading `.env.local`/`*.tfstate`; unprompted `terraform apply/destroy`, `kubectl delete` |
+| Local git (husky)   | `pre-commit`, `pre-push`                                                              | commits on `main`, pushes targeting `main`; unformatted/unlinted/untested/under-covered code reaching origin                                         |
+| CI (`ci.yml` & co.) | 9-job fan-out + drift guards (diagrams, insomnia/openapi)                             | everything above, re-checked server-side; secrets (TruffleHog), CVEs (audit), CodeQL findings                                                        |
+| GitHub              | branch protection + squash-merge + CODEOWNERS                                         | direct pushes to `main`, merging with red checks, unreviewed changes                                                                                 |
+| Runtime             | helmet headers, global rate limit, admin bearer auth, env validation at startup       | missing `ADMIN_TOKEN` in production is a **startup failure**, not a silent 503 admin surface                                                         |
+
+Notes for agents:
+
+- `--force-with-lease` is allowed when a history rewrite is genuinely needed; plain `--force` never is.
+- The pre-push coverage gate (`test:unit:coverage`) enforces the same thresholds as CI — run
+  `pnpm verify` before pushing so failures surface locally, not in CI.
+- The bash-guard script is dependency-free (POSIX sh + absolute-path `/usr/bin/grep`/`awk`) on
+  purpose: worktrees with an untrusted `.mise.toml` lose PATH entries in subshells. Keep it that
+  way. Matching is line-wise against the logical command, so commit messages that merely _mention_
+  the blocked flags don't trip it.
 
 ---
 

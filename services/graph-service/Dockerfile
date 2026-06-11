@@ -38,4 +38,9 @@ ENV PORT=3000
 WORKDIR /app/services/graph-service
 EXPOSE 3000
 
+# Drop root: the app binds :3000 (unprivileged) and writes nothing to disk, so the
+# stock node user (uid 1000) in the base image is all it needs. Pairs with the
+# runAsNonRoot securityContext in infra/k8s/graph-service/deployment.yaml.
+USER node
+
 CMD ["node", "dist/index.js"]

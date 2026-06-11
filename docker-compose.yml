@@ -23,7 +23,9 @@ services:
       context: .
       dockerfile: services/graph-service/Dockerfile
     ports:
-      - '3000:3000'
+      # Loopback-only, same rationale as the neo4j ports above — .env.local carries a
+      # real ADMIN_TOKEN, so don't expose the dev server to the LAN.
+      - '127.0.0.1:3000:3000'
     env_file:
       - .env.local
     environment:

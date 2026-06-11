@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../../../src/server.js';
 import { resetAllPipelineStates } from '../../../src/api/admin.js';
+import { markReloadActive, __resetReloadProgress } from '../../../src/ingestion/reload-progress.js';
 import type { IngestionSummary } from '../../../src/ingestion/ingest.js';
 import type { JobState } from '../../../src/ingestion/job-state.js';
 
@@ -28,9 +29,21 @@ vi.mock('../../../src/db/schema.js', () => ({
   applySchema: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Reload-job persistence — needed because POST /reload (used by the #281 mutual-exclusion tests)
+// calls createReloadJob, and the 409-when-enrich-running case asserts it is NOT called.
+const mockFindResumableReloadJob = vi.hoisted(() => vi.fn());
+const mockCreateReloadJob = vi.hoisted(() => vi.fn());
+const mockGetLatestReloadJob = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/db/job-repository.js', () => ({
-  findResumableReloadJob: vi.fn().mockResolvedValue(null),
+  findResumableReloadJob: mockFindResumableReloadJob,
+  createReloadJob: mockCreateReloadJob,
+  getLatestReloadJob: mockGetLatestReloadJob,
 }));
+
+// orchestrator.runReload is fired-and-forgotten by POST /reload; mock it so a real reload never
+// runs against the mock driver.
+const mockRunReload = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/ingestion/orchestrator.js', () => ({ runReload: mockRunReload }));
 
 vi.mock('../../../src/db/ingestion-repository.js', () => ({
   hasReleases: vi.fn().mockResolvedValue(true),
@@ -220,7 +233,14 @@ describe('Admin API', () => {
       durationMs: 300,
     });
     mockEnrichNationality.mockResolvedValue(nationalitySummary);
+    mockFindResumableReloadJob.mockResolvedValue(null);
+    mockCreateReloadJob.mockResolvedValue('job-new');
+    mockGetLatestReloadJob.mockResolvedValue(null);
+    mockRunReload.mockResolvedValue({ jobId: 'job-new', status: 'complete' });
     resetAllPipelineStates();
+    // Clear the real (unmocked) reload-progress singleton so a markReloadActive() from one test
+    // can't leak its active flag into the next (every later enrich would then 409).
+    __resetReloadProgress();
     app = await buildServer();
     await app.ready();
   });
@@ -1159,6 +1179,146 @@ describe('Admin API', () => {
         url: '/api/v1/admin/artist-genres/status',
       });
       expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── Reload ⇄ enrich mutual exclusion (#281) ───────────────────────────────
+  describe('reload ⇄ enrich mutual exclusion', () => {
+    it('409s a standalone enrich while a reload is active', async () => {
+      markReloadActive('reload-job-1');
+      mockEnrichLyrics.mockClear();
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(409);
+      const body = JSON.parse(response.payload) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe('RELOAD_RUNNING');
+      expect(body.error.message).toContain('lyrics enrichment');
+      // The guard returns before running=true, so no background run started — nothing to flush.
+      expect(mockEnrichLyrics).not.toHaveBeenCalled();
+    });
+
+    it('blocks an enrich the instant a reload is triggered, with no markReloadActive lag', async () => {
+      // Drives the real POST /reload path: the handler must flag the reload active *before* its
+      // 202 (runReload is mocked here and never reaches its own markReloadActive), so an enrich
+      // fired right after the reload's 202 is already blocked.
+      mockEnrichLyrics.mockClear();
+      const reload = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/reload',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(reload.statusCode).toBe(202);
+
+      const enrich = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(enrich.statusCode).toBe(409);
+      const body = JSON.parse(enrich.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('RELOAD_RUNNING');
+      expect(mockEnrichLyrics).not.toHaveBeenCalled();
+    });
+
+    it('allows a standalone enrich once the reload is no longer active', async () => {
+      markReloadActive('reload-job-1');
+      const blocked = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(blocked.statusCode).toBe(409);
+
+      __resetReloadProgress(); // the reload finished
+
+      const allowed = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(allowed.statusCode).toBe(202);
+      await flushBackground();
+    });
+
+    it('409s a reload while a standalone enrich is running, without starting the reload', async () => {
+      // Hold the lyrics run open so its pipeline state stays running=true across the /reload call.
+      let release!: (value: {
+        enriched: number;
+        skipped: number;
+        failed: number;
+        durationMs: number;
+      }) => void;
+      mockEnrichLyrics.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+      mockCreateReloadJob.mockClear();
+      mockRunReload.mockClear();
+
+      const enrich = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(enrich.statusCode).toBe(202);
+
+      const reload = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/reload',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(reload.statusCode).toBe(409);
+      const body = JSON.parse(reload.payload) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe('ENRICHMENT_RUNNING');
+      expect(body.error.message).toContain('lyrics enrichment');
+      expect(mockCreateReloadJob).not.toHaveBeenCalled();
+      expect(mockRunReload).not.toHaveBeenCalled();
+
+      release({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
+      await flushBackground();
+    });
+
+    it('names the specific running pipeline in the reload 409', async () => {
+      // A non-lyrics pipeline proves the guard scans the whole registry, not just lyrics.
+      let release!: (value: {
+        tracksProcessed: number;
+        tracksSkipped: number;
+        tracksFailed: number;
+        durationMs: number;
+      }) => void;
+      mockEnrichTrackAcousticBrainz.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+
+      const enrich = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/track-acousticbrainz/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(enrich.statusCode).toBe(202);
+
+      const reload = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/reload',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(reload.statusCode).toBe(409);
+      const body = JSON.parse(reload.payload) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe('ENRICHMENT_RUNNING');
+      expect(body.error.message).toContain('AcousticBrainz track enrichment');
+
+      release({ tracksProcessed: 0, tracksSkipped: 0, tracksFailed: 0, durationMs: 0 });
+      await flushBackground();
     });
   });
 });

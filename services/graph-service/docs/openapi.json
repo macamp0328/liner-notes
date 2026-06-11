@@ -2172,7 +2172,7 @@
       "post": {
         "summary": "Trigger the orchestrated reload (ingest + every enrichment) with resume",
         "tags": ["admin"],
-        "description": "Runs the full reload as one resumable, checkpointed job: fetch & MERGE all releases, then **every** enrichment stage in #154 dependency order — including the track-level and nationality stages that `POST /ingest` does NOT run (mb-release-events, track-musicbrainz, track-acousticbrainz, track-deezer, nationality).\n\nPer-stage progress is persisted to Neo4j, so if the pod is killed mid-reload the replacement **resumes from the last completed stage on startup** — it does not restart or re-wipe. Poll `GET /api/v1/admin/reload/status` for progress.\n\nRuns asynchronously — returns 202 immediately. Returns 409 if a reload is already in progress. **Does not wipe**: for a from-scratch reload, call `POST /api/v1/admin/reset?confirm=wipe-all` first, then trigger this.",
+        "description": "Runs the full reload as one resumable, checkpointed job: fetch & MERGE all releases, then **every** enrichment stage in #154 dependency order — including the track-level and nationality stages that `POST /ingest` does NOT run (mb-release-events, track-musicbrainz, track-acousticbrainz, track-deezer, nationality).\n\nPer-stage progress is persisted to Neo4j, so if the pod is killed mid-reload the replacement **resumes from the last completed stage on startup** — it does not restart or re-wipe. Poll `GET /api/v1/admin/reload/status` for progress.\n\nRuns asynchronously — returns 202 immediately. Returns 409 if a reload is already in progress, or if a standalone `POST /api/v1/admin/<stage>/enrich` is running (they contend on the same rate-limited clients). **Does not wipe**: for a from-scratch reload, call `POST /api/v1/admin/reset?confirm=wipe-all` first, then trigger this.",
         "security": [
           {
             "bearerAuth": []
@@ -2224,7 +2224,7 @@
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message", "jobId"],
+                      "required": ["code", "message"],
                       "properties": {
                         "code": {
                           "type": "string"

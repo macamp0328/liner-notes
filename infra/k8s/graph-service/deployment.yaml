@@ -25,6 +25,12 @@ spec:
       # by the operator before first deploy — see infra/RUNBOOK.md.
       imagePullSecrets:
         - name: ecr-pull-secret
+      # Defense-in-depth on a single-node k3s box where workload and control plane
+      # share the host: the image already runs as the unprivileged node user
+      # (USER node in the Dockerfile); these settings make root a deploy-time error
+      # rather than a silent regression.
+      securityContext:
+        runAsNonRoot: true
       containers:
         - name: graph-service
           # `graph-service-image` is a logical name retargeted by the
@@ -33,6 +39,10 @@ spec:
           # before `kubectl apply -k`. See infra/RUNBOOK.md.
           image: graph-service-image
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
           ports:
             - name: http
               containerPort: 3000

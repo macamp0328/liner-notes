@@ -63,3 +63,52 @@ describe('buildServer onReady — Neo4j env validation', () => {
     await app.close().catch(() => undefined);
   });
 });
+
+describe('buildServer onReady — ADMIN_TOKEN production requirement', () => {
+  const KEYS = ['NEO4J_URI', 'NEO4J_USER', 'NEO4J_PASSWORD', 'NODE_ENV', 'ADMIN_TOKEN'] as const;
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const key of KEYS) saved[key] = process.env[key];
+    process.env['NEO4J_URI'] = 'bolt://localhost:7687';
+    process.env['NEO4J_USER'] = 'neo4j';
+    process.env['NEO4J_PASSWORD'] = 'test';
+    mockVerifyConnectivity.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    for (const key of KEYS) {
+      const value = saved[key];
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  });
+
+  it('throws in production when ADMIN_TOKEN is unset', async () => {
+    process.env['NODE_ENV'] = 'production';
+    delete process.env['ADMIN_TOKEN'];
+    // logger: false — NODE_ENV=production would otherwise default it on.
+    const app = await buildServer({ logger: false });
+    await expect(app.ready()).rejects.toThrow(/ADMIN_TOKEN must be set in production/);
+    await app.close().catch(() => undefined);
+  });
+
+  it('starts in production when ADMIN_TOKEN is set', async () => {
+    process.env['NODE_ENV'] = 'production';
+    process.env['ADMIN_TOKEN'] = 'test-admin-token';
+    const app = await buildServer({ logger: false });
+    await expect(app.ready()).resolves.toBeDefined();
+    await app.close();
+  });
+
+  it('only warns outside production when ADMIN_TOKEN is unset', async () => {
+    process.env['NODE_ENV'] = 'test';
+    delete process.env['ADMIN_TOKEN'];
+    const app = await buildServer();
+    await expect(app.ready()).resolves.toBeDefined();
+    await app.close();
+  });
+});

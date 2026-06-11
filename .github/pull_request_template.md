@@ -24,8 +24,6 @@
 
 ## Checklist
 
-- [ ] `pnpm prettier --check .` passes locally
-- [ ] `pnpm lint` passes locally (zero warnings/errors)
-- [ ] `pnpm typecheck` passes locally
+- [ ] `pnpm verify` passes locally (prettier --check → lint → typecheck → unit tests with coverage)
 - [ ] No secrets or hardcoded credentials in committed files
 - [ ] `.env.example` updated if new environment variables were added

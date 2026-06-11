@@ -218,31 +218,6 @@ describe('AcousticBrainzClient', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
 
-  it('applies equal-jitter to backoff: random()=0 sleeps half the base (#245)', async () => {
-    const jitterClient = new AcousticBrainzClient({
-      userAgent: 'liner-notes/test',
-      delayMs: 0,
-      backoffBaseMs: 4000,
-      random: () => 0, // equal-jitter floor → base/2
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    });
-    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation((fn) => {
-      (fn as () => void)();
-      return 0 as unknown as ReturnType<typeof setTimeout>;
-    });
-    try {
-      fetchSpy
-        .mockResolvedValueOnce(makeErrorResponse(429, 'Too Many Requests'))
-        .mockResolvedValueOnce(makeOkResponse(bulkLow(MBID_A)))
-        .mockResolvedValueOnce(makeOkResponse(bulkHigh(MBID_A)));
-      const result = await jitterClient.getFeatures([MBID_A]);
-      expect(result.has(MBID_A)).toBe(true);
-      expect(setTimeoutSpy.mock.calls[0]?.[1]).toBe(2000);
-    } finally {
-      setTimeoutSpy.mockRestore();
-    }
-  });
-
   it('honors Retry-After header (seconds) on 429', async () => {
     // backoffBaseMs: 0 means we rely only on Retry-After
     vi.useFakeTimers();
