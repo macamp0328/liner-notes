@@ -29,6 +29,25 @@ vi.mock('../../../src/ingestion/ingest.js', () => ({
 const mockRunReload = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/ingestion/orchestrator.js', () => ({ runReload: mockRunReload }));
 
+// POST /reload now consults the ingest job state via busyWith() (#300). Mock job-state so the
+// happy-path 202 cases see an idle ingest deterministically, decoupled from the real singleton.
+const mockGetJobState = vi.hoisted(() =>
+  vi.fn().mockReturnValue({
+    status: 'idle',
+    jobId: '',
+    startedAt: null,
+    completedAt: null,
+    durationMs: null,
+    stats: null,
+  }),
+);
+vi.mock('../../../src/ingestion/job-state.js', () => ({
+  getJobState: mockGetJobState,
+  startJob: vi.fn(),
+  completeJob: vi.fn(),
+  failJob: vi.fn(),
+}));
+
 const repo = vi.hoisted(() => ({
   createReloadJob: vi.fn(),
   findResumableReloadJob: vi.fn(),

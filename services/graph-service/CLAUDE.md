@@ -279,20 +279,37 @@ ranStages)` produces a structured per-metric pass/fail report reused by the gate
   (and `error` on failure), surfaced by `/admin/reload/status`. An empty graph fails the gate.
 - **Wipe stays separate.** The reload never wipes; run `POST /reset?confirm=wipe-all` first for
   a from-scratch reload. It picks up from empty-or-partial.
-- **Reload ⇄ enrich mutual exclusion (#281).** `/reload` 409s `RELOAD_RUNNING` if a reload is
-  already running, and 409s `ENRICHMENT_RUNNING` (naming the stage) if any standalone
-  `/<stage>/enrich` is running (`PIPELINES.some(e => e.state.running)`). Conversely every
-  `/<stage>/enrich` 409s `RELOAD_RUNNING` while a reload is active, gated by the synchronous
-  `isReloadActive()` flag (not `getLiveProgress()`, which is null between stages) so the
-  enrich handler's running-flag guard stays atomic. `/reload` sets `markReloadActive(jobId)`
-  **synchronously before its 202** (not only inside `runReload`, which marks it after awaiting
-  job-state reads — that left a window where an enrich fired right after a reload would slip
-  through); the handler's `.catch` clears it if `runReload` rejects before its own `finally`, so
-  the flag can't leak. The remaining residual is the single-tick interleave where an enrich is
-  _between_ its `isReloadActive()` check and `running = true` when a reload's pipeline-scan runs —
-  irreducible without a lock, and harmless since writes are MERGE-idempotent. Out of scope:
-  the legacy `/ingest` (separate `job-state.ts`) and the `/<stage>/reset` routes are not gated
-  against a reload. (#177 was rescoped to deploy⇄reload and closed; #281 owns this.)
+- **Cross-job mutual exclusion (#281, #300).** Every mutating admin route enforces "only one
+  graph-writing job at a time" against three in-memory, **synchronous** signals: the `/ingest` job
+  (`getJobState().status === 'running'`, `job-state.ts`), the reload-active flag
+  (`isReloadActive()`, `reload-progress.ts`), and the per-pipeline running flags
+  (`PIPELINES[n].state.running`). They all contend on the same rate-limited Discogs/MusicBrainz
+  clients (`runIngestion` itself enriches), so the helper `busyWith(ignore?)` in `admin.ts` checks
+  all three and returns the 409 to send (or null); each route passes `ignore` to skip the signal it
+  guards itself with a richer 409. Coverage:
+  - `/reload` 409s `RELOAD_RUNNING` (with jobId, from the DB `findResumableReloadJob`) against
+    another reload, and via `busyWith({ reload: true })` 409s `JOB_RUNNING` / `ENRICHMENT_RUNNING`
+    (naming the stage) against an `/ingest` job or a standalone enrich — the sync check
+    short-circuits before the Neo4j round-trip.
+  - `/<stage>/enrich` keeps its synchronous `isReloadActive()` `RELOAD_RUNNING` guard (not
+    `getLiveProgress()`, which is null between stages) and its per-pipeline `ENRICHMENT_RUNNING`
+    guard, and adds `busyWith({ reload: true, enrich: true })` to 409 `JOB_RUNNING` against an
+    ingest job. `ignore.enrich` is deliberate: a _different_ enrich stage may run concurrently (the
+    #176 lanes overlap); this stage's own contention is the per-pipeline flag.
+  - `/ingest` keeps its `JOB_RUNNING` (with jobId) guard and adds `busyWith({ ingest: true })` to
+    409 against a reload or any enrich.
+  - `/<stage>/reset` adds `busyWith({ enrich: true })` (reload + ingest) above its own per-pipeline
+    guard; `/reset?confirm=wipe-all` and `/lyrics/clear-genius` (which own no flag) call
+    `busyWith()` against all three after their own gates (the wipe `confirm` 400 still precedes it).
+    `/reload` sets `markReloadActive(jobId)` **synchronously before its 202** (not only inside
+    `runReload`, which marks it after awaiting job-state reads — that left a window where an enrich
+    fired right after a reload would slip through); the handler's `.catch` clears it if `runReload`
+    rejects before its own `finally`, so the flag can't leak. All three signals being synchronous is
+    load-bearing: `busyWith` adds no `await` before any atomic `running = true` set. The remaining
+    residual is the single-tick interleave where a job starts _between_ another route's check and its
+    flag set — irreducible without a lock, and harmless since writes are MERGE-idempotent; these
+    checks close the operator-error window, not every interleave. (#177 was rescoped to deploy⇄reload
+    and closed; #281 owned reload⇄enrich, #300 extended it to `/ingest` and the reset routes.)
 - **`ingestReleases`** (in `ingest.ts`) is the shared release fetch/MERGE loop used by both the
   legacy `runIngestion` and the reload's `releases` stage — one definition, no drift.
 
