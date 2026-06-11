@@ -3,6 +3,13 @@ import {
   type Logger,
   type RateLimitedFetch,
 } from './rate-limited-fetch.js';
+import {
+  buildCircuitBreaker,
+  closedSnapshot,
+  CircuitBreakerOpenError,
+  type CircuitBreaker,
+  type CircuitBreakerSnapshot,
+} from './circuit-breaker.js';
 
 /**
  * Acoustic features for a single recording, as resolved from AcousticBrainz.
@@ -39,6 +46,8 @@ export interface AcousticBrainzClientConfig {
   /** Injectable RNG in [0,1) for deterministic backoff jitter in tests; defaults to Math.random. */
   random?: () => number;
   logger?: Logger;
+  /** Disable the per-source circuit breaker (#242); on by default. */
+  disableCircuitBreaker?: boolean;
 }
 
 /**
@@ -90,9 +99,14 @@ function toStringOrNull(value: unknown): string | null {
 export class AcousticBrainzClient {
   private readonly userAgent: string;
   private readonly rlFetch: RateLimitedFetch;
+  private readonly breaker: CircuitBreaker | undefined;
 
   constructor(config: AcousticBrainzClientConfig) {
     this.userAgent = config.userAgent;
+    this.breaker =
+      config.disableCircuitBreaker === true
+        ? undefined
+        : buildCircuitBreaker('acousticbrainz', config.logger);
     this.rlFetch = createRateLimitedFetch({
       label: 'acousticbrainz-client',
       apiName: 'AcousticBrainz API',
@@ -102,7 +116,13 @@ export class AcousticBrainzClient {
       retryStatuses: [429, 503],
       ...(config.random !== undefined ? { random: config.random } : {}),
       ...(config.logger !== undefined ? { logger: config.logger } : {}),
+      ...(this.breaker !== undefined ? { breaker: this.breaker } : {}),
     });
+  }
+
+  /** Current circuit-breaker state for run-summary surfacing; closed when the breaker is off. */
+  breakerSnapshot(): CircuitBreakerSnapshot {
+    return this.breaker?.snapshot() ?? closedSnapshot('acousticbrainz');
   }
 
   /**
@@ -122,12 +142,20 @@ export class AcousticBrainzClient {
     }
 
     const recordingIds = mbids.join(';');
-    const lowLevel = await this.fetchWithBackoff<BulkResponse<LowLevelDocument>>(
-      `${BASE_URL}/low-level?recording_ids=${recordingIds}`,
-    );
-    const highLevel = await this.fetchWithBackoff<BulkResponse<HighLevelDocument>>(
-      `${BASE_URL}/high-level?recording_ids=${recordingIds}`,
-    );
+    let lowLevel: BulkResponse<LowLevelDocument>;
+    let highLevel: BulkResponse<HighLevelDocument>;
+    try {
+      lowLevel = await this.fetchWithBackoff<BulkResponse<LowLevelDocument>>(
+        `${BASE_URL}/low-level?recording_ids=${recordingIds}`,
+      );
+      highLevel = await this.fetchWithBackoff<BulkResponse<HighLevelDocument>>(
+        `${BASE_URL}/high-level?recording_ids=${recordingIds}`,
+      );
+    } catch (err) {
+      // An open breaker leaves every MBID absent from the result map (= all features null).
+      if (err instanceof CircuitBreakerOpenError) return result;
+      throw err;
+    }
 
     for (const mbid of mbids) {
       // eslint-disable-next-line security/detect-object-injection

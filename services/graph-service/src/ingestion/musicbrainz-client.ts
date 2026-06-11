@@ -3,6 +3,13 @@ import {
   type Logger,
   type RateLimitedFetch,
 } from './rate-limited-fetch.js';
+import {
+  buildCircuitBreaker,
+  closedSnapshot,
+  CircuitBreakerOpenError,
+  type CircuitBreaker,
+  type CircuitBreakerSnapshot,
+} from './circuit-breaker.js';
 
 export interface MbReleaseEvent {
   mbReleaseId: string;
@@ -38,6 +45,8 @@ export interface MusicBrainzClientConfig {
   /** Injectable RNG in [0,1) for deterministic backoff jitter in tests; defaults to Math.random. */
   random?: () => number;
   logger?: Logger;
+  /** Disable the per-source circuit breaker (#242); on by default. */
+  disableCircuitBreaker?: boolean;
 }
 
 interface MbUrlResponse {
@@ -131,9 +140,14 @@ function escapeLucenePhrase(value: string): string {
 export class MusicBrainzClient {
   private readonly userAgent: string;
   private readonly rlFetch: RateLimitedFetch;
+  private readonly breaker: CircuitBreaker | undefined;
 
   constructor(config: MusicBrainzClientConfig) {
     this.userAgent = config.userAgent;
+    this.breaker =
+      config.disableCircuitBreaker === true
+        ? undefined
+        : buildCircuitBreaker('musicbrainz', config.logger);
     this.rlFetch = createRateLimitedFetch({
       label: 'musicbrainz-client',
       apiName: 'MusicBrainz API',
@@ -143,7 +157,13 @@ export class MusicBrainzClient {
       retryStatuses: [429, 503],
       ...(config.random !== undefined ? { random: config.random } : {}),
       ...(config.logger !== undefined ? { logger: config.logger } : {}),
+      ...(this.breaker !== undefined ? { breaker: this.breaker } : {}),
     });
+  }
+
+  /** Current circuit-breaker state for run-summary surfacing; closed when the breaker is off. */
+  breakerSnapshot(): CircuitBreakerSnapshot {
+    return this.breaker?.snapshot() ?? closedSnapshot('musicbrainz');
   }
 
   /**
@@ -158,6 +178,7 @@ export class MusicBrainzClient {
     try {
       response = await this.fetchWithBackoff<MbUrlResponse>(endpoint);
     } catch (err) {
+      if (err instanceof CircuitBreakerOpenError) return null;
       if (err instanceof Error && err.message.includes('not found (404)')) {
         return null;
       }
@@ -188,7 +209,14 @@ export class MusicBrainzClient {
         `${BASE_URL}/release?release-group=${encodeURIComponent(mbid)}` +
         `&status=official&inc=media&fmt=json&limit=${limit}&offset=${offset}`;
 
-      const page = await this.fetchWithBackoff<MbReleaseListResponse>(endpoint);
+      let page: MbReleaseListResponse;
+      try {
+        page = await this.fetchWithBackoff<MbReleaseListResponse>(endpoint);
+      } catch (err) {
+        // An open breaker ends the walk early; return whatever was collected (typically none).
+        if (err instanceof CircuitBreakerOpenError) return events;
+        throw err;
+      }
       totalCount = page['release-count'];
       const releases = page.releases ?? [];
 
@@ -226,6 +254,7 @@ export class MusicBrainzClient {
     try {
       response = await this.fetchWithBackoff<MbUrlResponse>(endpoint);
     } catch (err) {
+      if (err instanceof CircuitBreakerOpenError) return null;
       if (err instanceof Error && err.message.includes('not found (404)')) {
         return null;
       }
@@ -245,7 +274,14 @@ export class MusicBrainzClient {
    */
   async getRecordingsByReleaseMbid(mbReleaseId: string): Promise<MbRecordingTrack[]> {
     const endpoint = `${BASE_URL}/release/${encodeURIComponent(mbReleaseId)}?inc=recordings+isrcs&fmt=json`;
-    const response = await this.fetchWithBackoff<MbReleaseWithRecordingsResponse>(endpoint);
+    let response: MbReleaseWithRecordingsResponse;
+    try {
+      response = await this.fetchWithBackoff<MbReleaseWithRecordingsResponse>(endpoint);
+    } catch (err) {
+      // An open breaker yields no tracks — the caller treats that as "no MusicBrainz match".
+      if (err instanceof CircuitBreakerOpenError) return [];
+      throw err;
+    }
 
     const tracks: MbRecordingTrack[] = [];
     let position = 0;

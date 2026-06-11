@@ -222,3 +222,29 @@ export function resolveCircuitBreakerCooldownMs(): number | undefined {
   const value = Number(raw);
   return value > 0 ? value : undefined;
 }
+
+/**
+ * Build a per-source breaker from the environment knobs — the shared constructor every external
+ * client uses so threshold/cooldown resolution lives in one place.
+ */
+export function buildCircuitBreaker(source: BreakerSource, logger?: Logger): CircuitBreaker {
+  const cooldownMs = resolveCircuitBreakerCooldownMs();
+  return new CircuitBreaker({
+    source,
+    threshold: resolveCircuitBreakerThreshold(),
+    ...(cooldownMs !== undefined ? { cooldownMs } : {}),
+    ...(logger !== undefined ? { logger } : {}),
+  });
+}
+
+/** A zeroed, never-tripped snapshot — what a client returns when its breaker is disabled. */
+export function closedSnapshot(source: string): CircuitBreakerSnapshot {
+  return {
+    source,
+    state: 'closed',
+    open: false,
+    consecutiveFatals: 0,
+    fatalCount: 0,
+    trippedAt: null,
+  };
+}

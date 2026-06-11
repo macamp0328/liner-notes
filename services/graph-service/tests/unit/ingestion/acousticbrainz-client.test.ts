@@ -4,6 +4,7 @@ import {
   MAX_RECORDING_IDS_PER_CALL,
   buildAcousticBrainzClientFromEnv,
 } from '../../../src/ingestion/acousticbrainz-client.js';
+import { snapshotEnv } from '../../helpers/env.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -288,5 +289,39 @@ describe('AcousticBrainzClient', () => {
     vi.stubEnv('ACOUSTICBRAINZ_USER_AGENT', undefined);
     const c = buildAcousticBrainzClientFromEnv();
     expect(c).toBeInstanceOf(AcousticBrainzClient);
+  });
+});
+
+describe('AcousticBrainzClient circuit breaker (#242)', () => {
+  let fetchSpy: MockInstance<typeof fetch>;
+  const env = snapshotEnv(['CIRCUIT_BREAKER_THRESHOLD', 'CIRCUIT_BREAKER_COOLDOWN_MS']);
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
+    env.clear();
+    process.env['CIRCUIT_BREAKER_THRESHOLD'] = '2';
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    env.restore();
+  });
+
+  it('opens after consecutive fatal (403) responses, then returns an empty map without a fetch', async () => {
+    fetchSpy.mockResolvedValue(makeErrorResponse(403, 'Forbidden'));
+    const client = new AcousticBrainzClient({
+      userAgent: 'liner-notes/test',
+      delayMs: 0,
+      backoffBaseMs: 0,
+    });
+
+    await expect(client.getFeatures(['mbid-1'])).rejects.toThrow(); // fatal 1
+    await expect(client.getFeatures(['mbid-2'])).rejects.toThrow(); // fatal 2 → opens
+    expect(client.breakerSnapshot().open).toBe(true);
+
+    const callsBefore = fetchSpy.mock.calls.length;
+    const result = await client.getFeatures(['mbid-3']); // short-circuit
+    expect(result.size).toBe(0);
+    expect(fetchSpy.mock.calls.length).toBe(callsBefore); // no network call
   });
 });

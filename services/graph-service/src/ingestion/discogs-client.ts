@@ -10,6 +10,12 @@ import {
   type Logger,
   type RateLimitedFetch,
 } from './rate-limited-fetch.js';
+import {
+  buildCircuitBreaker,
+  closedSnapshot,
+  type CircuitBreaker,
+  type CircuitBreakerSnapshot,
+} from './circuit-breaker.js';
 
 // Logger lives in rate-limited-fetch.ts now; re-exported here so the many existing
 // importers of `Logger` from this module keep working unchanged.
@@ -25,6 +31,13 @@ export interface DiscogsClientConfig {
   random?: () => number;
   /** Optional structured logger; defaults to console when omitted. Pass app.log in production. */
   logger?: Logger;
+  /**
+   * Circuit breaker toggle (#242). Discogs powers the critical ingest `releases` loop, so its
+   * breaker is **disabled by default** — a fatal block (e.g. a bad token) should fail loudly via
+   * the existing error path, not be silently short-circuited. Set to `false` to opt in; when on, an
+   * open breaker propagates {@link CircuitBreakerOpenError} (fail-fast) rather than soft-skipping.
+   */
+  disableCircuitBreaker?: boolean;
 }
 
 const BASE_URL = 'https://api.discogs.com';
@@ -36,10 +49,16 @@ export class DiscogsClient {
   private readonly token: string;
   private readonly userAgent: string;
   private readonly rlFetch: RateLimitedFetch;
+  private readonly breaker: CircuitBreaker | undefined;
 
   constructor(config: DiscogsClientConfig) {
     this.token = config.token;
     this.userAgent = config.userAgent;
+    // Disabled by default for the critical ingest path; opt in with disableCircuitBreaker: false.
+    this.breaker =
+      (config.disableCircuitBreaker ?? true) === true
+        ? undefined
+        : buildCircuitBreaker('discogs', config.logger);
     this.rlFetch = createRateLimitedFetch({
       label: 'discogs-client',
       apiName: 'Discogs API',
@@ -49,7 +68,13 @@ export class DiscogsClient {
       retryStatuses: [429],
       ...(config.random !== undefined ? { random: config.random } : {}),
       ...(config.logger !== undefined ? { logger: config.logger } : {}),
+      ...(this.breaker !== undefined ? { breaker: this.breaker } : {}),
     });
+  }
+
+  /** Current circuit-breaker state for run-summary surfacing; closed when the breaker is off. */
+  breakerSnapshot(): CircuitBreakerSnapshot {
+    return this.breaker?.snapshot() ?? closedSnapshot('discogs');
   }
 
   async getCollectionReleases(
