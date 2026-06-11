@@ -113,6 +113,7 @@ describe('enrichLyrics', () => {
   afterEach(() => {
     if (savedConcurrency === undefined) delete process.env['LYRICS_CONCURRENCY'];
     else process.env['LYRICS_CONCURRENCY'] = savedConcurrency;
+    delete process.env['CIRCUIT_BREAKER_THRESHOLD'];
     fetchSpy.mockRestore();
   });
 
@@ -868,5 +869,35 @@ describe('enrichLyrics', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     // Transient failure must not stamp — the track retries next run.
     expect(mockMarkLyricsFetched).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Circuit breaker surfacing (#242) — the in-prod Genius 403 fix (#240)
+  // -------------------------------------------------------------------------
+  it('opens the Genius breaker after N 403s, skips Genius for later tracks, and surfaces it', async () => {
+    process.env['CIRCUIT_BREAKER_THRESHOLD'] = '2';
+    const injected = clients(true); // builds the Genius/LRCLIB breakers at threshold 2
+    mockGetUnenrichedTracks.mockResolvedValue(
+      [0, 1, 2].map((i) => ({ ...sampleTrack, position: `A${i}` })),
+    );
+    fetchSpy
+      .mockResolvedValueOnce(makeRetryableResponse(404)) // t0 LRCLIB miss
+      .mockResolvedValueOnce(makeRetryableResponse(403)) // t0 Genius search 403 (fatal 1)
+      .mockResolvedValueOnce(makeRetryableResponse(404)) // t1 LRCLIB miss
+      .mockResolvedValueOnce(makeRetryableResponse(403)) // t1 Genius search 403 (fatal 2 → opens)
+      .mockResolvedValueOnce(makeRetryableResponse(404)); // t2 LRCLIB miss (Genius short-circuited)
+    const log = makeMockLogger();
+
+    const summary = await enrichLyrics(fakeDriver, log, undefined, injected);
+
+    // 5 fetches: 2 for each of the first two tracks, 1 for the third (Genius skipped).
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
+    expect(summary.geniusBreakerOpen).toBe(1);
+    expect(summary.geniusFatalCount).toBe(2);
+    expect(summary.lrclibBreakerOpen).toBe(0);
+    // First two throw (failed, unstamped); the third skips Genius and IS stamped.
+    expect(summary.failed).toBe(2);
+    expect(summary.skipped).toBe(1);
+    expect(mockMarkLyricsFetched).toHaveBeenCalledTimes(1);
   });
 });

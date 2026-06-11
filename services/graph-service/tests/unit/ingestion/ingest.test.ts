@@ -116,6 +116,10 @@ describe('runIngestion', () => {
       skipped: 0,
       failed: 0,
       durationMs: 0,
+      geniusFatalCount: 0,
+      geniusBreakerOpen: 0,
+      lrclibFatalCount: 0,
+      lrclibBreakerOpen: 0,
     });
     expect(summary.errors.some((e) => e.includes('lyrics'))).toBe(true);
   });

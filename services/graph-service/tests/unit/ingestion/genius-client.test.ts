@@ -6,6 +6,7 @@ import {
   buildGeniusClientFromEnv,
 } from '../../../src/ingestion/genius-client.js';
 import { RetriesExhaustedError } from '../../../src/ingestion/rate-limited-fetch.js';
+import { snapshotEnv } from '../../helpers/env.js';
 import geniusSearchHit from '../../fixtures/genius-search-hit.json' with { type: 'json' };
 
 function makeJsonResponse(body: unknown): Response {
@@ -201,5 +202,54 @@ describe('buildGeniusClientFromEnv', () => {
   it('builds a client when GENIUS_TOKEN is set', () => {
     process.env['GENIUS_TOKEN'] = 'tok';
     expect(buildGeniusClientFromEnv()).toBeInstanceOf(GeniusClient);
+  });
+});
+
+describe('GeniusClient circuit breaker (#242)', () => {
+  let fetchSpy: MockInstance<typeof fetch>;
+  const env = snapshotEnv(['CIRCUIT_BREAKER_THRESHOLD', 'CIRCUIT_BREAKER_COOLDOWN_MS']);
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
+    env.clear();
+    process.env['CIRCUIT_BREAKER_THRESHOLD'] = '2';
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    env.restore();
+  });
+
+  it('opens after consecutive 403 bot-blocks, then short-circuits to null without a fetch', async () => {
+    fetchSpy.mockResolvedValue(makeErrorResponse(403));
+    const client = new GeniusClient({
+      token: 'test-token',
+      userAgent: 'Mozilla/5.0 (test-browser)',
+      delayMs: 0,
+      backoffBaseMs: 0,
+    });
+
+    // The 403 surfaces as an (expected) GeniusHttpError while the breaker is closed.
+    await expect(client.getLyrics('a', 'b')).rejects.toBeInstanceOf(GeniusHttpError); // fatal 1
+    await expect(client.getLyrics('a', 'b')).rejects.toBeInstanceOf(GeniusHttpError); // fatal 2 → opens
+    expect(client.breakerSnapshot().open).toBe(true);
+
+    const callsBefore = fetchSpy.mock.calls.length;
+    expect(await client.getLyrics('a', 'b')).toBeNull(); // open breaker → clean no-hit
+    expect(fetchSpy.mock.calls.length).toBe(callsBefore); // no network call
+  });
+
+  it('does NOT trip on a transient 5xx (retried, then exhausts)', async () => {
+    fetchSpy.mockResolvedValue(makeErrorResponse(500));
+    const client = new GeniusClient({
+      token: 'test-token',
+      userAgent: 'Mozilla/5.0 (test-browser)',
+      delayMs: 0,
+      backoffBaseMs: 0,
+    });
+
+    await expect(client.getLyrics('a', 'b')).rejects.toThrow(RetriesExhaustedError);
+    await expect(client.getLyrics('a', 'b')).rejects.toThrow(RetriesExhaustedError);
+    expect(client.breakerSnapshot().open).toBe(false); // transient never trips
   });
 });

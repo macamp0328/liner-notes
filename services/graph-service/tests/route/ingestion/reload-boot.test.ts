@@ -42,7 +42,16 @@ const completeSummary: IngestionSummary = {
   releasesFailed: 0,
   errors: [],
   durationMs: 1,
-  lyricsEnrichment: { enriched: 0, skipped: 0, failed: 0, durationMs: 0 },
+  lyricsEnrichment: {
+    enriched: 0,
+    skipped: 0,
+    failed: 0,
+    durationMs: 0,
+    geniusFatalCount: 0,
+    geniusBreakerOpen: 0,
+    lrclibFatalCount: 0,
+    lrclibBreakerOpen: 0,
+  },
   masterDataEnrichment: { enriched: 0, skipped: 0, failed: 0, durationMs: 0 },
   artistGenresEnrichment: {
     genresEnriched: 0,
