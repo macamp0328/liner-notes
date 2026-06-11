@@ -47,6 +47,13 @@ const STATS = {
         untagged: { covered: 2, applicable: 100, pct: 2 },
       },
     },
+    lyricsFunnel: {
+      resolved: 80,
+      instrumental: 6,
+      probableInstrumental: 4,
+      notFound: 10,
+      total: 100,
+    },
     tracksWithRecordingMbid: { covered: 70, applicable: 100, pct: 70 },
     tracksWithIsrc: { covered: 60, applicable: 100, pct: 60 },
     tracksWithTempo: { covered: 35, applicable: 70, pct: 50 },

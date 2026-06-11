@@ -6,6 +6,7 @@ import { getDriver } from '../../../src/db/client.js';
 import { getTracksForDeezerEnrichment } from '../../../src/db/track-deezer-repository.js';
 import { getTracksForAcousticBrainzEnrichment } from '../../../src/db/track-acousticbrainz-repository.js';
 import { getUnenrichedArtistsForNationality } from '../../../src/db/artist-nationality-repository.js';
+import { getUnenrichedTracks } from '../../../src/db/lyrics-repository.js';
 
 /**
  * Exercises the issue #89 re-enrichment gate against a real Neo4j, proving the
@@ -110,5 +111,41 @@ describe('re-enrichment staleness gate (issue #89)', () => {
     // null timestamp + stale-with-no-features → selected; fresh → skipped;
     // 'mbid-partial' has key/scale (tempo null) → already enriched → NOT re-selected.
     expect(mbids).toEqual(['mbid-null', 'mbid-old']);
+  });
+
+  it('lyrics gate (#246): excludes instrumental/probable-instrumental, keeps stale not-found', async () => {
+    // The lyrics candidate query joins through Release-[:HAS_TRACK]->Track, so each
+    // fixture track hangs off one Release. lyricsStatus drives the terminal exclusion;
+    // not-found stays re-eligible per the staleness window.
+    await write(`
+      CREATE (r:Release {discogsId: 1})
+      CREATE (never:Track     {title: 'never',     position: 'A1', releaseDiscogsId: 1})
+      CREATE (instr:Track     {title: 'instr',     position: 'A2', releaseDiscogsId: 1,
+                               lyricsStatus: 'instrumental',
+                               lyricsFetchedAt: datetime() - duration({ days: 60 })})
+      CREATE (probable:Track  {title: 'probable',  position: 'A3', releaseDiscogsId: 1,
+                               lyricsStatus: 'probable-instrumental',
+                               lyricsFetchedAt: datetime() - duration({ days: 60 })})
+      CREATE (staleNF:Track   {title: 'staleNF',   position: 'A4', releaseDiscogsId: 1,
+                               lyricsStatus: 'not-found',
+                               lyricsFetchedAt: datetime() - duration({ days: 60 })})
+      CREATE (freshNF:Track   {title: 'freshNF',   position: 'A5', releaseDiscogsId: 1,
+                               lyricsStatus: 'not-found', lyricsFetchedAt: datetime()})
+      CREATE (resolved:Track  {title: 'resolved',  position: 'A6', releaseDiscogsId: 1,
+                               lyrics: 'la la', lyricsStatus: 'resolved',
+                               lyricsFetchedAt: datetime() - duration({ days: 60 })})
+      CREATE (r)-[:HAS_TRACK]->(never)
+      CREATE (r)-[:HAS_TRACK]->(instr)
+      CREATE (r)-[:HAS_TRACK]->(probable)
+      CREATE (r)-[:HAS_TRACK]->(staleNF)
+      CREATE (r)-[:HAS_TRACK]->(freshNF)
+      CREATE (r)-[:HAS_TRACK]->(resolved)
+    `);
+
+    const titles = (await getUnenrichedTracks(getDriver())).map((t) => t.title).sort();
+
+    // never-attempted + stale not-found → selected; the two instrumental classes are
+    // terminal, fresh not-found is within the window, resolved has lyrics → all excluded.
+    expect(titles).toEqual(['never', 'staleNF']);
   });
 });

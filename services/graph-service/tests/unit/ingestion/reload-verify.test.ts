@@ -54,6 +54,13 @@ function makeStats(
     producersWithNationality: sourcedCov(50, 100),
     engineersWithNationality: sourcedCov(50, 100),
     tracksWithLyrics: sourcedCov(80, 100),
+    lyricsFunnel: {
+      resolved: 80,
+      instrumental: 0,
+      probableInstrumental: 0,
+      notFound: 20,
+      total: 100,
+    },
     tracksWithRecordingMbid: cov(60, 100),
     tracksWithIsrc: cov(45, 100),
     tracksWithTempo: cov(30, 60),

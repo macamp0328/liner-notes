@@ -63,6 +63,12 @@ const statements = [
   'MATCH ()-[r:IS_VERSION_OF]->() DELETE r',
   'MATCH (t:Track) WHERE t.normalizedTitle IS NOT NULL REMOVE t.normalizedTitle',
 
+  // --- issue #246: four-state lyricsStatus ---
+  // Backfill the new lyricsStatus on tracks that already have lyrics from before the field
+  // existed, so the candidate query and the /stats funnel see a consistent data model.
+  // Idempotent: the WHERE guard makes it a no-op once every lyric'd track is tagged.
+  "MATCH (t:Track) WHERE t.lyrics IS NOT NULL AND t.lyricsStatus IS NULL SET t.lyricsStatus = 'resolved'",
+
   // --- issue #175: persistent orchestrated-reload job state ---
   // A ReloadJob (one per run) owns a set of ReloadStage checkpoint nodes so an
   // interrupted reload resumes from the last completed stage after a pod restart.

@@ -2,14 +2,25 @@ import type { CoverageMetric, StatsData } from '../db/stats-repository.js';
 import type { ReloadStageName } from './stages.js';
 
 /**
- * One coverage bar the reload must clear. `metric` names a key under
+ * Keys under `StatsData.enrichment` whose value is a CoverageMetric (or the SourcedCoverageMetric
+ * subtype) — i.e. the gateable coverage figures. Excludes `lyricsFunnel`, which is a raw
+ * four-state count, not a covered/applicable metric (#246).
+ */
+type CoverageMetricKey = {
+  [K in keyof StatsData['enrichment']]: StatsData['enrichment'][K] extends CoverageMetric
+    ? K
+    : never;
+}[keyof StatsData['enrichment']];
+
+/**
+ * One coverage bar the reload must clear. `metric` names a coverage key under
  * `StatsData.enrichment`; `stage` is the reload stage that produces it (so a
  * failure can name the offending stage); `minPct` is the inclusive floor the
  * metric's `pct` must reach. `minPct: 0` means "silently-zero protection only" —
  * no percentage floor, only a non-empty result is required.
  */
 export interface CoverageThreshold {
-  metric: keyof StatsData['enrichment'];
+  metric: CoverageMetricKey;
   stage: ReloadStageName;
   minPct: number;
 }
