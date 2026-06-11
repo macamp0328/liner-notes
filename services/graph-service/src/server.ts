@@ -3,6 +3,7 @@ import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import rateLimit from '@fastify/rate-limit';
+import helmet from '@fastify/helmet';
 import { healthRoutes } from './api/health.js';
 import { adminRoutes } from './api/admin.js';
 import { collectionRoutes } from './api/collection.js';
@@ -139,7 +140,13 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     timeWindow: RATE_LIMIT_TIME_WINDOW,
   });
 
-  if (process.env['NODE_ENV'] !== 'production') {
+  // Security headers. The default Content-Security-Policy blocks Swagger UI's inline
+  // scripts/styles, and swagger is only mounted outside production — so CSP rides the
+  // same NODE_ENV switch: full helmet defaults in production, CSP-less elsewhere.
+  const isProduction = process.env['NODE_ENV'] === 'production';
+  await app.register(helmet, isProduction ? {} : { contentSecurityPolicy: false });
+
+  if (!isProduction) {
     await app.register(swagger, OPENAPI_CONFIG);
     await app.register(swaggerUi, {
       routePrefix: '/api/docs',
@@ -168,6 +175,12 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     }
 
     if (!process.env['ADMIN_TOKEN']) {
+      // In production a missing token silently turns every /admin route into a 503 —
+      // fail the pod at startup (k8s rollout health gate catches it) instead of
+      // shipping an instance whose admin surface can never work.
+      if (process.env['NODE_ENV'] === 'production') {
+        throw new Error('ADMIN_TOKEN must be set in production');
+      }
       app.log.warn('ADMIN_TOKEN not set — admin endpoints will return 503');
     }
 

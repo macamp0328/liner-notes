@@ -13,6 +13,7 @@
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
+    "verify": "prettier --check . && pnpm -r lint && pnpm -r typecheck && pnpm --filter graph-service test:unit:coverage",
     "diagrams:generate": "tsx scripts/diagrams/generate.ts",
     "insomnia:generate": "pnpm --filter graph-service docs:generate && tsx scripts/insomnia/generate.ts && prettier --write services/graph-service/docs/insomnia.collection.yaml",
     "enrich:lyrics": "scripts/admin/post.sh /api/v1/admin/lyrics/enrich",
