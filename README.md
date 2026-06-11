@@ -8,6 +8,16 @@ A personal, open-source, forkable monorepo for exploring a vinyl record collecti
 | ------------- | ------------------------- | ------------------------------------------- |
 | graph-service | `services/graph-service/` | Fastify REST API + Neo4j ingestion pipeline |
 
+## What's changed lately?
+
+The repo keeps a plain-English, **AI-written changelog** — one sentence per merged pull request,
+grouped by week and category, with breaking changes called out. Read it in the
+**[Releases](../../releases)** tab (the rolling "Changelog (unreleased)" draft).
+
+It's generated automatically: every merge summarises the PR with Claude into a structured store,
+and a weekly job self-heals anything missed. No manual upkeep, no committed `CHANGELOG.md`. See
+[`scripts/changelog/README.md`](scripts/changelog/README.md) for how it works and how to fork it.
+
 ## Quick Start
 
 ```bash
