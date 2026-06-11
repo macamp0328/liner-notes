@@ -446,7 +446,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -456,19 +456,13 @@
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": ["enriched", "skipped", "failed", "durationMs"],
+                      "required": ["message", "statusUrl"],
                       "properties": {
-                        "enriched": {
-                          "type": "integer"
+                        "message": {
+                          "type": "string"
                         },
-                        "skipped": {
-                          "type": "integer"
-                        },
-                        "failed": {
-                          "type": "integer"
-                        },
-                        "durationMs": {
-                          "type": "integer"
+                        "statusUrl": {
+                          "type": "string"
                         }
                       }
                     }
@@ -521,7 +515,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -531,38 +525,13 @@
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": [
-                        "enriched",
-                        "skipped",
-                        "failed",
-                        "durationMs",
-                        "resolvedByMusicbrainz",
-                        "resolvedByWikidata"
-                      ],
+                      "required": ["message", "statusUrl"],
                       "properties": {
-                        "enriched": {
-                          "type": "integer",
-                          "description": "Nodes that received an ORIGIN_COUNTRY this run."
+                        "message": {
+                          "type": "string"
                         },
-                        "skipped": {
-                          "type": "integer",
-                          "description": "Nodes no source could resolve (stamped; retried next staleness window)."
-                        },
-                        "failed": {
-                          "type": "integer",
-                          "description": "Nodes that threw and were not stamped."
-                        },
-                        "durationMs": {
-                          "type": "integer",
-                          "description": "Wall-clock duration of the run."
-                        },
-                        "resolvedByMusicbrainz": {
-                          "type": "integer",
-                          "description": "Countries this run where MusicBrainz was the chosen source (MB returned a country and Wikidata agreed or was null)."
-                        },
-                        "resolvedByWikidata": {
-                          "type": "integer",
-                          "description": "Countries this run where Wikidata was the chosen source (Wikidata-only, preferred on an MB/WD disagreement, or via the Wikipedia-URL fallback)."
+                        "statusUrl": {
+                          "type": "string"
                         }
                       }
                     }
@@ -671,7 +640,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -681,19 +650,13 @@
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": ["enriched", "skipped", "failed", "durationMs"],
+                      "required": ["message", "statusUrl"],
                       "properties": {
-                        "enriched": {
-                          "type": "integer"
+                        "message": {
+                          "type": "string"
                         },
-                        "skipped": {
-                          "type": "integer"
-                        },
-                        "failed": {
-                          "type": "integer"
-                        },
-                        "durationMs": {
-                          "type": "integer"
+                        "statusUrl": {
+                          "type": "string"
                         }
                       }
                     }
@@ -746,7 +709,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -756,28 +719,13 @@
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": [
-                        "mastersProcessed",
-                        "mastersSkipped",
-                        "mastersFailed",
-                        "eventsWritten",
-                        "durationMs"
-                      ],
+                      "required": ["message", "statusUrl"],
                       "properties": {
-                        "mastersProcessed": {
-                          "type": "integer"
+                        "message": {
+                          "type": "string"
                         },
-                        "mastersSkipped": {
-                          "type": "integer"
-                        },
-                        "mastersFailed": {
-                          "type": "integer"
-                        },
-                        "eventsWritten": {
-                          "type": "integer"
-                        },
-                        "durationMs": {
-                          "type": "integer"
+                        "statusUrl": {
+                          "type": "string"
                         }
                       }
                     }
@@ -886,7 +834,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -896,32 +844,13 @@
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": [
-                        "releasesProcessed",
-                        "releasesSkipped",
-                        "releasesFailed",
-                        "tracksMatched",
-                        "tracksUnmatched",
-                        "durationMs"
-                      ],
+                      "required": ["message", "statusUrl"],
                       "properties": {
-                        "releasesProcessed": {
-                          "type": "integer"
+                        "message": {
+                          "type": "string"
                         },
-                        "releasesSkipped": {
-                          "type": "integer"
-                        },
-                        "releasesFailed": {
-                          "type": "integer"
-                        },
-                        "tracksMatched": {
-                          "type": "integer"
-                        },
-                        "tracksUnmatched": {
-                          "type": "integer"
-                        },
-                        "durationMs": {
-                          "type": "integer"
+                        "statusUrl": {
+                          "type": "string"
                         }
                       }
                     }
@@ -1030,7 +959,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -1040,24 +969,13 @@
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": [
-                        "tracksProcessed",
-                        "tracksSkipped",
-                        "tracksFailed",
-                        "durationMs"
-                      ],
+                      "required": ["message", "statusUrl"],
                       "properties": {
-                        "tracksProcessed": {
-                          "type": "integer"
+                        "message": {
+                          "type": "string"
                         },
-                        "tracksSkipped": {
-                          "type": "integer"
-                        },
-                        "tracksFailed": {
-                          "type": "integer"
-                        },
-                        "durationMs": {
-                          "type": "integer"
+                        "statusUrl": {
+                          "type": "string"
                         }
                       }
                     }
@@ -1156,7 +1074,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -1166,24 +1084,13 @@
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": [
-                        "tracksProcessed",
-                        "tracksSkipped",
-                        "tracksFailed",
-                        "durationMs"
-                      ],
+                      "required": ["message", "statusUrl"],
                       "properties": {
-                        "tracksProcessed": {
-                          "type": "integer"
+                        "message": {
+                          "type": "string"
                         },
-                        "tracksSkipped": {
-                          "type": "integer"
-                        },
-                        "tracksFailed": {
-                          "type": "integer"
-                        },
-                        "durationMs": {
-                          "type": "integer"
+                        "statusUrl": {
+                          "type": "string"
                         }
                       }
                     }
@@ -1282,7 +1189,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -1292,19 +1199,13 @@
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": ["enriched", "skipped", "failed", "durationMs"],
+                      "required": ["message", "statusUrl"],
                       "properties": {
-                        "enriched": {
-                          "type": "integer"
+                        "message": {
+                          "type": "string"
                         },
-                        "skipped": {
-                          "type": "integer"
-                        },
-                        "failed": {
-                          "type": "integer"
-                        },
-                        "durationMs": {
-                          "type": "integer"
+                        "statusUrl": {
+                          "type": "string"
                         }
                       }
                     }
@@ -1413,7 +1314,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -1423,28 +1324,13 @@
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": [
-                        "genresEnriched",
-                        "stylesEnriched",
-                        "skipped",
-                        "failed",
-                        "durationMs"
-                      ],
+                      "required": ["message", "statusUrl"],
                       "properties": {
-                        "genresEnriched": {
-                          "type": "integer"
+                        "message": {
+                          "type": "string"
                         },
-                        "stylesEnriched": {
-                          "type": "integer"
-                        },
-                        "skipped": {
-                          "type": "integer"
-                        },
-                        "failed": {
-                          "type": "integer"
-                        },
-                        "durationMs": {
-                          "type": "integer"
+                        "statusUrl": {
+                          "type": "string"
                         }
                       }
                     }
@@ -1501,7 +1387,8 @@
                         "startedAt",
                         "completedAt",
                         "durationMs",
-                        "lastResult"
+                        "lastResult",
+                        "lastError"
                       ],
                       "properties": {
                         "running": {
@@ -1535,6 +1422,10 @@
                               "type": "integer"
                             }
                           },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
                           "nullable": true
                         }
                       }
@@ -1582,7 +1473,8 @@
                         "startedAt",
                         "completedAt",
                         "durationMs",
-                        "lastResult"
+                        "lastResult",
+                        "lastError"
                       ],
                       "properties": {
                         "running": {
@@ -1637,6 +1529,10 @@
                             }
                           },
                           "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
+                          "nullable": true
                         }
                       }
                     }
@@ -1683,7 +1579,8 @@
                         "startedAt",
                         "completedAt",
                         "durationMs",
-                        "lastResult"
+                        "lastResult",
+                        "lastError"
                       ],
                       "properties": {
                         "running": {
@@ -1717,6 +1614,10 @@
                               "type": "integer"
                             }
                           },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
                           "nullable": true
                         }
                       }
@@ -1764,7 +1665,8 @@
                         "startedAt",
                         "completedAt",
                         "durationMs",
-                        "lastResult"
+                        "lastResult",
+                        "lastError"
                       ],
                       "properties": {
                         "running": {
@@ -1801,6 +1703,10 @@
                               "type": "integer"
                             }
                           },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
                           "nullable": true
                         }
                       }
@@ -1848,7 +1754,8 @@
                         "startedAt",
                         "completedAt",
                         "durationMs",
-                        "lastResult"
+                        "lastResult",
+                        "lastError"
                       ],
                       "properties": {
                         "running": {
@@ -1888,6 +1795,10 @@
                               "type": "integer"
                             }
                           },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
                           "nullable": true
                         }
                       }
@@ -1935,7 +1846,8 @@
                         "startedAt",
                         "completedAt",
                         "durationMs",
-                        "lastResult"
+                        "lastResult",
+                        "lastError"
                       ],
                       "properties": {
                         "running": {
@@ -1969,6 +1881,10 @@
                               "type": "integer"
                             }
                           },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
                           "nullable": true
                         }
                       }
@@ -2016,7 +1932,8 @@
                         "startedAt",
                         "completedAt",
                         "durationMs",
-                        "lastResult"
+                        "lastResult",
+                        "lastError"
                       ],
                       "properties": {
                         "running": {
@@ -2050,6 +1967,10 @@
                               "type": "integer"
                             }
                           },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
                           "nullable": true
                         }
                       }
@@ -2097,7 +2018,8 @@
                         "startedAt",
                         "completedAt",
                         "durationMs",
-                        "lastResult"
+                        "lastResult",
+                        "lastError"
                       ],
                       "properties": {
                         "running": {
@@ -2131,6 +2053,10 @@
                               "type": "integer"
                             }
                           },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
                           "nullable": true
                         }
                       }
@@ -2178,7 +2104,8 @@
                         "startedAt",
                         "completedAt",
                         "durationMs",
-                        "lastResult"
+                        "lastResult",
+                        "lastError"
                       ],
                       "properties": {
                         "running": {
@@ -2216,6 +2143,10 @@
                             }
                           },
                           "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
+                          "nullable": true
                         }
                       }
                     }
@@ -2241,7 +2172,7 @@
       "post": {
         "summary": "Trigger the orchestrated reload (ingest + every enrichment) with resume",
         "tags": ["admin"],
-        "description": "Runs the full reload as one resumable, checkpointed job: fetch & MERGE all releases, then **every** enrichment stage in #154 dependency order — including the track-level and nationality stages that `POST /ingest` does NOT run (mb-release-events, track-musicbrainz, track-acousticbrainz, track-deezer, nationality).\n\nPer-stage progress is persisted to Neo4j, so if the pod is killed mid-reload the replacement **resumes from the last completed stage on startup** — it does not restart or re-wipe. Poll `GET /api/v1/admin/reload/status` for progress.\n\nRuns asynchronously — returns 202 immediately. Returns 409 if a reload is already in progress. **Does not wipe**: for a from-scratch reload, call `POST /api/v1/admin/reset?confirm=wipe-all` first, then trigger this.",
+        "description": "Runs the full reload as one resumable, checkpointed job: fetch & MERGE all releases, then **every** enrichment stage in #154 dependency order — including the track-level and nationality stages that `POST /ingest` does NOT run (mb-release-events, track-musicbrainz, track-acousticbrainz, track-deezer, nationality).\n\nPer-stage progress is persisted to Neo4j, so if the pod is killed mid-reload the replacement **resumes from the last completed stage on startup** — it does not restart or re-wipe. Poll `GET /api/v1/admin/reload/status` for progress.\n\nRuns asynchronously — returns 202 immediately. Returns 409 if a reload is already in progress, or if a standalone `POST /api/v1/admin/<stage>/enrich` is running (they contend on the same rate-limited clients). **Does not wipe**: for a from-scratch reload, call `POST /api/v1/admin/reset?confirm=wipe-all` first, then trigger this.",
         "security": [
           {
             "bearerAuth": []
@@ -2293,7 +2224,7 @@
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message", "jobId"],
+                      "required": ["code", "message"],
                       "properties": {
                         "code": {
                           "type": "string"
