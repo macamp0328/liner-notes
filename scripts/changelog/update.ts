@@ -1,9 +1,12 @@
 #!/usr/bin/env tsx
 // Fast-path writer: summarise ONE merged PR and fold it into the changelog.
 // Driven by the changelog.yml workflow on every push to main (PR_NUMBER set from
-// the squash-merge commit). Idempotent — re-running for the same PR replaces its
-// record, never duplicates. DRY_RUN=1 prints the result without touching GitHub.
+// the squash-merge commit). Run it by hand as `pnpm changelog:update <number>`
+// (or PR_NUMBER=<number> pnpm changelog:update). Idempotent — re-running for the
+// same PR replaces its record, so it doubles as a single-entry refresh. DRY_RUN=1
+// prints the result without touching GitHub.
 
+import './env.js';
 import { appendFileSync } from 'node:fs';
 import { summarize } from './claude.js';
 import { getPrInput, readStore, writeStore } from './store.js';
@@ -35,10 +38,12 @@ function writeStepSummary(r: ChangelogRecord, note: string): void {
 }
 
 async function main(): Promise<void> {
-  const number = Number(process.env['PR_NUMBER']);
+  // PR number from the PR_NUMBER env (CI) or the first CLI arg (manual run).
+  const raw = process.env['PR_NUMBER'] ?? process.argv[2] ?? '';
+  const number = Number(raw);
   if (!Number.isInteger(number) || number <= 0) {
     throw new Error(
-      `PR_NUMBER must be a positive integer (got "${process.env['PR_NUMBER'] ?? ''}")`,
+      `Need a PR number. Run "pnpm changelog:update <number>" or set PR_NUMBER=<number> (got "${raw}").`,
     );
   }
 

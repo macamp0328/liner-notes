@@ -65,19 +65,32 @@ fails.
 
 ```bash
 pnpm changelog:test                               # unit tests
-DRY_RUN=1 PR_NUMBER=283 pnpm changelog:update     # preview one entry, no writes
-DRY_RUN=1 pnpm changelog:backfill                 # preview the full history
+pnpm changelog:update 304                         # summarise one PR (also refreshes that entry)
+DRY_RUN=1 pnpm changelog:update 304               # ...preview only, no writes
 pnpm changelog:backfill                           # seed the store (run once after setup)
+pnpm changelog:backfill --refresh                 # re-summarise EVERY entry (e.g. after editing style.md)
 pnpm changelog:reconcile --since 2026-06-01       # heal a window on demand
 ```
 
 `DRY_RUN=1` prints the record + rendered body and writes nothing. All commands need `gh`
-auth (or `GH_TOKEN`); Claude summaries need `ANTHROPIC_API_KEY` (else they fall back).
+auth (or `GH_TOKEN`); Claude summaries need `ANTHROPIC_API_KEY` (else they fall back to the PR
+title).
+
+**Local env:** the scripts auto-load `.env.local` then `.env` from the repo root (via
+[`env.ts`](env.ts)), so a key in either file is picked up without a manual `export` — a real
+environment variable (CI secret) still wins. Both files are gitignored.
+
+**Upgrading fallbacks:** backfill and reconcile automatically re-summarise existing PR-title
+**fallback** entries once a key is available — so if the history was seeded before the key was
+set, just re-run `pnpm changelog:backfill` and the title-only entries become Claude summaries
+(no need to delete the draft). `--refresh` forces re-summarising entries that are already
+Claude-written too.
 
 ## Setup (one-time)
 
 ```bash
 gh secret set ANTHROPIC_API_KEY --repo <owner>/<repo>   # enables Claude summaries in CI
+# put ANTHROPIC_API_KEY in .env.local (gitignored) for local runs, then:
 pnpm changelog:backfill                                 # seed the project's history
 ```
 
@@ -85,7 +98,7 @@ pnpm changelog:backfill                                 # seed the project's his
 
 - **Cheaper model:** set `CHANGELOG_MODEL=claude-haiku-4-5` (in the workflow `env`, or your
   shell). Default is `claude-opus-4-8`.
-- **Voice:** edit [`style.md`](style.md).
+- **Voice:** edit [`style.md`](style.md), then `pnpm changelog:backfill --refresh` to re-render history in the new voice.
 - **Prefer a committed file over a release asset?** `store.ts` is the only place that knows
   where the store lives — swap `readStore`/`writeStore` to read/write a committed
   `CHANGELOG.md` + `.jsonl` instead of the release. (Note: writing to a protected `main`

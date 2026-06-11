@@ -103,6 +103,30 @@ export function upsert(
   return next;
 }
 
+/** Index a record set by PR number — for fast "do we already have this PR?" lookups. */
+export function recordsByNumber(records: readonly ChangelogRecord[]): Map<number, ChangelogRecord> {
+  return new Map(records.map((r) => [r.number, r]));
+}
+
+/**
+ * Decide whether a PR needs (re)summarising:
+ *   - a PR not yet in the store → always (it gets a Claude summary, or a fallback if no key);
+ *   - an existing **fallback** (PR-title) entry → yes, but only when a key is available to
+ *     improve it (so a keyless run doesn't churn title→title);
+ *   - an existing Claude entry → only when `refresh` is set (e.g. the editorial style changed).
+ * This is what lets backfill/reconcile upgrade title-only entries to real summaries once the
+ * key is present, without re-doing work that's already good.
+ */
+export function needsSummary(
+  existing: ChangelogRecord | undefined,
+  opts: { refresh: boolean; hasKey: boolean },
+): boolean {
+  if (!existing) return true;
+  if (!opts.hasKey) return false;
+  if (opts.refresh) return true;
+  return existing.summarySource === 'fallback';
+}
+
 /** A line is a usable record only if every field `render()` depends on is well-typed. */
 export function isValidRecord(value: unknown): value is ChangelogRecord {
   if (typeof value !== 'object' || value === null) return false;

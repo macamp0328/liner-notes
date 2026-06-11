@@ -68,7 +68,7 @@ function model(): string {
   return process.env['CHANGELOG_MODEL']?.trim() || DEFAULT_MODEL;
 }
 
-function hasApiKey(): boolean {
+export function hasApiKey(): boolean {
   return (process.env['ANTHROPIC_API_KEY']?.trim().length ?? 0) > 0;
 }
 

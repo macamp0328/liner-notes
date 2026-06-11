@@ -8,8 +8,10 @@ import assert from 'node:assert/strict';
 import {
   type ChangelogRecord,
   isoWeekMonday,
+  needsSummary,
   parsePrNumber,
   parseRecords,
+  recordsByNumber,
   render,
   serializeRecords,
   upsert,
@@ -135,4 +137,30 @@ test('render: deterministic — same records, same bytes', () => {
 
 test('render: empty store has a placeholder', () => {
   assert.match(render([]), /No entries yet/);
+});
+
+test('recordsByNumber: indexes by PR number', () => {
+  const map = recordsByNumber([rec({ number: 3 }), rec({ number: 7 })]);
+  assert.equal(map.size, 2);
+  assert.equal(map.get(7)?.number, 7);
+  assert.equal(map.get(99), undefined);
+});
+
+test('needsSummary: a PR not yet in the store always needs summarising', () => {
+  assert.equal(needsSummary(undefined, { refresh: false, hasKey: true }), true);
+  assert.equal(needsSummary(undefined, { refresh: false, hasKey: false }), true);
+});
+
+test('needsSummary: existing fallback upgrades only when a key is available', () => {
+  const fb = rec({ number: 1, summarySource: 'fallback' });
+  assert.equal(needsSummary(fb, { refresh: false, hasKey: true }), true);
+  assert.equal(needsSummary(fb, { refresh: false, hasKey: false }), false);
+});
+
+test('needsSummary: existing Claude entry only re-summarises under --refresh', () => {
+  const ai = rec({ number: 1, summarySource: 'claude' });
+  assert.equal(needsSummary(ai, { refresh: false, hasKey: true }), false);
+  assert.equal(needsSummary(ai, { refresh: true, hasKey: true }), true);
+  // ...but never without a key (a refresh can't improve anything offline).
+  assert.equal(needsSummary(ai, { refresh: true, hasKey: false }), false);
 });
