@@ -133,7 +133,7 @@ describe('getUnenrichedTracks', () => {
     // coalesce(...,'') keeps NULL-status (legacy) rows in scope while dropping the two
     // terminal instrumental statuses — a bare NOT ... IN [...] would drop NULL rows.
     expect(query).toContain(
-      "NOT coalesce(t.lyricsStatus, '') IN ['instrumental', 'probable-instrumental']",
+      "NOT (coalesce(t.lyricsStatus, '') IN ['instrumental', 'probable-instrumental'])",
     );
     expect(query).toContain('t.voiceInstrumental AS voiceInstrumental');
   });

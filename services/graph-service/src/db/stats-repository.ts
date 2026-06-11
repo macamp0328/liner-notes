@@ -136,8 +136,8 @@ const TRACK_QUERY = `
     count(CASE WHEN t.lyrics IS NOT NULL THEN 1 END) AS lyricsCovered,
     count(CASE WHEN t.lyricsSource = 'lrclib' THEN 1 END) AS lyricsLrclibCovered,
     count(CASE WHEN t.lyricsSource = 'genius' THEN 1 END) AS lyricsGeniusCovered,
-    count(CASE WHEN t.lyricsStatus = 'instrumental' THEN 1 END) AS lyricsInstrumental,
-    count(CASE WHEN t.lyricsStatus = 'probable-instrumental' THEN 1 END) AS lyricsProbableInstrumental,
+    count(CASE WHEN t.lyrics IS NULL AND t.lyricsStatus = 'instrumental' THEN 1 END) AS lyricsInstrumental,
+    count(CASE WHEN t.lyrics IS NULL AND t.lyricsStatus = 'probable-instrumental' THEN 1 END) AS lyricsProbableInstrumental,
     count(CASE WHEN t.recordingMbid IS NOT NULL THEN 1 END) AS mbidCovered,
     count(CASE WHEN t.isrc IS NOT NULL THEN 1 END) AS isrcCovered,
     count(CASE WHEN t.recordingMbid IS NOT NULL AND t.tempo IS NOT NULL THEN 1 END) AS tempoCovered,
@@ -229,6 +229,10 @@ export async function getStats(driver: Driver): Promise<StatsData> {
   // Lyrics funnel (#246). `resolved` keys on `lyrics IS NOT NULL` (ground truth) so legacy
   // tracks enriched before `lyricsStatus` existed still count; the two instrumental buckets
   // are believed lyric-less, so they leave the honest non-instrumental coverage denominator.
+  // The instrumental counts additionally require `lyrics IS NULL` (see TRACK_QUERY) so a track
+  // with dirty/manual data (lyrics set AND an instrumental status, which our writers never
+  // produce — there is no DB constraint) is counted only as `resolved`, keeping the four
+  // buckets disjoint and the derived `notFound` non-negative.
   const lyricsCovered = n(track, 'lyricsCovered');
   const lyricsInstrumental = n(track, 'lyricsInstrumental');
   const lyricsProbableInstrumental = n(track, 'lyricsProbableInstrumental');

@@ -70,6 +70,13 @@ describe('GET /api/v1/stats', () => {
         `MATCH (t:Track) WHERE t.lyrics IS NULL AND t.lyricsStatus IS NULL WITH t LIMIT 1
          SET t.lyricsStatus = 'not-found'`,
       );
+      // Dirty/manual data our writers never produce: lyrics set AND an instrumental status.
+      // The funnel must count it once (resolved), keeping the four buckets disjoint so the
+      // partition invariant holds and notFound can't go negative.
+      await session.run(
+        `MATCH (t:Track) WHERE t.lyrics IS NULL AND t.lyricsStatus IS NULL WITH t LIMIT 1
+         SET t.lyrics = 'oops', t.lyricsSource = 'lrclib', t.lyricsStatus = 'instrumental'`,
+      );
       await session.run(`MERGE (m:Master {discogsId: 555555})`);
       // mb-release-events output on the master.
       await session.run(
@@ -107,7 +114,9 @@ describe('GET /api/v1/stats', () => {
     expect(enrichment.releasesWithOriginalYear.applicable).toBeGreaterThanOrEqual(1);
 
     expect(enrichment.artistsWithProfile.covered).toBe(1);
-    expect(enrichment.tracksWithLyrics.covered).toBe(1);
+    // Two tracks carry lyrics: the resolved slice plus the dirty (lyrics + instrumental
+    // status) track, which the funnel counts as resolved, not instrumental.
+    expect(enrichment.tracksWithLyrics.covered).toBe(2);
     expect(enrichment.tracksWithRecordingMbid.covered).toBe(1);
     expect(enrichment.tracksWithIsrc.covered).toBe(1);
 
@@ -128,8 +137,8 @@ describe('GET /api/v1/stats', () => {
     );
     expect(enrichment.mastersWithReleaseEvents).toEqual({ covered: 1, applicable: 1, pct: 100 });
 
-    // The lyrics track came from LRCLIB; the per-source split reflects it.
-    expect(enrichment.tracksWithLyrics.sources.lrclib!.covered).toBe(1);
+    // Both lyric'd tracks came from LRCLIB; the per-source split reflects it.
+    expect(enrichment.tracksWithLyrics.sources.lrclib!.covered).toBe(2);
     expect(enrichment.tracksWithLyrics.sources.genius!.covered).toBe(0);
 
     // The one nationality edge is tagged musicbrainz; the split attributes it there.
@@ -144,17 +153,19 @@ describe('GET /api/v1/stats', () => {
     const { enrichment, counts } = (JSON.parse(res.payload) as StatsBody).data;
     const f = enrichment.lyricsFunnel;
 
-    // Exactly the classes we seeded; resolved counts the legacy null-status track.
+    // resolved counts the legacy null-status track AND the dirty lyrics+instrumental track
+    // (the latter is gated out of the instrumental bucket so it isn't double-counted).
     expect(f.total).toBe(counts.tracks);
-    expect(f.resolved).toBe(1);
+    expect(f.resolved).toBe(2);
     expect(f.instrumental).toBe(1);
     expect(f.probableInstrumental).toBe(1);
-    // The four buckets partition total exactly.
+    // The four buckets partition total exactly (no double-count, notFound stays ≥ 0).
     expect(f.resolved + f.instrumental + f.probableInstrumental + f.notFound).toBe(f.total);
+    expect(f.notFound).toBeGreaterThanOrEqual(0);
 
-    // The honest denominator excludes both instrumental classes (2), so it is smaller
-    // than the total track count while still containing the one resolved track.
-    expect(enrichment.tracksWithLyrics.covered).toBe(1);
+    // The honest denominator excludes both instrumental classes (2 tracks), so it is
+    // smaller than the total track count while still containing the resolved tracks.
+    expect(enrichment.tracksWithLyrics.covered).toBe(2);
     expect(enrichment.tracksWithLyrics.applicable).toBe(counts.tracks - 2);
   });
 

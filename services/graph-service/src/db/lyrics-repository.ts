@@ -36,7 +36,7 @@ export async function getUnenrichedTracks(driver: Driver): Promise<UnenrichedTra
     const result = await session.run(
       `MATCH (r:Release)-[:HAS_TRACK]->(t:Track)
        WHERE t.lyrics IS NULL
-         AND NOT coalesce(t.lyricsStatus, '') IN ['instrumental', 'probable-instrumental']
+         AND NOT (coalesce(t.lyricsStatus, '') IN ['instrumental', 'probable-instrumental'])
          AND (t.lyricsFetchedAt IS NULL
               OR t.lyricsFetchedAt < datetime() - duration({ days: $stalenessDays }))
        OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
