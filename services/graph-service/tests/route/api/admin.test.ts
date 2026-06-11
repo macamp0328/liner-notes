@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../../../src/server.js';
-import { resetAllPipelineStates } from '../../../src/api/admin.js';
+import { resetAllPipelineStates, busyWith } from '../../../src/api/admin.js';
 import { markReloadActive, __resetReloadProgress } from '../../../src/ingestion/reload-progress.js';
 import type { IngestionSummary } from '../../../src/ingestion/ingest.js';
 import type { JobState } from '../../../src/ingestion/job-state.js';
@@ -1319,6 +1319,242 @@ describe('Admin API', () => {
 
       release({ tracksProcessed: 0, tracksSkipped: 0, tracksFailed: 0, durationMs: 0 });
       await flushBackground();
+    });
+  });
+
+  // ── Cross-job mutual exclusion: /ingest + /reset routes (#300) ─────────────
+  // Closes the gaps #281 scoped out: /ingest ⇄ {reload, enrich}, and the /reset routes
+  // (per-stage reset, wipe-all, clear-genius) ⇄ any in-flight job. The shared busyWith() helper
+  // is unit-tested first, then each route direction is driven end-to-end.
+
+  describe('busyWith (cross-job guard)', () => {
+    it('reports JOB_RUNNING when an ingest job is running', () => {
+      mockGetJobState.mockReturnValue(runningState);
+      expect(busyWith()).toEqual({ code: 'JOB_RUNNING', message: 'Ingestion is in progress' });
+    });
+
+    it('ignores the ingest signal when asked', () => {
+      mockGetJobState.mockReturnValue(runningState);
+      expect(busyWith({ ingest: true })).toBeNull();
+    });
+
+    it('reports RELOAD_RUNNING when a reload is active (ingest idle)', () => {
+      markReloadActive('reload-x');
+      expect(busyWith()).toEqual({ code: 'RELOAD_RUNNING', message: 'A reload is in progress' });
+    });
+
+    it('ignores the reload signal when asked', () => {
+      markReloadActive('reload-x');
+      expect(busyWith({ reload: true })).toBeNull();
+    });
+
+    it('returns null when nothing is in flight', () => {
+      expect(busyWith()).toBeNull();
+    });
+  });
+
+  describe('POST /ingest ⇄ {reload, enrich} (#300)', () => {
+    it('409s RELOAD_RUNNING while a reload is active', async () => {
+      markReloadActive('reload-job-1');
+      mockRunIngestion.mockClear();
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/ingest',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(409);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('RELOAD_RUNNING');
+      expect(mockRunIngestion).not.toHaveBeenCalled();
+    });
+
+    it('409s ENRICHMENT_RUNNING while a standalone enrich is running', async () => {
+      mockRunIngestion.mockClear();
+      let release!: (value: {
+        enriched: number;
+        skipped: number;
+        failed: number;
+        durationMs: number;
+      }) => void;
+      mockEnrichLyrics.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+      const enrich = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(enrich.statusCode).toBe(202);
+
+      const ingest = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/ingest',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(ingest.statusCode).toBe(409);
+      const body = JSON.parse(ingest.payload) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe('ENRICHMENT_RUNNING');
+      expect(body.error.message).toContain('lyrics enrichment');
+      expect(mockRunIngestion).not.toHaveBeenCalled();
+
+      release({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
+      await flushBackground();
+    });
+  });
+
+  describe('POST /reload ⇄ ingest (#300)', () => {
+    it('409s JOB_RUNNING while an ingest job is running, without starting a reload', async () => {
+      mockGetJobState.mockReturnValue(runningState);
+      mockCreateReloadJob.mockClear();
+      mockRunReload.mockClear();
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/reload',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(409);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('JOB_RUNNING');
+      expect(mockCreateReloadJob).not.toHaveBeenCalled();
+      expect(mockRunReload).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /<stage>/enrich ⇄ ingest (#300)', () => {
+    it('409s JOB_RUNNING while an ingest job is running, without enriching', async () => {
+      mockGetJobState.mockReturnValue(runningState);
+      mockEnrichLyrics.mockClear();
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(409);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('JOB_RUNNING');
+      expect(mockEnrichLyrics).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /<stage>/reset ⇄ {reload, ingest} (#300)', () => {
+    it('409s RELOAD_RUNNING while a reload is active, without resetting', async () => {
+      markReloadActive('reload-job-1');
+      mockResetTrackAcousticBrainzEnrichment.mockClear();
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/track-acousticbrainz/reset',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(409);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('RELOAD_RUNNING');
+      expect(mockResetTrackAcousticBrainzEnrichment).not.toHaveBeenCalled();
+    });
+
+    it('409s JOB_RUNNING while an ingest job is running, without resetting', async () => {
+      mockGetJobState.mockReturnValue(runningState);
+      mockResetTrackAcousticBrainzEnrichment.mockClear();
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/track-acousticbrainz/reset',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(409);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('JOB_RUNNING');
+      expect(mockResetTrackAcousticBrainzEnrichment).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /reset?confirm=wipe-all ⇄ any job (#300)', () => {
+    it('409s RELOAD_RUNNING while a reload is active', async () => {
+      markReloadActive('reload-job-1');
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/reset?confirm=wipe-all',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(409);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('RELOAD_RUNNING');
+    });
+
+    it('409s JOB_RUNNING while an ingest job is running', async () => {
+      mockGetJobState.mockReturnValue(runningState);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/reset?confirm=wipe-all',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(409);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('JOB_RUNNING');
+    });
+
+    it('409s ENRICHMENT_RUNNING while a standalone enrich is running', async () => {
+      let release!: (value: {
+        enriched: number;
+        skipped: number;
+        failed: number;
+        durationMs: number;
+      }) => void;
+      mockEnrichLyrics.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+      const enrich = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(enrich.statusCode).toBe(202);
+
+      const wipe = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/reset?confirm=wipe-all',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(wipe.statusCode).toBe(409);
+      const body = JSON.parse(wipe.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('ENRICHMENT_RUNNING');
+
+      release({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
+      await flushBackground();
+    });
+
+    it('lets the confirm gate (400) precede the busy check', async () => {
+      // A wipe with no ?confirm is rejected 400 even while a reload is active — the destructive-
+      // intent gate is checked before the busy guard.
+      markReloadActive('reload-job-1');
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/reset',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(400);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('CONFIRMATION_REQUIRED');
+    });
+  });
+
+  describe('POST /lyrics/clear-genius ⇄ any job (#300)', () => {
+    it('409s while a reload is active, without clearing', async () => {
+      markReloadActive('reload-job-1');
+      mockClearGeniusLyrics.mockClear();
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/clear-genius',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(409);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('RELOAD_RUNNING');
+      expect(mockClearGeniusLyrics).not.toHaveBeenCalled();
     });
   });
 });
