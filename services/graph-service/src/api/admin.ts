@@ -187,10 +187,18 @@ interface PipelineState {
   completedAt: string | null;
   durationMs: number | null;
   lastResult: Record<string, unknown> | null;
+  lastError: string | null;
 }
 
 function makePipelineState(): PipelineState {
-  return { running: false, startedAt: null, completedAt: null, durationMs: null, lastResult: null };
+  return {
+    running: false,
+    startedAt: null,
+    completedAt: null,
+    durationMs: null,
+    lastResult: null,
+    lastError: null,
+  };
 }
 
 /**
@@ -214,8 +222,9 @@ interface PipelineResetConfig {
  * One standalone-enrichment pipeline (issue #222 phase ③). The registry replaces nine
  * hand-written `/enrich` + `/status` (+ six `/reset`) route blocks and their per-pipeline
  * mutable state globals; `adminRoutes` generates the routes from this array. Entries hold
- * the OpenAPI strings/schemas VERBATIM from the routes they replaced — `docs:generate`
- * output must not change.
+ * the OpenAPI strings/schemas VERBATIM from the routes they replaced — except the `/enrich`
+ * response, which #280 flipped to a fire-and-forget 202 (run continues in the background;
+ * poll `/status`), so the enrich body no longer carries a summary.
  */
 interface PipelineEntry {
   /** Path segment: POST /<name>/enrich, GET /<name>/status, optional POST /<name>/reset. */
@@ -226,8 +235,6 @@ interface PipelineEntry {
   runningMessage: string;
   enrichSummary: string;
   enrichDescription: string;
-  /** 200 `data` schema for /enrich — declares `required` (the run fully populates it). */
-  enrichDataSchema: Record<string, unknown>;
   /** `lastResult` schema for /status — historically most variants declare no `required`. */
   statusSummarySchema: Record<string, unknown>;
   /**
@@ -264,19 +271,6 @@ const trackFeatureSummarySchema = {
     tracksFailed: { type: 'integer' },
     durationMs: { type: 'integer' },
   },
-};
-
-// Enrich-200 `data` shapes — same fields plus `required`, matching the original enrich routes.
-const standardSummaryRequiredSchema = {
-  type: 'object',
-  required: ['enriched', 'skipped', 'failed', 'durationMs'],
-  properties: standardSummarySchema.properties,
-};
-
-const trackFeatureSummaryRequiredSchema = {
-  type: 'object',
-  required: ['tracksProcessed', 'tracksSkipped', 'tracksFailed', 'durationMs'],
-  properties: trackFeatureSummarySchema.properties,
 };
 
 const mbReleaseEventsSummarySchema = {
@@ -336,7 +330,6 @@ const PIPELINES: PipelineEntry[] = [
       'infra/RUNBOOK.md "Harvest Genius lyrics locally"); it reuses this same pipeline from a non-blocked IP. ' +
       'When Genius does run it sends a browser-like User-Agent to clear Cloudflare (#195); override via ' +
       '`GENIUS_USER_AGENT` if the default needs refreshing.',
-    enrichDataSchema: standardSummaryRequiredSchema,
     statusSummarySchema: standardSummarySchema,
     schemaHas503: true,
     clientCheckFirst: false,
@@ -371,7 +364,6 @@ const PIPELINES: PipelineEntry[] = [
       'node no source could resolve is retried at most once per window while already-countried nodes are ' +
       'skipped. Run `POST /api/v1/admin/nationality/reset` to force a full re-run.\n\n' +
       'Requires `MUSICBRAINZ_USER_AGENT` env var.',
-    enrichDataSchema: nationalitySummarySchema,
     statusSummarySchema: nationalitySummarySchema,
     schemaHas503: true,
     clientCheckFirst: false,
@@ -420,7 +412,6 @@ const PIPELINES: PipelineEntry[] = [
       'Use this endpoint to run it in isolation without a full re-ingest. ' +
       'Deduplicates by masterDiscogsId — releases sharing the same master trigger only one API call. ' +
       'Requires `DISCOGS_TOKEN` env var.',
-    enrichDataSchema: standardSummaryRequiredSchema,
     statusSummarySchema: standardSummarySchema,
     schemaHas503: true,
     clientCheckFirst: true,
@@ -452,17 +443,6 @@ const PIPELINES: PipelineEntry[] = [
       'Same country with different release IDs creates separate relationships, enabling `min(r.date)` ' +
       'queries for first-release-per-country.\n\n' +
       'Requires `MUSICBRAINZ_USER_AGENT` env var.',
-    enrichDataSchema: {
-      type: 'object',
-      required: [
-        'mastersProcessed',
-        'mastersSkipped',
-        'mastersFailed',
-        'eventsWritten',
-        'durationMs',
-      ],
-      properties: mbReleaseEventsSummarySchema.properties,
-    },
     statusSummarySchema: mbReleaseEventsSummarySchema,
     schemaHas503: true,
     clientCheckFirst: false,
@@ -507,18 +487,6 @@ const PIPELINES: PipelineEntry[] = [
       'each attempt — so a track with no MusicBrainz match is retried at most once per window while ' +
       'already-resolved tracks are skipped. Run `POST /api/v1/admin/track-musicbrainz/reset` to force a full re-run.\n\n' +
       'Requires `MUSICBRAINZ_USER_AGENT` env var.',
-    enrichDataSchema: {
-      type: 'object',
-      required: [
-        'releasesProcessed',
-        'releasesSkipped',
-        'releasesFailed',
-        'tracksMatched',
-        'tracksUnmatched',
-        'durationMs',
-      ],
-      properties: trackMusicBrainzSummarySchema.properties,
-    },
     statusSummarySchema: trackMusicBrainzSummarySchema,
     schemaHas503: true,
     clientCheckFirst: false,
@@ -571,7 +539,6 @@ const PIPELINES: PipelineEntry[] = [
       'after each attempt — so a track with no AcousticBrainz data is retried at most once per window ' +
       'while already-featured tracks are skipped. Run `POST /api/v1/admin/track-acousticbrainz/reset` ' +
       'to force a full re-run.',
-    enrichDataSchema: trackFeatureSummaryRequiredSchema,
     statusSummarySchema: trackFeatureSummarySchema,
     schemaHas503: false,
     clientCheckFirst: false,
@@ -617,7 +584,6 @@ const PIPELINES: PipelineEntry[] = [
       '(default 30), stamping `deezerFetchedAt` after each attempt — so a track Deezer had nothing for is ' +
       'retried at most once per window while already-populated tracks are skipped. Run ' +
       '`POST /api/v1/admin/track-deezer/reset` to force a full re-run.',
-    enrichDataSchema: trackFeatureSummaryRequiredSchema,
     statusSummarySchema: trackFeatureSummarySchema,
     schemaHas503: false,
     clientCheckFirst: false,
@@ -656,7 +622,6 @@ const PIPELINES: PipelineEntry[] = [
       'retried at most once per window via the `profileFetchedAt` marker; run ' +
       '`POST /api/v1/admin/artist-profiles/reset` first to re-fetch every artist.\n\n' +
       'Requires `DISCOGS_TOKEN` env var.',
-    enrichDataSchema: standardSummaryRequiredSchema,
     statusSummarySchema: standardSummarySchema,
     schemaHas503: true,
     clientCheckFirst: true,
@@ -694,11 +659,6 @@ const PIPELINES: PipelineEntry[] = [
       'Use this endpoint to recompute in isolation after a re-ingest adds releases.\n\n' +
       '**No reset endpoint:** the aggregation recomputes each Artist from scratch every run, ' +
       'so it is inherently idempotent and there is nothing to reset.',
-    enrichDataSchema: {
-      type: 'object',
-      required: ['genresEnriched', 'stylesEnriched', 'skipped', 'failed', 'durationMs'],
-      properties: artistGenresSummarySchema.properties,
-    },
     statusSummarySchema: artistGenresSummarySchema,
     schemaHas503: false,
     clientCheckFirst: false,
@@ -962,7 +922,9 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   // (the committed OpenAPI doc emits paths in registration order).
   for (const entry of PIPELINES) {
     fastify.post<{
-      Reply: { data: Record<string, unknown> } | { error: { code: string; message: string } };
+      Reply:
+        | { data: { message: string; statusUrl: string } }
+        | { error: { code: string; message: string } };
     }>(
       `/${entry.name}/enrich`,
       {
@@ -972,10 +934,16 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           description: entry.enrichDescription,
           security: [{ bearerAuth: [] }],
           response: {
-            200: {
+            202: {
               type: 'object',
               required: ['data'],
-              properties: { data: entry.enrichDataSchema },
+              properties: {
+                data: {
+                  type: 'object',
+                  required: ['message', 'statusUrl'],
+                  properties: { message: { type: 'string' }, statusUrl: { type: 'string' } },
+                },
+              },
             },
             401: errorResponseRef,
             409: errorResponseRef,
@@ -1011,21 +979,43 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           }
         }
 
+        // No await between the 409 check above and `running = true` keeps the guard atomic.
         entry.state.running = true;
         entry.state.startedAt = new Date().toISOString();
         entry.state.completedAt = null;
         entry.state.durationMs = null;
         entry.state.lastResult = null;
-        try {
-          const summary = await prepared.run(getDriver());
-          entry.state.lastResult = summary;
-          entry.state.completedAt = new Date().toISOString();
-          entry.state.durationMs =
-            typeof summary['durationMs'] === 'number' ? summary['durationMs'] : null;
-          return reply.send({ data: summary });
-        } finally {
-          entry.state.running = false;
-        }
+        entry.state.lastError = null;
+
+        // Fire-and-forget (like POST /ingest): the slow run continues in the background while we
+        // return 202, so the request never sits past Cloudflare's ~100s proxy timeout (#280).
+        // Outcome lands on the pipeline state, observable via GET /<name>/status.
+        // Capture just the logger — these runs last hours, and closing over `request` would pin
+        // its headers/body/raw socket in memory for the whole run; the pino child logger doesn't.
+        const log = request.log;
+        void prepared
+          .run(getDriver())
+          .then((summary) => {
+            entry.state.lastResult = summary;
+            entry.state.completedAt = new Date().toISOString();
+            entry.state.durationMs =
+              typeof summary['durationMs'] === 'number' ? summary['durationMs'] : null;
+          })
+          .catch((err: unknown) => {
+            entry.state.lastError = err instanceof Error ? err.message : String(err);
+            entry.state.completedAt = new Date().toISOString();
+            log.error({ err }, `[enrich] ${entry.name} enrichment failed`);
+          })
+          .finally(() => {
+            entry.state.running = false;
+          });
+
+        return reply.code(202).send({
+          data: {
+            message: `${entry.statusLabel} started`,
+            statusUrl: `/api/v1/admin/${entry.name}/status`,
+          },
+        });
       },
     );
 
@@ -1087,13 +1077,14 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     properties: {
       data: {
         type: 'object',
-        required: ['running', 'startedAt', 'completedAt', 'durationMs', 'lastResult'],
+        required: ['running', 'startedAt', 'completedAt', 'durationMs', 'lastResult', 'lastError'],
         properties: {
           running: { type: 'boolean' },
           startedAt: { type: 'string', nullable: true },
           completedAt: { type: 'string', nullable: true },
           durationMs: { type: 'number', nullable: true },
           lastResult: { ...summary, nullable: true },
+          lastError: { type: 'string', nullable: true },
         },
       },
     },
