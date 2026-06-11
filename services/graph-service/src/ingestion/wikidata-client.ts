@@ -1,6 +1,10 @@
-import type { Logger } from './discogs-client.js';
 import { transientNetworkCode } from './network-errors.js';
-import { jitteredBackoffMs } from './backoff.js';
+import {
+  createRateLimitedFetch,
+  RetriesExhaustedError,
+  type Logger,
+  type RateLimitedFetch,
+} from './rate-limited-fetch.js';
 
 export interface WikidataClientConfig {
   userAgent: string;
@@ -26,17 +30,29 @@ const DEFAULT_BACKOFF_BASE_MS = 2_000;
 
 export class WikidataClient {
   private readonly userAgent: string;
-  private readonly delayMs: number;
-  private readonly backoffBaseMs: number;
-  private readonly random: () => number;
   private readonly log: Logger;
+  private readonly rlFetch: RateLimitedFetch;
 
   constructor(config: WikidataClientConfig) {
     this.userAgent = config.userAgent;
-    this.delayMs = config.delayMs;
-    this.backoffBaseMs = config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
-    this.random = config.random ?? Math.random;
     this.log = config.logger ?? console;
+    this.rlFetch = createRateLimitedFetch({
+      label: 'wikidata-client',
+      apiName: 'Wikidata API',
+      delayMs: config.delayMs,
+      maxRetries: MAX_RETRIES,
+      backoffBaseMs: config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS,
+      // 502 = transient Bad Gateway from Blazegraph.
+      retryStatuses: [429, 502, 503],
+      // Wikidata sometimes serves an HTML maintenance page with a 200 OK — retry those
+      // (only when ok; an HTML error page must still soft-skip via the !ok branch below).
+      shouldRetryResponse: (res) =>
+        res.ok && (res.headers.get('content-type') ?? '').includes('text/html')
+          ? 'HTML response'
+          : null,
+      ...(config.random !== undefined ? { random: config.random } : {}),
+      ...(config.logger !== undefined ? { logger: config.logger } : {}),
+    });
   }
 
   /**
@@ -103,86 +119,37 @@ export class WikidataClient {
   private async executeSparql(query: string, logLabel: string): Promise<string | null> {
     const url = `${SPARQL_ENDPOINT}?query=${encodeURIComponent(query)}&format=json`;
 
-    let attempt = 0;
-    let backoffMs = this.backoffBaseMs;
+    // Unlike the other clients, Wikidata never throws — every failure soft-skips to null. The
+    // shared core throws on exhaustion (RetriesExhaustedError) or rethrows a transient network
+    // error that outlived its retry budget; both mean "give up on this lookup", so we catch and
+    // return null. A one-shot non-transient error (the core rethrows it immediately) is a
+    // plain network-error skip.
+    try {
+      const response = await this.rlFetch(url, {
+        headers: {
+          'User-Agent': this.userAgent,
+          Accept: 'application/sparql-results+json',
+        },
+      });
 
-    while (attempt <= MAX_RETRIES) {
-      try {
-        const response = await fetch(url, {
-          headers: {
-            'User-Agent': this.userAgent,
-            Accept: 'application/sparql-results+json',
-          },
-        });
-
-        if (response.status === 429 || response.status === 503 || response.status === 502) {
-          if (attempt >= MAX_RETRIES) break;
-          const retryAfterHeader = response.headers.get('Retry-After');
-          const retryAfterRaw = parseInt(retryAfterHeader ?? '', 10);
-          const retryAfterMs = Number.isFinite(retryAfterRaw) ? retryAfterRaw * 1_000 : 0;
-          const waitMs = jitteredBackoffMs(backoffMs, { retryAfterMs, random: this.random });
-          this.log.warn(
-            `[wikidata-client] HTTP ${response.status} for ${logLabel} on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${waitMs}ms`,
-          );
-          await this.sleep(waitMs);
-          backoffMs = Math.min(backoffMs * 2, 32_000);
-          attempt++;
-          continue;
-        }
-
-        if (!response.ok) {
-          this.log.warn(`[wikidata-client] HTTP ${response.status} for ${logLabel} — skipping`);
-          return null;
-        }
-
-        const contentType = response.headers.get('content-type') ?? '';
-        if (contentType.includes('text/html')) {
-          if (attempt >= MAX_RETRIES) break;
-          const waitMs = jitteredBackoffMs(backoffMs, { random: this.random });
-          this.log.warn(
-            `[wikidata-client] HTML response (status ${response.status}) for ${logLabel} on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${waitMs}ms`,
-          );
-          await this.sleep(waitMs);
-          backoffMs = Math.min(backoffMs * 2, 32_000);
-          attempt++;
-          continue;
-        }
-
-        const data = (await response.json()) as SparqlResponse;
-        await this.sleep(this.delayMs);
-
-        const binding = data.results.bindings[0];
-        const code = binding?.['countryCode']?.value?.trim();
-        return code ?? null;
-      } catch (err) {
-        // A transient network-level failure (fetch failed / ECONNRESET / ...) is worth a
-        // bounded retry on the same budget as the HTTP-status branch above. Anything else stays
-        // a soft-skip to null — this client never throws. Exhausting the retries breaks to the
-        // "Exceeded max retries" path below, which also returns null.
-        const netCode = transientNetworkCode(err);
-        if (netCode === null) {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.log.warn(`[wikidata-client] Network error for ${logLabel} — ${msg}`);
-          return null;
-        }
-        if (attempt >= MAX_RETRIES) break;
-        const waitMs = jitteredBackoffMs(backoffMs, { random: this.random });
-        this.log.warn(
-          `[wikidata-client] Network error (${netCode}) for ${logLabel} on attempt ${attempt + 1}/${MAX_RETRIES + 1} — retrying in ${waitMs}ms`,
-        );
-        await this.sleep(waitMs);
-        backoffMs = Math.min(backoffMs * 2, 32_000);
-        attempt++;
-        continue;
+      if (!response.ok) {
+        this.log.warn(`[wikidata-client] HTTP ${response.status} for ${logLabel} — skipping`);
+        return null;
       }
+
+      const data = (await response.json()) as SparqlResponse;
+      const binding = data.results.bindings[0];
+      const code = binding?.['countryCode']?.value?.trim();
+      return code ?? null;
+    } catch (err) {
+      if (err instanceof RetriesExhaustedError || transientNetworkCode(err) !== null) {
+        this.log.warn(`[wikidata-client] Exceeded max retries for ${logLabel} — skipping`);
+        return null;
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      this.log.warn(`[wikidata-client] Network error for ${logLabel} — ${msg}`);
+      return null;
     }
-
-    this.log.warn(`[wikidata-client] Exceeded max retries for ${logLabel} — skipping`);
-    return null;
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 

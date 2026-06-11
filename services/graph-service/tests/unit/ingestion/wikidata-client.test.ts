@@ -170,30 +170,6 @@ describe('WikidataClient', () => {
     vi.useRealTimers();
   });
 
-  it('applies equal-jitter to backoff: random()=0 sleeps half the base (#245)', async () => {
-    const jitterClient = new WikidataClient({
-      userAgent: 'liner-notes/test',
-      delayMs: 0,
-      backoffBaseMs: 4000,
-      random: () => 0, // equal-jitter floor → base/2
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    });
-    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation((fn) => {
-      (fn as () => void)();
-      return 0 as unknown as ReturnType<typeof setTimeout>;
-    });
-    try {
-      fetchSpy
-        .mockResolvedValueOnce(makeErrorResponse(429))
-        .mockResolvedValueOnce(makeOkResponse(makeSparqlResponse('FR')));
-      const result = await jitterClient.getCountryByDiscogsId(1);
-      expect(result).toBe('FR');
-      expect(setTimeoutSpy.mock.calls[0]?.[1]).toBe(2000);
-    } finally {
-      setTimeoutSpy.mockRestore();
-    }
-  });
-
   it('retries on HTML response and succeeds', async () => {
     fetchSpy
       .mockResolvedValueOnce(makeHtmlResponse(200))

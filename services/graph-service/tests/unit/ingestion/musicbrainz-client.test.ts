@@ -176,31 +176,6 @@ describe('MusicBrainzClient', () => {
       expect(fetchSpy).toHaveBeenCalledTimes(3);
     });
 
-    it('applies equal-jitter to backoff: random()=0 sleeps half the base (#245)', async () => {
-      const jitterClient = new MusicBrainzClient({
-        userAgent: 'liner-notes/test',
-        delayMs: 0,
-        backoffBaseMs: 4000,
-        random: () => 0, // equal-jitter floor → base/2
-        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-      });
-      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation((fn) => {
-        (fn as () => void)();
-        return 0 as unknown as ReturnType<typeof setTimeout>;
-      });
-      try {
-        fetchSpy
-          .mockResolvedValueOnce(makeErrorResponse(429, 'Too Many Requests'))
-          .mockResolvedValueOnce(makeOkResponse(mbUrlResponse('mbid')))
-          .mockResolvedValueOnce(makeOkResponse(mbArtistResponse('JP')));
-        const result = await jitterClient.getCountryByDiscogsId(5);
-        expect(result).toBe('JP');
-        expect(setTimeoutSpy.mock.calls[0]?.[1]).toBe(2000);
-      } finally {
-        setTimeoutSpy.mockRestore();
-      }
-    });
-
     it('returns null (does not throw) when URL lookup throws a network error', async () => {
       fetchSpy.mockRejectedValueOnce(new Error('Network error'));
       const result = await client.getCountryByDiscogsId(1);
@@ -309,38 +284,14 @@ describe('MusicBrainzClient', () => {
       );
     });
 
-    it('throws when max retries are exceeded (non-404 failure)', async () => {
-      fetchSpy
-        .mockResolvedValueOnce(makeErrorResponse(503, 'Service Unavailable'))
-        .mockResolvedValueOnce(makeErrorResponse(503, 'Service Unavailable'))
-        .mockResolvedValueOnce(makeErrorResponse(503, 'Service Unavailable'))
-        .mockResolvedValueOnce(makeErrorResponse(503, 'Service Unavailable'));
+    it('throws after exhausting all retries on a persistent 503 (4 attempts = 3 retries)', async () => {
+      fetchSpy.mockResolvedValue(makeErrorResponse(503, 'Service Unavailable'));
+
       await expect(client.getReleaseGroupMbidByMasterDiscogsId(1)).rejects.toThrow(
         'exceeded max retries',
       );
-    });
-
-    it('does not back off after the final 503 attempt before throwing', async () => {
-      const warn = vi.fn();
-      const quietClient = new MusicBrainzClient({
-        userAgent: 'liner-notes/test',
-        delayMs: 0,
-        backoffBaseMs: 0,
-        logger: { info: vi.fn(), warn, error: vi.fn(), debug: vi.fn() },
-      });
-      fetchSpy.mockResolvedValue(makeErrorResponse(503, 'Service Unavailable'));
-
-      await expect(quietClient.getReleaseGroupMbidByMasterDiscogsId(1)).rejects.toThrow(
-        'exceeded max retries',
-      );
-
-      // The final allowed attempt still fetches, but must not log/sleep before throwing:
-      // 4 total fetches, only 3 backoff warnings (none for the unreachable 4th wait).
+      // Pins MAX_RETRIES=3 wiring; the loop mechanics live in rate-limited-fetch.test.ts.
       expect(fetchSpy).toHaveBeenCalledTimes(4);
-      expect(warn).toHaveBeenCalledTimes(3);
-      for (const call of warn.mock.calls) {
-        expect(call[0] as string).not.toContain('attempt 4/4');
-      }
     });
   });
 
