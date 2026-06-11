@@ -27,10 +27,19 @@ spec:
         - name: ecr-pull-secret
       # Defense-in-depth on a single-node k3s box where workload and control plane
       # share the host: the image already runs as the unprivileged node user
-      # (USER node in the Dockerfile); these settings make root a deploy-time error
+      # (USER 1000 in the Dockerfile); these settings make root a deploy-time error
       # rather than a silent regression.
+      #
+      # runAsUser MUST be numeric and accompany runAsNonRoot: the kubelet cannot
+      # resolve a username (e.g. `USER node`) to a UID at admission, so with only
+      # `runAsNonRoot: true` it fails the container with CreateContainerConfigError
+      # ("image has non-numeric user (node), cannot verify user is non-root").
+      # node:22-alpine's `node` user is uid/gid 1000 — pin it explicitly so the
+      # kubelet can verify 1000 != 0.
       securityContext:
         runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
       containers:
         - name: graph-service
           # `graph-service-image` is a logical name retargeted by the
