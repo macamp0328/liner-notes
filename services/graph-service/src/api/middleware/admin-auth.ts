@@ -14,15 +14,26 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(digestA, digestB);
 }
 
-export async function adminAuthHook(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+/**
+ * Strict authorization predicate: true only when ADMIN_TOKEN is set AND the request
+ * carries a matching `Bearer <token>`. Deliberately returns false when the token is
+ * unset, so callers (e.g. the rate-limiter allowList) never treat an unconfigured
+ * instance as "authorized". The hook below keeps the richer 503-vs-401 distinction.
+ */
+export function isAuthorizedAdmin(request: FastifyRequest): boolean {
   const token = process.env['ADMIN_TOKEN'];
-  if (!token) {
+  if (!token) return false;
+  const auth = request.headers['authorization'];
+  return typeof auth === 'string' && safeEqual(auth, `Bearer ${token}`);
+}
+
+export async function adminAuthHook(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  if (!process.env['ADMIN_TOKEN']) {
     return reply.code(503).send({
       error: { code: 'SERVICE_UNAVAILABLE', message: 'Admin token not configured' },
     });
   }
-  const auth = request.headers['authorization'];
-  if (!auth || !safeEqual(auth, `Bearer ${token}`)) {
+  if (!isAuthorizedAdmin(request)) {
     return reply.code(401).send({
       error: { code: 'UNAUTHORIZED', message: 'Valid ADMIN_TOKEN bearer token required' },
     });

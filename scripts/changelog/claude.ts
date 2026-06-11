@@ -76,7 +76,7 @@ function styleText(): string {
   return readFileSync(join(import.meta.dirname, 'style.md'), 'utf8');
 }
 
-function buildUserPrompt(pr: PrInput): string {
+export function buildUserPrompt(pr: PrInput): string {
   return [
     `PR #${pr.number}: ${pr.title}`,
     `Author: @${pr.author}`,
@@ -90,23 +90,46 @@ function buildUserPrompt(pr: PrInput): string {
   ].join('\n');
 }
 
-interface ParsedSummary {
+export interface ParsedSummary {
   category: Category;
   summary: string;
   impact: Impact;
   breaking: boolean;
 }
 
-/** Parse + coerce the model's JSON. Structured outputs guarantee the shape, but we
- * defend against drift so a malformed field degrades gracefully rather than throws. */
-function parseSummary(text: string): ParsedSummary {
-  const raw: unknown = JSON.parse(text);
-  const obj = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+/**
+ * Parse + coerce the model's JSON. Structured outputs guarantee the shape, but we
+ * never trust it blindly: malformed JSON or a non-object returns `null` (never
+ * throws), and each field is coerced to a safe default so an odd value can't
+ * produce a broken record. Returning null (vs throwing) is what keeps one bad
+ * response from killing an entire batch — see `recordFromText`.
+ */
+export function parseSummary(text: string): ParsedSummary | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const obj = raw as Record<string, unknown>;
   const category = isCategory(obj['category']) ? obj['category'] : 'Changed';
   const impact = isImpact(obj['impact']) ? obj['impact'] : 'developer';
   const summary = typeof obj['summary'] === 'string' ? obj['summary'].trim().slice(0, 240) : '';
   const breaking = obj['breaking'] === true;
   return { category, summary, impact, breaking };
+}
+
+/**
+ * Build a record from a model response's text, falling back to the PR title when
+ * the JSON is malformed OR the summary came back empty. Guarantees we never emit
+ * a blank/broken changelog line, and never throw — so one unusable response in a
+ * batch degrades to that PR's fallback instead of losing the whole run.
+ */
+export function recordFromText(pr: PrInput, text: string): ChangelogRecord {
+  const parsed = parseSummary(text);
+  if (parsed === null || parsed.summary === '') return fallbackRecord(pr);
+  return toRecord(pr, parsed, 'claude');
 }
 
 function toRecord(pr: PrInput, parsed: ParsedSummary, source: SummarySource): ChangelogRecord {
@@ -129,13 +152,13 @@ function toRecord(pr: PrInput, parsed: ParsedSummary, source: SummarySource): Ch
 const CONVENTIONAL_PREFIX =
   /^(task\/\d+|feat|fix|chore|docs|build|ci|refactor|perf|style|test)(\([^)]*\))?!?:\s*/i;
 
-function cleanTitle(title: string): string {
+export function cleanTitle(title: string): string {
   const stripped = title.replace(CONVENTIONAL_PREFIX, '').trim();
   const base = stripped || title.trim();
   return base.charAt(0).toUpperCase() + base.slice(1);
 }
 
-function fallbackCategory(title: string): Category {
+export function fallbackCategory(title: string): Category {
   const lead = title.toLowerCase();
   if (lead.startsWith('fix')) return 'Fixed';
   if (lead.startsWith('docs')) return 'Docs';
@@ -190,8 +213,11 @@ export async function summarize(pr: PrInput): Promise<SummarizeOutcome> {
       messages: [{ role: 'user', content: buildUserPrompt(pr) }],
       output_config: { effort: 'high', format: { type: 'json_schema', schema: SUMMARY_SCHEMA } },
     });
-    const record = toRecord(pr, parseSummary(findText(message.content)), 'claude');
-    return { record, note: costNote(message.usage, modelId) };
+    const record = recordFromText(pr, findText(message.content));
+    const cost = costNote(message.usage, modelId);
+    const note =
+      record.summarySource === 'claude' ? cost : `fallback (unusable response) — ${cost}`;
+    return { record, note };
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     return { record: fallbackRecord(pr), note: `fallback (Claude error: ${reason})` };
@@ -254,10 +280,9 @@ export async function summarizeBatch(prs: PrInput[]): Promise<ChangelogRecord[]>
     const pr = byId.get(item.custom_id);
     if (!pr) continue;
     if (item.result.type === 'succeeded') {
-      records.set(
-        pr.number,
-        toRecord(pr, parseSummary(findText(item.result.message.content)), 'claude'),
-      );
+      // recordFromText never throws — a single unparseable response degrades to
+      // that PR's fallback instead of aborting the whole batch write.
+      records.set(pr.number, recordFromText(pr, findText(item.result.message.content)));
     } else {
       console.warn(`  ${item.custom_id}: ${item.result.type} — using fallback`);
       records.set(pr.number, fallbackRecord(pr));

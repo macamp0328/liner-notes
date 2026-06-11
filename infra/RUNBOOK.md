@@ -813,13 +813,15 @@ curl --max-time 8 http://<eip-dns>:30080/api/v1/health || echo "blocked (expecte
 
 > After the lockdown the origin is reachable **only through Cloudflare** — direct `http://<eip>:30080` from anywhere (including your laptop) is refused. Any habit of hitting the public IP on `:30080` (e.g. quick `/stats` or `/health` checks) must move to the HTTPS domain: `https://<custom-domain>/api/v1/...`.
 
+> **Rate-limit keying depends on this lockdown (#287).** With the SG locked, the app keys its per-client rate limiter on Cloudflare's `cf-connecting-ip` header (which CF overwrites every request) instead of the shared CF-edge/NodePort-SNAT peer IP — enabled by `TRUST_CF_CONNECTING_IP=true` in [`infra/k8s/graph-service/deployment.yaml`](k8s/graph-service/deployment.yaml). This is safe **only because** `restrict_app_to_cloudflare` makes the header unspoofable past the edge. **Hard coupling:** if you ever revert the lockdown (Phase 2 → `false`) or disable Cloudflare, you must also unset `TRUST_CF_CONNECTING_IP`, or a direct caller can spoof the header and bypass the limiter entirely.
+
 ### Bot protection
 
 Free-tier **Bot Fight Mode** (dashboard → Security → Bots) is a coarse on/off toggle that isn't reliably Terraform-manageable, so it is left as a manual step rather than codified. It is defense-in-depth on top of the SG lock — enable it if you want it, but note it can challenge the Route 53 health prober and turn the health alarm red; if that happens, turn it back off (the SG restriction is the primary control).
 
 ### Rollback / hardening notes
 
-- To revert, set the flags back to `false` and `apply` — the CNAME, zone settings, and origin rule are destroyed and the SG reopens per `allow_app_cidr`.
+- To revert, set the flags back to `false` and `apply` — the CNAME, zone settings, and origin rule are destroyed and the SG reopens per `allow_app_cidr`. Also unset `TRUST_CF_CONNECTING_IP` in the deployment (see the rate-limit note under Phase 2), or the limiter trusts a now-spoofable header.
 - Flexible SSL leaves the Cloudflare→origin hop in plaintext (mitigated by the SG lock). Future hardening: a Cloudflare **Origin CA** cert + **Full (Strict)** mode (requires the origin to terminate TLS), or a **Cloudflare Tunnel** (removes inbound exposure entirely).
 
 ---
