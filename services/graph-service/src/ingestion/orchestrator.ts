@@ -5,7 +5,7 @@ import { buildMusicBrainzClientFromEnv } from './musicbrainz-client.js';
 import { buildAcousticBrainzClientFromEnv } from './acousticbrainz-client.js';
 import { buildDeezerClientFromEnv } from './deezer-client.js';
 import { buildWikidataClientFromEnv } from './wikidata-client.js';
-import { RELOAD_STAGES } from './stages.js';
+import { RELOAD_STAGES, foldBreakerCounts } from './stages.js';
 import type { ReloadContext, ReloadStageName, StageDescriptor } from './stages.js';
 import { scheduleStages } from './scheduler.js';
 import {
@@ -174,7 +174,12 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
         stagesSkipped++;
         log.info(`[reload] stage "${descriptor.name}" skipped — required client not configured`);
       } else {
-        await markStageComplete(driver, jobId, descriptor.name, counts);
+        await markStageComplete(
+          driver,
+          jobId,
+          descriptor.name,
+          foldBreakerCounts(ctx, descriptor, counts),
+        );
         stagesRun++;
         ranStages.add(descriptor.name);
         log.info(`[reload] stage "${descriptor.name}" complete`);
@@ -183,7 +188,14 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
       const msg = err instanceof Error ? err.message : String(err);
       stagesFailed++;
       try {
-        await markStageFailed(driver, jobId, descriptor.name, msg);
+        // Surface any breaker that tripped before the stage threw, even on the failure path.
+        await markStageFailed(
+          driver,
+          jobId,
+          descriptor.name,
+          msg,
+          foldBreakerCounts(ctx, descriptor, {}),
+        );
         log.error(`[reload] stage "${descriptor.name}" failed (recorded; continuing): ${msg}`);
       } catch (recordErr) {
         const rmsg = recordErr instanceof Error ? recordErr.message : String(recordErr);
