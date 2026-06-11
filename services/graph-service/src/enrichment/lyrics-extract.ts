@@ -131,7 +131,7 @@ export function extractLyricsFromHtml(html: string): string | null {
 // Genius prepends to the lyric body. The extractor leaves it glued to the front
 // ("…Right On Time LyricsWell, well…"), which makes isValidGeniusLyrics reject the
 // whole body on its contributor-header rule even when real lyrics follow (#253).
-// Applied at the Genius validation boundary (fetchGenius + the offline probe), not
+// Applied at the Genius validation boundary (GeniusClient + the offline probe), not
 // inside extractLyricsFromHtml, so the validator's own header rule stays a live
 // backstop rather than dead code.
 //
