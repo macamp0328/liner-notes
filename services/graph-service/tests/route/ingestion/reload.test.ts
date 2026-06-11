@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../../../src/server.js';
+import { __resetReloadProgress } from '../../../src/ingestion/reload-progress.js';
 
 const mockVerifyConnectivity = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 
@@ -70,6 +71,9 @@ describe('Reload admin API', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    // POST /reload now flags the reload active synchronously (#281 fix); runReload is mocked here
+    // and never clears it, so reset the real reload-progress singleton between tests.
+    __resetReloadProgress();
     mockVerifyConnectivity.mockResolvedValue(undefined);
     mockRunReload.mockResolvedValue({
       jobId: 'job-new',

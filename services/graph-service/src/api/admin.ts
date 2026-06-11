@@ -40,7 +40,13 @@ import {
   getLatestReloadJob,
 } from '../db/job-repository.js';
 import type { PersistedJob, PersistedStage } from '../db/job-repository.js';
-import { getLiveProgress, type LiveStageProgress } from '../ingestion/reload-progress.js';
+import {
+  getLiveProgress,
+  isReloadActive,
+  markReloadActive,
+  markReloadInactive,
+  type LiveStageProgress,
+} from '../ingestion/reload-progress.js';
 import { errorResponseRef } from './schemas.js';
 
 // Shared response shape for the nationality summary, used by both POST /nationality/enrich and
@@ -953,6 +959,21 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         preHandler: adminAuthHook,
       },
       async (request, reply) => {
+        // A reload owns the shared rate-limited clients (and the #176 scheduler serialises its
+        // lanes), so refuse a standalone enrich while one is in flight (#281). isReloadActive() is
+        // synchronous, so this adds no await before the running-flag guard below — that guard stays
+        // atomic. Deliberate precedence: RELOAD_RUNNING > SERVICE_UNAVAILABLE > ENRICHMENT_RUNNING.
+        // Point-in-time only: a reload starting *after* this passes isn't blocked mid-run, but
+        // writes are MERGE-idempotent, so this closes the operator-error window, not every race.
+        if (isReloadActive()) {
+          return reply.code(409).send({
+            error: {
+              code: 'RELOAD_RUNNING',
+              message: `Cannot run ${entry.statusLabel} while a reload is in progress`,
+            },
+          });
+        }
+
         let prepared: PreparedRun | null = null;
 
         if (entry.clientCheckFirst) {
@@ -1125,8 +1146,9 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           'replacement **resumes from the last completed stage on startup** — it does not restart ' +
           'or re-wipe. Poll `GET /api/v1/admin/reload/status` for progress.\n\n' +
           'Runs asynchronously — returns 202 immediately. Returns 409 if a reload is already in ' +
-          'progress. **Does not wipe**: for a from-scratch reload, call ' +
-          '`POST /api/v1/admin/reset?confirm=wipe-all` first, then trigger this.',
+          'progress, or if a standalone `POST /api/v1/admin/<stage>/enrich` is running (they ' +
+          'contend on the same rate-limited clients). **Does not wipe**: for a from-scratch reload, ' +
+          'call `POST /api/v1/admin/reset?confirm=wipe-all` first, then trigger this.',
         security: [{ bearerAuth: [] }],
         response: {
           202: {
@@ -1141,13 +1163,16 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
             },
           },
           401: errorResponseRef,
+          // Two 409 variants: RELOAD_RUNNING carries the conflicting reload's jobId;
+          // ENRICHMENT_RUNNING (a standalone enrich is running, #281) has none — so jobId is
+          // optional, not required (fast-json-stringify simply omits it when absent).
           409: {
             type: 'object',
             required: ['error'],
             properties: {
               error: {
                 type: 'object',
-                required: ['code', 'message', 'jobId'],
+                required: ['code', 'message'],
                 properties: {
                   code: { type: 'string' },
                   message: { type: 'string' },
@@ -1164,8 +1189,21 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const driver = getDriver();
 
-      // Coarse mutual exclusion: refuse if a reload job is still running. Full locking
-      // (including against the standalone /enrich routes) is #177.
+      // Mutual exclusion with the standalone /<stage>/enrich routes (#281): a reload and an enrich
+      // contend on the same rate-limited clients. Sync, zero-I/O check first, so a busy enrich
+      // short-circuits before the Neo4j round-trip below. (The reverse guard lives in the generated
+      // enrich handler via isReloadActive().)
+      const busy = PIPELINES.find((e) => e.state.running);
+      if (busy) {
+        return reply.code(409).send({
+          error: {
+            code: 'ENRICHMENT_RUNNING',
+            message: `Cannot start a reload while ${busy.statusLabel} is running`,
+          },
+        });
+      }
+
+      // Coarse mutual exclusion against another reload: refuse if a reload job is still running.
       const inProgress = await findResumableReloadJob(driver);
       if (inProgress) {
         return reply.code(409).send({
@@ -1194,8 +1232,16 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         driver,
         RELOAD_STAGES.map((s) => s.name),
       );
+      // Flag the reload active *synchronously, before the 202*, so the enrich-side
+      // isReloadActive() guard (#281) holds the instant the operator gets their response.
+      // runReload sets this too, but only after awaiting job-state reads — leaving a window
+      // where an enrich triggered right after this reload would slip through. runReload re-marks
+      // it (idempotent) and clears it in its finally on normal completion; the .catch clears it
+      // if runReload rejects before reaching that finally, so the flag can't leak.
+      markReloadActive(jobId);
       void runReload(driver, { username, logger: request.log, resumeJobId: jobId }).catch(
         (err: unknown) => {
+          markReloadInactive(jobId);
           request.log.error({ err }, '[reload] orchestrated reload failed');
         },
       );
