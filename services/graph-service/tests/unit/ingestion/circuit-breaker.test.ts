@@ -175,6 +175,41 @@ describe('CircuitBreaker', () => {
       expect(b.snapshot().state).toBe('closed');
       expect(b.allowRequest()).toBe(true);
     });
+
+    it('admits only ONE probe while half-open (concurrent callers get false)', () => {
+      let t = 1_000;
+      const b = new CircuitBreaker({
+        source: 'x',
+        threshold: 1,
+        cooldownMs: 5_000,
+        logger: makeLogger(),
+        now: () => t,
+      });
+      fatal(b, 1);
+      t += 5_000;
+      expect(b.allowRequest()).toBe(true); // the single probe
+      expect(b.allowRequest()).toBe(false); // a concurrent caller is blocked until record() settles
+      expect(b.allowRequest()).toBe(false);
+    });
+
+    it('a transient probe re-arms the cooldown (no deadlock, retries after another cooldown)', () => {
+      let t = 1_000;
+      const b = new CircuitBreaker({
+        source: 'x',
+        threshold: 1,
+        cooldownMs: 5_000,
+        logger: makeLogger(),
+        now: () => t,
+      });
+      fatal(b, 1);
+      t += 5_000;
+      b.allowRequest(); // → half-open
+      b.record('transient'); // inconclusive → back to open, cooldown re-armed
+      expect(b.snapshot().state).toBe('open');
+      expect(b.allowRequest()).toBe(false); // cooldown restarted from now
+      t += 5_000;
+      expect(b.allowRequest()).toBe(true); // a later probe is allowed again
+    });
   });
 });
 

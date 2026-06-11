@@ -139,15 +139,21 @@ export class CircuitBreaker {
   /**
    * Consult before making a request. Returns false when open (the caller must short-circuit). When
    * `cooldownMs` is set and has elapsed since the trip, transitions open → half-open and returns
-   * true to permit a single recovery probe. Never logs.
+   * true to permit a **single** recovery probe; while that probe is in flight (`half-open`) every
+   * other caller gets false, so concurrent callers can't fan out a burst of probes. The probe is
+   * settled by the next {@link record}, which always leaves `half-open`. Never logs.
    */
   allowRequest(): boolean {
+    // A probe is already in flight — admit exactly one until record() settles it.
+    if (this.state === 'half-open') return false;
     if (this.state === 'open') {
-      if (this.cooldownMs !== undefined && this.trippedAt !== null) {
-        if (this.now() - this.trippedAt >= this.cooldownMs) {
-          this.state = 'half-open';
-          return true;
-        }
+      if (
+        this.cooldownMs !== undefined &&
+        this.trippedAt !== null &&
+        this.now() - this.trippedAt >= this.cooldownMs
+      ) {
+        this.state = 'half-open';
+        return true;
       }
       return false;
     }
@@ -156,17 +162,26 @@ export class CircuitBreaker {
 
   /**
    * Record a settled request's {@link Outcome}. success/miss reset the consecutive counter (and
-   * close a half-open probe); transient is a no-op; a fatal increments and, on reaching the
-   * threshold (or failing a half-open probe), opens the breaker and logs the trip once.
+   * close a half-open probe); a fatal increments and, on reaching the threshold (or failing a
+   * half-open probe), opens the breaker and logs the trip once. `transient` is a no-op while
+   * closed, but settles a half-open probe by re-arming the cooldown (it was inconclusive) so the
+   * breaker never deadlocks waiting on a probe that neither succeeded nor failed.
    */
   record(outcome: Outcome): void {
-    if (outcome === 'transient') return;
-
     if (outcome === 'success' || outcome === 'miss') {
       this.consecutiveFatals = 0;
       if (this.state === 'half-open') {
         this.state = 'closed';
         this.trippedAt = null;
+      }
+      return;
+    }
+
+    if (outcome === 'transient') {
+      // An inconclusive probe — back to open, cooldown re-armed so a later probe can retry.
+      if (this.state === 'half-open') {
+        this.state = 'open';
+        this.trippedAt = this.now();
       }
       return;
     }

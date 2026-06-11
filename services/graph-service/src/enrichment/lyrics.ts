@@ -155,15 +155,10 @@ export async function enrichLyrics(
   const base = await runEnrichment(driver, stage, { logger: log, onProgress, concurrency });
 
   // Surface each source's run-scoped breaker so a trip (e.g. Genius 403 all run, #240) is visible
-  // in /admin/reload/status, not just the single warn line the breaker already logged.
+  // in /admin/reload/status. The breaker already logs the trip once at warn, so we don't re-log
+  // here — these persisted fields are the visibility channel.
   const geniusSnap = genius?.breakerSnapshot() ?? closedSnapshot('genius');
   const lrclibSnap = lrclib.breakerSnapshot();
-  if (geniusSnap.open || lrclibSnap.open) {
-    log.warn(
-      `[lyrics] circuit breaker(s) tripped this run — genius open=${geniusSnap.open} fatals=${geniusSnap.fatalCount}, ` +
-        `lrclib open=${lrclibSnap.open} fatals=${lrclibSnap.fatalCount}`,
-    );
-  }
   return {
     ...base,
     geniusFatalCount: geniusSnap.fatalCount,
