@@ -41,6 +41,8 @@ jobs:
   regenerate:
     name: Regenerate diagrams
     runs-on: ubuntu-latest
+    # Backstop against wedged installs/pulls — GitHub default is 360 min.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -79,11 +81,16 @@ jobs:
         # generator produces means the contributor forgot to run
         # `pnpm diagrams:generate` locally before pushing. Print the diff so
         # the failure is self-explanatory, then exit non-zero.
+        #
+        # `git status --porcelain`, not `git diff --quiet`: diff only sees
+        # changes to TRACKED files, so a brand-new generated artifact (e.g. the
+        # per-file .mmd for a freshly added .tf) would pass the check while
+        # missing from the commit. status catches untracked files too.
         run: |
-          if ! git diff --quiet -- infra/diagrams README.md infra/RUNBOOK.md; then
+          if [ -n "$(git status --porcelain -- infra/diagrams README.md infra/RUNBOOK.md)" ]; then
             echo "::error::Diagrams are out of date. Run 'pnpm diagrams:generate' locally and commit the result."
             echo "Drift:"
-            git --no-pager diff --stat -- infra/diagrams README.md infra/RUNBOOK.md
+            git status --porcelain -- infra/diagrams README.md infra/RUNBOOK.md
             git --no-pager diff -- infra/diagrams README.md infra/RUNBOOK.md | head -200
             exit 1
           fi

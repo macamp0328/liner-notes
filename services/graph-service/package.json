@@ -20,6 +20,7 @@
     "docs:generate": "tsx scripts/generate-openapi.ts && prettier --write docs/openapi.json"
   },
   "dependencies": {
+    "@fastify/helmet": "^13.0.2",
     "@fastify/rate-limit": "^10.3.0",
     "@fastify/swagger": "^9.1.0",
     "@fastify/swagger-ui": "^5.1.0",
