@@ -1,0 +1,269 @@
+// Claude summarisation: turn a merged PR into a validated ChangelogRecord.
+//
+// Quality comes from structured outputs — Claude returns a schema-validated
+// object {category, summary, impact, breaking}, not free text we hope is one
+// sentence. The model reads what actually changed (title + body + labels +
+// diffstat), and the editorial voice lives in the committed style.md so tuning
+// the changelog is a one-file PR.
+//
+// AI-enhanced, not AI-required: with no ANTHROPIC_API_KEY (forks), or on any API
+// error, we fall back to a cleaned PR title so the merge path never fails.
+
+import Anthropic from '@anthropic-ai/sdk';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  type Category,
+  type ChangelogRecord,
+  type Impact,
+  type SummarySource,
+  CATEGORIES,
+  IMPACTS,
+  isCategory,
+  isImpact,
+} from './lib.js';
+
+/** Everything the summariser needs about one PR (gathered by store.ts via `gh`). */
+export interface PrInput {
+  number: number;
+  title: string;
+  body: string;
+  url: string;
+  author: string;
+  mergedAt: string;
+  labels: string[];
+  /** Pre-rendered "path  +A -D" diffstat lines (size-capped by the caller). */
+  filesSummary: string;
+}
+
+export interface SummarizeOutcome {
+  record: ChangelogRecord;
+  /** Human note for logs / the GitHub step summary (model + token cost, or fallback reason). */
+  note: string;
+}
+
+const DEFAULT_MODEL = 'claude-opus-4-8';
+const MAX_OUTPUT_TOKENS = 300;
+const MAX_BODY_CHARS = 4000;
+
+// Per-MTok USD (Opus 4.8). Only used to print an informational cost note.
+const PRICING: Record<string, { input: number; output: number }> = {
+  'claude-opus-4-8': { input: 5, output: 25 },
+  'claude-haiku-4-5': { input: 1, output: 5 },
+};
+
+const SUMMARY_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    category: { type: 'string', enum: [...CATEGORIES] },
+    summary: { type: 'string' },
+    impact: { type: 'string', enum: [...IMPACTS] },
+    breaking: { type: 'boolean' },
+  },
+  required: ['category', 'summary', 'impact', 'breaking'],
+} as const;
+
+function model(): string {
+  return process.env['CHANGELOG_MODEL']?.trim() || DEFAULT_MODEL;
+}
+
+function hasApiKey(): boolean {
+  return (process.env['ANTHROPIC_API_KEY']?.trim().length ?? 0) > 0;
+}
+
+function styleText(): string {
+  return readFileSync(join(import.meta.dirname, 'style.md'), 'utf8');
+}
+
+function buildUserPrompt(pr: PrInput): string {
+  return [
+    `PR #${pr.number}: ${pr.title}`,
+    `Author: @${pr.author}`,
+    `Labels: ${pr.labels.length > 0 ? pr.labels.join(', ') : '(none)'}`,
+    '',
+    'Files changed:',
+    pr.filesSummary.trim() || '(not available)',
+    '',
+    'Description:',
+    pr.body.trim().slice(0, MAX_BODY_CHARS) || '(no description)',
+  ].join('\n');
+}
+
+interface ParsedSummary {
+  category: Category;
+  summary: string;
+  impact: Impact;
+  breaking: boolean;
+}
+
+/** Parse + coerce the model's JSON. Structured outputs guarantee the shape, but we
+ * defend against drift so a malformed field degrades gracefully rather than throws. */
+function parseSummary(text: string): ParsedSummary {
+  const raw: unknown = JSON.parse(text);
+  const obj = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+  const category = isCategory(obj['category']) ? obj['category'] : 'Changed';
+  const impact = isImpact(obj['impact']) ? obj['impact'] : 'developer';
+  const summary = typeof obj['summary'] === 'string' ? obj['summary'].trim().slice(0, 240) : '';
+  const breaking = obj['breaking'] === true;
+  return { category, summary, impact, breaking };
+}
+
+function toRecord(pr: PrInput, parsed: ParsedSummary, source: SummarySource): ChangelogRecord {
+  return {
+    number: pr.number,
+    title: pr.title,
+    url: pr.url,
+    author: pr.author,
+    mergedAt: pr.mergedAt,
+    category: parsed.category,
+    summary: parsed.summary,
+    impact: parsed.impact,
+    breaking: parsed.breaking,
+    summarySource: source,
+  };
+}
+
+// ── Fallback (no API key, or API error) ────────────────────────────────────
+
+const CONVENTIONAL_PREFIX =
+  /^(task\/\d+|feat|fix|chore|docs|build|ci|refactor|perf|style|test)(\([^)]*\))?!?:\s*/i;
+
+function cleanTitle(title: string): string {
+  const stripped = title.replace(CONVENTIONAL_PREFIX, '').trim();
+  const base = stripped || title.trim();
+  return base.charAt(0).toUpperCase() + base.slice(1);
+}
+
+function fallbackCategory(title: string): Category {
+  const lead = title.toLowerCase();
+  if (lead.startsWith('fix')) return 'Fixed';
+  if (lead.startsWith('docs')) return 'Docs';
+  if (/^(chore|build|ci)/.test(lead)) return 'Infra';
+  if (/^(feat|add)/.test(lead)) return 'Added';
+  return 'Changed';
+}
+
+export function fallbackRecord(pr: PrInput): ChangelogRecord {
+  return toRecord(
+    pr,
+    {
+      category: fallbackCategory(pr.title),
+      summary: cleanTitle(pr.title),
+      impact: 'developer',
+      breaking: false,
+    },
+    'fallback',
+  );
+}
+
+// ── Single summarisation (fast path) ────────────────────────────────────────
+
+function findText(content: Anthropic.Messages.ContentBlock[]): string {
+  for (const block of content) {
+    if (block.type === 'text') return block.text;
+  }
+  return '';
+}
+
+function costNote(usage: Anthropic.Messages.Usage, modelId: string, discount = 1): string {
+  const price = PRICING[modelId];
+  const cost = price
+    ? ((usage.input_tokens * price.input + usage.output_tokens * price.output) / 1_000_000) *
+      discount
+    : 0;
+  return `Claude (${modelId}): in=${usage.input_tokens} out=${usage.output_tokens} tok ≈ $${cost.toFixed(4)}`;
+}
+
+/** Summarise one PR, falling back to the cleaned title if Claude is unavailable. */
+export async function summarize(pr: PrInput): Promise<SummarizeOutcome> {
+  if (!hasApiKey()) {
+    return { record: fallbackRecord(pr), note: 'fallback (no ANTHROPIC_API_KEY)' };
+  }
+  try {
+    const client = new Anthropic();
+    const modelId = model();
+    const message = await client.messages.create({
+      model: modelId,
+      max_tokens: MAX_OUTPUT_TOKENS,
+      system: styleText(),
+      messages: [{ role: 'user', content: buildUserPrompt(pr) }],
+      output_config: { effort: 'high', format: { type: 'json_schema', schema: SUMMARY_SCHEMA } },
+    });
+    const record = toRecord(pr, parseSummary(findText(message.content)), 'claude');
+    return { record, note: costNote(message.usage, modelId) };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return { record: fallbackRecord(pr), note: `fallback (Claude error: ${reason})` };
+  }
+}
+
+// ── Batched summarisation (one-shot historical backfill) ────────────────────
+
+const POLL_INTERVAL_MS = 10_000;
+const POLL_MAX_ATTEMPTS = 360; // 360 * 10s = 60 min ceiling
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Summarise many PRs in one Message Batch (50% cheaper, non-latency-sensitive) —
+ * used to seed the changelog with the project's entire merged history. With no
+ * API key, every PR degrades to its fallback record. PRs that error/expire in the
+ * batch also fall back, so backfill always returns one record per input.
+ */
+export async function summarizeBatch(prs: PrInput[]): Promise<ChangelogRecord[]> {
+  if (prs.length === 0) return [];
+  if (!hasApiKey()) {
+    console.log('No ANTHROPIC_API_KEY — backfilling with fallback (PR-title) summaries.');
+    return prs.map(fallbackRecord);
+  }
+
+  const client = new Anthropic();
+  const modelId = model();
+  const byId = new Map(prs.map((pr) => [`pr-${pr.number}`, pr]));
+  const system = styleText();
+
+  const batch = await client.messages.batches.create({
+    requests: prs.map((pr) => ({
+      custom_id: `pr-${pr.number}`,
+      params: {
+        model: modelId,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        system,
+        messages: [{ role: 'user', content: buildUserPrompt(pr) }],
+        output_config: { effort: 'high', format: { type: 'json_schema', schema: SUMMARY_SCHEMA } },
+      },
+    })),
+  });
+  console.log(`Submitted batch ${batch.id} (${prs.length} PRs). Polling…`);
+
+  for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt += 1) {
+    const status = await client.messages.batches.retrieve(batch.id);
+    if (status.processing_status === 'ended') break;
+    const c = status.request_counts;
+    console.log(
+      `  ${status.processing_status}: processing=${c.processing} succeeded=${c.succeeded} errored=${c.errored}`,
+    );
+    await sleep(POLL_INTERVAL_MS);
+  }
+
+  const records = new Map<number, ChangelogRecord>();
+  for await (const item of await client.messages.batches.results(batch.id)) {
+    const pr = byId.get(item.custom_id);
+    if (!pr) continue;
+    if (item.result.type === 'succeeded') {
+      records.set(
+        pr.number,
+        toRecord(pr, parseSummary(findText(item.result.message.content)), 'claude'),
+      );
+    } else {
+      console.warn(`  ${item.custom_id}: ${item.result.type} — using fallback`);
+      records.set(pr.number, fallbackRecord(pr));
+    }
+  }
+
+  // Any PR with no result at all (shouldn't happen) still gets a record.
+  return prs.map((pr) => records.get(pr.number) ?? fallbackRecord(pr));
+}

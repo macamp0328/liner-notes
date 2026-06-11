@@ -1,0 +1,62 @@
+name: Changelog reconcile
+
+# Self-healing pass for the changelog. The per-merge hook (changelog.yml) is the
+# fast path; it can fail on a given day (transient error, an unset secret). Because
+# the changelog store is DERIVED from the merged PRs on GitHub, it can always be
+# rebuilt: this job lists recently-merged PRs, diffs them against what's recorded,
+# and summarises only the gaps — converging the draft release back to correct.
+#
+# Runs weekly, and on demand (with an optional older `since` to heal a longer tail).
+
+on:
+  schedule:
+    - cron: '17 6 * * 1' # Mondays 06:17 UTC
+  workflow_dispatch:
+    inputs:
+      since:
+        description: 'Reconcile PRs merged on/after this date (YYYY-MM-DD). Default: 21 days ago.'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: read
+
+# Shared group with changelog.yml so a merge and a reconcile never write the store
+# concurrently.
+concurrency:
+  group: changelog
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Reconcile changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Reconcile the draft release
+        # `since` is passed via env (not interpolated into the script) so a
+        # dispatch input can't inject shell.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SINCE: ${{ inputs.since }}
+        run: |
+          if [ -n "$SINCE" ]; then
+            pnpm changelog:reconcile --since "$SINCE"
+          else
+            pnpm changelog:reconcile
+          fi
