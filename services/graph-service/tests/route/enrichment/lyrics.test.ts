@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import type { Driver, Session, Result } from 'neo4j-driver';
 import { enrichLyrics } from '../../../src/enrichment/lyrics.js';
 
@@ -69,15 +69,24 @@ const tracks = [
 // ---------------------------------------------------------------------------
 describe('enrichLyrics integration', () => {
   let fetchSpy: MockInstance<typeof fetch>;
+  const savedConcurrency = process.env['LYRICS_CONCURRENCY'];
 
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env['GENIUS_TOKEN'];
+    // Pin serial so the call-order mock chains below are deterministic; the worker pool is
+    // covered in tests/unit/enrichment/run.test.ts.
+    process.env['LYRICS_CONCURRENCY'] = '1';
 
     mockGetUnenrichedTracks.mockResolvedValue([]);
     mockSetTrackLyrics.mockResolvedValue(undefined);
 
     fetchSpy = vi.spyOn(globalThis, 'fetch');
+  });
+
+  afterEach(() => {
+    if (savedConcurrency === undefined) delete process.env['LYRICS_CONCURRENCY'];
+    else process.env['LYRICS_CONCURRENCY'] = savedConcurrency;
   });
 
   // -------------------------------------------------------------------------

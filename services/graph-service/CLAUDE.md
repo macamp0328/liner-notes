@@ -325,6 +325,18 @@ stamp-on-attempt contract (data → `write`+stamp/`enriched`; `null` → `markAt
 stages declare 10), and summary aggregation. Each pipeline is a thin `EnrichmentStage`
 declaring only what varies.
 
+**Per-item concurrency (#247).** `runEnrichment` takes an optional `concurrency` (default `1` →
+strictly serial, byte-for-byte the original loop) that bounds how many items process at once via a
+shared-index worker pool. Counters are mutated synchronously between awaits, so the single-threaded
+event loop keeps them race-free; under concurrency the progress line keys off completion count, not
+arrival order. **Only `lyrics` opts in today** (`LYRICS_CONCURRENCY`, default 6, clamped `[1, 12]`),
+and only because it is deadlock-immune — it writes one Track per transaction, so it carries no
+resource lane (see "Scheduling (#176)"). Bounded concurrency IS the lyrics stage's rate ceiling
+(there is no separate limiter), so `LYRICS_CONCURRENCY` doubles as the politeness knob toward LRCLIB.
+It composes with the stage-level `RELOAD_STAGE_CONCURRENCY` (intra-stage workers inside one stage
+slot). Do not enable it for a stage on a shared rate-limited client lane — concurrent items would
+bypass that client's per-call spacing.
+
 **Runs through the runner:** `lyrics`, `artist-profiles`, `master-data`, `mb-release-events`,
 `track-musicbrainz` (item = release, one stamping write per release), and `nationality` (two
 sequential stages — Artists then Musicians — sharing source-instrumentation closures).
@@ -347,6 +359,16 @@ Added in Task 4. Source files:
 - `src/ingestion/discogs-client.ts` — `DiscogsClient` class with rate limiting and 429 backoff
 - `src/ingestion/ingest.ts` — `runIngestion()` pipeline orchestrator + `buildDiscogsClientFromEnv()` helper
 - `src/db/ingestion-repository.ts` — All Cypher MERGE queries; `hasReleases()` + `mergeReleaseGraph()`
+
+> **Lyrics clients (#247):** `src/ingestion/lrclib-client.ts` (`LrclibClient`) and
+> `src/ingestion/genius-client.ts` (`GeniusClient`) join the other external clients here — every
+> HTTP client lives in `src/ingestion/`, even the enrichment-consumed ones (deezer, acousticbrainz,
+> wikidata). Both share the `createRateLimitedFetch` core (retry/backoff/UA) like the rest. LRCLIB
+> sends an identifying UA (`LRCLIB_USER_AGENT`); Genius keeps the browser UA (#195/#236) and 403 is
+> deliberately **not** retried (permanent Cloudflare datacenter block → an expected `GeniusHttpError`).
+> `GeniusClient` is the integration surface for the circuit breaker (#242). `enrichLyrics` accepts an
+> optional injected-clients param (the breaker seam + unit-test seam); it defaults to the
+> `build*ClientFromEnv` factories.
 
 **Non-obvious decisions:**
 
