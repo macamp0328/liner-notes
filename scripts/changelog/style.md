@@ -43,6 +43,35 @@ is **Security**; a CI change that also touches a doc is **Infra**.
 
 ## Breaking
 
-`true` only for a change that forces action by an API consumer or operator — a removed/renamed
-endpoint or field, a changed response shape, a new required env var or secret, a migration
-step. Internal refactors are **not** breaking.
+Set `breaking: true` **only** when a reasonable API consumer or operator must _take action_ because
+of this change. When in doubt, use `false` — a wrongly-flagged change is worse than a missed one,
+because it's pinned under a prominent "⚠️ Breaking changes" heading. Ask: "does anyone have to
+change something they're doing?" If no, it's `false`.
+
+**Breaking (`true`):**
+
+- A removed or renamed API field, response key, endpoint, or route.
+- A changed response shape or status code an existing client would notice.
+- A newly _required_ env var, secret, or config the service won't start or function without.
+- A required migration or manual operator step on upgrade (move state, re-run a command, re-apply config).
+
+**Not breaking (`false`)** — these are real, useful changes, but nobody is _forced_ to act:
+
+- **Adding** anything — a feature, endpoint, route, field, dashboard, metric, or _permission_. New
+  capabilities don't break existing ones, even if they need one-time setup to use.
+- Internal refactors, consolidations, or renames not visible outside the code.
+- CI/CD, deploy-pipeline, Terraform, Kubernetes, or other infrastructure-plumbing changes **that
+  don't require an operator action** — one that does (e.g. migrating Terraform state, re-applying a
+  policy on deploy) is breaking, per the list above.
+- Bug fixes that restore intended behaviour, and performance improvements.
+- Removing something _internal_ (a pipeline stage, a metric, an unused field) that no API consumer
+  or operator invoked directly.
+
+Worked examples:
+
+- "Renames the release year field to `pressingYear`" → **true** (a client reading that field must update).
+- "Makes the admin token required in production" → **true** (operator must set a secret or the service won't start).
+- "Stores Terraform state in a shared S3 backend" → **true** (operators must re-init against the new backend).
+- "Adds a CloudWatch dashboard" / "Adds an automated deploy pipeline" → **false** (purely additive).
+- "Derives deploy targets from Terraform state" → **false** (internal CD change, nothing to do).
+- "Drops VIAF from the nationality pipeline" → **false** (internal stage; no consumer- or API-visible change).
