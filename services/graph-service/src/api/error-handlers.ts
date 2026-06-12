@@ -29,10 +29,16 @@ export function clientErrorCode(error: FastifyError, status: number): string {
 }
 
 /**
- * Install the global error and not-found handlers on a Fastify instance. Must
- * be called after `@fastify/rate-limit` is registered (the not-found handler's
- * `preHandler` uses `app.rateLimit()`); handlers set on the root instance apply
- * to all routes regardless of registration order.
+ * Install the global error and not-found handlers on a Fastify instance.
+ *
+ * Ordering is load-bearing — call this:
+ *   - AFTER `@fastify/rate-limit` is registered, because the not-found handler's
+ *     `preHandler` uses `app.rateLimit()`; and
+ *   - BEFORE the route plugins, because `setErrorHandler` is encapsulated: each
+ *     route plugin is a child context that inherits the error handler at
+ *     registration time, so a handler set afterwards would not apply to routes
+ *     already registered. (`setNotFoundHandler` resolves at the root and is
+ *     order-insensitive, but both are installed together here.)
  */
 export function registerErrorHandlers(app: FastifyInstance): void {
   // Non-async on purpose: an async handler with no `await` trips
