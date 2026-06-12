@@ -10,6 +10,7 @@ import { enrichLyrics } from '../enrichment/lyrics.js';
 import { enrichMasterData } from '../enrichment/master-data.js';
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
 import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
+import { enrichGroupMembers } from '../enrichment/group-members.js';
 import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
 import { enrichTrackMusicBrainz } from '../enrichment/track-musicbrainz.js';
 import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
@@ -27,6 +28,7 @@ export type ReloadStageName =
   | 'master-data'
   | 'artist-genres'
   | 'artist-profiles'
+  | 'group-members'
   | 'mb-release-events'
   | 'track-musicbrainz'
   | 'track-acousticbrainz'
@@ -160,6 +162,20 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     deps: ['releases'],
     resources: [],
     run: async (ctx) => ({ ...(await enrichArtistGenres(ctx.driver, ctx.log)) }),
+  },
+  {
+    // #330: fetch /artists/{id} per Musician-with-discogsId to discover groups and write MEMBER_OF.
+    // Holds the `discogs` rate-limiter lane. Its per-group write touches the group + member Musician
+    // nodes (Musician axis); the only concurrent Musician multi-writer is `person-reconciliation`,
+    // which deps this stage (so they never overlap) — no `track`-style node-lock lane is needed.
+    name: 'group-members',
+    deps: ['releases'],
+    resources: ['discogs'],
+    sources: ['discogs'],
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
+      if (!ctx.discogs) return null;
+      return { ...(await enrichGroupMembers(ctx.discogs, ctx.driver, ctx.log, onProgress)) };
+    },
   },
   {
     name: 'track-musicbrainz',

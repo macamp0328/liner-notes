@@ -68,9 +68,17 @@ function makeStats(
     tracksWithDeezerBpm: cov(20, 45),
     tracksWithDeezerGain: cov(20, 45),
     mastersWithReleaseEvents: cov(40, 50),
+    memberOfEdges: 12,
+    groupsWithMembers: 4,
   };
   return {
-    counts: { releases: overrides.releases ?? 100, artists: 100, tracks: 100, masters: 50 },
+    counts: {
+      releases: overrides.releases ?? 100,
+      artists: 100,
+      tracks: 100,
+      masters: 50,
+      musicians: 100,
+    },
     enrichment: { ...enrichment, ...overrides.enrichment },
   };
 }

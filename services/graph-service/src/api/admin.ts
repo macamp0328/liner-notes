@@ -32,6 +32,8 @@ import { resetTrackDeezerEnrichment } from '../db/track-deezer-repository.js';
 import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
 import { resetArtistProfilesEnrichment } from '../db/artist-profiles-repository.js';
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
+import { enrichGroupMembers } from '../enrichment/group-members.js';
+import { resetGroupMembers } from '../db/group-members-repository.js';
 import { runReload } from '../ingestion/orchestrator.js';
 import { RELOAD_STAGES } from '../ingestion/stages.js';
 import {
@@ -674,6 +676,49 @@ const PIPELINES: PipelineEntry[] = [
       ok: true,
       run: async (driver) => ({ ...(await enrichArtistGenres(driver, log)) }),
     }),
+    state: makePipelineState(),
+  },
+  {
+    name: 'group-members',
+    statusLabel: 'group members enrichment',
+    runningMessage: 'Group members enrichment already in progress',
+    enrichSummary: 'Link group members via MEMBER_OF from the Discogs artist API',
+    enrichDescription:
+      'For each Musician node carrying a `discogsId` whose last members check has aged past ' +
+      '`ENRICHMENT_STALENESS_DAYS` (default 30), fetches `GET /artists/{id}` and — when the profile ' +
+      "lists members — links each member's existing Musician node to the group via " +
+      '`(member)-[:MEMBER_OF { active }]->(group)`, stamping `membersFetchedAt`. Blocks until ' +
+      'complete.\n\n' +
+      'Group-ness is not knowable without the fetch, so every Musician-with-discogsId is checked ' +
+      'once per window (non-groups are stamped and skipped). Member linking is MATCH-only — a member ' +
+      'not credited anywhere in the collection has no Musician node and is skipped, never created.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually** (it ' +
+      'is a full `/artists/{id}` sweep over the credited musicians). Run ' +
+      '`POST /api/v1/admin/group-members/reset` first to delete every MEMBER_OF edge and re-fetch ' +
+      'from scratch.\n\n' +
+      'Requires `DISCOGS_TOKEN` env var.',
+    statusSummarySchema: standardSummarySchema,
+    schemaHas503: true,
+    clientCheckFirst: true,
+    prepare: (log): PreparedRun => {
+      const discogsClient = buildDiscogsClientFromEnv(log);
+      if (!discogsClient) return { ok: false, message: 'DISCOGS_TOKEN not configured' };
+      return {
+        ok: true,
+        run: async (driver) => ({ ...(await enrichGroupMembers(discogsClient, driver, log)) }),
+      };
+    },
+    reset: {
+      summary: 'Delete all MEMBER_OF edges and reset group-members markers for a full re-run',
+      description:
+        'Deletes every `MEMBER_OF` relationship and removes the `membersFetchedAt` marker from all ' +
+        'Musician nodes, causing the next `POST /api/v1/admin/group-members/enrich` call to re-fetch ' +
+        'every group from scratch.\n\n' +
+        'This endpoint is blocked while enrichment is running.',
+      runningMessage:
+        'Group members enrichment is currently running — wait for it to finish before resetting',
+      run: (driver) => resetGroupMembers(driver),
+    },
     state: makePipelineState(),
   },
 ];

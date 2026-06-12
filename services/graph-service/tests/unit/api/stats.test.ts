@@ -27,7 +27,7 @@ const sourcedNat = {
 };
 
 const STATS = {
-  counts: { releases: 10, artists: 20, tracks: 100, masters: 7 },
+  counts: { releases: 10, artists: 20, tracks: 100, masters: 7, musicians: 40 },
   enrichment: {
     releasesWithOriginalYear: { covered: 6, applicable: 8, pct: 75 },
     artistsWithProfile: { covered: 12, applicable: 16, pct: 75 },
@@ -61,6 +61,8 @@ const STATS = {
     tracksWithDeezerBpm: { covered: 30, applicable: 60, pct: 50 },
     tracksWithDeezerGain: { covered: 24, applicable: 60, pct: 40 },
     mastersWithReleaseEvents: { covered: 5, applicable: 7, pct: 71.4 },
+    memberOfEdges: 9,
+    groupsWithMembers: 3,
   },
 };
 

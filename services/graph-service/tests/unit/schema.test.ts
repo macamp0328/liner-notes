@@ -24,13 +24,30 @@ describe('applySchema', () => {
     } as unknown as Driver;
   });
 
-  it('opens and closes a fresh session for each of the 45 statements', async () => {
+  it('opens and closes a fresh session for each of the 47 statements', async () => {
     await applySchema(driver);
-    expect(sessions).toHaveLength(45);
+    expect(sessions).toHaveLength(47);
     for (const s of sessions) {
       expect(s.run).toHaveBeenCalledTimes(1);
       expect(s.close).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it('creates the musician discogsId and membersFetchedAt indexes (issue #330)', async () => {
+    await applySchema(driver);
+    const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
+    expect(
+      stmts.some(
+        (s) => s.includes('CREATE INDEX musician_discogs_id') && s.includes('m.discogsId'),
+      ),
+    ).toBe(true);
+    expect(
+      stmts.some(
+        (s) =>
+          s.includes('CREATE INDEX musician_members_fetched_at') &&
+          s.includes('m.membersFetchedAt'),
+      ),
+    ).toBe(true);
   });
 
   it('creates the release uniqueness constraint', async () => {
