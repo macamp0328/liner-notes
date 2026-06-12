@@ -27,6 +27,7 @@ import {
 import type { ProgressReporter } from '../enrichment/progress.js';
 import { getStats } from '../db/stats-repository.js';
 import { evaluateCoverage, reportToCounts, formatVerifyFailure } from './reload-verify.js';
+import { getShutdownSignal, isShuttingDown } from '../lifecycle/shutdown.js';
 
 export interface RunReloadOptions {
   username: string;
@@ -169,6 +170,19 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
 
       beginStage(jobId, descriptor.name);
       const counts = await descriptor.run(ctx, onProgress);
+
+      // Shutdown signalled mid-stage (#291): the stage's loop returned partial counts, so leave it
+      // `running` (set by markStageRunning) — do NOT mark complete/failed. The still-`running` job
+      // resumes on the next boot and this stage's idempotent candidate filter re-runs only the
+      // unfinished work. Marking complete would skip that half; marking failed would end the job
+      // `failed` and stop it resuming at all.
+      if (isShuttingDown()) {
+        log.warn(
+          `[reload] stage "${descriptor.name}" interrupted by shutdown — left running for resume`,
+        );
+        return;
+      }
+
       if (counts === null) {
         await markStageComplete(driver, jobId, descriptor.name, {}, true, log);
         stagesSkipped++;
@@ -226,9 +240,20 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
       alreadyDone: doneStages,
       run: runOneStage,
       log,
+      // Same controller the stage loops poll, so the scheduler stops launching new stages and the
+      // in-flight ones checkpoint-and-exit in lock-step on SIGTERM (#291).
+      signal: getShutdownSignal(),
     });
   } finally {
     markReloadInactive(jobId);
+  }
+
+  // Shutdown signalled (#291): leave the job row `running` — skip finishReloadJob — so the next
+  // boot's cold-start resume picks it up via findResumableReloadJob. The in-flight stage(s) were
+  // left `running` by runOneStage; complete/skipped stages skip on resume and pending ones re-run.
+  if (isShuttingDown()) {
+    log.warn(`[reload] job ${jobId} interrupted by shutdown — left running; next boot resumes it`);
+    return { jobId, status: 'failed', stagesRun, stagesSkipped, stagesFailed };
   }
 
   // A schedule that couldn't settle every stage (a malformed graph trips the scheduler's stuck

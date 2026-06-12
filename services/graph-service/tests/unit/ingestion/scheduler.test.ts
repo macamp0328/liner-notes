@@ -189,6 +189,49 @@ describe('scheduleStages — stuck guard', () => {
   });
 });
 
+describe('scheduleStages — shutdown abort (#291)', () => {
+  it('launches no stages when the signal is already aborted (not the stuck path)', async () => {
+    const stages = ['a', 'b', 'c'].map((n) => stage(n));
+    const { launched, run } = harness(stages);
+    const abortLog = { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as Logger;
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      scheduleStages({ stages, concurrency: 2, run, log: abortLog, signal: controller.signal }),
+    ).resolves.toBeUndefined();
+
+    expect(launched).toEqual([]);
+    expect(run).not.toHaveBeenCalled();
+    // Clean exit, not the cyclic-dep "stuck" error.
+    expect(abortLog.error).not.toHaveBeenCalled();
+    expect(abortLog.info).toHaveBeenCalledWith(expect.stringContaining('shutdown signalled'));
+  });
+
+  it('drains the in-flight stage but launches no new ones after a mid-run abort', async () => {
+    const stages = ['a', 'b', 'c'].map((n) => stage(n));
+    const { launched, gates, run } = harness(stages);
+    const controller = new AbortController();
+
+    const done = scheduleStages({
+      stages,
+      concurrency: 1,
+      run,
+      log,
+      signal: controller.signal,
+    });
+    await flush();
+    expect(launched).toEqual(['a']); // concurrency 1 → only 'a' is in flight
+
+    controller.abort();
+    gates.get('a')!.resolve();
+    await expect(done).resolves.toBeUndefined();
+
+    expect(launched).toEqual(['a']); // 'b'/'c' never launched after the abort
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('validateStageGraph', () => {
   it('accepts a valid DAG', () => {
     const stages = [stage('a'), stage('b', ['a']), stage('c', ['a', 'b'])];
