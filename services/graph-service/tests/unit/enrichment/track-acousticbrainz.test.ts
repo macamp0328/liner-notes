@@ -245,4 +245,57 @@ describe('enrichTrackAcousticBrainz', () => {
     expect(summary.tracksSkipped).toBe(0);
     expect(getFeaturesSpy).not.toHaveBeenCalled();
   });
+
+  // Cooperative shutdown abort (#291)
+  it('processes nothing when the signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    mockGetTracks.mockResolvedValue([makeTrack('e1', 'mbid-0001')]);
+    const { client, getFeaturesSpy } = makeAbClient(
+      async (mbids) => new Map(mbids.map((m) => [m, FULL_FEATURES])),
+    );
+
+    const summary = await enrichTrackAcousticBrainz(
+      client,
+      fakeDriver,
+      silentLogger,
+      undefined,
+      controller.signal,
+    );
+
+    expect(getFeaturesSpy).not.toHaveBeenCalled();
+    expect(summary.tracksProcessed).toBe(0);
+    expect(mockSetFeatures).not.toHaveBeenCalled();
+  });
+
+  it('checkpoint-exits between batches on shutdown, keeping the first written batch', async () => {
+    const controller = new AbortController();
+    const tracks = Array.from({ length: MAX_RECORDING_IDS_PER_CALL * 2 }, (_, i) =>
+      makeTrack(`e${i}`, `${String(i).padStart(8, '0')}-0000-0000-0000-00000000000a`),
+    );
+    mockGetTracks.mockResolvedValue(tracks);
+    const getFeaturesSpy = vi.fn().mockImplementation(async (mbids: string[]) => {
+      controller.abort(); // signal arrives during the first batch
+      return new Map(mbids.map((m) => [m, FULL_FEATURES]));
+    });
+    const client = { getFeatures: getFeaturesSpy } as unknown as AcousticBrainzClient;
+    const onProgress = vi.fn();
+
+    const summary = await enrichTrackAcousticBrainz(
+      client,
+      fakeDriver,
+      silentLogger,
+      onProgress,
+      controller.signal,
+    );
+
+    expect(getFeaturesSpy).toHaveBeenCalledTimes(1); // 2nd batch skipped by the abort
+    expect(summary.tracksProcessed).toBe(MAX_RECORDING_IDS_PER_CALL); // first batch persisted
+    expect(mockSetFeatures).toHaveBeenCalledOnce();
+    // Honest partial progress: one batch's worth of recordings, not total (#291).
+    expect(onProgress).toHaveBeenLastCalledWith(
+      MAX_RECORDING_IDS_PER_CALL,
+      MAX_RECORDING_IDS_PER_CALL * 2,
+    );
+  });
 });

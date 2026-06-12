@@ -381,15 +381,22 @@ ranStages)` produces a structured per-metric pass/fail report reused by the gate
   - `/<stage>/reset` adds `busyWith({ enrich: true })` (reload + ingest) above its own per-pipeline
     guard; `/reset?confirm=wipe-all` and `/lyrics/clear-genius` (which own no flag) call
     `busyWith()` against all three after their own gates (the wipe `confirm` 400 still precedes it).
-    `/reload` sets `markReloadActive(jobId)` **synchronously before its 202** (not only inside
-    `runReload`, which marks it after awaiting job-state reads — that left a window where an enrich
-    fired right after a reload would slip through); the handler's `.catch` clears it if `runReload`
-    rejects before its own `finally`, so the flag can't leak. All three signals being synchronous is
-    load-bearing: `busyWith` adds no `await` before any atomic `running = true` set. The remaining
-    residual is the single-tick interleave where a job starts _between_ another route's check and its
-    flag set — irreducible without a lock, and harmless since writes are MERGE-idempotent; these
-    checks close the operator-error window, not every interleave. (#177 was rescoped to deploy⇄reload
-    and closed; #281 owned reload⇄enrich, #300 extended it to `/ingest` and the reset routes.)
+    `/reset` _additionally_ 409s `RELOAD_RUNNING` on a DB-`running` reload job (`findResumableReloadJob`,
+    not just the in-memory flag), so a wipe can't DETACH DELETE the `ReloadJob`/`ReloadStage`
+    checkpoints of a reload no live pod is currently on — a crash not yet resumed, or a cold-start
+    resume skipped for missing creds (#290). `/reload` sets `markReloadActive(jobId)` **synchronously
+    before its 202** (not only inside `runReload`, which marks it after awaiting job-state reads —
+    that left a window where an enrich fired right after a reload would slip through); the handler's
+    `.catch` clears the in-memory flag if `runReload` rejects before its own `finally`, and also
+    best-effort `finishReloadJob(jobId, 'failed')`s so an orchestration that rejected outside any
+    stage's catch can't sit `running` forever and 409 every future `/reload`+`/reset` until a pod
+    restart (#290). All three signals being synchronous is load-bearing: `busyWith` adds no `await`
+    before any atomic `running = true` set. The remaining residual is the single-tick interleave where
+    a job starts _between_ another route's check and its flag set — irreducible without a lock, and
+    harmless since writes are MERGE-idempotent; these checks close the operator-error window, not every
+    interleave. (#177 was rescoped to deploy⇄reload and closed; #281 owned reload⇄enrich, #300 extended
+    it to `/ingest` and the reset routes; #290 added the `/reset` DB-resumable guard + the rejected-
+    reload `failed` recovery.)
 - **`ingestReleases`** (in `ingest.ts`) is the shared release fetch/MERGE loop used by both the
   legacy `runIngestion` and the reload's `releases` stage — one definition, no drift.
 
@@ -545,7 +552,7 @@ fast, naming the var. An explicitly-set empty value is honored.
 skips `.env.local` in that mode. Put the vars in `.env.test.local` (gitignored) or
 export them in your shell — values in `.env.local` never reach the suite.
 
-**Isolation:** both the CI `neo4j:5` image (Community edition) and Neo4j Aura Free
+**Isolation:** both the CI `neo4j:5.26` image (Community edition) and Neo4j Aura Free
 support only the single default database — `CREATE DATABASE test` is unsupported on
 either. Tests isolate by instance plus a full graph wipe
 (`MATCH (n) DETACH DELETE n`) between files, so point `NEO4J_TEST_*` at a database

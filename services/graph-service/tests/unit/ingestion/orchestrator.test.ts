@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import type { Driver } from 'neo4j-driver';
 import type { Logger } from '../../../src/ingestion/discogs-client.js';
 import {
@@ -8,6 +8,7 @@ import {
   runVerifyGate,
 } from '../../../src/ingestion/orchestrator.js';
 import type { ReloadStageName } from '../../../src/ingestion/stages.js';
+import { requestShutdown, __resetShutdown } from '../../../src/lifecycle/shutdown.js';
 import { snapshotEnv } from '../../helpers/env.js';
 
 const stageMocks = vi.hoisted(() => ({
@@ -99,13 +100,23 @@ describe('runReload — fresh run', () => {
     expect(repo.getReloadJob).not.toHaveBeenCalled();
     // Each stage marked running then complete with its counts.
     expect(repo.markStageRunning).toHaveBeenCalledTimes(3);
-    expect(repo.markStageComplete).toHaveBeenCalledWith(driver, 'job-new', 'releases', {
-      releasesProcessed: 2,
-    });
-    expect(repo.markStageComplete).toHaveBeenCalledWith(driver, 'job-new', 'lyrics', {
-      enriched: 5,
-    });
-    expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'complete');
+    expect(repo.markStageComplete).toHaveBeenCalledWith(
+      driver,
+      'job-new',
+      'releases',
+      { releasesProcessed: 2 },
+      false,
+      log,
+    );
+    expect(repo.markStageComplete).toHaveBeenCalledWith(
+      driver,
+      'job-new',
+      'lyrics',
+      { enriched: 5 },
+      false,
+      log,
+    );
+    expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'complete', log);
     expect(result).toMatchObject({
       jobId: 'job-new',
       status: 'complete',
@@ -173,8 +184,13 @@ describe('runReload — resume', () => {
     expect(stageMocks.lyricsRun).not.toHaveBeenCalled();
     // The interrupted stage re-runs.
     expect(stageMocks.masterRun).toHaveBeenCalledOnce();
-    expect(repo.markStageRunning).toHaveBeenCalledExactlyOnceWith(driver, 'job-1', 'master-data');
-    expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-1', 'complete');
+    expect(repo.markStageRunning).toHaveBeenCalledExactlyOnceWith(
+      driver,
+      'job-1',
+      'master-data',
+      log,
+    );
+    expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-1', 'complete', log);
     expect(result).toMatchObject({ jobId: 'job-1', stagesRun: 1 });
   });
 
@@ -216,17 +232,19 @@ describe('runReload — failure isolation', () => {
 
     const result = await runReload(driver, { username: 'tester', logger: log });
 
-    // The 5th arg is the folded breaker counts ({} here — the mocked stages declare no sources).
+    // The 5th arg is the folded breaker counts ({} here — the mocked stages declare no sources);
+    // the 6th is the forwarded logger for #290 zero-match warnings.
     expect(repo.markStageFailed).toHaveBeenCalledWith(
       driver,
       'job-new',
       'lyrics',
       'LRCLIB down',
       {},
+      log,
     );
     // master-data still runs after lyrics fails.
     expect(stageMocks.masterRun).toHaveBeenCalledOnce();
-    expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'failed');
+    expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'failed', log);
     expect(result).toMatchObject({ status: 'failed', stagesRun: 2, stagesFailed: 1 });
   });
 
@@ -249,9 +267,60 @@ describe('runReload — skip', () => {
 
     const result = await runReload(driver, { username: 'tester', logger: log });
 
-    expect(repo.markStageComplete).toHaveBeenCalledWith(driver, 'job-new', 'master-data', {}, true);
-    expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'complete');
+    expect(repo.markStageComplete).toHaveBeenCalledWith(
+      driver,
+      'job-new',
+      'master-data',
+      {},
+      true,
+      log,
+    );
+    expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'complete', log);
     expect(result).toMatchObject({ status: 'complete', stagesRun: 2, stagesSkipped: 1 });
+  });
+});
+
+describe('runReload — shutdown abort (#291)', () => {
+  afterEach(() => __resetShutdown());
+
+  it('leaves the interrupted stage running and skips finishReloadJob so the job resumes', async () => {
+    // releases completes; lyrics signals shutdown mid-run and returns partial counts.
+    stageMocks.lyricsRun.mockImplementation(async () => {
+      requestShutdown();
+      return { enriched: 2 };
+    });
+
+    const result = await runReload(driver, { username: 'tester', logger: log, concurrency: 1 });
+
+    // releases settled before the abort.
+    expect(repo.markStageComplete).toHaveBeenCalledWith(
+      driver,
+      'job-new',
+      'releases',
+      { releasesProcessed: 2 },
+      false,
+      log,
+    );
+    // lyrics was started but NOT marked complete/failed — left `running` for cold-start resume.
+    expect(repo.markStageRunning).toHaveBeenCalledWith(driver, 'job-new', 'lyrics', log);
+    expect(repo.markStageComplete).not.toHaveBeenCalledWith(
+      driver,
+      'job-new',
+      'lyrics',
+      expect.anything(),
+    );
+    expect(repo.markStageFailed).not.toHaveBeenCalledWith(
+      driver,
+      'job-new',
+      'lyrics',
+      expect.anything(),
+      expect.anything(),
+    );
+    // master-data never launched after the abort.
+    expect(stageMocks.masterRun).not.toHaveBeenCalled();
+    // The job row is left `running` (finishReloadJob skipped) so findResumableReloadJob picks it up.
+    expect(repo.finishReloadJob).not.toHaveBeenCalled();
+    expect(result.status).toBe('failed');
   });
 });
 
@@ -275,7 +344,7 @@ describe('runReload — concurrency', () => {
     expect(stageMocks.releasesRun).toHaveBeenCalledOnce();
     expect(stageMocks.lyricsRun).toHaveBeenCalledOnce();
     expect(stageMocks.masterRun).toHaveBeenCalledOnce();
-    expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'complete');
+    expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'complete', log);
     expect(result).toMatchObject({ status: 'complete', stagesRun: 3 });
   });
 });
@@ -338,9 +407,14 @@ describe('runVerifyGate', () => {
     expect(result).toEqual({ passed: true });
     expect(verifyMocks.getStats).toHaveBeenCalledWith(driver);
     expect(verifyMocks.evaluateCoverage).toHaveBeenCalledWith(expect.anything(), ran);
-    expect(repo.markStageComplete).toHaveBeenCalledWith(driver, 'job-1', 'verify', {
-      coverageChecksFailed: 0,
-    });
+    expect(repo.markStageComplete).toHaveBeenCalledWith(
+      driver,
+      'job-1',
+      'verify',
+      { coverageChecksFailed: 0 },
+      false,
+      log,
+    );
     expect(repo.markStageFailed).not.toHaveBeenCalled();
   });
 
@@ -362,6 +436,7 @@ describe('runVerifyGate', () => {
       'verify',
       'verify gate FAILED — stage [lyrics]',
       { coverageChecksFailed: 1 },
+      log,
     );
     expect(repo.markStageComplete).not.toHaveBeenCalled();
   });
@@ -377,6 +452,8 @@ describe('runVerifyGate', () => {
       'job-1',
       'verify',
       expect.stringContaining('verify gate errored: neo4j down'),
+      undefined,
+      log,
     );
   });
 });

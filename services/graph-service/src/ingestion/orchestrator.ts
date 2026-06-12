@@ -27,6 +27,7 @@ import {
 import type { ProgressReporter } from '../enrichment/progress.js';
 import { getStats } from '../db/stats-repository.js';
 import { evaluateCoverage, reportToCounts, formatVerifyFailure } from './reload-verify.js';
+import { getShutdownSignal, isShuttingDown } from '../lifecycle/shutdown.js';
 
 export interface RunReloadOptions {
   username: string;
@@ -154,7 +155,7 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
     const onProgress: ProgressReporter = (processed, total) =>
       reportStageProgress(jobId, descriptor.name, processed, total);
     try {
-      await markStageRunning(driver, jobId, descriptor.name);
+      await markStageRunning(driver, jobId, descriptor.name, log);
 
       // The verify gate (#178) runs here, not via descriptor.run, because it needs `ranStages`
       // (which stages produced output this job) that the run(ctx) signature can't carry. Its deps
@@ -169,8 +170,21 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
 
       beginStage(jobId, descriptor.name);
       const counts = await descriptor.run(ctx, onProgress);
+
+      // Shutdown signalled mid-stage (#291): the stage's loop returned partial counts, so leave it
+      // `running` (set by markStageRunning) — do NOT mark complete/failed. The still-`running` job
+      // resumes on the next boot and this stage's idempotent candidate filter re-runs only the
+      // unfinished work. Marking complete would skip that half; marking failed would end the job
+      // `failed` and stop it resuming at all.
+      if (isShuttingDown()) {
+        log.warn(
+          `[reload] stage "${descriptor.name}" interrupted by shutdown — left running for resume`,
+        );
+        return;
+      }
+
       if (counts === null) {
-        await markStageComplete(driver, jobId, descriptor.name, {}, true);
+        await markStageComplete(driver, jobId, descriptor.name, {}, true, log);
         stagesSkipped++;
         log.info(`[reload] stage "${descriptor.name}" skipped — required client not configured`);
       } else {
@@ -179,6 +193,8 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
           jobId,
           descriptor.name,
           foldBreakerCounts(ctx, descriptor, counts),
+          false,
+          log,
         );
         stagesRun++;
         ranStages.add(descriptor.name);
@@ -195,6 +211,7 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
           descriptor.name,
           msg,
           foldBreakerCounts(ctx, descriptor, {}),
+          log,
         );
         log.error(`[reload] stage "${descriptor.name}" failed (recorded; continuing): ${msg}`);
       } catch (recordErr) {
@@ -223,9 +240,20 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
       alreadyDone: doneStages,
       run: runOneStage,
       log,
+      // Same controller the stage loops poll, so the scheduler stops launching new stages and the
+      // in-flight ones checkpoint-and-exit in lock-step on SIGTERM (#291).
+      signal: getShutdownSignal(),
     });
   } finally {
     markReloadInactive(jobId);
+  }
+
+  // Shutdown signalled (#291): leave the job row `running` — skip finishReloadJob — so the next
+  // boot's cold-start resume picks it up via findResumableReloadJob. The in-flight stage(s) were
+  // left `running` by runOneStage; complete/skipped stages skip on resume and pending ones re-run.
+  if (isShuttingDown()) {
+    log.warn(`[reload] job ${jobId} interrupted by shutdown — left running; next boot resumes it`);
+    return { jobId, status: 'failed', stagesRun, stagesSkipped, stagesFailed };
   }
 
   // A schedule that couldn't settle every stage (a malformed graph trips the scheduler's stuck
@@ -233,7 +261,7 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
   const allSettled =
     stagesRun + stagesSkipped + stagesFailed + doneStages.size >= RELOAD_STAGES.length;
   const status: 'complete' | 'failed' = stagesFailed > 0 || !allSettled ? 'failed' : 'complete';
-  await finishReloadJob(driver, jobId, status);
+  await finishReloadJob(driver, jobId, status, log);
   log.info(
     `[reload] job ${jobId} ${status}: ${stagesRun} run, ${stagesSkipped} skipped, ${stagesFailed} failed`,
   );
@@ -259,18 +287,18 @@ export async function runVerifyGate(
     const report = evaluateCoverage(await getStats(driver), ranStages);
     const counts = reportToCounts(report);
     if (report.pass) {
-      await markStageComplete(driver, jobId, 'verify', counts);
+      await markStageComplete(driver, jobId, 'verify', counts, false, log);
       log.info('[reload] verify gate passed');
       return { passed: true };
     }
     const summary = formatVerifyFailure(report);
     log.error(`[reload] ${summary}`);
-    await markStageFailed(driver, jobId, 'verify', summary, counts);
+    await markStageFailed(driver, jobId, 'verify', summary, counts, log);
     return { passed: false };
   } catch (err) {
     const msg = `verify gate errored: ${err instanceof Error ? err.message : String(err)}`;
     log.error(`[reload] ${msg}`);
-    await markStageFailed(driver, jobId, 'verify', msg);
+    await markStageFailed(driver, jobId, 'verify', msg, undefined, log);
     return { passed: false };
   }
 }

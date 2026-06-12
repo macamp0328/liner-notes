@@ -36,6 +36,7 @@ import { runReload } from '../ingestion/orchestrator.js';
 import { RELOAD_STAGES } from '../ingestion/stages.js';
 import {
   createReloadJob,
+  finishReloadJob,
   findResumableReloadJob,
   getLatestReloadJob,
 } from '../db/job-repository.js';
@@ -47,6 +48,7 @@ import {
   markReloadInactive,
   type LiveStageProgress,
 } from '../ingestion/reload-progress.js';
+import { trackBackgroundJob } from '../lifecycle/shutdown.js';
 import { errorResponseRef } from './schemas.js';
 
 // Shared response shape for the nationality summary, used by both POST /nationality/enrich and
@@ -810,7 +812,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       const jobId = startJob();
       const driver = getDriver();
 
-      void runIngestion(discogsClient, driver, { username, logger: request.log })
+      // Track the detached run so graceful shutdown drains it before closing the driver (#291).
+      const ingestRun = runIngestion(discogsClient, driver, { username, logger: request.log })
         .then((summary) => {
           const stats: IngestionStats = {
             nodes: {},
@@ -826,6 +829,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         .catch((err: unknown) => {
           failJob(err instanceof Error ? err.message : String(err));
         });
+      trackBackgroundJob(ingestRun);
 
       return reply.code(202).send({ data: { jobId, message: 'Ingestion started' } });
     },
@@ -919,6 +923,20 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       const busy = busyWith();
       if (busy) {
         return reply.code(409).send({ error: busy });
+      }
+      // busyWith() only sees the in-memory reload flag; a reload job that is `running` in Neo4j but
+      // has no live pod on it (cold-start resume skipped for missing creds, or a crash not yet
+      // resumed) is invisible to it. Wiping then DETACH DELETEs that job's ReloadJob/ReloadStage
+      // checkpoints and the orphaned orchestrator's writes silently no-op — re-arming a second
+      // concurrent reload (#290). Refuse while any reload job is still resumable.
+      const resumable = await findResumableReloadJob(getDriver());
+      if (resumable) {
+        return reply.code(409).send({
+          error: {
+            code: 'RELOAD_RUNNING',
+            message: 'A reload job is still in progress — let it finish or resume before wiping',
+          },
+        });
       }
       const deleted = await wipeGraph(getDriver());
       // Log at error level (Pino 50) so this destructive action trips the
@@ -1081,7 +1099,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         // Capture just the logger — these runs last hours, and closing over `request` would pin
         // its headers/body/raw socket in memory for the whole run; the pino child logger doesn't.
         const log = request.log;
-        void prepared
+        // Track the detached run so graceful shutdown drains it before closing the driver (#291).
+        const enrichRun = prepared
           .run(getDriver())
           .then((summary) => {
             entry.state.lastResult = summary;
@@ -1097,6 +1116,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           .finally(() => {
             entry.state.running = false;
           });
+        trackBackgroundJob(enrichRun);
 
         return reply.code(202).send({
           data: {
@@ -1311,12 +1331,26 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       // it (idempotent) and clears it in its finally on normal completion; the .catch clears it
       // if runReload rejects before reaching that finally, so the flag can't leak.
       markReloadActive(jobId);
-      void runReload(driver, { username, logger: request.log, resumeJobId: jobId }).catch(
-        (err: unknown) => {
-          markReloadInactive(jobId);
-          request.log.error({ err }, '[reload] orchestrated reload failed');
-        },
-      );
+      // Track the detached run so graceful shutdown drains it before closing the driver (#291).
+      const reloadRun = runReload(driver, {
+        username,
+        logger: request.log,
+        resumeJobId: jobId,
+      }).catch((err: unknown) => {
+        markReloadInactive(jobId);
+        request.log.error({ err }, '[reload] orchestrated reload failed');
+        // The orchestration rejected outside any stage's own catch (a transient Neo4j blip in
+        // getReloadJob/finishReloadJob/the scheduler), so the job is still `running` in Neo4j and
+        // would 409 every future /reload + /reset until a pod restart (#290). Flip it terminal so
+        // the operator can retry without a restart. Pass request.log so a zero-match (the job node
+        // was deleted out from under us) surfaces the same warning the orchestrator's writes do.
+        // Best-effort + fire-and-forget: on failure the prior behaviour stands (stuck `running`,
+        // recovered on the next cold-start resume).
+        void finishReloadJob(driver, jobId, 'failed', request.log).catch((markErr: unknown) => {
+          request.log.error({ err: markErr }, '[reload] failed to mark stuck reload job failed');
+        });
+      });
+      trackBackgroundJob(reloadRun);
 
       return reply.code(202).send({ data: { jobId, message: 'Reload started' } });
     },
@@ -1358,4 +1392,12 @@ export function resetAllPipelineStates(): void {
   for (const entry of PIPELINES) {
     Object.assign(entry.state, makePipelineState());
   }
+}
+
+/**
+ * Names of the standalone enrichment pipelines currently running — read by the entry point at
+ * shutdown to log which detached enrich runs are being drained/interrupted (#291).
+ */
+export function getRunningPipelineNames(): string[] {
+  return PIPELINES.filter((entry) => entry.state.running).map((entry) => entry.name);
 }

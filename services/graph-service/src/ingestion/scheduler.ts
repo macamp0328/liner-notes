@@ -1,4 +1,5 @@
 import type { Logger } from './discogs-client.js';
+import { getShutdownSignal } from '../lifecycle/shutdown.js';
 
 /**
  * A unit of work the scheduler can order: a name, its ordering prerequisites, and the named
@@ -29,6 +30,11 @@ export interface ScheduleOptions<T extends SchedulableStage> {
   run: (stage: T) => Promise<void>;
   /** Defaults to `console`. */
   log?: Logger;
+  /**
+   * Cooperative shutdown signal (#291). Once aborted, no NEW stage launches; already-running stages
+   * drain (they checkpoint-and-exit via their own loops). Defaults to the process shutdown signal.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -49,6 +55,7 @@ export async function scheduleStages<T extends SchedulableStage>(
 ): Promise<void> {
   const { stages, run } = options;
   const log: Logger = options.log ?? console;
+  const signal: AbortSignal = options.signal ?? getShutdownSignal();
   const concurrency = Math.max(1, Math.floor(options.concurrency));
 
   const byName = new Map<string, T>(stages.map((s) => [s.name, s]));
@@ -61,6 +68,9 @@ export async function scheduleStages<T extends SchedulableStage>(
 
   while (settled.size < stages.length) {
     for (const stage of stages) {
+      // Stop launching new stages once shutdown is signalled (#291) — in-flight stages still drain
+      // below, then the `inflight.size === 0` branch exits the loop cleanly.
+      if (signal.aborted) break;
       if (inflight.size >= concurrency) break;
       if (launched.has(stage.name)) continue;
       if (!stage.deps.every((d) => settled.has(d))) continue;
@@ -83,6 +93,12 @@ export async function scheduleStages<T extends SchedulableStage>(
     }
 
     if (inflight.size === 0) {
+      // Shutdown signalled and everything in-flight has drained → exit cleanly, leaving the
+      // unlaunched stages for the resumed run (#291) — this is not the "stuck" condition.
+      if (signal.aborted) {
+        log.info('[reload] shutdown signalled — stopped launching stages; in-flight work drained');
+        break;
+      }
       // Nothing running and nothing launchable → an unsatisfiable/cyclic dep. Defensive only:
       // `validateStageGraph` (unit-tested against the real graph) rules this out in practice.
       const stuck = stages.filter((s) => !settled.has(s.name)).map((s) => s.name);

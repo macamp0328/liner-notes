@@ -197,4 +197,48 @@ describe('enrichTrackDeezer', () => {
     expect(onProgress).toHaveBeenCalledWith(50, 51); // mid-loop report at the 50-ISRC cadence
     expect(onProgress).toHaveBeenLastCalledWith(51, 51);
   });
+
+  // Cooperative shutdown abort (#291)
+  it('processes nothing when the signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    mockGetTracks.mockResolvedValue([makeTrack('e1', 'AAA0000001')]);
+    const client = makeDeezerClient(async () => ({ bpm: 120, gain: -4 }));
+
+    const summary = await enrichTrackDeezer(
+      client,
+      fakeDriver,
+      silentLogger,
+      undefined,
+      controller.signal,
+    );
+
+    expect(client.getTrackByIsrc).not.toHaveBeenCalled();
+    expect(summary.tracksProcessed).toBe(0);
+    expect(mockSetData).not.toHaveBeenCalled();
+  });
+
+  it('checkpoint-exits between ISRCs on shutdown, flushing the buffered batch', async () => {
+    const controller = new AbortController();
+    mockGetTracks.mockResolvedValue([makeTrack('e1', 'AAA0000001'), makeTrack('e2', 'BBB0000002')]);
+    const getTrackSpy = vi.fn().mockImplementation(async () => {
+      controller.abort(); // signal arrives during the first fetch
+      return { bpm: 120, gain: -4 };
+    });
+    const client = { getTrackByIsrc: getTrackSpy } as unknown as DeezerClient;
+    const onProgress = vi.fn();
+
+    const summary = await enrichTrackDeezer(
+      client,
+      fakeDriver,
+      silentLogger,
+      onProgress,
+      controller.signal,
+    );
+
+    expect(getTrackSpy).toHaveBeenCalledTimes(1); // 2nd ISRC skipped by the abort
+    expect(summary.tracksProcessed).toBe(1);
+    expect(mockSetData).toHaveBeenCalledOnce(); // buffered result flushed post-loop
+    expect(onProgress).toHaveBeenLastCalledWith(1, 2); // honest partial progress, not 2/2 (#291)
+  });
 });

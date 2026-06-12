@@ -39,12 +39,34 @@ export interface PersistedJob {
 /** Cap stored error messages so a pathological upstream error can't bloat a node property. */
 const MAX_ERROR_LENGTH = 1000;
 
+/**
+ * Minimal logger surface — pino, console, and the reload `Logger` all satisfy it structurally.
+ * Declared locally so this `db` module needs no backwards import from `ingestion`.
+ */
+type CheckpointLogger = { warn: (msg: string) => void };
+
 function toNumberOrNull(raw: unknown): number | null {
   if (raw === null || raw === undefined) return null;
   if (typeof raw === 'number') return raw;
   if (typeof (raw as Neo4jInt).toNumber === 'function') return (raw as Neo4jInt).toNumber();
   const n = Number(raw);
   return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * The checkpoint writers are `MATCH … SET`, which silently no-op when the target ReloadJob/ReloadStage
+ * node is gone — e.g. a `/reset` wipe DETACH DELETEs it out from under an in-flight reload (#290).
+ * Each writer RETURNs `count(...) AS matched`; this turns a zero match into a structured warning so
+ * the otherwise-invisible no-op is diagnosable. No-op when no logger was passed.
+ */
+function warnIfUnmatched(
+  matchedRaw: unknown,
+  log: CheckpointLogger | undefined,
+  context: string,
+): void {
+  if (log !== undefined && (toNumberOrNull(matchedRaw) ?? 0) === 0) {
+    log.warn(`[job-repository] ${context} matched no node — deleted mid-reload? (#290)`);
+  }
 }
 
 /** Neo4j DateTime values stringify to ISO-8601; null stays null. */
@@ -156,14 +178,17 @@ export async function markStageRunning(
   driver: Driver,
   jobId: string,
   stage: string,
+  log?: CheckpointLogger,
 ): Promise<void> {
   const session = driver.session();
   try {
-    await session.run(
+    const result = await session.run(
       `MATCH (st:ReloadStage {jobId: $jobId, stage: $stage})
-       SET st.status = 'running', st.startedAt = datetime(), st.error = null`,
+       SET st.status = 'running', st.startedAt = datetime(), st.error = null
+       RETURN count(st) AS matched`,
       { jobId, stage },
     );
+    warnIfUnmatched(result.records[0]?.get('matched'), log, `markStageRunning(${jobId}/${stage})`);
   } finally {
     await session.close();
   }
@@ -179,13 +204,15 @@ export async function markStageComplete(
   stage: string,
   counts: Record<string, number>,
   skipped = false,
+  log?: CheckpointLogger,
 ): Promise<void> {
   const session = driver.session();
   try {
-    await session.run(
+    const result = await session.run(
       `MATCH (st:ReloadStage {jobId: $jobId, stage: $stage})
        SET st.status = $status, st.completedAt = datetime(),
-           st.countsJson = $countsJson, st.error = null`,
+           st.countsJson = $countsJson, st.error = null
+       RETURN count(st) AS matched`,
       {
         jobId,
         stage,
@@ -193,6 +220,7 @@ export async function markStageComplete(
         countsJson: JSON.stringify(counts),
       },
     );
+    warnIfUnmatched(result.records[0]?.get('matched'), log, `markStageComplete(${jobId}/${stage})`);
   } finally {
     await session.close();
   }
@@ -210,13 +238,15 @@ export async function markStageFailed(
   stage: string,
   error: string,
   counts?: Record<string, number>,
+  log?: CheckpointLogger,
 ): Promise<void> {
   const session = driver.session();
   try {
-    await session.run(
+    const result = await session.run(
       `MATCH (st:ReloadStage {jobId: $jobId, stage: $stage})
        SET st.status = 'failed', st.completedAt = datetime(), st.error = $error` +
-        (counts === undefined ? '' : ', st.countsJson = $countsJson'),
+        (counts === undefined ? '' : ', st.countsJson = $countsJson') +
+        ' RETURN count(st) AS matched',
       {
         jobId,
         stage,
@@ -224,6 +254,7 @@ export async function markStageFailed(
         ...(counts === undefined ? {} : { countsJson: JSON.stringify(counts) }),
       },
     );
+    warnIfUnmatched(result.records[0]?.get('matched'), log, `markStageFailed(${jobId}/${stage})`);
   } finally {
     await session.close();
   }
@@ -237,15 +268,18 @@ export async function finishReloadJob(
   driver: Driver,
   jobId: string,
   status: ReloadJobStatus,
+  log?: CheckpointLogger,
 ): Promise<void> {
   const session = driver.session();
   try {
-    await session.run(
+    const result = await session.run(
       `MATCH (j:ReloadJob {jobId: $jobId})
        SET j.status = $status, j.completedAt = datetime(),
-           j.durationMs = datetime().epochMillis - j.startedAt.epochMillis`,
+           j.durationMs = datetime().epochMillis - j.startedAt.epochMillis
+       RETURN count(j) AS matched`,
       { jobId, status },
     );
+    warnIfUnmatched(result.records[0]?.get('matched'), log, `finishReloadJob(${jobId})`);
   } finally {
     await session.close();
   }

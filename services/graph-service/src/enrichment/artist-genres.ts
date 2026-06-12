@@ -19,6 +19,10 @@ export interface ArtistGenresEnrichmentSummary {
  * Deliberately NOT a runEnrichment stage (#222): there is no candidate loop, no external
  * resolve, and no per-node `*FetchedAt` stamping — just two whole-graph Cypher aggregations
  * that recompute every Artist from scratch each run.
+ *
+ * No SIGTERM abort seam (#291): with no candidate loop there is nothing to checkpoint, and the two
+ * aggregations are fast and idempotent — an interrupted run simply re-runs whole on resume. The
+ * #291 cooperative-abort shutdown deliberately leaves this stage uninterruptible.
  */
 export async function enrichArtistGenres(
   driver: Driver,
