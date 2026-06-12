@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildTestServer } from '../setup.js';
-import { seedGraph, clearGraph, seedExploreEnrichment } from '../../fixtures/loader.js';
+import {
+  seedGraph,
+  clearGraph,
+  seedExploreEnrichment,
+  seedEntityResolution,
+} from '../../fixtures/loader.js';
 import { getDriver } from '../../../src/db/client.js';
 
 const SEED_RELEASE_ID = 7000001; // Maiden Voyage — Herbie Hancock, Blue Note, US, 1966
@@ -14,6 +19,7 @@ describe('explore routes', () => {
     await clearGraph(getDriver());
     await seedGraph(getDriver());
     await seedExploreEnrichment(getDriver());
+    await seedEntityResolution(getDriver());
   });
 
   afterAll(async () => {
@@ -227,6 +233,79 @@ describe('explore routes', () => {
         p.sharedMusicians.some((m) => m.name === 'Ron Carter'),
       );
       expect(ronCarterPair).toBeDefined();
+    });
+
+    it('collapses an alias to the canonical Artist name (#330)', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/shared-musicians' });
+      const body = JSON.parse(res.payload) as {
+        releaseA: { discogsId: number };
+        releaseB: { discogsId: number };
+        sharedMusicians: { name: string }[];
+      }[];
+      // The aliased person (Musician "Canon Alias" ≡ Artist "Canonical Person") is credited on
+      // 7000004 + 7000005 → the pair lists them once, under the canonical name, not the alias node.
+      const pair = body.find(
+        (p) =>
+          (p.releaseA.discogsId === 7000004 && p.releaseB.discogsId === 7000005) ||
+          (p.releaseA.discogsId === 7000005 && p.releaseB.discogsId === 7000004),
+      );
+      expect(pair).toBeDefined();
+      expect(pair!.sharedMusicians.map((m) => m.name)).toContain('Canonical Person');
+      expect(pair!.sharedMusicians.map((m) => m.name)).not.toContain('Canon Alias');
+    });
+  });
+
+  describe('GET /api/v1/explore/musician/:name — entity resolution (#330)', () => {
+    const ids = (payload: string): number[] =>
+      (JSON.parse(payload) as { discogsId: number }[]).map((r) => r.discogsId);
+
+    it('includes track-scoped credits (the Dixie Hummingbirds / Jimmy Johnson bug)', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/musician/Jimmy%20Test%20(4)',
+      });
+      expect(res.statusCode).toBe(200);
+      // "Jimmy Test (4)" is credited only at TRACK scope on a track of 7000001 — release-only
+      // matching used to drop it entirely.
+      expect(ids(res.payload)).toContain(7000001);
+    });
+
+    it('returns the same release set for an alias and its canonical name', async () => {
+      const aliasRes = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/musician/Jimmy%20Test%20(4)',
+      });
+      const canonicalRes = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/musician/Jimmy%20Test',
+      });
+      expect(canonicalRes.statusCode).toBe(200);
+      expect(ids(canonicalRes.payload).sort()).toEqual(ids(aliasRes.payload).sort());
+      expect(ids(canonicalRes.payload)).toContain(7000001);
+    });
+
+    it('expands a group query to its members’ work (≥2 members resolved)', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/musician/The%20Test%20Swampers',
+      });
+      expect(res.statusCode).toBe(200);
+      const got = ids(res.payload);
+      // The group's own credit (7000001) plus both members' releases (7000002, 7000003).
+      expect(got).toContain(7000001);
+      expect(got).toContain(7000002);
+      expect(got).toContain(7000003);
+    });
+
+    it('expands a member query to the group’s work (vice-versa)', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/musician/Test%20Hood',
+      });
+      expect(res.statusCode).toBe(200);
+      const got = ids(res.payload);
+      expect(got).toContain(7000002); // the member's own credit
+      expect(got).toContain(7000001); // the group's credit, via MEMBER_OF
     });
   });
 
