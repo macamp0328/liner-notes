@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../../../src/server.js';
-import type { DiscogsCollectionPage, DiscogsRelease } from '../../../src/ingestion/types.js';
+import type { DiscogsCollectionPage } from '../../../src/ingestion/types.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks — plain vi.fn() here; implementations set in beforeEach after

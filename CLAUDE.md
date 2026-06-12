@@ -26,6 +26,9 @@ pnpm --filter graph-service dev
 # Hooks (auto-installed on pnpm install via husky):
 #   pre-commit  — blocks commits on main, then prettier via lint-staged (staged files only)
 #   pre-push    — blocks pushes targeting main, then lint + typecheck + test:unit:coverage
+# Install is guarded by scripts/prepare.sh: `pnpm install` now FAILS LOUDLY if husky
+# can't wire the hooks (no more silent `|| true`), and skips cleanly when there's no
+# .git (Docker build) or CI/HUSKY=0 is set. Guard logic is tested: `pnpm prepare:test`.
 # Commit message format is not enforced — the repo squash-merges into main, so
 # the PR title is what lands in history, not individual branch commits.
 
@@ -367,22 +370,22 @@ Notes for agents:
 
 **Parallel fan-out:** `format`, `lint`, `typecheck`, `tests-and-coverage`, `schema-validation`, `script-tests`, `terraform`, `audit`, `secrets-scan`, `codeql`, and `actionlint` all start in parallel at t=0 (`actionlint` also shellchecks the standalone `*.sh` scripts). `docker-build` is the only gated job — it waits on `lint` + `typecheck` (the multi-stage build compiles TS, so a type error would fail it anyway) but **not** on the ~90s test job, so it builds alongside it. There is deliberately no static fast-fail gate on the test/schema jobs: it traded ~1 min of green-path wall-clock for runner minutes that were only saved on red PRs. The critical path is now `max(tests-and-coverage, codeql)` ≈ 85s.
 
-| Check             | Tool                                                   | Requirement                                                                                    |
-| ----------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| Format check      | Prettier                                               | Zero differences                                                                               |
-| Linting           | ESLint + security plugin                               | Zero warnings/errors (src + `scripts/` + service scripts + configs; tests deferred — see note) |
-| Type checking     | TypeScript strict (src + tests + `scripts/` + configs) | Zero errors                                                                                    |
-| Tests & Coverage  | Vitest + coverage-v8 + Neo4j container                 | All tests pass; thresholds met                                                                 |
-| Schema validation | tsx + Neo4j container                                  | Constraints/indexes apply idempotently                                                         |
-| Script tests      | node:test via tsx (`changelog:test`)                   | All changelog generator tests pass                                                             |
-| Terraform         | `terraform fmt -check` + `validate`                    | Formatted; both roots validate (`init -backend=false`)                                         |
-| Shellcheck        | shellcheck (pinned, in `actionlint`)                   | Standalone `*.sh` clean                                                                        |
-| Docker build      | Docker Buildx                                          | Image builds successfully                                                                      |
-| Security audit    | `pnpm audit`                                           | No high/critical vulnerabilities                                                               |
-| Secrets scan      | TruffleHog                                             | No credentials in committed code                                                               |
-| CodeQL scan       | GitHub CodeQL (security-extended)                      | No security alerts                                                                             |
+| Check             | Tool                                                   | Requirement                                                                            |
+| ----------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| Format check      | Prettier                                               | Zero differences                                                                       |
+| Linting           | ESLint + security plugin                               | Zero warnings/errors (src + tests + `scripts/` + service scripts + configs — see note) |
+| Type checking     | TypeScript strict (src + tests + `scripts/` + configs) | Zero errors                                                                            |
+| Tests & Coverage  | Vitest + coverage-v8 + Neo4j container                 | All tests pass; thresholds met                                                         |
+| Schema validation | tsx + Neo4j container                                  | Constraints/indexes apply idempotently                                                 |
+| Script tests      | node:test via tsx (`changelog:test`)                   | All changelog generator tests pass                                                     |
+| Terraform         | `terraform fmt -check` + `validate`                    | Formatted; both roots validate (`init -backend=false`)                                 |
+| Shellcheck        | shellcheck (pinned, in `actionlint`)                   | Standalone `*.sh` clean                                                                |
+| Docker build      | Docker Buildx                                          | Image builds successfully                                                              |
+| Security audit    | `pnpm audit`                                           | No high/critical vulnerabilities                                                       |
+| Secrets scan      | TruffleHog                                             | No credentials in committed code                                                       |
+| CodeQL scan       | GitHub CodeQL (security-extended)                      | No security alerts                                                                     |
 
-> **Lint scope note:** `lint`/`typecheck` are root-level (`pnpm lint` / `pnpm typecheck`), not `--filter graph-service`, so they cover `scripts/`, the service-level `scripts/`, and the vitest configs — not just `src`. Type-aware ESLint needs every file in a tsconfig: `scripts/tsconfig.json` plus `tsconfig.test.json`'s widened `include` provide that (see `.eslintrc.cjs` `overrides`). `eslint-plugin-security`'s `detect-non-literal-fs-filename` / `detect-object-injection` are scoped **off** for the trusted-path `scripts/` tooling (they target untrusted-input web handlers). **Test-file linting is deferred to a follow-up** — the 298 idiomatic findings (`unbound-method`, `require-await`, …) need their own rule-tuning pass; tests are still typechecked.
+> **Lint scope note:** `lint`/`typecheck` are root-level (`pnpm lint` / `pnpm typecheck`), not `--filter graph-service`, so they cover `scripts/`, the service-level `scripts/`, and the vitest configs — not just `src`. Type-aware ESLint needs every file in a tsconfig: `scripts/tsconfig.json` plus `tsconfig.test.json`'s widened `include` provide that (see `.eslintrc.cjs` `overrides`). `eslint-plugin-security`'s `detect-non-literal-fs-filename` / `detect-object-injection` are scoped **off** for the trusted-path `scripts/` tooling (they target untrusted-input web handlers). **Test files are linted too** (#345): three idiomatic-noise rules — `unbound-method` (passing `obj.method` to `expect`), `require-await` (async mock signatures), `detect-object-injection` (`arr[i]` in assertions) — are tuned **off** for tests, while the correctness rules stay on. `no-floating-promises` is the load-bearing one: kept **on** for the vitest tests (a missing `await` on an async assertion is a silent false-green) and turned **off** only for the root `scripts/**/*.test.ts` node:test suite, where a top-level `test(...)` floats by design.
 
 ---
 
