@@ -7,6 +7,10 @@ while read -r _local_ref _local_sha remote_ref _remote_sha; do
   fi
 done
 
-pnpm --filter graph-service lint
-pnpm --filter graph-service typecheck
+# Root lint/typecheck (not --filter graph-service) so they also cover scripts/,
+# the service-level scripts, and the vitest configs — see .eslintrc.cjs overrides
+# and scripts/tsconfig.json.
+pnpm lint
+pnpm typecheck
 pnpm --filter graph-service test:unit:coverage
+pnpm changelog:test

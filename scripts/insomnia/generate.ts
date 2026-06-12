@@ -222,8 +222,10 @@ export function validateDocument(yamlText: string, spec: OpenApiSpec, prodUrl: s
   );
   if (resetRequest) {
     const params = resetRequest.node['parameters'];
+    // Array.isArray narrows `unknown` to `any[]`; cast to `unknown[]` so `.find`
+    // returns `unknown` (not `any`) and the result stays type-safe.
     const confirm = Array.isArray(params)
-      ? params.find((p: unknown) => isRecord(p) && p['name'] === 'confirm')
+      ? (params as unknown[]).find((p) => isRecord(p) && p['name'] === 'confirm')
       : undefined;
     if (!isRecord(confirm) || confirm['value'] !== 'wipe-all' || confirm['disabled'] !== true) {
       result.failures.push(

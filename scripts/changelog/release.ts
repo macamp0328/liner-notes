@@ -199,6 +199,9 @@ async function healRecentPrs(
 
 // ── The baseline one-shot ───────────────────────────────────────────────────
 
+// async for dispatch parity with runCut(); main() awaits both branches uniformly.
+// The body is all synchronous (sync store reads + execFileSync `gh`).
+// eslint-disable-next-line @typescript-eslint/require-await
 async function runBaseline(): Promise<void> {
   const records = readStore();
   const versions = readVersions();
