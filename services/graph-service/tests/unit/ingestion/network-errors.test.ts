@@ -32,4 +32,17 @@ describe('transientNetworkCode', () => {
   it('returns null for a plain error with no recognized code', () => {
     expect(transientNetworkCode(new Error('something else'))).toBeNull();
   });
+
+  it('classifies an AbortSignal.timeout TimeoutError (a DOMException matched by name)', () => {
+    // A TimeoutError DOMException carries no transient `.code` string (its legacy `.code` is the
+    // number 23) and its message is not "fetch failed", so it would fall through to null without the
+    // early name-based check — hence that check must run first.
+    const err = new DOMException('The operation timed out.', 'TimeoutError');
+    expect(transientNetworkCode(err)).toBe('TimeoutError');
+  });
+
+  it('leaves a caller-initiated AbortError non-transient', () => {
+    const err = new DOMException('The operation was aborted.', 'AbortError');
+    expect(transientNetworkCode(err)).toBeNull();
+  });
 });

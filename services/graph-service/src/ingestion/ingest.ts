@@ -1,6 +1,7 @@
 import type { Driver } from 'neo4j-driver';
 import { DiscogsClient } from './discogs-client.js';
 import type { Logger } from './discogs-client.js';
+import { DEFAULT_OUTBOUND_TIMEOUT_MS, resolveOutboundTimeoutMs } from './outbound-timeout.js';
 import { mergeReleaseGraph } from '../db/ingestion-repository.js';
 import { NOOP_PROGRESS, type ProgressReporter } from '../enrichment/progress.js';
 import { getShutdownSignal } from '../lifecycle/shutdown.js';
@@ -341,6 +342,7 @@ export function buildDiscogsClientFromEnv(logger?: Logger): DiscogsClient | null
     token,
     userAgent,
     delayMs,
+    timeoutMs: resolveOutboundTimeoutMs(DEFAULT_OUTBOUND_TIMEOUT_MS),
     ...(logger !== undefined ? { logger } : {}),
   });
 }

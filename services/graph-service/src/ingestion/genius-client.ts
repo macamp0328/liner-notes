@@ -10,6 +10,7 @@ import {
   type CircuitBreaker,
   type CircuitBreakerSnapshot,
 } from './circuit-breaker.js';
+import { DEFAULT_OUTBOUND_TIMEOUT_MS, resolveOutboundTimeoutMs } from './outbound-timeout.js';
 import {
   extractLyricsFromHtml,
   stripGeniusHeader,
@@ -62,6 +63,8 @@ export interface GeniusClientConfig {
   delayMs: number;
   /** Minimum backoff on a retryable status. Defaults to 1000ms. Set to 0 in tests to keep them fast. */
   backoffBaseMs?: number;
+  /** Per-request timeout in ms (#357). Falls back to the shared fetch default when omitted. */
+  timeoutMs?: number;
   /** Injectable RNG in [0,1) for deterministic backoff jitter in tests; defaults to Math.random. */
   random?: () => number;
   /** Optional structured logger; defaults to console when omitted. Pass app.log in production. */
@@ -135,6 +138,7 @@ export class GeniusClient {
       maxRetries: MAX_RETRIES,
       backoffBaseMs: config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS,
       retryStatuses: RETRY_STATUSES,
+      ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
       ...(config.random !== undefined ? { random: config.random } : {}),
       ...(config.logger !== undefined ? { logger: config.logger } : {}),
       ...(this.breaker !== undefined ? { breaker: this.breaker } : {}),
@@ -248,6 +252,7 @@ export function buildGeniusClientFromEnv(logger?: Logger): GeniusClient | null {
     token,
     userAgent,
     delayMs: 0,
+    timeoutMs: resolveOutboundTimeoutMs(DEFAULT_OUTBOUND_TIMEOUT_MS),
     ...(logger !== undefined ? { logger } : {}),
   });
 }

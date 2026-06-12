@@ -70,6 +70,10 @@ describe('createRateLimitedFetch', () => {
         sleeps.push(ms);
         return Promise.resolve();
       },
+      // A never-aborting signal: keeps real AbortSignal.timeout timers out of the event loop while
+      // still exercising the signal-attachment path. A distinct instance per call so the
+      // fresh-per-attempt assertion below has something to compare.
+      timeoutSignal: () => new AbortController().signal,
       logger: { info: vi.fn(), warn, error: vi.fn() },
       ...overrides,
     });
@@ -90,13 +94,17 @@ describe('createRateLimitedFetch', () => {
       expect(res.json).not.toHaveBeenCalled();
     });
 
-    it('passes the init (headers) through to fetch', async () => {
+    it('passes the init (headers) through to fetch, with a timeout signal attached', async () => {
       fetchSpy.mockResolvedValueOnce(makeResponse(200));
       const init = { headers: { 'User-Agent': 'liner-notes/test', Accept: 'application/json' } };
 
       await build()('https://api.example.com/thing', init);
 
-      expect(fetchSpy.mock.calls[0]?.[1]).toBe(init);
+      // init is spread into a fresh object so the per-attempt signal can be added — the headers
+      // still forward verbatim, plus the signal (#357).
+      const passed = fetchSpy.mock.calls[0]?.[1];
+      expect(passed).toMatchObject(init);
+      expect(passed?.signal).toBeInstanceOf(AbortSignal);
     });
 
     it('sleeps exactly delayMs after an ok response (trailing request spacing)', async () => {
@@ -327,6 +335,73 @@ describe('createRateLimitedFetch', () => {
       await build({ backoffBaseMs: 100, random: () => 1 })('https://api.example.com/thing');
 
       expect(sleeps.slice(0, 2)).toEqual([100, 200]);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Request timeout (#357)
+  // ---------------------------------------------------------------------------
+  describe('request timeout', () => {
+    function timeoutError(): DOMException {
+      return new DOMException('The operation timed out.', 'TimeoutError');
+    }
+
+    it('attaches a timeout signal to every fetch', async () => {
+      fetchSpy.mockResolvedValueOnce(makeResponse(200));
+
+      await build()('https://api.example.com/thing');
+
+      expect(fetchSpy.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('composes a caller-supplied signal with the timeout signal', async () => {
+      fetchSpy.mockResolvedValueOnce(makeResponse(200));
+      const callerSignal = new AbortController().signal;
+
+      await build()('https://api.example.com/thing', { signal: callerSignal });
+
+      const passed = fetchSpy.mock.calls[0]?.[1]?.signal;
+      expect(passed).toBeInstanceOf(AbortSignal);
+      // A composite (AbortSignal.any) — not the caller's signal handed through verbatim.
+      expect(passed).not.toBe(callerSignal);
+    });
+
+    it('builds a fresh signal per attempt (not one reused across retries)', async () => {
+      fetchSpy
+        .mockRejectedValueOnce(makeNetworkError('connection reset', 'ECONNRESET'))
+        .mockResolvedValueOnce(makeResponse(200));
+
+      await build()('https://api.example.com/thing');
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(fetchSpy.mock.calls[0]?.[1]?.signal).not.toBe(fetchSpy.mock.calls[1]?.[1]?.signal);
+    });
+
+    it('fails fast on a timeout — no retry, original error rethrown, warned', async () => {
+      fetchSpy.mockRejectedValue(timeoutError());
+
+      await expect(build()('https://api.example.com/thing')).rejects.toThrow('timed out');
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      expect(sleeps).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('timed out after'));
+    });
+
+    it('records a timeout as a transient breaker outcome, exactly once', async () => {
+      fetchSpy.mockRejectedValue(timeoutError());
+      const breaker = new CircuitBreaker({
+        source: 'test',
+        threshold: 1,
+        logger: { info: vi.fn(), warn, error: vi.fn() },
+      });
+      const recordSpy = vi.spyOn(breaker, 'record');
+
+      await expect(build({ breaker })('https://api.example.com/thing')).rejects.toThrow(
+        'timed out',
+      );
+
+      expect(recordSpy).toHaveBeenCalledExactlyOnceWith('transient');
+      expect(breaker.snapshot().state).toBe('closed'); // transient never trips
+      expect(fetchSpy).toHaveBeenCalledOnce(); // fail-fast — not retried
     });
   });
 

@@ -10,6 +10,7 @@ import {
   type CircuitBreaker,
   type CircuitBreakerSnapshot,
 } from './circuit-breaker.js';
+import { DEFAULT_OUTBOUND_TIMEOUT_MS, resolveOutboundTimeoutMs } from './outbound-timeout.js';
 
 export interface LrclibClientConfig {
   /**
@@ -22,6 +23,8 @@ export interface LrclibClientConfig {
   delayMs: number;
   /** Minimum backoff on a retryable status. Defaults to 1000ms. Set to 0 in tests to keep them fast. */
   backoffBaseMs?: number;
+  /** Per-request timeout in ms (#357). Falls back to the shared fetch default when omitted. */
+  timeoutMs?: number;
   /** Injectable RNG in [0,1) for deterministic backoff jitter in tests; defaults to Math.random. */
   random?: () => number;
   /** Optional structured logger; defaults to console when omitted. Pass app.log in production. */
@@ -89,6 +92,7 @@ export class LrclibClient {
       maxRetries: MAX_RETRIES,
       backoffBaseMs: config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS,
       retryStatuses: [429, 500, 502, 503, 504],
+      ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
       ...(config.random !== undefined ? { random: config.random } : {}),
       ...(config.logger !== undefined ? { logger: config.logger } : {}),
       ...(this.breaker !== undefined ? { breaker: this.breaker } : {}),
@@ -151,6 +155,7 @@ export function buildLrclibClientFromEnv(logger?: Logger): LrclibClient {
   return new LrclibClient({
     userAgent,
     delayMs,
+    timeoutMs: resolveOutboundTimeoutMs(DEFAULT_OUTBOUND_TIMEOUT_MS),
     ...(logger !== undefined ? { logger } : {}),
   });
 }
