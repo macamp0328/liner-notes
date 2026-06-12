@@ -41,9 +41,10 @@ The reference deployment runs a **public HTTPS API** at `ln-api.impressivelyadeq
 proxies the hostname and terminates TLS; the EC2/k3s origin's security group accepts traffic **only
 from Cloudflare's IP ranges** (#119), so the NodePort is not reachable directly. Read endpoints
 (`/api/v1/*`, `/health`, `/stats`) are unauthenticated; all mutating `/api/v1/admin/*` routes require
-an `Authorization: Bearer <ADMIN_TOKEN>` and are exempt from the public rate limiter. Forks that have
-not configured a Cloudflare zone run on plain HTTP with no origin lockdown — treat that as
-develop-only, not a hardened deployment.
+an `Authorization: Bearer <ADMIN_TOKEN>`. Only requests bearing a **valid** admin token are exempt
+from the public rate limiter — a missing or wrong token is still throttled, so the admin surface
+can't be sprayed unauthenticated. Forks that have not configured a Cloudflare zone run on plain HTTP
+with no origin lockdown — treat that as develop-only, not a hardened deployment.
 
 ## Disclosure Policy
 

@@ -146,7 +146,7 @@ liner-notes/
 │   ├── diagrams/                ← `pnpm diagrams:generate` — Inframap + per-file Mermaid
 │   ├── changelog/               ← `pnpm changelog:*` — AI-written release notes
 │   ├── insomnia/                ← `pnpm insomnia:generate` — Insomnia collection generator
-│   └── admin/                   ← operator scripts (status/enrich/reset helpers, local lyrics harvest)
+│   └── admin/                   ← operator shell helpers: get.sh/post.sh (admin HTTP), power.sh, mint-deploy-kubeconfig.sh
 ├── services/
 │   └── graph-service/           ← Fastify REST API + Neo4j ingestion
 │       ├── CLAUDE.md            ← service-specific handbook (read this too)

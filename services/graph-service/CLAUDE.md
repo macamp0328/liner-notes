@@ -177,11 +177,11 @@ All `/explore/*` routes return a **bare JSON array** — _not_ a `{ data }` enve
 
 ### Search & Stats
 
-| Method | Path                       | Description                                                                                                  |
-| ------ | -------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `GET`  | `/api/v1/search?q=`        | Full-text across release/artist/track titles (`releaseArtistTrackSearch` index); bare array                  |
-| `GET`  | `/api/v1/search/lyrics?q=` | Full-text within lyrics (`lyricsSearch` index); bare array                                                   |
-| `GET`  | `/api/v1/stats`            | Public graph + enrichment-coverage stats (`{ data }`); short-TTL cached, doubles as the Aura keep-warm query |
+| Method | Path                       | Description                                                                                                                                               |
+| ------ | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/v1/search?q=`        | Full-text across release/artist/track titles (`releaseArtistTrackSearch` index); bare array                                                               |
+| `GET`  | `/api/v1/search/lyrics?q=` | Full-text within lyrics (`lyricsSearch` index); bare array                                                                                                |
+| `GET`  | `/api/v1/stats`            | Public graph + enrichment-coverage stats (`{ data }`); short-TTL cached (the Aura keep-warm is the separate in-process snapshot timer, not this endpoint) |
 
 ### Admin & Ops
 
@@ -207,9 +207,10 @@ Every `/api/v1/admin/*` route requires `Authorization: Bearer <ADMIN_TOKEN>`
 - `POST /api/v1/admin/<stage>/enrich` — run that stage standalone (returns `202`; poll status). Four
   also run inside `runIngestion`; the rest are manual-only (see Ingestion Pipeline below).
 - `GET /api/v1/admin/<stage>/status` — that stage's last-run counts / running flag.
-- `POST /api/v1/admin/<stage>/reset` — force a full re-fetch. **Exists for 6 stages only** — every
-  pipeline _except_ `lyrics` (use `/api/v1/admin/lyrics/clear-genius` instead) and `artist-genres`
-  (a self-idempotent whole-graph aggregation with nothing to reset).
+- `POST /api/v1/admin/<stage>/reset` — force a full re-fetch. **Exists for 6 stages only** — the
+  three _without_ a `reset` route are `lyrics` (use `/api/v1/admin/lyrics/clear-genius` instead),
+  `master-data`, and `artist-genres` (a self-idempotent whole-graph aggregation with nothing to
+  reset).
 
 ### Response Shapes
 
