@@ -80,16 +80,17 @@ pnpm diagrams:generate
 # See .github/workflows/diagrams.yml.
 
 # Changelog (plain-English, AI-written, VERSIONED, self-healing). See scripts/changelog/README.md.
-# Every successful deploy auto-cuts a PUBLISHED, tagged CalVer release (vYYYY.MM.DD) describing
-# what went live; note richness ramps with an importance tier (maintenance/standard/notable). A
-# rolling "unreleased" DRAFT holds the canonical changelog.jsonl + versions.json store and previews
-# what's pending. NOT committed files, NOT a PR check; tag refs can't retrigger branch-filtered CI.
+# Cutting a release is a DELIBERATE, batched action — run `changelog:release` (Actions "Run
+# workflow", or locally) when you've shipped a batch and want to declare it released. Merged PRs
+# accumulate in a rolling "unreleased" DRAFT until then; note richness ramps with an importance
+# tier (maintenance/standard/notable). The cut tags current main HEAD by default (pass HEAD_SHA to
+# pin a commit). NOT committed files, NOT a PR check; tag refs can't retrigger branch-filtered CI.
 pnpm changelog:test                            # unit tests (scripts/changelog/*.test.ts)
 pnpm changelog:update 304                      # summarise one PR by number (also refreshes it)
 pnpm changelog:backfill                        # seed history (also upgrades PR-title fallbacks)
 pnpm changelog:backfill --refresh              # re-summarise every entry (e.g. after style.md edits)
 pnpm changelog:reconcile --since 2026-06-01    # heal missed PRs + re-render published releases (no AI)
-pnpm changelog:release                         # cut a version (needs HEAD_SHA; normally CI-driven)
+pnpm changelog:release                         # cut a version deliberately (tags main HEAD; HEAD_SHA to pin)
 pnpm changelog:baseline                        # one-shot: publish the v0.1.0 history baseline
 # Local runs auto-load ANTHROPIC_API_KEY from .env.local/.env (no export needed).
 ```
@@ -103,16 +104,17 @@ human-facing is a deterministic `render()` of that store — `renderUnreleased` 
 `renderVersion` (each published release, tier-aware), `renderBaseline` (the v0.1.0 history). **Three
 writers** keep it current: the per-merge hook
 ([`.github/workflows/changelog.yml`](.github/workflows/changelog.yml), `changelog:update`); **the cut**
-([`.github/workflows/changelog-release.yml`](.github/workflows/changelog-release.yml), a
-`workflow_run` on a successful **Deploy** that runs `changelog:release` to publish a `vYYYY.MM.DD`
-release and stamp the swept records); and a weekly self-healing reconciler
+([`.github/workflows/changelog-release.yml`](.github/workflows/changelog-release.yml), a **deliberate
+`workflow_dispatch`** you run after shipping a batch — it runs `changelog:release` to publish a
+`vYYYY.MM.DD` release and stamp the swept records; cutting is decoupled from Deploy so merged PRs
+accumulate in the draft until you choose to release them); and a weekly self-healing reconciler
 ([`.github/workflows/changelog-reconcile.yml`](.github/workflows/changelog-reconcile.yml)) that fills
 gaps and **re-renders every published release from the frozen store with no new AI calls**.
 Summaries come from Claude via structured outputs (up to two sentences; default `claude-opus-4-8`,
 `CHANGELOG_MODEL=claude-haiku-4-5` for cost), with a PR-title fallback when `ANTHROPIC_API_KEY` is
-unset so the merge/deploy paths never fail. **One-time setup:** `gh secret set ANTHROPIC_API_KEY`,
+unset so the merge path never fails. **One-time setup:** `gh secret set ANTHROPIC_API_KEY`,
 `pnpm changelog:backfill` to seed history, then `pnpm changelog:baseline` once before the first
-deploy cut. Full details in [`scripts/changelog/README.md`](scripts/changelog/README.md).
+cut. Full details in [`scripts/changelog/README.md`](scripts/changelog/README.md).
 
 ### When to refresh diagrams
 
