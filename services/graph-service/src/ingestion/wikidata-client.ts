@@ -12,6 +12,7 @@ import {
   type CircuitBreaker,
   type CircuitBreakerSnapshot,
 } from './circuit-breaker.js';
+import { DEFAULT_OUTBOUND_TIMEOUT_MS, resolveOutboundTimeoutMs } from './outbound-timeout.js';
 
 export interface WikidataClientConfig {
   userAgent: string;
@@ -19,6 +20,8 @@ export interface WikidataClientConfig {
   delayMs: number;
   /** Initial backoff ms on 429/502/503 retries. Defaults to 2000ms. Set to 0 in tests. */
   backoffBaseMs?: number;
+  /** Per-request timeout in ms (#357). Falls back to the shared fetch default when omitted. */
+  timeoutMs?: number;
   /** Injectable RNG in [0,1) for deterministic backoff jitter in tests; defaults to Math.random. */
   random?: () => number;
   logger?: Logger;
@@ -64,6 +67,7 @@ export class WikidataClient {
         res.ok && (res.headers.get('content-type') ?? '').includes('text/html')
           ? 'HTML response'
           : null,
+      ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
       ...(config.random !== undefined ? { random: config.random } : {}),
       ...(config.logger !== undefined ? { logger: config.logger } : {}),
       ...(this.breaker !== undefined ? { breaker: this.breaker } : {}),
@@ -181,6 +185,7 @@ export function buildWikidataClientFromEnv(logger?: Logger): WikidataClient | nu
   return new WikidataClient({
     userAgent,
     delayMs: 1100,
+    timeoutMs: resolveOutboundTimeoutMs(DEFAULT_OUTBOUND_TIMEOUT_MS),
     ...(logger !== undefined ? { logger } : {}),
   });
 }

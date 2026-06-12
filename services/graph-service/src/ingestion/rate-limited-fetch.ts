@@ -50,6 +50,18 @@ export interface RateLimitedFetchConfig {
    * Used by Wikidata for ok-but-HTML maintenance pages.
    */
   shouldRetryResponse?: (res: Response) => string | null;
+  /**
+   * Per-request timeout in ms, bounding a stalled upstream well under undici's ~300s defaults.
+   * A fresh `AbortSignal.timeout` is attached to every attempt. Clamps to {@link DEFAULT_TIMEOUT_MS}
+   * when absent or not a finite positive number, so every request is always bounded.
+   */
+  timeoutMs?: number;
+  /**
+   * Injectable timeout-signal factory for fake-timer-free tests; defaults to `AbortSignal.timeout`.
+   * Tests pass `() => new AbortController().signal` (a never-aborting signal) so real multi-second
+   * timers don't leak into the vitest event loop — consistent with the injected `sleep`/`random`.
+   */
+  timeoutSignal?: (ms: number) => AbortSignal;
   /** Injectable RNG in [0,1) for deterministic backoff jitter in tests; defaults to Math.random. */
   random?: () => number;
   /** Injectable sleep for fake-timer-free tests; defaults to a setTimeout-based sleep. */
@@ -69,6 +81,13 @@ export type RateLimitedFetch = (url: string, init?: RequestInit) => Promise<Resp
 
 const DEFAULT_BACKOFF_CEIL_MS = 32_000;
 
+/**
+ * Fallback per-request timeout when a caller supplies none (or a non-positive/garbage value). This
+ * is also the canonical standard-client default — `outbound-timeout.ts` derives
+ * `DEFAULT_OUTBOUND_TIMEOUT_MS` from it so the two can't drift.
+ */
+export const DEFAULT_TIMEOUT_MS = 30_000;
+
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -86,9 +105,19 @@ function retryReasonForStatus(status: number): string {
  * response parsing over their own instance; every non-retryable response (404, 500, …) is
  * returned as-is so each client keeps its own status semantics and error messages.
  *
+ * Every attempt is bounded by a fresh per-attempt timeout signal ({@link RateLimitedFetchConfig.timeoutMs},
+ * default {@link DEFAULT_TIMEOUT_MS}) — a fresh signal per attempt because `AbortSignal.timeout`
+ * counts from creation, so reusing one would shrink the budget across retries. A request timeout is
+ * classified as transient (so the breaker counts it as a source blip) but **fails fast**: it is
+ * rethrown on the first occurrence rather than consuming the retry budget. A genuinely wedged
+ * upstream would otherwise burn maxRetries+1 full timeouts, and the enrichment staleness window
+ * already retries un-stamped items on the next run, so an in-loop retry is mostly redundant cost.
+ * A caller-initiated abort (init.signal → 'AbortError') stays non-transient and propagates.
+ *
  * Loop semantics, per attempt 0..maxRetries:
- * - fetch throws: transient codes retry with backoff; non-transient errors and the final
- *   attempt rethrow the ORIGINAL error unchanged.
+ * - fetch throws: a request timeout records transient and rethrows immediately (fail-fast); other
+ *   transient codes retry with backoff; non-transient errors and the final attempt rethrow the
+ *   ORIGINAL error unchanged.
  * - status in retryStatuses (or shouldRetryResponse returns a reason): backoff floored at
  *   Retry-After, then the schedule advances from the un-jittered wait — so a server-specified
  *   wait raises subsequent backoff instead of being forgotten. On the final attempt this
@@ -107,11 +136,19 @@ export function createRateLimitedFetch(config: RateLimitedFetchConfig): RateLimi
     backoffCeilMs = DEFAULT_BACKOFF_CEIL_MS,
     retryStatuses,
     shouldRetryResponse,
+    timeoutMs,
+    timeoutSignal,
     random = Math.random,
     sleep = defaultSleep,
     logger = console,
     breaker,
   } = config;
+
+  const effectiveTimeoutMs =
+    typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? timeoutMs
+      : DEFAULT_TIMEOUT_MS;
+  const makeTimeoutSignal = timeoutSignal ?? ((ms: number): AbortSignal => AbortSignal.timeout(ms));
 
   return async (url: string, init?: RequestInit): Promise<Response> => {
     if (breaker && !breaker.allowRequest()) {
@@ -124,13 +161,25 @@ export function createRateLimitedFetch(config: RateLimitedFetchConfig): RateLimi
     while (attempt <= maxRetries) {
       let response: Response;
       try {
-        response = await fetch(url, init);
+        // Fresh signal per attempt: AbortSignal.timeout counts from creation, so reusing one would
+        // shrink the budget across retries. Compose with a caller-supplied signal when present.
+        const timeoutSig = makeTimeoutSignal(effectiveTimeoutMs);
+        const signal = init?.signal ? AbortSignal.any([init.signal, timeoutSig]) : timeoutSig;
+        response = await fetch(url, { ...init, signal });
       } catch (err) {
         const netCode = transientNetworkCode(err);
         // A non-transient error (and the final-attempt rethrow) leaves the loop. Only a transient
         // exhaustion is the source's verdict; a non-transient throw is a programming/abort error
         // the breaker must not count.
         if (netCode === null) throw err;
+        // A request timeout is transient (breaker counts it) but fails fast — see the function
+        // header. Logged here because the silent rethrow would otherwise hide a wedged upstream
+        // (the normal retry path below logs each attempt; the caller only sees a generic failure).
+        if (netCode === 'TimeoutError') {
+          logger.warn(`[${label}] Request timed out after ${effectiveTimeoutMs}ms — failing fast`);
+          breaker?.record('transient');
+          throw err;
+        }
         if (attempt >= maxRetries) {
           breaker?.record('transient');
           throw err;

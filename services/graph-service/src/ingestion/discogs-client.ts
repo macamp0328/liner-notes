@@ -27,6 +27,8 @@ export interface DiscogsClientConfig {
   delayMs: number;
   /** Minimum backoff in ms for 429 retry. Defaults to 1000. Set to 0 in tests to keep them fast. */
   backoffBaseMs?: number;
+  /** Per-request timeout in ms (#357). Falls back to the shared fetch default when omitted. */
+  timeoutMs?: number;
   /** Injectable RNG in [0,1) for deterministic backoff jitter in tests; defaults to Math.random. */
   random?: () => number;
   /** Optional structured logger; defaults to console when omitted. Pass app.log in production. */
@@ -66,6 +68,7 @@ export class DiscogsClient {
       maxRetries: MAX_RETRIES,
       backoffBaseMs: config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS,
       retryStatuses: [429],
+      ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
       ...(config.random !== undefined ? { random: config.random } : {}),
       ...(config.logger !== undefined ? { logger: config.logger } : {}),
       ...(this.breaker !== undefined ? { breaker: this.breaker } : {}),
