@@ -12,6 +12,7 @@ import { exploreRoutes } from './api/explore.js';
 import { searchRoutes } from './api/search.js';
 import { statsRoutes } from './api/stats.js';
 import { registerSharedSchemas } from './api/schemas.js';
+import { registerErrorHandlers } from './api/error-handlers.js';
 import { initDriver, closeDriver } from './db/client.js';
 import { applySchema } from './db/schema.js';
 import { hasReleases } from './db/ingestion-repository.js';
@@ -154,6 +155,7 @@ export async function buildDocsServer(): Promise<FastifyInstance> {
     routePrefix: '/api/docs',
     uiConfig: { docExpansion: 'list' },
   });
+  registerErrorHandlers(app);
   await app.register(healthRoutes);
   await app.register(adminRoutes, { prefix: '/api/v1/admin' });
   await app.register(collectionRoutes);
@@ -231,6 +233,13 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
       uiConfig: { docExpansion: 'list' },
     });
   }
+
+  // Global error + not-found handlers (issue #288). Must run BEFORE the route
+  // plugins: each is an encapsulated child context that inherits the error
+  // handler at registration time, so a handler set afterwards wouldn't apply to
+  // them. Runs after rate-limit registration — the not-found preHandler uses
+  // app.rateLimit().
+  registerErrorHandlers(app);
 
   await app.register(healthRoutes);
   await app.register(adminRoutes, { prefix: '/api/v1/admin' });
