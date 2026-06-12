@@ -6,6 +6,7 @@ import {
   markLyricsFetched,
   markTrackInstrumental,
   markTrackProbableInstrumental,
+  markTrackLowConfidence,
   clearGeniusLyrics,
 } from '../../../src/db/lyrics-repository.js';
 
@@ -67,6 +68,7 @@ describe('getUnenrichedTracks', () => {
       releaseDiscogsId: fakeId,
       artistName: 'Miles Davis',
       voiceInstrumental: 'voice',
+      durationSeconds: { toNumber: () => 327, low: 327, high: 0 },
     });
     const result = { records: [record] } as unknown as Result;
     const { session } = makeMockSession(result);
@@ -81,7 +83,25 @@ describe('getUnenrichedTracks', () => {
       releaseDiscogsId: 13570466,
       artistName: 'Miles Davis',
       voiceInstrumental: 'voice',
+      durationSeconds: 327,
     });
+  });
+
+  it('maps a null durationSeconds (unlisted Discogs duration) to null', async () => {
+    const fakeId = { toNumber: () => 42, low: 42, high: 0 };
+    const record = makeNeo4jRecord({
+      title: 'Untitled',
+      position: 'B1',
+      releaseDiscogsId: fakeId,
+      artistName: 'Miles Davis',
+      voiceInstrumental: null,
+      durationSeconds: null,
+    });
+    const { session } = makeMockSession({ records: [record] } as unknown as Result);
+
+    const tracks = await getUnenrichedTracks(makeMockDriver(session));
+
+    expect(tracks[0]?.durationSeconds).toBeNull();
   });
 
   it('returns null artistName when no artist is linked to the release', async () => {
@@ -91,6 +111,8 @@ describe('getUnenrichedTracks', () => {
       position: 'B1',
       releaseDiscogsId: fakeId,
       artistName: null,
+      voiceInstrumental: null,
+      durationSeconds: null,
     });
     const result = { records: [record] } as unknown as Result;
     const { session } = makeMockSession(result);
@@ -135,7 +157,10 @@ describe('getUnenrichedTracks', () => {
     expect(query).toContain(
       "NOT (coalesce(t.lyricsStatus, '') IN ['instrumental', 'probable-instrumental'])",
     );
+    // low-confidence is deliberately NOT in the exclusion list (#248) — it stays a candidate.
+    expect(query).not.toContain('low-confidence');
     expect(query).toContain('t.voiceInstrumental AS voiceInstrumental');
+    expect(query).toContain('t.durationSeconds AS durationSeconds');
   });
 
   it('closes the session even when run throws', async () => {
@@ -170,6 +195,10 @@ describe('clearGeniusLyrics', () => {
     expect(query).toContain('SET t.lyrics = null');
     // Status must be reset too, else a cleared track keeps a stale 'resolved' (#246).
     expect(query).toContain('t.lyricsStatus = null');
+    // Provenance must be cleared too (#248), else a cleared track keeps stale confidence/matched.
+    expect(query).toContain('t.lyricsConfidence = null');
+    expect(query).toContain('t.lyricsMatchedTitle = null');
+    expect(query).toContain('t.lyricsMatchedArtist = null');
   });
 
   it('returns 0 when no records are returned', async () => {
@@ -191,11 +220,20 @@ describe('setTrackLyrics', () => {
     vi.clearAllMocks();
   });
 
-  it('sends a SET query targeting the correct Release and Track', async () => {
+  it('sends a SET query targeting the correct Release and Track, with confidence + provenance', async () => {
     const { session, runSpy } = makeMockSession();
     const driver = makeMockDriver(session);
 
-    await setTrackLyrics(driver, 13570466, 'A2', 'Verse\nLine', 'lrclib');
+    await setTrackLyrics(
+      driver,
+      13570466,
+      'A2',
+      'Verse\nLine',
+      'lrclib',
+      0.95,
+      'Blue in Green',
+      'Miles Davis',
+    );
 
     expect(runSpy).toHaveBeenCalledOnce();
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
@@ -204,16 +242,22 @@ describe('setTrackLyrics', () => {
     );
     expect(query).toContain('SET t.lyrics = $lyrics, t.lyricsSource = $lyricsSource');
     expect(query).toContain("t.lyricsStatus = 'resolved'");
+    expect(query).toContain('t.lyricsConfidence = $confidence');
+    expect(query).toContain('t.lyricsMatchedTitle = $matchedTitle');
+    expect(query).toContain('t.lyricsMatchedArtist = $matchedArtist');
     expect(params['position']).toBe('A2');
     expect(params['lyrics']).toBe('Verse\nLine');
     expect(params['lyricsSource']).toBe('lrclib');
+    expect(params['confidence']).toBe(0.95);
+    expect(params['matchedTitle']).toBe('Blue in Green');
+    expect(params['matchedArtist']).toBe('Miles Davis');
   });
 
   it('wraps releaseDiscogsId in neo4j.int()', async () => {
     const { session, runSpy } = makeMockSession();
     const driver = makeMockDriver(session);
 
-    await setTrackLyrics(driver, 13570466, 'A2', 'Some lyrics', 'genius');
+    await setTrackLyrics(driver, 13570466, 'A2', 'Some lyrics', 'genius', 0.9, 'T', 'A');
 
     const [, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     // neo4j.int() is mocked to return { toNumber, low, high }
@@ -227,7 +271,54 @@ describe('setTrackLyrics', () => {
     (session.run as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('DB error'));
     const driver = makeMockDriver(session);
 
-    await expect(setTrackLyrics(driver, 1, 'A1', 'lyrics', 'lrclib')).rejects.toThrow('DB error');
+    await expect(
+      setTrackLyrics(driver, 1, 'A1', 'lyrics', 'lrclib', 0.9, null, null),
+    ).rejects.toThrow('DB error');
+    expect(session.close).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// markTrackLowConfidence — stores doubt without lyrics (#248)
+// ---------------------------------------------------------------------------
+describe('markTrackLowConfidence', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("sets lyricsStatus='low-confidence' with score + provenance, leaving lyrics untouched", async () => {
+    const { session, runSpy } = makeMockSession();
+    const driver = makeMockDriver(session);
+
+    await markTrackLowConfidence(
+      driver,
+      13570466,
+      'A2',
+      'genius',
+      0.42,
+      'Wrong Song',
+      'Right Artist',
+    );
+
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain("t.lyricsStatus = 'low-confidence'");
+    expect(query).not.toContain('t.lyrics ='); // lyric text is NOT stored
+    expect(query).toContain('t.lyricsConfidence = $confidence');
+    expect(query).toContain('t.lyricsMatchedTitle = $matchedTitle');
+    expect(params['lyricsSource']).toBe('genius');
+    expect(params['confidence']).toBe(0.42);
+    expect(params['matchedTitle']).toBe('Wrong Song');
+    expect(params['matchedArtist']).toBe('Right Artist');
+  });
+
+  it('closes the session even when run throws', async () => {
+    const { session } = makeMockSession();
+    (session.run as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('DB error'));
+    const driver = makeMockDriver(session);
+
+    await expect(
+      markTrackLowConfidence(driver, 1, 'A1', 'lrclib', 0.5, null, null),
+    ).rejects.toThrow('DB error');
     expect(session.close).toHaveBeenCalledOnce();
   });
 });

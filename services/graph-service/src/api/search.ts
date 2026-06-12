@@ -1,4 +1,5 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyReply } from 'fastify';
+import { Neo4jError } from 'neo4j-driver';
 import { getDriver } from '../db/client.js';
 import {
   searchGeneral,
@@ -87,6 +88,35 @@ function validateQ(q: string | undefined): string | ErrorReply {
   return q;
 }
 
+// A malformed Lucene query reaches Neo4j as a procedure-call failure wrapping a Lucene
+// ParseException. Match it narrowly so genuinely different client errors (missing index, missing
+// parameter) still surface as 500 rather than being mislabelled a client 400. In practice
+// escapeLuceneQuery prevents the parse error entirely; this is a backstop.
+function isLuceneParseError(err: unknown): err is Neo4jError {
+  return (
+    err instanceof Neo4jError &&
+    err.code === 'Neo.ClientError.Procedure.ProcedureCallFailed' &&
+    /ParseException|Cannot parse|lucene/i.test(err.message)
+  );
+}
+
+async function runSearch<T>(
+  reply: FastifyReply,
+  exec: () => Promise<T[]>,
+): Promise<T[] | ErrorReply> {
+  try {
+    return await exec();
+  } catch (err) {
+    if (isLuceneParseError(err)) {
+      void reply.code(400);
+      return {
+        error: { code: 'INVALID_QUERY', message: 'q could not be parsed as a search query' },
+      };
+    }
+    throw err;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
@@ -115,8 +145,7 @@ export async function searchRoutes(fastify: FastifyInstance): Promise<void> {
       if (typeof validated !== 'string') {
         return reply.code(400).send(validated);
       }
-      const results = await searchGeneral(getDriver(), validated);
-      return reply.send(results);
+      return runSearch(reply, () => searchGeneral(getDriver(), validated));
     },
   );
 
@@ -142,8 +171,7 @@ export async function searchRoutes(fastify: FastifyInstance): Promise<void> {
       if (typeof validated !== 'string') {
         return reply.code(400).send(validated);
       }
-      const results = await searchLyrics(getDriver(), validated);
-      return reply.send(results);
+      return runSearch(reply, () => searchLyrics(getDriver(), validated));
     },
   );
 }

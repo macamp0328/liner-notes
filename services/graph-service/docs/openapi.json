@@ -4485,6 +4485,7 @@
                                 "resolved",
                                 "instrumental",
                                 "probableInstrumental",
+                                "lowConfidence",
                                 "notFound",
                                 "total"
                               ],
@@ -4496,6 +4497,9 @@
                                   "type": "integer"
                                 },
                                 "probableInstrumental": {
+                                  "type": "integer"
+                                },
+                                "lowConfidence": {
                                   "type": "integer"
                                 },
                                 "notFound": {

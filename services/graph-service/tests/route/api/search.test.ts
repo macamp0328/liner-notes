@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { Neo4jError } from 'neo4j-driver';
 import { buildServer } from '../../../src/server.js';
 
 // ---------------------------------------------------------------------------
@@ -67,6 +68,19 @@ const sampleLyricsResult = {
   releaseDiscogsId: 12345,
   score: 4.2,
 };
+
+// A real Neo4jError as the fulltext procedure surfaces a Lucene parse failure. Built via
+// Object.create so the test does not depend on the driver's constructor arity.
+function makeLuceneParseError(): Neo4jError {
+  const err = Object.create(Neo4jError.prototype) as Neo4jError;
+  return Object.assign(err, {
+    name: 'Neo4jError',
+    message:
+      'Failed to invoke procedure `db.index.fulltext.queryNodes`: Caused by: ' +
+      'org.apache.lucene.queryparser.classic.ParseException: Cannot parse',
+    code: 'Neo.ClientError.Procedure.ProcedureCallFailed',
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -161,6 +175,20 @@ describe('search routes', () => {
       });
       expect(response.statusCode).toBe(200);
     });
+
+    it('returns 400 INVALID_QUERY when Neo4j reports a Lucene parse error', async () => {
+      mockSearchGeneral.mockRejectedValue(makeLuceneParseError());
+      const response = await app.inject({ method: 'GET', url: '/api/v1/search?q=%28' });
+      expect(response.statusCode).toBe(400);
+      const body = JSON.parse(response.payload) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe('INVALID_QUERY');
+    });
+
+    it('rethrows a non-parse error as a 500', async () => {
+      mockSearchGeneral.mockRejectedValue(new Error('connection reset'));
+      const response = await app.inject({ method: 'GET', url: '/api/v1/search?q=coltrane' });
+      expect(response.statusCode).toBe(500);
+    });
   });
 
   // GET /api/v1/search/lyrics?q=
@@ -222,6 +250,20 @@ describe('search routes', () => {
       expect(response.statusCode).toBe(400);
       const body = JSON.parse(response.payload) as { error: { code: string } };
       expect(body.error.code).toBe('QUERY_TOO_LONG');
+    });
+
+    it('returns 400 INVALID_QUERY when Neo4j reports a Lucene parse error', async () => {
+      mockSearchLyrics.mockRejectedValue(makeLuceneParseError());
+      const response = await app.inject({ method: 'GET', url: '/api/v1/search/lyrics?q=%22' });
+      expect(response.statusCode).toBe(400);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('INVALID_QUERY');
+    });
+
+    it('rethrows a non-parse error as a 500', async () => {
+      mockSearchLyrics.mockRejectedValue(new Error('connection reset'));
+      const response = await app.inject({ method: 'GET', url: '/api/v1/search/lyrics?q=supreme' });
+      expect(response.statusCode).toBe(500);
     });
   });
 });

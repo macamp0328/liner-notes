@@ -157,6 +157,21 @@ describe('searchGeneral', () => {
     await searchGeneral(driver, 'test');
     expect(session.close).toHaveBeenCalledOnce();
   });
+
+  it('passes the Lucene-escaped query as the $q parameter', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+    await searchGeneral(driver, '(unbalanced "');
+    expect(runSpy.mock.calls[0]![1]).toEqual({ q: '\\(unbalanced \\"' });
+  });
+
+  it('short-circuits to empty without querying when input escapes to whitespace', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+    const results = await searchGeneral(driver, '<>');
+    expect(results).toEqual([]);
+    expect(runSpy).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -213,5 +228,20 @@ describe('searchLyrics', () => {
     const driver = makeMockDriver(session);
     await searchLyrics(driver, 'test');
     expect(session.close).toHaveBeenCalledOnce();
+  });
+
+  it('passes the Lucene-escaped query as the $q parameter', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+    await searchLyrics(driver, 'love*~');
+    expect(runSpy.mock.calls[0]![1]).toEqual({ q: 'love\\*\\~' });
+  });
+
+  it('short-circuits to empty without querying when input escapes to whitespace', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+    const results = await searchLyrics(driver, '<>');
+    expect(results).toEqual([]);
+    expect(runSpy).not.toHaveBeenCalled();
   });
 });
