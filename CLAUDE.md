@@ -26,6 +26,9 @@ pnpm --filter graph-service dev
 # Hooks (auto-installed on pnpm install via husky):
 #   pre-commit  — blocks commits on main, then prettier via lint-staged (staged files only)
 #   pre-push    — blocks pushes targeting main, then lint + typecheck + test:unit:coverage
+# Install is guarded by scripts/prepare.sh: `pnpm install` now FAILS LOUDLY if husky
+# can't wire the hooks (no more silent `|| true`), and skips cleanly when there's no
+# .git (Docker build) or CI/HUSKY=0 is set. Guard logic is tested: `pnpm prepare:test`.
 # Commit message format is not enforced — the repo squash-merges into main, so
 # the PR title is what lands in history, not individual branch commits.
 

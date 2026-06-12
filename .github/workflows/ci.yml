@@ -374,18 +374,21 @@ jobs:
       - name: Shellcheck standalone scripts
         # actionlint shellchecks `run:` blocks inside workflows, but never the
         # standalone *.sh files in the repo. Reuse the pinned shellcheck installed
-        # above (on /usr/local/bin) to lint the admin HTTP/ops helpers and the
-        # agent bash-guard hook — the only enforcement against `--no-verify` /
-        # `git push --force`, so a silent break there matters.
-        run: shellcheck scripts/admin/*.sh .claude/hooks/bash-guard.sh
+        # above (on /usr/local/bin) to lint the admin HTTP/ops helpers, the
+        # prepare-time hook installer, and the agent bash-guard hook — all
+        # safety-critical (the bash-guard is the only enforcement against
+        # `--no-verify` / `git push --force`; prepare.sh installs the husky walls),
+        # so a silent break in any of them matters.
+        run: shellcheck scripts/admin/*.sh scripts/prepare.sh .claude/hooks/bash-guard.sh
 
   script-tests:
     name: Script Tests
-    # Runs the changelog generator's unit tests (scripts/changelog/*.test.ts) via
-    # node:test/tsx. No Neo4j, no secrets, fully offline — so it joins the t=0
-    # fan-out with the static checks. These tests guard the render/parse logic the
-    # per-merge, on-deploy, and weekly-reconcile changelog workflows all depend on;
-    # they were previously local-only (`pnpm changelog:test`) and never gated.
+    # Runs the standalone scripts/ unit tests via node:test/tsx. No Neo4j, no
+    # secrets, fully offline — so it joins the t=0 fan-out with the static checks.
+    # Covers the changelog generator (scripts/changelog/*.test.ts) — the
+    # render/parse logic the per-merge, on-deploy, and weekly-reconcile changelog
+    # workflows depend on — and the prepare-time husky-install guard
+    # (scripts/prepare.test.ts). Both were previously local-only and never gated.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -401,6 +404,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Run changelog script tests
         run: pnpm changelog:test
+      - name: Run prepare guard tests
+        run: pnpm prepare:test
 
   terraform:
     name: Terraform Validate
