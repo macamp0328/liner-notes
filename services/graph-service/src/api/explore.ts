@@ -153,6 +153,15 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
       schema: {
         tags: ['explore'],
         summary: 'Releases featuring this musician, with instrument and role on each result',
+        description:
+          'Resolves entity-resolution edges (#330), so results are not limited to the named credit ' +
+          "node. The name is matched against Musician nodes AND, via `SAME_PERSON_AS`, an Artist's " +
+          'canonical name — so querying an alias or the canonical name returns the same release set. ' +
+          'Aliases of the same person are consolidated, both release- and track-scoped credits are ' +
+          'included, and `MEMBER_OF` group membership is expanded in both directions: querying a ' +
+          "group also returns its members' work, and querying an individual also returns releases " +
+          'credited only to a group they belong to. (A future `?expand=` parameter may make the ' +
+          'group expansion opt-in; today it is always on.)',
         params: {
           type: 'object',
           required: ['name'],
