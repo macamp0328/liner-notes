@@ -58,6 +58,7 @@ function makeStats(
       resolved: 80,
       instrumental: 0,
       probableInstrumental: 0,
+      lowConfidence: 0,
       notFound: 20,
       total: 100,
     },

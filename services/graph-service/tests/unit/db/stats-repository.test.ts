@@ -159,9 +159,9 @@ describe('getStats', () => {
     });
   });
 
-  it('reports the lyrics funnel and a non-instrumental coverage denominator (#246)', async () => {
+  it('reports the lyrics funnel and a non-instrumental coverage denominator (#246, #248)', async () => {
     // 100 tracks: 80 resolved (incl. legacy null-status, since covered keys on lyrics IS
-    // NOT NULL), 6 instrumental, 4 probable-instrumental → 10 not-found remainder.
+    // NOT NULL), 6 instrumental, 4 probable-instrumental, 5 low-confidence → 5 not-found remainder.
     const driver = makeDriver({
       release: { total: int(0), oyApplicable: int(0), oyCovered: int(0) },
       artist: { total: int(0), profApplicable: int(0), profCovered: int(0) },
@@ -172,6 +172,7 @@ describe('getStats', () => {
         lyricsGeniusCovered: int(8),
         lyricsInstrumental: int(6),
         lyricsProbableInstrumental: int(4),
+        lyricsLowConfidence: int(5),
         mbidCovered: int(0),
         isrcCovered: int(0),
         tempoCovered: int(0),
@@ -187,7 +188,8 @@ describe('getStats', () => {
 
     const stats = await getStats(driver);
 
-    // denominator excludes both instrumental classes: 100 − 6 − 4 = 90; 80/90 = 88.9%
+    // denominator excludes ONLY the two instrumental classes (low-confidence stays in): 100 − 6 − 4
+    // = 90; 80/90 = 88.9%
     expect(stats.enrichment.tracksWithLyrics.covered).toBe(80);
     expect(stats.enrichment.tracksWithLyrics.applicable).toBe(90);
     expect(stats.enrichment.tracksWithLyrics.pct).toBe(88.9);
@@ -196,12 +198,15 @@ describe('getStats', () => {
       resolved: 80,
       instrumental: 6,
       probableInstrumental: 4,
-      notFound: 10,
+      lowConfidence: 5,
+      notFound: 5,
       total: 100,
     });
-    // the four buckets partition total exactly
+    // the five buckets partition total exactly
     const f = stats.enrichment.lyricsFunnel;
-    expect(f.resolved + f.instrumental + f.probableInstrumental + f.notFound).toBe(f.total);
+    expect(
+      f.resolved + f.instrumental + f.probableInstrumental + f.lowConfidence + f.notFound,
+    ).toBe(f.total);
   });
 
   it('rounds percentages to one decimal place', async () => {

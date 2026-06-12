@@ -13,6 +13,16 @@ import type {
 } from '../db/track-musicbrainz-repository.js';
 import { runEnrichment, type EnrichmentStage } from './run.js';
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
+import {
+  normalizeForMatch,
+  titleSimilarity,
+  TITLE_SIMILARITY_THRESHOLD,
+  DURATION_TOLERANCE_SECONDS,
+} from './match-confidence.js';
+
+// Re-exported so existing importers (and tests) keep resolving them here; the canonical
+// home is now `match-confidence.js`, shared with the lyrics gate (#248).
+export { normalizeForMatch, titleSimilarity };
 
 export interface TrackMusicBrainzEnrichmentSummary {
   releasesProcessed: number;
@@ -21,63 +31,6 @@ export interface TrackMusicBrainzEnrichmentSummary {
   tracksMatched: number;
   tracksUnmatched: number;
   durationMs: number;
-}
-
-/** Title similarity at or above this value counts the titles as the same track. */
-const TITLE_SIMILARITY_THRESHOLD = 0.85;
-/** Maximum allowed gap between Discogs and MusicBrainz durations, in seconds. */
-const DURATION_TOLERANCE_SECONDS = 5;
-
-/**
- * Normalize a title for comparison: strip diacritics via NFKD, lowercase, and drop every
- * character that is not an ASCII letter or digit. "Café (Take 2)" → "cafetake2".
- * Non-Latin scripts normalize to an empty string (which scores 0 in titleSimilarity).
- */
-export function normalizeForMatch(value: string): string {
-  return value
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-}
-
-function bigrams(value: string): string[] {
-  const grams: string[] = [];
-  for (let i = 0; i < value.length - 1; i++) {
-    grams.push(value.slice(i, i + 2));
-  }
-  return grams;
-}
-
-/**
- * Sørensen–Dice coefficient over character bigrams of the normalized titles.
- * Returns 1 for an exact normalized match and 0 when either title is empty.
- */
-export function titleSimilarity(a: string, b: string): number {
-  const na = normalizeForMatch(a);
-  const nb = normalizeForMatch(b);
-  if (na === '' || nb === '') return 0;
-  if (na === nb) return 1;
-
-  const aGrams = bigrams(na);
-  const bGrams = bigrams(nb);
-  if (aGrams.length === 0 || bGrams.length === 0) return 0;
-
-  const bCounts = new Map<string, number>();
-  for (const gram of bGrams) {
-    bCounts.set(gram, (bCounts.get(gram) ?? 0) + 1);
-  }
-
-  let intersection = 0;
-  for (const gram of aGrams) {
-    const remaining = bCounts.get(gram) ?? 0;
-    if (remaining > 0) {
-      intersection++;
-      bCounts.set(gram, remaining - 1);
-    }
-  }
-
-  return (2 * intersection) / (aGrams.length + bGrams.length);
 }
 
 /**

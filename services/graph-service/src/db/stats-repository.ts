@@ -26,16 +26,18 @@ export interface SourcedCoverageMetric extends CoverageMetric {
 }
 
 /**
- * The four-state lyrics funnel (issue #246). The buckets partition `total` exactly:
+ * The lyrics funnel (issues #246, #248). The buckets partition `total` exactly:
  * `resolved` is ground-truth `lyrics IS NOT NULL` (so it counts legacy tracks enriched
  * before `lyricsStatus` existed), `instrumental`/`probableInstrumental` are the terminal
- * no-lyrics classifications, and `notFound` is the derived remainder (everything still
+ * no-lyrics classifications, `lowConfidence` is a candidate whose best match the gate rejected
+ * (#248, lyrics still null), and `notFound` is the derived remainder (everything else still
  * eligible for a retry — whether stamped `not-found` or never attempted).
  */
 export interface LyricsFunnel {
   resolved: number;
   instrumental: number;
   probableInstrumental: number;
+  lowConfidence: number;
   notFound: number;
   total: number;
 }
@@ -134,10 +136,14 @@ const TRACK_QUERY = `
   RETURN
     count(t) AS total,
     count(CASE WHEN t.lyrics IS NOT NULL THEN 1 END) AS lyricsCovered,
-    count(CASE WHEN t.lyricsSource = 'lrclib' THEN 1 END) AS lyricsLrclibCovered,
-    count(CASE WHEN t.lyricsSource = 'genius' THEN 1 END) AS lyricsGeniusCovered,
+    // Per-source split of covered, so it must gate on lyrics being present: a low-confidence
+    // track (#248) carries a lyricsSource for provenance but has NULL lyrics, so without this gate
+    // it would inflate the source bucket past covered and drive the untagged bucket negative.
+    count(CASE WHEN t.lyrics IS NOT NULL AND t.lyricsSource = 'lrclib' THEN 1 END) AS lyricsLrclibCovered,
+    count(CASE WHEN t.lyrics IS NOT NULL AND t.lyricsSource = 'genius' THEN 1 END) AS lyricsGeniusCovered,
     count(CASE WHEN t.lyrics IS NULL AND t.lyricsStatus = 'instrumental' THEN 1 END) AS lyricsInstrumental,
     count(CASE WHEN t.lyrics IS NULL AND t.lyricsStatus = 'probable-instrumental' THEN 1 END) AS lyricsProbableInstrumental,
+    count(CASE WHEN t.lyrics IS NULL AND t.lyricsStatus = 'low-confidence' THEN 1 END) AS lyricsLowConfidence,
     count(CASE WHEN t.recordingMbid IS NOT NULL THEN 1 END) AS mbidCovered,
     count(CASE WHEN t.isrc IS NOT NULL THEN 1 END) AS isrcCovered,
     count(CASE WHEN t.recordingMbid IS NOT NULL AND t.tempo IS NOT NULL THEN 1 END) AS tempoCovered,
@@ -226,19 +232,26 @@ export async function getStats(driver: Driver): Promise<StatsData> {
   const mbidCovered = n(track, 'mbidCovered');
   const isrcCovered = n(track, 'isrcCovered');
 
-  // Lyrics funnel (#246). `resolved` keys on `lyrics IS NOT NULL` (ground truth) so legacy
+  // Lyrics funnel (#246, #248). `resolved` keys on `lyrics IS NOT NULL` (ground truth) so legacy
   // tracks enriched before `lyricsStatus` existed still count; the two instrumental buckets
   // are believed lyric-less, so they leave the honest non-instrumental coverage denominator.
-  // The instrumental counts additionally require `lyrics IS NULL` (see TRACK_QUERY) so a track
-  // with dirty/manual data (lyrics set AND an instrumental status, which our writers never
-  // produce — there is no DB constraint) is counted only as `resolved`, keeping the four
-  // buckets disjoint and the derived `notFound` non-negative.
+  // `lowConfidence` stays IN that denominator — a track that *could* have lyrics, just not
+  // confidently matched yet (like `notFound`); excluding it would inflate coverage by hiding
+  // failures. Each `lyrics IS NULL` bucket requires a distinct status (see TRACK_QUERY) so a track
+  // with dirty/manual data (lyrics set AND a non-resolved status, which our writers never produce
+  // — there is no DB constraint) is counted only as `resolved`, keeping the buckets disjoint and
+  // the derived `notFound` non-negative.
   const lyricsCovered = n(track, 'lyricsCovered');
   const lyricsInstrumental = n(track, 'lyricsInstrumental');
   const lyricsProbableInstrumental = n(track, 'lyricsProbableInstrumental');
+  const lyricsLowConfidence = n(track, 'lyricsLowConfidence');
   const nonInstrumentalTracks = trackTotal - lyricsInstrumental - lyricsProbableInstrumental;
   const lyricsNotFound =
-    trackTotal - lyricsCovered - lyricsInstrumental - lyricsProbableInstrumental;
+    trackTotal -
+    lyricsCovered -
+    lyricsInstrumental -
+    lyricsProbableInstrumental -
+    lyricsLowConfidence;
 
   const nationality = (m: Map<string, number>): SourcedCoverageMetric =>
     sourced(n(m, 'covered'), n(m, 'applicable'), {
@@ -272,6 +285,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
         resolved: lyricsCovered,
         instrumental: lyricsInstrumental,
         probableInstrumental: lyricsProbableInstrumental,
+        lowConfidence: lyricsLowConfidence,
         notFound: lyricsNotFound,
         total: trackTotal,
       },

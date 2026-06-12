@@ -7,10 +7,18 @@ import { enrichLyrics } from '../../../src/enrichment/lyrics.js';
 // ---------------------------------------------------------------------------
 const mockGetUnenrichedTracks = vi.hoisted(() => vi.fn());
 const mockSetTrackLyrics = vi.hoisted(() => vi.fn());
+const mockMarkLyricsFetched = vi.hoisted(() => vi.fn());
+const mockMarkTrackInstrumental = vi.hoisted(() => vi.fn());
+const mockMarkTrackProbableInstrumental = vi.hoisted(() => vi.fn());
+const mockMarkTrackLowConfidence = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/db/lyrics-repository.js', () => ({
   getUnenrichedTracks: mockGetUnenrichedTracks,
   setTrackLyrics: mockSetTrackLyrics,
+  markLyricsFetched: mockMarkLyricsFetched,
+  markTrackInstrumental: mockMarkTrackInstrumental,
+  markTrackProbableInstrumental: mockMarkTrackProbableInstrumental,
+  markTrackLowConfidence: mockMarkTrackLowConfidence,
 }));
 
 // ---------------------------------------------------------------------------
@@ -58,10 +66,33 @@ function makeMockDriver(session: Session): Driver {
   return { session: vi.fn().mockReturnValue(session) } as unknown as Driver;
 }
 
+// Title/artist/duration match lrclibHit (Song Title / Test Artist / 180) so every track clears
+// the match-confidence gate and resolves; tracks stay distinct by position + releaseDiscogsId.
 const tracks = [
-  { title: 'Track One', position: 'A1', releaseDiscogsId: 100, artistName: 'Artist A' },
-  { title: 'Track Two', position: 'A2', releaseDiscogsId: 100, artistName: 'Artist A' },
-  { title: 'Track Three', position: 'B1', releaseDiscogsId: 101, artistName: 'Artist B' },
+  {
+    title: 'Song Title',
+    position: 'A1',
+    releaseDiscogsId: 100,
+    artistName: 'Test Artist',
+    voiceInstrumental: null,
+    durationSeconds: 180,
+  },
+  {
+    title: 'Song Title',
+    position: 'A2',
+    releaseDiscogsId: 100,
+    artistName: 'Test Artist',
+    voiceInstrumental: null,
+    durationSeconds: 180,
+  },
+  {
+    title: 'Song Title',
+    position: 'B1',
+    releaseDiscogsId: 101,
+    artistName: 'Test Artist',
+    voiceInstrumental: null,
+    durationSeconds: 180,
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -116,7 +147,8 @@ describe('enrichLyrics integration', () => {
     process.env['GENIUS_TOKEN'] = 'test-genius-token';
     mockGetUnenrichedTracks.mockResolvedValue(tracks);
 
-    // Artist name must match track[1].artistName ('Artist A') to pass the fuzzy match guard.
+    // Artist + title must match track[1] ('Test Artist' / 'Song Title') to clear the Genius artist
+    // guard and the new pre-fetch title-similarity filter (#248).
     const artistAHit = {
       meta: { status: 200 },
       response: {
@@ -126,7 +158,8 @@ describe('enrichLyrics integration', () => {
             result: {
               id: 12345,
               url: 'https://genius.com/Artist-a-track-two-lyrics',
-              primary_artist: { id: 999, name: 'Artist A' },
+              title: 'Song Title',
+              primary_artist: { id: 999, name: 'Test Artist' },
             },
           },
         ],

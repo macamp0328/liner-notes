@@ -16,6 +16,7 @@ import {
   isValidGeniusLyrics,
   normalizeArtistName,
 } from '../enrichment/lyrics-extract.js';
+import { titleSimilarity, LYRICS_CONFIDENCE_DEFAULT } from '../enrichment/match-confidence.js';
 
 // Browser-like User-Agent sent on every Genius request. Unlike DISCOGS_USER_AGENT /
 // LRCLIB_USER_AGENT — which are polite identifying strings — this default must look like a
@@ -76,10 +77,24 @@ interface GeniusSearchResponse {
       result: {
         id: number;
         url: string;
+        // The bare song title (not `full_title`, which carries "by Artist (feat. …)" noise) —
+        // used by the match-confidence gate (#248) to confirm the right song was matched.
+        title: string;
         primary_artist: { name: string };
       };
     }>;
   };
+}
+
+/**
+ * What Genius matched: the validated lyrics plus the title/artist the search resolved to (#248),
+ * so the orchestrator can score the match and store the provenance. Genius never carries a
+ * duration, so there is no `matchedDuration` field.
+ */
+export interface GeniusResult {
+  lyrics: string;
+  matchedTitle: string;
+  matchedArtist: string;
 }
 
 const SEARCH_URL = 'https://api.genius.com/search';
@@ -95,8 +110,10 @@ const RETRY_STATUSES = [429, 500, 502, 503, 504];
  * Promoted from raw `fetch()` calls to a hardened client (#247) sharing the
  * `createRateLimitedFetch` core (bounded retry on transient/5xx, capped backoff). It is the
  * canonical integration surface for the circuit breaker (#242). `getLyrics` encapsulates the
- * whole lookup — search → song-type guard → artist fuzzy-match → page scrape → extract → strip →
- * validate — so callers see only `string | null` (or a thrown `GeniusHttpError`/exhaustion error).
+ * whole lookup — search → song-type guard → artist fuzzy-match → title-similarity pre-filter →
+ * page scrape → extract → strip → validate — so callers see only a {@link GeniusResult} (lyrics +
+ * matched title/artist for the confidence gate, #248) or `null` (or a thrown
+ * `GeniusHttpError`/exhaustion error).
  */
 export class GeniusClient {
   private readonly token: string;
@@ -130,14 +147,23 @@ export class GeniusClient {
   }
 
   /**
-   * Look up lyrics for a track via Genius. Returns the lyrics text, or `null` when there is no
-   * usable result (no hit, non-song, artist mismatch, or invalid/empty page). Throws on
-   * network/API errors — a non-retryable status (notably the expected 403 bot-block) as a
-   * {@link GeniusHttpError}; a retryable status that spends the budget as a `RetriesExhaustedError`.
+   * Look up lyrics for a track via Genius. Returns a {@link GeniusResult} (lyrics + the matched
+   * title/artist), or `null` when there is no usable result (no hit, non-song, artist mismatch,
+   * title mismatch, or invalid/empty page). Throws on network/API errors — a non-retryable status
+   * (notably the expected 403 bot-block) as a {@link GeniusHttpError}; a retryable status that
+   * spends the budget as a `RetriesExhaustedError`.
+   *
+   * `confidenceThreshold` is the same gate the orchestrator applies (#248); pass the run's resolved
+   * `LYRICS_CONFIDENCE_THRESHOLD` so the pre-fetch title filter tracks it. Defaults to the standard
+   * gate so direct callers/tests behave as configured by default.
    */
-  async getLyrics(artistName: string, title: string): Promise<string | null> {
+  async getLyrics(
+    artistName: string,
+    title: string,
+    confidenceThreshold: number = LYRICS_CONFIDENCE_DEFAULT,
+  ): Promise<GeniusResult | null> {
     try {
-      return await this.lookupLyrics(artistName, title);
+      return await this.lookupLyrics(artistName, title, confidenceThreshold);
     } catch (err) {
       // An open breaker is a clean no-hit (→ not-found, stamped) — not an error to propagate.
       if (err instanceof CircuitBreakerOpenError) return null;
@@ -145,7 +171,11 @@ export class GeniusClient {
     }
   }
 
-  private async lookupLyrics(artistName: string, title: string): Promise<string | null> {
+  private async lookupLyrics(
+    artistName: string,
+    title: string,
+    confidenceThreshold: number,
+  ): Promise<GeniusResult | null> {
     const searchUrl = new URL(SEARCH_URL);
     searchUrl.searchParams.set('q', `${artistName} ${title}`);
 
@@ -165,13 +195,26 @@ export class GeniusClient {
     // Genius also indexes books and articles — only accept song results.
     if (!firstHit || firstHit.type !== 'song') return null;
 
+    const matchedArtist = firstHit.result.primary_artist.name;
+    const matchedTitle = firstHit.result.title;
+
     // Reject hits where the primary artist doesn't fuzzy-match the query artist to avoid storing
     // lyrics for completely different songs.
-    const geniusArtist = normalizeArtistName(firstHit.result.primary_artist.name);
+    const geniusArtist = normalizeArtistName(matchedArtist);
     const queryArtist = normalizeArtistName(artistName);
     if (queryArtist && !geniusArtist.includes(queryArtist) && !queryArtist.includes(geniusArtist)) {
       return null;
     }
+
+    // Pre-fetch title-similarity filter (#248): Genius's search routinely returns a *different song*
+    // by the matched artist (the #31 wrong-song class). The matched title is known before the page
+    // fetch, so reject an obvious mismatch here to save the expensive scrape (and a 403-budget call
+    // in prod). This is a strict subset of the orchestrator's gate: the final confidence is
+    // `min(titleSim, artistSim) × durationFactor`, so titleSim is an UPPER BOUND on it — a hit with
+    // `titleSim < confidenceThreshold` can never clear the gate, so dropping it here only ever skips
+    // what the full gate would also reject. Using the run's resolved threshold (not a fixed 0.85)
+    // keeps that guarantee when LYRICS_CONFIDENCE_THRESHOLD is tuned.
+    if (titleSimilarity(title, matchedTitle) < confidenceThreshold) return null;
 
     const pageResponse = await this.rlFetch(firstHit.result.url, {
       headers: {
@@ -188,7 +231,7 @@ export class GeniusClient {
     // collapses to "" and is rejected by the falsy guard below.
     const lyrics = extracted ? stripGeniusHeader(extracted) : null;
     if (!lyrics || !isValidGeniusLyrics(lyrics)) return null;
-    return lyrics;
+    return { lyrics, matchedTitle, matchedArtist };
   }
 }
 
