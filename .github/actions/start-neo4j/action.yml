@@ -1,8 +1,8 @@
 name: Start Neo4j
 description: >-
-  Start a neo4j:5 container for the test / schema-validation jobs. Unlike a `services:`
+  Start a neo4j:5.26 container for the test / schema-validation jobs. Unlike a `services:`
   block — whose image the runner pulls in its built-in "Initialize containers" step with a
-  fixed, short retry that can't be tuned — this pulls neo4j:5 with our own retry/backoff, so an
+  fixed, short retry that can't be tuned — this pulls neo4j:5.26 with our own retry/backoff, so an
   intermittent Docker Hub blip (the `registry-1.docker.io` connection timeouts that have
   failed "Initialize containers") gets retried instead of failing the whole job. Readiness
   reuses Docker's own healthcheck (the same probe the `services:` block used), after which the
@@ -11,18 +11,18 @@ description: >-
 runs:
   using: composite
   steps:
-    - name: Pull neo4j:5 (retry on Docker Hub flakiness)
+    - name: Pull neo4j:5.26 (retry on Docker Hub flakiness)
       shell: bash
       run: |
         for attempt in 1 2 3 4 5; do
-          if docker pull neo4j:5; then
-            echo "pulled neo4j:5 (attempt $attempt)"
+          if docker pull neo4j:5.26; then
+            echo "pulled neo4j:5.26 (attempt $attempt)"
             exit 0
           fi
-          echo "::warning title=neo4j pull retry::docker pull neo4j:5 failed (attempt $attempt/5) — retrying"
+          echo "::warning title=neo4j pull retry::docker pull neo4j:5.26 failed (attempt $attempt/5) — retrying"
           sleep $((attempt * 15))
         done
-        echo "::error title=neo4j pull failed::docker pull neo4j:5 failed after 5 attempts"
+        echo "::error title=neo4j pull failed::docker pull neo4j:5.26 failed after 5 attempts"
         exit 1
 
     - name: Start Neo4j
@@ -36,7 +36,7 @@ runs:
           --health-timeout 5s \
           --health-retries 20 \
           --health-start-period 5s \
-          neo4j:5
+          neo4j:5.26
 
     - name: Wait for Neo4j to be healthy
       shell: bash
