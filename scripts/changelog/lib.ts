@@ -88,7 +88,11 @@ export interface VersionRecord {
   prNumbers: number[];
   /** The deployed commit this version tags. */
   targetSha: string;
-  /** Model that wrote headline/narrative, or null (fallback / no version-level AI). */
+  /**
+   * Disclosure model — the model whose voice this release reflects (its per-PR
+   * summaries, and any headline/narrative), or null when no key was set so every
+   * summary was a PR-title fallback. Drives the body's "summaries by …" line.
+   */
   model: string | null;
 }
 
@@ -688,6 +692,12 @@ export interface CutArtifacts {
  * narrative/date/sha, so the same inputs always produce the same release — which is
  * what lets `release.ts` recompute cleanly on a same-day tag collision and what the
  * reconciler relies on to re-render byte-stably.
+ *
+ * `model` is the DISCLOSURE model — whether the per-PR summaries were AI-written
+ * (key availability at cut time) — and is what the body's "summaries by …" line
+ * reflects. It is deliberately NOT `vn.model` (the version-prose model), which is
+ * null on a maintenance cut even though that release's bullets may be Claude-written
+ * by the per-merge hook. Frozen on the record so reconcile re-renders the same line.
  */
 export function buildCut(
   tag: string,
@@ -697,6 +707,7 @@ export function buildCut(
   releaseDate: Date,
   headSha: string,
   versions: readonly VersionRecord[],
+  model: string | null,
 ): CutArtifacts {
   const versionRecord: VersionRecord = {
     tag,
@@ -709,9 +720,9 @@ export function buildCut(
       .slice()
       .sort((a, b) => a - b),
     targetSha: headSha,
-    model: vn.model,
+    model,
   };
   const stats = computeStats(versionRecord, previousVersion(versions, tag));
-  const body = renderVersion(versionRecord, unreleased, stats, { model: vn.model });
+  const body = renderVersion(versionRecord, unreleased, stats, { model });
   return { versionRecord, title: releaseTitle(tag, vn.headline), body };
 }

@@ -500,7 +500,7 @@ test('stampVersion: stamps only the listed PRs', () => {
   assert.equal(out.find((r) => r.number === 3)?.version, 'v2026.06.11');
 });
 
-test('buildCut: freezes sorted prNumbers/model/sha/tier; title + body reflect the version', () => {
+test('buildCut: freezes sorted prNumbers/sha/tier; title + body reflect the version', () => {
   const unreleased = [
     rec({ number: 12, summary: 'Break C.', breaking: true, impact: 'operator' }),
     rec({ number: 11, category: 'Added', summary: 'Add B.', impact: 'user' }),
@@ -519,15 +519,47 @@ test('buildCut: freezes sorted prNumbers/model/sha/tier; title + body reflect th
     new Date('2026-06-11T00:00:00Z'),
     'deadbeef',
     versions,
+    'claude-opus-4-8',
   );
   assert.deepEqual(cut.versionRecord.prNumbers, [11, 12], 'prNumbers sorted ascending');
-  assert.equal(cut.versionRecord.model, 'claude-opus-4-8');
   assert.equal(cut.versionRecord.targetSha, 'deadbeef');
   assert.equal(cut.versionRecord.tier, 'notable');
   assert.equal(cut.title, 'v2026.06.11 — big stuff');
   assert.match(cut.body, /A theme\. Why it matters\./, 'narrative in body for notable');
   assert.match(cut.body, /since v0\.1\.0/);
   assert.ok(cut.body.indexOf('Break C.') < cut.body.indexOf('Add B.'), 'breaking pinned');
+});
+
+test('buildCut: disclosure uses the passed model, not vn.model (maintenance bullets are still AI)', () => {
+  // The maintenance reality: no version-level AI (vn.model null), but the per-PR
+  // summary WAS Claude-written — so the disclosure model is passed explicitly.
+  const unreleased = [rec({ number: 7, category: 'Docs', summary: 'A doc tweak.' })];
+  const vnFallback = { headline: '1 change', narrative: null, model: null };
+  const cut = buildCut(
+    'v2026.06.12',
+    'maintenance',
+    vnFallback,
+    unreleased,
+    new Date('2026-06-12T00:00:00Z'),
+    'cafe',
+    [vrec({ tag: 'v0.1.0', date: '2026-06-11T00:00:00Z' })],
+    'claude-opus-4-8',
+  );
+  assert.equal(cut.versionRecord.model, 'claude-opus-4-8', 'record stores the disclosure model');
+  assert.match(cut.body, /summaries by claude-opus-4-8/, 'body discloses the model, not "no AI"');
+  // ...and a keyless cut honestly says "no AI".
+  const keyless = buildCut(
+    'v2026.06.12',
+    'maintenance',
+    vnFallback,
+    unreleased,
+    new Date('2026-06-12T00:00:00Z'),
+    'cafe',
+    [],
+    null,
+  );
+  assert.equal(keyless.versionRecord.model, null);
+  assert.match(keyless.body, /no AI/);
 });
 
 // ── unchanged helpers ─────────────────────────────────────────────────────────

@@ -124,7 +124,11 @@ async function runCut(): Promise<void> {
       ? fallbackVersionNarrative(unreleased.length)
       : await summarizeVersion({ tag, tier, records: unreleased, prevTag });
 
-  let cut = buildCut(tag, tier, vn, unreleased, releaseDate, headSha, versions);
+  // Disclosure model = key availability at cut time (frozen). Reflects whether the
+  // per-PR summaries are AI-written — true even on a maintenance cut, whose bullets
+  // come from the per-merge hook. NOT vn.model (the prose model, null for maintenance).
+  const model = disclosureModel();
+  let cut = buildCut(tag, tier, vn, unreleased, releaseDate, headSha, versions, model);
 
   console.log(
     `Tag: ${tag}  ·  tier: ${tier}  ·  ${unreleased.length} PR(s)  ·  prev: ${prevTag ?? '(none)'}`,
@@ -153,7 +157,7 @@ async function runCut(): Promise<void> {
     if (!isAlreadyExists(err)) throw err;
     tag = calverTag(releaseDate, [...listReleaseTags(), tag]);
     console.log(`Tag collision — retrying as ${tag}.`);
-    cut = buildCut(tag, tier, vn, unreleased, releaseDate, headSha, versions);
+    cut = buildCut(tag, tier, vn, unreleased, releaseDate, headSha, versions, model);
     writeVersionRelease(tag, headSha, cut.title, cut.body);
   }
 
