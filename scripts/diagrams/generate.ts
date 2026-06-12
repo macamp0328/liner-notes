@@ -571,6 +571,23 @@ function postProcessDot(dot: string, extraNodes: Set<string> = new Set()): strin
     if (n && n[1] !== undefined) nodes.add(n[1]);
   }
 
+  // Drift guard: edgeRE/nodeRE parse inframap's DOT line-by-line, so a future inframap
+  // version emitting multi-line node attrs would silently match nothing. The extraNodes
+  // union below would then paper over it — refilling `nodes` from our HCL parser — and the
+  // byte-identical SVG drift check would happily pass a structurally-truncated artifact.
+  // Capture the parsed count BEFORE the union and fail loudly if the parser extracted zero
+  // nodes from non-empty inframap output. This floor is unreachable on healthy input (the
+  // infra's IAM/SG/EC2 dependencies guarantee parsed edges/nodes); only a real format change
+  // can trip it, which is exactly when a human is in the loop bumping the inframap pin.
+  const parsedNodeCount = nodes.size;
+  if (parsedNodeCount === 0 && extraNodes.size > 0) {
+    throw new Error(
+      `postProcessDot: parsed 0 nodes from non-empty inframap output, but ${extraNodes.size} ` +
+        `resources were declared — the DOT node/edge regex likely no longer matches inframap's ` +
+        `format (version bump?). Refusing to emit a silently-truncated diagram.`,
+    );
+  }
+
   // Inframap silently drops resources with no edges (e.g. an isolated
   // Secrets Manager secret whose only relationship is through a policy doc
   // body it can't see), which leaves whole category clusters missing from
