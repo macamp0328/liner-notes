@@ -327,6 +327,29 @@ Enforced by `services/graph-service/vitest.config.ts`:
 
 ---
 
+## Issue Organization
+
+Claude Code creates most issues here, so they're labeled automatically with a **four-axis namespaced taxonomy**. The full label list, the priority rule, and the bookmark queries live in [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md); the rationale (and the features we deliberately skipped) is in [ADR 0002](docs/adr/0002-issue-organization.md).
+
+- **Status** — `needs-triage` · `needs-info` · `ready-for-agent` · `ready-for-human` · `wontfix`, plus the `blocked` modifier (depends on an open issue).
+- **Area** — one `area:*` per component: `ingestion` · `enrichment` · `graph` · `api` · `infra` · `ci` · `scripts` · `docs`.
+- **Type** — `enhancement` · `bug` · `refactor` · `chore` (+ `good first issue`).
+- **Priority** — `priority:high|medium|low` (high = keystone-that-unblocks or prod bug; low = nice-to-have / measure-first; medium = default).
+
+**Auto-apply rule:** every issue Claude Code creates gets exactly one status + area + type + priority (plus `blocked` when a `## Blocked by #N` references an open issue). Agent-safe, fully-specified work is born `ready-for-agent`; anything needing a maintainer judgment call is born `needs-triage`.
+
+**Pick the next task** (instead of scanning the backlog): open `is:open label:"ready-for-agent" label:"priority:high" -label:"blocked"`, falling back to the full FIFO queue `is:open label:"ready-for-agent" -label:"blocked" sort:created-asc` → hand the top item's URL to `/issue`.
+
+### Agent skills
+
+The matt-pocock engineering skills (`triage`, `to-issues`, `to-prd`, `diagnose`, `tdd`) read their per-repo config from here:
+
+- **Issue tracker** — GitHub Issues on `macamp0328/liner-notes`, via the `gh` CLI.
+- **Triage labels** — the four-axis taxonomy above; full mapping in [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md).
+- **Domain docs** — single-context: this `CLAUDE.md` + `services/graph-service/CLAUDE.md` + `docs/adr/`.
+
+---
+
 ## Service Communication
 
 `graph-service` is currently the **only** service in the repo. The planned `collection-mcp` (not yet
