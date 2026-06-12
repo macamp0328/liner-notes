@@ -10,7 +10,11 @@
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
-To report a security vulnerability, please email: **macamp0328@gmail.com**
+Use either private channel:
+
+- **GitHub Private Vulnerability Reporting** — open the repo's **Security → Report a vulnerability**
+  tab (preferred; keeps the report and fix linked on GitHub).
+- **Email** — **macamp0328@gmail.com**.
 
 Include as much of the following information as possible:
 
@@ -30,6 +34,17 @@ This is a personal open-source project. The primary concern is:
 - **Secrets exposure** — credentials committed to git history
 - **Injection vulnerabilities** — in the Cypher query layer or API inputs
 - **Dependency vulnerabilities** — critical CVEs in dependencies
+
+### Deployed surface
+
+The reference deployment runs a **public HTTPS API** at `ln-api.impressivelyadequate.com`. Cloudflare
+proxies the hostname and terminates TLS; the EC2/k3s origin's security group accepts traffic **only
+from Cloudflare's IP ranges** (#119), so the NodePort is not reachable directly. Read endpoints
+(`/api/v1/*`, `/health`, `/stats`) are unauthenticated; all mutating `/api/v1/admin/*` routes require
+an `Authorization: Bearer <ADMIN_TOKEN>`. Only requests bearing a **valid** admin token are exempt
+from the public rate limiter — a missing or wrong token is still throttled, so the admin surface
+can't be sprayed unauthenticated. Forks that have not configured a Cloudflare zone run on plain HTTP
+with no origin lockdown — treat that as develop-only, not a hardened deployment.
 
 ## Disclosure Policy
 
