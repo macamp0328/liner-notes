@@ -162,6 +162,50 @@ describe('finishReloadJob', () => {
 });
 
 // ---------------------------------------------------------------------------
+// zero-match warnings (#290): the MATCH…SET checkpoint writers silently no-op when their target
+// node was deleted (e.g. a /reset wipe mid-reload). Each RETURNs count(...) AS matched; when a
+// logger is passed and nothing matched, it warns instead of vanishing.
+// ---------------------------------------------------------------------------
+describe('checkpoint zero-match warnings', () => {
+  const matched = (n: number) => ({ records: [makeRecord({ matched: makeNeo4jInt(n) })] });
+
+  it('markStageRunning RETURNs the match count and warns when the stage node is gone', async () => {
+    const { session, runSpy } = makeMockSession(matched(0));
+    const log = { warn: vi.fn() };
+    await markStageRunning(makeMockDriver(session), 'job-1', 'lyrics', log);
+
+    const [query] = runSpy.mock.calls[0] as [string];
+    expect(query).toContain('RETURN count(st) AS matched');
+    expect(log.warn).toHaveBeenCalledOnce();
+  });
+
+  it('does not warn when a node matched', async () => {
+    const { session } = makeMockSession(matched(1));
+    const log = { warn: vi.fn() };
+    await markStageComplete(makeMockDriver(session), 'job-1', 'lyrics', {}, false, log);
+
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('finishReloadJob warns on a zero match', async () => {
+    const { session, runSpy } = makeMockSession(matched(0));
+    const log = { warn: vi.fn() };
+    await finishReloadJob(makeMockDriver(session), 'job-1', 'failed', log);
+
+    const [query] = runSpy.mock.calls[0] as [string];
+    expect(query).toContain('RETURN count(j) AS matched');
+    expect(log.warn).toHaveBeenCalledOnce();
+  });
+
+  it('never throws and never warns when no logger is passed, even on a zero match', async () => {
+    const { session } = makeMockSession(matched(0));
+    await expect(
+      markStageFailed(makeMockDriver(session), 'job-1', 'lyrics', 'boom'),
+    ).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // read paths: getReloadJob / getLatestReloadJob / findResumableReloadJob
 // ---------------------------------------------------------------------------
 describe('getReloadJob', () => {
