@@ -270,6 +270,20 @@ test('previousVersion: predecessor by (date, tag); cut path (tag absent) → lat
   assert.equal(previousVersion([], 'v2026.06.20'), null);
 });
 
+test('version ordering: same-day .N suffix sorts numerically (.10 after .2), not lexically', () => {
+  // All same date → the tiebreak is the tag, which must compare NUMERICALLY.
+  const base = vrec({ tag: 'v2026.06.11', date: '2026-06-11T00:00:00Z' });
+  const n2 = vrec({ tag: 'v2026.06.11.2', date: '2026-06-11T00:00:00Z' });
+  const n10 = vrec({ tag: 'v2026.06.11.10', date: '2026-06-11T00:00:00Z' });
+  // serializeVersions sorts ascending: base, .2, .10 — NOT the lexical base, .10, .2.
+  const order = (JSON.parse(serializeVersions([n10, base, n2])) as VersionRecord[]).map(
+    (v) => v.tag,
+  );
+  assert.deepEqual(order, ['v2026.06.11', 'v2026.06.11.2', 'v2026.06.11.10']);
+  // ...so the predecessor of .10 is .2, not the base.
+  assert.equal(previousVersion([base, n2, n10], 'v2026.06.11.10')?.tag, 'v2026.06.11.2');
+});
+
 test('parseVersions / serializeVersions: round-trip, sorted by date, tolerant', () => {
   const vs = [
     vrec({ tag: 'v2026.06.12', date: '2026-06-12T00:00:00Z' }),

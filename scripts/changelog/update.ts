@@ -8,7 +8,7 @@
 
 import './env.js';
 import { appendFileSync } from 'node:fs';
-import { currentModel, summarize } from './claude.js';
+import { disclosureModel, summarize } from './claude.js';
 import { getPrInput, readStore, readVersions, writeDraft } from './store.js';
 import {
   type ChangelogRecord,
@@ -71,11 +71,11 @@ async function main(): Promise<void> {
     console.log('\n--- DRY RUN: record ---');
     console.log(JSON.stringify(merged, null, 2));
     console.log('\n--- DRY RUN: unreleased draft body ---\n');
-    console.log(renderUnreleased(records, { model: currentModel() }));
+    console.log(renderUnreleased(records, { model: disclosureModel() }));
     return;
   }
 
-  writeDraft(records, versions, { model: currentModel() });
+  writeDraft(records, versions, { model: disclosureModel() });
   console.log(`\nUpdated the "unreleased" draft release (${records.length} entries).`);
 }
 

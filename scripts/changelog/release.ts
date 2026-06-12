@@ -17,7 +17,7 @@
 import './env.js';
 import { appendFileSync } from 'node:fs';
 import {
-  currentModel,
+  disclosureModel,
   fallbackVersionNarrative,
   hasApiKey,
   summarize,
@@ -139,9 +139,14 @@ async function runCut(): Promise<void> {
     return;
   }
 
-  // Publish FIRST, then stamp + rewrite the draft. A crash between is healed by the
-  // reconciler's version back-fill. On a same-day tag collision, recompute `.N`
-  // against the now-visible tag and retry once.
+  // Publish the release FIRST, then stamp records + rewrite the draft (which writes
+  // the new versions.json entry). Once the draft rewrite lands, the version is in
+  // the manifest, so the reconciler's back-fill re-derives any stamps that didn't
+  // make it. The residual window — a crash strictly between publish and the draft
+  // rewrite — leaves a published release the manifest doesn't yet know about; those
+  // PRs simply stay Unreleased and fold into the next cut (a rare near-duplicate,
+  // not data loss). On a same-day tag collision, recompute `.N` against the
+  // now-visible tag and retry once.
   try {
     writeVersionRelease(tag, headSha, cut.title, cut.body);
   } catch (err) {
@@ -153,7 +158,7 @@ async function runCut(): Promise<void> {
   }
 
   const stamped = stampVersion(records, cut.versionRecord.prNumbers, tag);
-  writeDraft(stamped, [...versions, cut.versionRecord], { model: currentModel() });
+  writeDraft(stamped, [...versions, cut.versionRecord], { model: disclosureModel() });
 
   console.log(`\nPublished ${cut.title} (${cut.versionRecord.prNumbers.length} PRs).`);
   writeStepSummary([
@@ -203,7 +208,7 @@ async function runBaseline(): Promise<void> {
   }
 
   const releaseDate = resolveReleaseDate();
-  const model = hasApiKey() ? currentModel() : null;
+  const model = disclosureModel();
   const targetSha = process.env['HEAD_SHA']?.trim() || defaultBranchSha();
   const baseline: VersionRecord = {
     tag: BASELINE_TAG,
@@ -231,7 +236,7 @@ async function runBaseline(): Promise<void> {
 
   writeVersionRelease(BASELINE_TAG, targetSha, title, body);
   const stamped = stampVersion(records, baseline.prNumbers, BASELINE_TAG);
-  writeDraft(stamped, [baseline], { model: currentModel() });
+  writeDraft(stamped, [baseline], { model: disclosureModel() });
   console.log(`\nPublished ${title}; stamped ${records.length} records and emptied Unreleased.`);
 }
 

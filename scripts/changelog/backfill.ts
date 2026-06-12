@@ -13,7 +13,7 @@
 // DRY_RUN=1 prints the rebuilt body without writing.
 
 import './env.js';
-import { currentModel, hasApiKey, summarizeBatch } from './claude.js';
+import { disclosureModel, hasApiKey, summarizeBatch } from './claude.js';
 import {
   getPrInput,
   listAllMergedPrNumbers,
@@ -75,11 +75,11 @@ async function main(): Promise<void> {
 
   if (isDryRun()) {
     console.log('\n--- DRY RUN: rebuilt unreleased body ---\n');
-    console.log(renderUnreleased(records, { model: currentModel() }));
+    console.log(renderUnreleased(records, { model: disclosureModel() }));
     return;
   }
 
-  writeDraft(records, versions, { model: currentModel() });
+  writeDraft(records, versions, { model: disclosureModel() });
   console.log(
     `\nWrote ${summarised.length} entr${summarised.length === 1 ? 'y' : 'ies'} (${records.length} total).`,
   );

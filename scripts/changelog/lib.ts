@@ -423,10 +423,25 @@ export function serializeRecords(records: readonly ChangelogRecord[]): string {
     .join('\n');
 }
 
-/** Stable order for versions: oldest first by (date, tag). The baseline sorts first. */
+/**
+ * Order two tags. Two CalVer tags compare NUMERICALLY by (y, m, d, n) so the
+ * same-day suffix sorts correctly once it reaches two digits (`…11.10` after
+ * `…11.2`, which a lexical compare gets wrong). A non-CalVer tag (the `v0.1.0`
+ * baseline) sorts before any CalVer tag; two non-CalVer tags fall back to lexical.
+ */
+function compareTags(a: string, b: string): number {
+  const pa = parseCalver(a);
+  const pb = parseCalver(b);
+  if (pa && pb) return pa.y - pb.y || pa.m - pb.m || pa.d - pb.d || pa.n - pb.n;
+  if (pa && !pb) return 1; // CalVer after the non-CalVer baseline
+  if (!pa && pb) return -1;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** Stable order for versions: oldest first by (date, then tag). The baseline sorts first. */
 function byDateThenTag(a: VersionRecord, b: VersionRecord): number {
   if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-  return a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0;
+  return compareTags(a.tag, b.tag);
 }
 
 /** Validate one parsed `versions.json` entry. Mirrors `isValidRecord`'s strictness. */

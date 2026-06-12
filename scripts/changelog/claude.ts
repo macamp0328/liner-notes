@@ -76,6 +76,16 @@ export function currentModel(): string {
   return process.env['CHANGELOG_MODEL']?.trim() || DEFAULT_MODEL;
 }
 
+/**
+ * The model to name in a disclosure line: the configured model when a key is set,
+ * else `null` so the disclosure honestly reads "no AI". Without a key every summary
+ * is a PR-title fallback, so naming a model would be a lie. Use this (not
+ * `currentModel()`) for any draft/baseline render's disclosure.
+ */
+export function disclosureModel(): string | null {
+  return hasApiKey() ? currentModel() : null;
+}
+
 export function hasApiKey(): boolean {
   return (process.env['ANTHROPIC_API_KEY']?.trim().length ?? 0) > 0;
 }
