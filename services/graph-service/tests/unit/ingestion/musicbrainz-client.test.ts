@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { MusicBrainzClient } from '../../../src/ingestion/musicbrainz-client.js';
+import { snapshotEnv } from '../../helpers/env.js';
 
 function makeOkResponse(body: unknown): Response {
   return {
@@ -742,5 +743,39 @@ describe('MusicBrainzClient', () => {
       const headers = call[1]?.headers as Record<string, string>;
       expect(headers['User-Agent']).toBe('liner-notes/test');
     }
+  });
+});
+
+describe('MusicBrainzClient circuit breaker (#242)', () => {
+  let fetchSpy: MockInstance<typeof fetch>;
+  const env = snapshotEnv(['CIRCUIT_BREAKER_THRESHOLD', 'CIRCUIT_BREAKER_COOLDOWN_MS']);
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
+    env.clear();
+    process.env['CIRCUIT_BREAKER_THRESHOLD'] = '2';
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    env.restore();
+  });
+
+  it('opens after consecutive fatal (403) responses, then short-circuits without a fetch', async () => {
+    fetchSpy.mockResolvedValue(makeErrorResponse(403, 'Forbidden'));
+    const client = new MusicBrainzClient({
+      userAgent: 'liner-notes/test',
+      delayMs: 0,
+      backoffBaseMs: 0,
+    });
+
+    // getCountryByDiscogsId soft-skips a 403 to null while recording a fatal.
+    expect(await client.getCountryByDiscogsId(1)).toBeNull();
+    expect(await client.getCountryByDiscogsId(2)).toBeNull(); // → opens
+    expect(client.breakerSnapshot().open).toBe(true);
+
+    const callsBefore = fetchSpy.mock.calls.length;
+    expect(await client.getCountryByDiscogsId(3)).toBeNull(); // short-circuit
+    expect(fetchSpy.mock.calls.length).toBe(callsBefore); // no network call
   });
 });

@@ -4,6 +4,7 @@ import type { MusicBrainzClient } from './musicbrainz-client.js';
 import type { AcousticBrainzClient } from './acousticbrainz-client.js';
 import type { DeezerClient } from './deezer-client.js';
 import type { WikidataClient } from './wikidata-client.js';
+import type { BreakerSource, CircuitBreakerSnapshot } from './circuit-breaker.js';
 import { ingestReleases } from './ingest.js';
 import { enrichLyrics } from '../enrichment/lyrics.js';
 import { enrichMasterData } from '../enrichment/master-data.js';
@@ -80,6 +81,14 @@ export interface StageDescriptor {
   /** Mutual-exclusion lanes held while this stage runs. See {@link ReloadResource}. */
   resources: readonly ReloadResource[];
   /**
+   * The external `ctx`-level clients this stage drives (#242). After the stage settles, the
+   * orchestrator folds each named client's circuit-breaker snapshot into the persisted `counts`
+   * (`<source>BreakerOpen` 0/1, `<source>Fatals`) so a tripped source is visible in
+   * `/admin/reload/status`. `genius`/`lrclib` are NOT listed here — they are run-scoped breakers
+   * internal to `enrichLyrics` and surface via the lyrics stage's own summary instead.
+   */
+  sources?: readonly BreakerSource[];
+  /**
    * Run the stage. Returns a flat counts map on success, or `null` to signal "skipped"
    * (a required client was not configured). A throw is caught by the orchestrator and
    * recorded as `failed` without aborting later stages.
@@ -115,6 +124,7 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     name: 'releases',
     deps: [],
     resources: ['discogs'],
+    sources: ['discogs'],
     run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.discogs) return null;
       const s = await ingestReleases(ctx.discogs, ctx.driver, ctx.username, ctx.log, onProgress);
@@ -129,6 +139,7 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     name: 'master-data',
     deps: ['releases'],
     resources: ['discogs'],
+    sources: ['discogs'],
     run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.discogs) return null;
       return { ...(await enrichMasterData(ctx.discogs, ctx.driver, ctx.log, onProgress)) };
@@ -138,6 +149,7 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     name: 'artist-profiles',
     deps: ['releases'],
     resources: ['discogs'],
+    sources: ['discogs'],
     run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.discogs) return null;
       return { ...(await enrichArtistProfiles(ctx.discogs, ctx.driver, ctx.log, onProgress)) };
@@ -153,6 +165,7 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     name: 'track-musicbrainz',
     deps: ['releases'],
     resources: ['musicbrainz', 'track'],
+    sources: ['musicbrainz'],
     run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.musicbrainz) return null;
       return {
@@ -164,6 +177,7 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     name: 'mb-release-events',
     deps: ['master-data'],
     resources: ['musicbrainz'],
+    sources: ['musicbrainz'],
     run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.musicbrainz) return null;
       return { ...(await enrichMbReleaseEvents(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)) };
@@ -179,6 +193,7 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     name: 'track-acousticbrainz',
     deps: ['track-musicbrainz'],
     resources: ['track'],
+    sources: ['acousticbrainz'],
     run: async (ctx, onProgress) => ({
       ...(await enrichTrackAcousticBrainz(ctx.acousticbrainz, ctx.driver, ctx.log, onProgress)),
     }),
@@ -187,6 +202,7 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     name: 'track-deezer',
     deps: ['track-musicbrainz'],
     resources: ['track'],
+    sources: ['deezer'],
     run: async (ctx, onProgress) => ({
       ...(await enrichTrackDeezer(ctx.deezer, ctx.driver, ctx.log, onProgress)),
     }),
@@ -195,6 +211,7 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     name: 'nationality',
     deps: ['releases'],
     resources: ['discogs', 'musicbrainz'],
+    sources: ['musicbrainz', 'wikidata', 'discogs'],
     run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.musicbrainz) return null;
       return {
@@ -230,3 +247,49 @@ export const RELOAD_STAGES: readonly StageDescriptor[] = [
     run: async () => Promise.resolve({}),
   },
 ];
+
+/**
+ * Read a `ctx`-level client's circuit-breaker snapshot by source key (#242). Returns null for a
+ * source with no live client (an unconfigured nullable client, or `genius`/`lrclib`, which are not
+ * `ctx` clients). A `switch` over the fixed union keeps this free of dynamic object indexing.
+ */
+export function clientBreakerSnapshot(
+  ctx: ReloadContext,
+  source: BreakerSource,
+): CircuitBreakerSnapshot | null {
+  switch (source) {
+    case 'discogs':
+      return ctx.discogs?.breakerSnapshot() ?? null;
+    case 'musicbrainz':
+      return ctx.musicbrainz?.breakerSnapshot() ?? null;
+    case 'acousticbrainz':
+      return ctx.acousticbrainz.breakerSnapshot();
+    case 'deezer':
+      return ctx.deezer.breakerSnapshot();
+    case 'wikidata':
+      return ctx.wikidata?.breakerSnapshot() ?? null;
+    case 'genius':
+    case 'lrclib':
+      return null;
+  }
+}
+
+/**
+ * Fold a stage's declared sources' breaker snapshots into its persisted `counts` so a tripped
+ * source surfaces in `/admin/reload/status`. Returns the same `counts` object for chaining.
+ */
+export function foldBreakerCounts(
+  ctx: ReloadContext,
+  descriptor: StageDescriptor,
+  counts: Record<string, number>,
+): Record<string, number> {
+  for (const source of descriptor.sources ?? []) {
+    const snap = clientBreakerSnapshot(ctx, source);
+    if (snap === null) continue;
+    Object.assign(counts, {
+      [`${source}BreakerOpen`]: snap.open ? 1 : 0,
+      [`${source}Fatals`]: snap.fatalCount,
+    });
+  }
+  return counts;
+}

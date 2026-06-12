@@ -4,6 +4,13 @@ import {
   type RateLimitedFetch,
 } from './rate-limited-fetch.js';
 import {
+  buildCircuitBreaker,
+  closedSnapshot,
+  CircuitBreakerOpenError,
+  type CircuitBreaker,
+  type CircuitBreakerSnapshot,
+} from './circuit-breaker.js';
+import {
   extractLyricsFromHtml,
   stripGeniusHeader,
   isValidGeniusLyrics,
@@ -58,6 +65,8 @@ export interface GeniusClientConfig {
   random?: () => number;
   /** Optional structured logger; defaults to console when omitted. Pass app.log in production. */
   logger?: Logger;
+  /** Disable the per-source circuit breaker (#242); on by default. */
+  disableCircuitBreaker?: boolean;
 }
 
 interface GeniusSearchResponse {
@@ -93,10 +102,15 @@ export class GeniusClient {
   private readonly token: string;
   private readonly userAgent: string;
   private readonly rlFetch: RateLimitedFetch;
+  private readonly breaker: CircuitBreaker | undefined;
 
   constructor(config: GeniusClientConfig) {
     this.token = config.token;
     this.userAgent = config.userAgent;
+    this.breaker =
+      config.disableCircuitBreaker === true
+        ? undefined
+        : buildCircuitBreaker('genius', config.logger);
     this.rlFetch = createRateLimitedFetch({
       label: 'genius-client',
       apiName: 'Genius API',
@@ -106,7 +120,13 @@ export class GeniusClient {
       retryStatuses: RETRY_STATUSES,
       ...(config.random !== undefined ? { random: config.random } : {}),
       ...(config.logger !== undefined ? { logger: config.logger } : {}),
+      ...(this.breaker !== undefined ? { breaker: this.breaker } : {}),
     });
+  }
+
+  /** Current circuit-breaker state for run-summary surfacing; closed when the breaker is off. */
+  breakerSnapshot(): CircuitBreakerSnapshot {
+    return this.breaker?.snapshot() ?? closedSnapshot('genius');
   }
 
   /**
@@ -116,6 +136,16 @@ export class GeniusClient {
    * {@link GeniusHttpError}; a retryable status that spends the budget as a `RetriesExhaustedError`.
    */
   async getLyrics(artistName: string, title: string): Promise<string | null> {
+    try {
+      return await this.lookupLyrics(artistName, title);
+    } catch (err) {
+      // An open breaker is a clean no-hit (→ not-found, stamped) — not an error to propagate.
+      if (err instanceof CircuitBreakerOpenError) return null;
+      throw err;
+    }
+  }
+
+  private async lookupLyrics(artistName: string, title: string): Promise<string | null> {
     const searchUrl = new URL(SEARCH_URL);
     searchUrl.searchParams.set('q', `${artistName} ${title}`);
 

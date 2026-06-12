@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { DiscogsClient } from '../../../src/ingestion/discogs-client.js';
+import { CircuitBreakerOpenError } from '../../../src/ingestion/circuit-breaker.js';
+import { snapshotEnv } from '../../helpers/env.js';
 import collectionPage1 from '../../fixtures/collection-page-1.json' with { type: 'json' };
 import release13570466 from '../../fixtures/release-13570466.json' with { type: 'json' };
 
@@ -257,5 +259,55 @@ describe('DiscogsClient', () => {
 
       setTimeoutSpy.mockRestore();
     });
+  });
+});
+
+describe('DiscogsClient circuit breaker (#242)', () => {
+  let fetchSpy: MockInstance<typeof fetch>;
+  const env = snapshotEnv(['CIRCUIT_BREAKER_THRESHOLD', 'CIRCUIT_BREAKER_COOLDOWN_MS']);
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
+    env.clear();
+    process.env['CIRCUIT_BREAKER_THRESHOLD'] = '2';
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    env.restore();
+  });
+
+  function newClient(disableCircuitBreaker?: boolean): DiscogsClient {
+    return new DiscogsClient({
+      token: 'test-token',
+      userAgent: 'liner-notes/test',
+      delayMs: 0,
+      backoffBaseMs: 0,
+      ...(disableCircuitBreaker !== undefined ? { disableCircuitBreaker } : {}),
+    });
+  }
+
+  it('is disabled by default — a 403 storm never trips (ingest fails loudly per call)', async () => {
+    fetchSpy.mockResolvedValue(makeErrorResponse(403, 'Forbidden'));
+    const client = newClient();
+
+    for (const id of [1, 2, 3, 4]) {
+      await expect(client.getRelease(id)).rejects.toThrow(/Discogs API error 403/);
+    }
+    expect(client.breakerSnapshot().open).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(4); // every call still hit the network
+  });
+
+  it('opts in via disableCircuitBreaker:false, then fails fast with CircuitBreakerOpenError', async () => {
+    fetchSpy.mockResolvedValue(makeErrorResponse(403, 'Forbidden'));
+    const client = newClient(false);
+
+    await expect(client.getRelease(1)).rejects.toThrow(/Discogs API error 403/); // fatal 1
+    await expect(client.getRelease(2)).rejects.toThrow(/Discogs API error 403/); // fatal 2 → opens
+    expect(client.breakerSnapshot().open).toBe(true);
+
+    const callsBefore = fetchSpy.mock.calls.length;
+    await expect(client.getRelease(3)).rejects.toBeInstanceOf(CircuitBreakerOpenError);
+    expect(fetchSpy.mock.calls.length).toBe(callsBefore); // short-circuit, no network call
   });
 });

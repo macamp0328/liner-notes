@@ -24,6 +24,9 @@ vi.mock('../../../src/ingestion/stages.js', () => ({
     { name: 'lyrics', deps: [], resources: [], run: stageMocks.lyricsRun },
     { name: 'master-data', deps: [], resources: [], run: stageMocks.masterRun },
   ],
+  // Passthrough: these stages declare no `sources`, so the real fold would be a no-op anyway.
+  foldBreakerCounts: (_ctx: unknown, _descriptor: unknown, counts: Record<string, number>) =>
+    counts,
 }));
 
 const repo = vi.hoisted(() => ({
@@ -213,7 +216,14 @@ describe('runReload — failure isolation', () => {
 
     const result = await runReload(driver, { username: 'tester', logger: log });
 
-    expect(repo.markStageFailed).toHaveBeenCalledWith(driver, 'job-new', 'lyrics', 'LRCLIB down');
+    // The 5th arg is the folded breaker counts ({} here — the mocked stages declare no sources).
+    expect(repo.markStageFailed).toHaveBeenCalledWith(
+      driver,
+      'job-new',
+      'lyrics',
+      'LRCLIB down',
+      {},
+    );
     // master-data still runs after lyrics fails.
     expect(stageMocks.masterRun).toHaveBeenCalledOnce();
     expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'failed');

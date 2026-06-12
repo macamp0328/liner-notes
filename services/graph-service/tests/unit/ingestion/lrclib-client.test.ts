@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { LrclibClient, buildLrclibClientFromEnv } from '../../../src/ingestion/lrclib-client.js';
 import { RetriesExhaustedError } from '../../../src/ingestion/rate-limited-fetch.js';
+import { snapshotEnv } from '../../helpers/env.js';
 
 function makeOkResponse(body: unknown): Response {
   return {
@@ -171,5 +172,38 @@ describe('buildLrclibClientFromEnv', () => {
 
     const headers = (fetchSpy.mock.calls[0]?.[1] as RequestInit).headers as Record<string, string>;
     expect(headers['User-Agent']).toBe('custom-agent/2.0');
+  });
+});
+
+describe('LrclibClient circuit breaker (#242)', () => {
+  let fetchSpy: MockInstance<typeof fetch>;
+  const env = snapshotEnv(['CIRCUIT_BREAKER_THRESHOLD', 'CIRCUIT_BREAKER_COOLDOWN_MS']);
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
+    env.clear();
+    process.env['CIRCUIT_BREAKER_THRESHOLD'] = '2';
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    env.restore();
+  });
+
+  it('opens after consecutive fatal (403) responses, then short-circuits to null', async () => {
+    fetchSpy.mockResolvedValue(makeErrorResponse(403));
+    const client = new LrclibClient({
+      userAgent: 'liner-notes/test',
+      delayMs: 0,
+      backoffBaseMs: 0,
+    });
+
+    await expect(client.getLyrics('a', 'b')).rejects.toThrow(); // fatal 1
+    await expect(client.getLyrics('a', 'b')).rejects.toThrow(); // fatal 2 → opens
+    expect(client.breakerSnapshot().open).toBe(true);
+
+    const callsBefore = fetchSpy.mock.calls.length;
+    expect(await client.getLyrics('a', 'b')).toBeNull(); // short-circuit
+    expect(fetchSpy.mock.calls.length).toBe(callsBefore); // no network call
   });
 });

@@ -16,8 +16,22 @@ import {
 } from '../db/lyrics-repository.js';
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 import { runEnrichment, type EnrichmentStage, type EnrichmentSummary } from './run.js';
+import { closedSnapshot } from '../ingestion/circuit-breaker.js';
 
-export type LyricsEnrichmentSummary = EnrichmentSummary;
+/**
+ * The lyrics summary plus the per-run circuit-breaker outcome for each source (#242). The four
+ * breaker fields are numeric so they flow through the lyrics stage's `counts` into
+ * `/admin/reload/status` — Genius/LRCLIB are not `ctx`-level clients, so they surface here rather
+ * than via the orchestrator's source fold.
+ */
+export interface LyricsEnrichmentSummary extends EnrichmentSummary {
+  geniusFatalCount: number;
+  /** 1 when the Genius breaker tripped this run, else 0. */
+  geniusBreakerOpen: number;
+  lrclibFatalCount: number;
+  /** 1 when the LRCLIB breaker tripped this run, else 0. */
+  lrclibBreakerOpen: number;
+}
 
 /**
  * A terminal classification of a track's lyrics (issue #246). `resolve` returns one of these
@@ -138,5 +152,18 @@ export async function enrichLyrics(
     describeItem: (track) => `"${track.title}"`,
   };
 
-  return runEnrichment(driver, stage, { logger: log, onProgress, concurrency });
+  const base = await runEnrichment(driver, stage, { logger: log, onProgress, concurrency });
+
+  // Surface each source's run-scoped breaker so a trip (e.g. Genius 403 all run, #240) is visible
+  // in /admin/reload/status. The breaker already logs the trip once at warn, so we don't re-log
+  // here — these persisted fields are the visibility channel.
+  const geniusSnap = genius?.breakerSnapshot() ?? closedSnapshot('genius');
+  const lrclibSnap = lrclib.breakerSnapshot();
+  return {
+    ...base,
+    geniusFatalCount: geniusSnap.fatalCount,
+    geniusBreakerOpen: geniusSnap.open ? 1 : 0,
+    lrclibFatalCount: lrclibSnap.fatalCount,
+    lrclibBreakerOpen: lrclibSnap.open ? 1 : 0,
+  };
 }

@@ -13,6 +13,7 @@ import {
   RetriesExhaustedError,
   type RateLimitedFetchConfig,
 } from '../../../src/ingestion/rate-limited-fetch.js';
+import { CircuitBreaker, CircuitBreakerOpenError } from '../../../src/ingestion/circuit-breaker.js';
 
 function makeResponse(
   status: number,
@@ -431,6 +432,116 @@ describe('createRateLimitedFetch', () => {
 
       expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 250);
       setTimeoutSpy.mockRestore();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Circuit breaker integration (#242)
+  // ---------------------------------------------------------------------------
+  describe('circuit breaker', () => {
+    it('short-circuits without a network call when the breaker is open', async () => {
+      const breaker = new CircuitBreaker({
+        source: 'test',
+        threshold: 1,
+        logger: { info: vi.fn(), warn, error: vi.fn() },
+      });
+      breaker.record('fatal'); // opens it
+
+      await expect(build({ breaker })('https://api.example.com/thing')).rejects.toBeInstanceOf(
+        CircuitBreakerOpenError,
+      );
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('records success on an ok response', async () => {
+      fetchSpy.mockResolvedValueOnce(makeResponse(200));
+      const breaker = new CircuitBreaker({
+        source: 'test',
+        threshold: 1,
+        logger: { info: vi.fn(), warn, error: vi.fn() },
+      });
+      const recordSpy = vi.spyOn(breaker, 'record');
+
+      await build({ breaker })('https://api.example.com/thing');
+
+      expect(recordSpy).toHaveBeenCalledExactlyOnceWith('success');
+    });
+
+    it('records fatal on a non-retryable 403 (and trips at threshold)', async () => {
+      fetchSpy.mockResolvedValue(makeResponse(403));
+      const breaker = new CircuitBreaker({
+        source: 'test',
+        threshold: 2,
+        logger: { info: vi.fn(), warn, error: vi.fn() },
+      });
+
+      await build({ breaker })('https://api.example.com/a'); // returned as-is (403 not retried)
+      expect(breaker.snapshot().state).toBe('closed');
+      await build({ breaker })('https://api.example.com/b');
+      expect(breaker.snapshot().state).toBe('open');
+      expect(breaker.snapshot().fatalCount).toBe(2);
+    });
+
+    it('records miss on a 404 (never trips)', async () => {
+      fetchSpy.mockResolvedValue(makeResponse(404));
+      const breaker = new CircuitBreaker({
+        source: 'test',
+        threshold: 1,
+        logger: { info: vi.fn(), warn, error: vi.fn() },
+      });
+      const recordSpy = vi.spyOn(breaker, 'record');
+
+      await build({ breaker })('https://api.example.com/thing');
+
+      expect(recordSpy).toHaveBeenCalledExactlyOnceWith('miss');
+      expect(breaker.snapshot().state).toBe('closed');
+    });
+
+    it('records transient when retryable responses exhaust the budget', async () => {
+      fetchSpy.mockResolvedValue(makeResponse(429));
+      const breaker = new CircuitBreaker({
+        source: 'test',
+        threshold: 1,
+        logger: { info: vi.fn(), warn, error: vi.fn() },
+      });
+      const recordSpy = vi.spyOn(breaker, 'record');
+
+      await expect(
+        build({ breaker, maxRetries: 2 })('https://api.example.com/thing'),
+      ).rejects.toThrow(RetriesExhaustedError);
+
+      expect(recordSpy).toHaveBeenCalledExactlyOnceWith('transient');
+      expect(breaker.snapshot().state).toBe('closed'); // transient never trips
+    });
+
+    it('records transient when a transient network error exhausts the budget', async () => {
+      fetchSpy.mockRejectedValue(makeNetworkError('connection reset', 'ECONNRESET'));
+      const breaker = new CircuitBreaker({
+        source: 'test',
+        threshold: 1,
+        logger: { info: vi.fn(), warn, error: vi.fn() },
+      });
+      const recordSpy = vi.spyOn(breaker, 'record');
+
+      await expect(
+        build({ breaker, maxRetries: 1 })('https://api.example.com/thing'),
+      ).rejects.toThrow('connection reset');
+
+      expect(recordSpy).toHaveBeenCalledExactlyOnceWith('transient');
+    });
+
+    it('does NOT record on a non-transient fetch throw', async () => {
+      fetchSpy.mockRejectedValue(new TypeError('boom'));
+      const breaker = new CircuitBreaker({
+        source: 'test',
+        threshold: 1,
+        logger: { info: vi.fn(), warn, error: vi.fn() },
+      });
+      const recordSpy = vi.spyOn(breaker, 'record');
+
+      await expect(build({ breaker })('https://api.example.com/thing')).rejects.toThrow('boom');
+
+      expect(recordSpy).not.toHaveBeenCalled();
     });
   });
 });

@@ -3,6 +3,13 @@ import {
   type Logger,
   type RateLimitedFetch,
 } from './rate-limited-fetch.js';
+import {
+  buildCircuitBreaker,
+  closedSnapshot,
+  CircuitBreakerOpenError,
+  type CircuitBreaker,
+  type CircuitBreakerSnapshot,
+} from './circuit-breaker.js';
 
 export interface DeezerClientConfig {
   /** Milliseconds to sleep after every successful request. 120ms stays well under 50 req/5s. */
@@ -12,6 +19,8 @@ export interface DeezerClientConfig {
   /** Injectable RNG in [0,1) for deterministic backoff jitter in tests; defaults to Math.random. */
   random?: () => number;
   logger?: Logger;
+  /** Disable the per-source circuit breaker (#242); on by default. */
+  disableCircuitBreaker?: boolean;
 }
 
 export interface DeezerTrackData {
@@ -40,8 +49,13 @@ const DEFAULT_BACKOFF_BASE_MS = 1_000;
  */
 export class DeezerClient {
   private readonly rlFetch: RateLimitedFetch;
+  private readonly breaker: CircuitBreaker | undefined;
 
   constructor(config: DeezerClientConfig) {
+    this.breaker =
+      config.disableCircuitBreaker === true
+        ? undefined
+        : buildCircuitBreaker('deezer', config.logger);
     this.rlFetch = createRateLimitedFetch({
       label: 'deezer-client',
       apiName: 'Deezer API',
@@ -51,7 +65,13 @@ export class DeezerClient {
       retryStatuses: [429, 503],
       ...(config.random !== undefined ? { random: config.random } : {}),
       ...(config.logger !== undefined ? { logger: config.logger } : {}),
+      ...(this.breaker !== undefined ? { breaker: this.breaker } : {}),
     });
+  }
+
+  /** Current circuit-breaker state for run-summary surfacing; closed when the breaker is off. */
+  breakerSnapshot(): CircuitBreakerSnapshot {
+    return this.breaker?.snapshot() ?? closedSnapshot('deezer');
   }
 
   /**
@@ -80,9 +100,16 @@ export class DeezerClient {
   }
 
   private async fetchWithBackoff<T>(url: string): Promise<T | null> {
-    const response = await this.rlFetch(url, {
-      headers: { Accept: 'application/json' },
-    });
+    let response: Response;
+    try {
+      response = await this.rlFetch(url, {
+        headers: { Accept: 'application/json' },
+      });
+    } catch (err) {
+      // An open breaker is the source's "no data" outcome — null, like a 404 miss.
+      if (err instanceof CircuitBreakerOpenError) return null;
+      throw err;
+    }
 
     // 404 means the ISRC is not in Deezer's catalog — a normal "no data" outcome, not an error.
     if (response.status === 404) {

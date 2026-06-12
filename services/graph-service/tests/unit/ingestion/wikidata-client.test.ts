@@ -3,6 +3,7 @@ import {
   WikidataClient,
   buildWikidataClientFromEnv,
 } from '../../../src/ingestion/wikidata-client.js';
+import { snapshotEnv } from '../../helpers/env.js';
 
 function makeSparqlResponse(countryCode?: string): unknown {
   return {
@@ -384,5 +385,38 @@ describe('buildWikidataClientFromEnv', () => {
     delete process.env['MUSICBRAINZ_USER_AGENT'];
     process.env['DISCOGS_USER_AGENT'] = 'liner-notes/test';
     expect(buildWikidataClientFromEnv()).toBeInstanceOf(WikidataClient);
+  });
+});
+
+describe('WikidataClient circuit breaker (#242)', () => {
+  let fetchSpy: MockInstance<typeof fetch>;
+  const env = snapshotEnv(['CIRCUIT_BREAKER_THRESHOLD', 'CIRCUIT_BREAKER_COOLDOWN_MS']);
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
+    env.clear();
+    process.env['CIRCUIT_BREAKER_THRESHOLD'] = '2';
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    env.restore();
+  });
+
+  it('opens after consecutive fatal (403) responses, then short-circuits to null without a fetch', async () => {
+    fetchSpy.mockResolvedValue(makeErrorResponse(403));
+    const client = new WikidataClient({
+      userAgent: 'liner-notes/test',
+      delayMs: 0,
+      backoffBaseMs: 0,
+    });
+
+    expect(await client.getCountryByDiscogsId(1)).toBeNull(); // fatal 1
+    expect(await client.getCountryByDiscogsId(2)).toBeNull(); // fatal 2 → opens
+    expect(client.breakerSnapshot().open).toBe(true);
+
+    const callsBefore = fetchSpy.mock.calls.length;
+    expect(await client.getCountryByDiscogsId(3)).toBeNull(); // short-circuit
+    expect(fetchSpy.mock.calls.length).toBe(callsBefore); // no network call
   });
 });

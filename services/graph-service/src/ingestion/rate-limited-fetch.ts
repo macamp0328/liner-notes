@@ -1,5 +1,6 @@
 import { transientNetworkCode } from './network-errors.js';
 import { jitteredBackoffMs } from './backoff.js';
+import { CircuitBreaker, CircuitBreakerOpenError, classifyOutcome } from './circuit-breaker.js';
 
 /** Minimal logger interface — satisfied by Fastify's app.log (pino) and by console. */
 export interface Logger {
@@ -55,6 +56,13 @@ export interface RateLimitedFetchConfig {
   sleep?: (ms: number) => Promise<void>;
   /** Optional structured logger; defaults to console. Pass app.log in production. */
   logger?: Logger;
+  /**
+   * Optional per-source circuit breaker (#242). When supplied, the loop consults it once before
+   * the first fetch — throwing {@link CircuitBreakerOpenError} without a network call if open — and
+   * records the final outcome once after the loop settles. Behaviour is byte-identical to a
+   * breaker-less loop when omitted.
+   */
+  breaker?: CircuitBreaker;
 }
 
 export type RateLimitedFetch = (url: string, init?: RequestInit) => Promise<Response>;
@@ -102,9 +110,14 @@ export function createRateLimitedFetch(config: RateLimitedFetchConfig): RateLimi
     random = Math.random,
     sleep = defaultSleep,
     logger = console,
+    breaker,
   } = config;
 
   return async (url: string, init?: RequestInit): Promise<Response> => {
+    if (breaker && !breaker.allowRequest()) {
+      throw new CircuitBreakerOpenError(breaker.source);
+    }
+
     let attempt = 0;
     let currentDelay = backoffBaseMs;
 
@@ -114,7 +127,14 @@ export function createRateLimitedFetch(config: RateLimitedFetchConfig): RateLimi
         response = await fetch(url, init);
       } catch (err) {
         const netCode = transientNetworkCode(err);
-        if (netCode === null || attempt >= maxRetries) throw err;
+        // A non-transient error (and the final-attempt rethrow) leaves the loop. Only a transient
+        // exhaustion is the source's verdict; a non-transient throw is a programming/abort error
+        // the breaker must not count.
+        if (netCode === null) throw err;
+        if (attempt >= maxRetries) {
+          breaker?.record('transient');
+          throw err;
+        }
         const sleepMs = jitteredBackoffMs(currentDelay, { random });
         logger.warn(
           `[${label}] Network error (${netCode}) on attempt ${attempt + 1}/${maxRetries + 1} — waiting ${sleepMs}ms`,
@@ -131,6 +151,7 @@ export function createRateLimitedFetch(config: RateLimitedFetchConfig): RateLimi
 
       if (retryReason !== null) {
         if (attempt >= maxRetries) {
+          breaker?.record('transient');
           throw new RetriesExhaustedError(apiName, maxRetries, url);
         }
         // Honour the server-specified Retry-After delay when present. Validate the parsed
@@ -153,6 +174,7 @@ export function createRateLimitedFetch(config: RateLimitedFetchConfig): RateLimi
       if (response.ok) {
         await sleep(delayMs);
       }
+      breaker?.record(classifyOutcome({ status: response.status }));
       return response;
     }
 

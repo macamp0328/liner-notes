@@ -177,7 +177,16 @@ export async function runIngestion(
   const lyricsEnrichment = await runStage(
     'lyrics',
     () => enrichLyrics(driver, log),
-    { enriched: 0, skipped: 0, failed: 0, durationMs: 0 },
+    {
+      enriched: 0,
+      skipped: 0,
+      failed: 0,
+      durationMs: 0,
+      geniusFatalCount: 0,
+      geniusBreakerOpen: 0,
+      lrclibFatalCount: 0,
+      lrclibBreakerOpen: 0,
+    },
     log,
     errors,
   );

@@ -3,6 +3,13 @@ import {
   type Logger,
   type RateLimitedFetch,
 } from './rate-limited-fetch.js';
+import {
+  buildCircuitBreaker,
+  closedSnapshot,
+  CircuitBreakerOpenError,
+  type CircuitBreaker,
+  type CircuitBreakerSnapshot,
+} from './circuit-breaker.js';
 
 export interface LrclibClientConfig {
   /**
@@ -19,6 +26,8 @@ export interface LrclibClientConfig {
   random?: () => number;
   /** Optional structured logger; defaults to console when omitted. Pass app.log in production. */
   logger?: Logger;
+  /** Disable the per-source circuit breaker (#242); on by default. */
+  disableCircuitBreaker?: boolean;
 }
 
 interface LrclibResponse {
@@ -56,9 +65,14 @@ const DEFAULT_DELAY_MS = 0;
 export class LrclibClient {
   private readonly userAgent: string;
   private readonly rlFetch: RateLimitedFetch;
+  private readonly breaker: CircuitBreaker | undefined;
 
   constructor(config: LrclibClientConfig) {
     this.userAgent = config.userAgent;
+    this.breaker =
+      config.disableCircuitBreaker === true
+        ? undefined
+        : buildCircuitBreaker('lrclib', config.logger);
     this.rlFetch = createRateLimitedFetch({
       label: 'lrclib-client',
       apiName: 'LRCLIB API',
@@ -68,7 +82,13 @@ export class LrclibClient {
       retryStatuses: [429, 500, 502, 503, 504],
       ...(config.random !== undefined ? { random: config.random } : {}),
       ...(config.logger !== undefined ? { logger: config.logger } : {}),
+      ...(this.breaker !== undefined ? { breaker: this.breaker } : {}),
     });
+  }
+
+  /** Current circuit-breaker state for run-summary surfacing; closed when the breaker is off. */
+  breakerSnapshot(): CircuitBreakerSnapshot {
+    return this.breaker?.snapshot() ?? closedSnapshot('lrclib');
   }
 
   /**
@@ -82,9 +102,16 @@ export class LrclibClient {
     url.searchParams.set('track_name', title);
     url.searchParams.set('artist_name', artistName);
 
-    const response = await this.rlFetch(url.toString(), {
-      headers: { 'User-Agent': this.userAgent, Accept: 'application/json' },
-    });
+    let response: Response;
+    try {
+      response = await this.rlFetch(url.toString(), {
+        headers: { 'User-Agent': this.userAgent, Accept: 'application/json' },
+      });
+    } catch (err) {
+      // An open breaker is LRCLIB's "no record" outcome — null, like a 404 miss.
+      if (err instanceof CircuitBreakerOpenError) return null;
+      throw err;
+    }
 
     if (response.status === 404) return null;
     if (!response.ok) {

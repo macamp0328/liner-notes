@@ -1,6 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { RELOAD_STAGES } from '../../../src/ingestion/stages.js';
-import type { ReloadContext, ReloadStageName } from '../../../src/ingestion/stages.js';
+import {
+  RELOAD_STAGES,
+  foldBreakerCounts,
+  clientBreakerSnapshot,
+} from '../../../src/ingestion/stages.js';
+import type {
+  ReloadContext,
+  ReloadStageName,
+  StageDescriptor,
+} from '../../../src/ingestion/stages.js';
+import type { CircuitBreakerSnapshot } from '../../../src/ingestion/circuit-breaker.js';
 import { validateStageGraph } from '../../../src/ingestion/scheduler.js';
 import { ingestReleases } from '../../../src/ingestion/ingest.js';
 import { enrichLyrics } from '../../../src/enrichment/lyrics.js';
@@ -323,5 +332,74 @@ describe('stages skip (return null) when a required client is missing', () => {
   it('nationality skips with no musicbrainz client', async () => {
     expect(await stage('nationality').run(makeCtx({ musicbrainz: null }))).toBeNull();
     expect(enrichNationality).not.toHaveBeenCalled();
+  });
+});
+
+describe('breaker count surfacing (#242)', () => {
+  const snap = (source: string, open: boolean, fatalCount: number): CircuitBreakerSnapshot => ({
+    source,
+    state: open ? 'open' : 'closed',
+    open,
+    consecutiveFatals: open ? fatalCount : 0,
+    fatalCount,
+    trippedAt: open ? 1 : null,
+  });
+
+  const clientStub = (
+    s: CircuitBreakerSnapshot,
+  ): { breakerSnapshot: () => CircuitBreakerSnapshot } => ({
+    breakerSnapshot: () => s,
+  });
+
+  it('clientBreakerSnapshot returns null for non-ctx sources (genius/lrclib)', () => {
+    const ctx = makeCtx();
+    expect(clientBreakerSnapshot(ctx, 'genius')).toBeNull();
+    expect(clientBreakerSnapshot(ctx, 'lrclib')).toBeNull();
+  });
+
+  it('clientBreakerSnapshot returns null for an unconfigured (null) client', () => {
+    const ctx = makeCtx({ musicbrainz: null });
+    expect(clientBreakerSnapshot(ctx, 'musicbrainz')).toBeNull();
+  });
+
+  it('folds a tripped source into the stage counts', () => {
+    const ctx = makeCtx({
+      musicbrainz: clientStub(
+        snap('musicbrainz', true, 7),
+      ) as unknown as ReloadContext['musicbrainz'],
+    });
+    const descriptor = {
+      name: 'track-musicbrainz',
+      sources: ['musicbrainz'],
+    } as unknown as StageDescriptor;
+
+    const counts = foldBreakerCounts(ctx, descriptor, { releasesProcessed: 3 });
+
+    expect(counts).toMatchObject({
+      releasesProcessed: 3,
+      musicbrainzBreakerOpen: 1,
+      musicbrainzFatals: 7,
+    });
+  });
+
+  it('reports a closed breaker as open=0 and skips null clients', () => {
+    const ctx = makeCtx({
+      deezer: clientStub(snap('deezer', false, 0)) as unknown as ReloadContext['deezer'],
+      wikidata: null,
+    });
+    const descriptor = {
+      name: 'nationality',
+      sources: ['deezer', 'wikidata'],
+    } as unknown as StageDescriptor;
+
+    const counts = foldBreakerCounts(ctx, descriptor, {});
+
+    expect(counts).toEqual({ deezerBreakerOpen: 0, deezerFatals: 0 });
+  });
+
+  it('is a no-op when the stage declares no sources', () => {
+    expect(
+      foldBreakerCounts(makeCtx(), { name: 'artist-genres' } as StageDescriptor, { a: 1 }),
+    ).toEqual({ a: 1 });
   });
 });

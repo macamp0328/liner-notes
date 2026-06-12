@@ -5,6 +5,13 @@ import {
   type Logger,
   type RateLimitedFetch,
 } from './rate-limited-fetch.js';
+import {
+  buildCircuitBreaker,
+  closedSnapshot,
+  CircuitBreakerOpenError,
+  type CircuitBreaker,
+  type CircuitBreakerSnapshot,
+} from './circuit-breaker.js';
 
 export interface WikidataClientConfig {
   userAgent: string;
@@ -15,6 +22,8 @@ export interface WikidataClientConfig {
   /** Injectable RNG in [0,1) for deterministic backoff jitter in tests; defaults to Math.random. */
   random?: () => number;
   logger?: Logger;
+  /** Disable the per-source circuit breaker (#242); on by default. */
+  disableCircuitBreaker?: boolean;
 }
 
 interface SparqlResponse {
@@ -32,10 +41,15 @@ export class WikidataClient {
   private readonly userAgent: string;
   private readonly log: Logger;
   private readonly rlFetch: RateLimitedFetch;
+  private readonly breaker: CircuitBreaker | undefined;
 
   constructor(config: WikidataClientConfig) {
     this.userAgent = config.userAgent;
     this.log = config.logger ?? console;
+    this.breaker =
+      config.disableCircuitBreaker === true
+        ? undefined
+        : buildCircuitBreaker('wikidata', config.logger);
     this.rlFetch = createRateLimitedFetch({
       label: 'wikidata-client',
       apiName: 'Wikidata API',
@@ -52,7 +66,13 @@ export class WikidataClient {
           : null,
       ...(config.random !== undefined ? { random: config.random } : {}),
       ...(config.logger !== undefined ? { logger: config.logger } : {}),
+      ...(this.breaker !== undefined ? { breaker: this.breaker } : {}),
     });
+  }
+
+  /** Current circuit-breaker state for run-summary surfacing; closed when the breaker is off. */
+  breakerSnapshot(): CircuitBreakerSnapshot {
+    return this.breaker?.snapshot() ?? closedSnapshot('wikidata');
   }
 
   /**
@@ -142,6 +162,8 @@ export class WikidataClient {
       const code = binding?.['countryCode']?.value?.trim();
       return code ?? null;
     } catch (err) {
+      // An open breaker already logged its single trip line — short-circuit silently to null.
+      if (err instanceof CircuitBreakerOpenError) return null;
       if (err instanceof RetriesExhaustedError || transientNetworkCode(err) !== null) {
         this.log.warn(`[wikidata-client] Exceeded max retries for ${logLabel} — skipping`);
         return null;

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { DeezerClient, buildDeezerClientFromEnv } from '../../../src/ingestion/deezer-client.js';
+import { snapshotEnv } from '../../helpers/env.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -209,5 +210,35 @@ describe('DeezerClient', () => {
   it('always returns a DeezerClient (no env gate required)', () => {
     const c = buildDeezerClientFromEnv();
     expect(c).toBeInstanceOf(DeezerClient);
+  });
+});
+
+describe('DeezerClient circuit breaker (#242)', () => {
+  let fetchSpy: MockInstance<typeof fetch>;
+  const env = snapshotEnv(['CIRCUIT_BREAKER_THRESHOLD', 'CIRCUIT_BREAKER_COOLDOWN_MS']);
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
+    env.clear();
+    process.env['CIRCUIT_BREAKER_THRESHOLD'] = '2';
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    env.restore();
+  });
+
+  it('opens after consecutive fatal (403) responses, then short-circuits to null', async () => {
+    fetchSpy.mockResolvedValue(makeErrorResponse(403, 'Forbidden'));
+    const client = new DeezerClient({ delayMs: 0, backoffBaseMs: 0 });
+
+    await expect(client.getTrackByIsrc('A')).rejects.toThrow(); // fatal 1
+    await expect(client.getTrackByIsrc('B')).rejects.toThrow(); // fatal 2 → opens
+    expect(client.breakerSnapshot().open).toBe(true);
+
+    const callsBefore = fetchSpy.mock.calls.length;
+    const result = await client.getTrackByIsrc('C'); // short-circuit
+    expect(result).toBeNull();
+    expect(fetchSpy.mock.calls.length).toBe(callsBefore); // no network call
   });
 });
