@@ -17,6 +17,14 @@ if [ "$#" -ne 1 ]; then
   exit 2
 fi
 
+# --fail-with-body needs curl >= 7.76. Probe for it without a network call (--version
+# short-circuits), so an older curl fails fast with an actionable message instead of a
+# terse "option --fail-with-body: is unknown" on every operator command.
+if ! curl --fail-with-body --version >/dev/null 2>&1; then
+  echo "$0: requires curl >= 7.76 for --fail-with-body (found: $(curl --version | head -1))" >&2
+  exit 1
+fi
+
 # --config - feeds the Authorization header via curl's stdin so the token never lands on argv
 # (readable via `ps`). --fail-with-body still fails on 4xx/5xx but keeps the response body
 # (curl >= 7.76). --connect-timeout/--max-time bound a hung or unreachable origin. Capture the
