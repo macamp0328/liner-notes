@@ -1382,6 +1382,190 @@
         }
       }
     },
+    "/api/v1/admin/group-members/enrich": {
+      "post": {
+        "summary": "Link group members via MEMBER_OF from the Discogs artist API",
+        "tags": ["admin"],
+        "description": "For each Musician node carrying a `discogsId` whose last members check has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), fetches `GET /artists/{id}` and — when the profile lists members — links each member's existing Musician node to the group via `(member)-[:MEMBER_OF { active }]->(group)`, stamping `membersFetchedAt`. Blocks until complete.\n\nGroup-ness is not knowable without the fetch, so every Musician-with-discogsId is checked once per window (non-groups are stamped and skipped). Member linking is MATCH-only — a member not credited anywhere in the collection has no Musician node and is skipped, never created.\n\n**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually** (it is a full `/artists/{id}` sweep over the credited musicians). Run `POST /api/v1/admin/group-members/reset` first to delete every MEMBER_OF edge and re-fetch from scratch.\n\nRequires `DISCOGS_TOKEN` env var.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["message", "statusUrl"],
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "statusUrl": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/group-members/reset": {
+      "post": {
+        "summary": "Delete all MEMBER_OF edges and reset group-members markers for a full re-run",
+        "tags": ["admin"],
+        "description": "Deletes every `MEMBER_OF` relationship and removes the `membersFetchedAt` marker from all Musician nodes, causing the next `POST /api/v1/admin/group-members/enrich` call to re-fetch every group from scratch.\n\nThis endpoint is blocked while enrichment is running.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["reset"],
+                      "properties": {
+                        "reset": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/person-reconciliation/enrich": {
+      "post": {
+        "summary": "Reconcile Musician identities with Artist nodes (SAME_PERSON_AS)",
+        "tags": ["admin"],
+        "description": "Links every Musician carrying a `discogsId` to the Artist node sharing that `discogsId` via a `SAME_PERSON_AS` relationship. Backfills links the order-dependent inline write missed because the Artist node arrived via a later release. Pure graph computation — no external API. Idempotent and safe to re-run; picks up new collection additions without a full re-ingest. Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest`** — run it after a re-ingest, or rely on the orchestrated reload (`POST /api/v1/admin/reload`), which includes it.\n\n**No reset endpoint:** the pass re-links exhaustively every run, so it is inherently idempotent and there is nothing to reset.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["message", "statusUrl"],
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "statusUrl": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/lyrics/status": {
       "get": {
         "summary": "Status of the most recent lyrics enrichment run",
@@ -2153,6 +2337,175 @@
                               "type": "integer"
                             },
                             "skipped": {
+                              "type": "integer"
+                            },
+                            "failed": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/group-members/status": {
+      "get": {
+        "summary": "Status of the most recent group members enrichment run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult",
+                        "lastError"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "enriched": {
+                              "type": "integer"
+                            },
+                            "skipped": {
+                              "type": "integer"
+                            },
+                            "failed": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/person-reconciliation/status": {
+      "get": {
+        "summary": "Status of the most recent person reconciliation run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult",
+                        "lastError"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "linksReconciled": {
                               "type": "integer"
                             },
                             "failed": {
@@ -2979,6 +3332,7 @@
       "get": {
         "summary": "Releases featuring this musician, with instrument and role on each result",
         "tags": ["explore"],
+        "description": "Resolves entity-resolution edges (#330), so results are not limited to the named credit node. The name is matched against Musician nodes AND, via `SAME_PERSON_AS`, an Artist's canonical name — so querying an alias or the canonical name returns the same release set. Aliases of the same person are consolidated, both release- and track-scoped credits are included, and `MEMBER_OF` group membership is expanded in both directions: querying a group also returns its members' work, and querying an individual also returns releases credited only to a group they belong to. (A future `?expand=` parameter may make the group expansion opt-in; today it is always on.)",
         "parameters": [
           {
             "schema": {
@@ -4203,7 +4557,7 @@
                       "properties": {
                         "counts": {
                           "type": "object",
-                          "required": ["releases", "artists", "tracks", "masters"],
+                          "required": ["releases", "artists", "tracks", "masters", "musicians"],
                           "properties": {
                             "releases": {
                               "type": "integer"
@@ -4215,6 +4569,9 @@
                               "type": "integer"
                             },
                             "masters": {
+                              "type": "integer"
+                            },
+                            "musicians": {
                               "type": "integer"
                             }
                           }
@@ -4237,7 +4594,10 @@
                             "tracksWithTempo",
                             "tracksWithDeezerBpm",
                             "tracksWithDeezerGain",
-                            "mastersWithReleaseEvents"
+                            "mastersWithReleaseEvents",
+                            "samePersonLinks",
+                            "memberOfEdges",
+                            "groupsWithMembers"
                           ],
                           "properties": {
                             "releasesWithOriginalYear": {
@@ -4605,6 +4965,28 @@
                                   "nullable": true
                                 }
                               }
+                            },
+                            "samePersonLinks": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "memberOfEdges": {
+                              "type": "integer"
+                            },
+                            "groupsWithMembers": {
+                              "type": "integer"
                             }
                           }
                         }

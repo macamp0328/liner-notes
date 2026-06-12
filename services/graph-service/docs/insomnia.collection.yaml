@@ -260,10 +260,50 @@ collection:
               sortKey: 100
             url: '{{ _.base_url }}/api/v1/admin/artist-genres/status'
             method: GET
+      - name: group-members
+        meta:
+          id: fld_8aab557e9325a1e70388e072e9945260
+          sortKey: 1100
+        children:
+          - name: Link group members via MEMBER_OF from the Discogs artist API
+            meta:
+              id: req_96860b84510b9b7aa7bf749fec81eaf2
+              sortKey: 0
+            url: '{{ _.base_url }}/api/v1/admin/group-members/enrich'
+            method: POST
+          - name: Delete all MEMBER_OF edges and reset group-members markers for a full re-run
+            meta:
+              id: req_732cdda590558cf5f99d2f9f5d2a058f
+              sortKey: 100
+            url: '{{ _.base_url }}/api/v1/admin/group-members/reset'
+            method: POST
+          - name: Status of the most recent group members enrichment run
+            meta:
+              id: req_666dc51649e4851eb6c52a7a797289df
+              sortKey: 200
+            url: '{{ _.base_url }}/api/v1/admin/group-members/status'
+            method: GET
+      - name: person-reconciliation
+        meta:
+          id: fld_03d54ba059816940e23ed9da3cc552e4
+          sortKey: 1200
+        children:
+          - name: Reconcile Musician identities with Artist nodes (SAME_PERSON_AS)
+            meta:
+              id: req_17f47cbd13294993ba8274ae7e8f775d
+              sortKey: 0
+            url: '{{ _.base_url }}/api/v1/admin/person-reconciliation/enrich'
+            method: POST
+          - name: Status of the most recent person reconciliation run
+            meta:
+              id: req_ab62714d6cf9868554823175f518b4aa
+              sortKey: 100
+            url: '{{ _.base_url }}/api/v1/admin/person-reconciliation/status'
+            method: GET
       - name: reload
         meta:
           id: fld_5808d8d0499fb9db11f9d9870b1ff194
-          sortKey: 1100
+          sortKey: 1300
         children:
           - name: Trigger the orchestrated reload (ingest + every enrichment) with resume
             meta:
