@@ -21,6 +21,19 @@ const TRANSIENT_NETWORK_CODES = new Set([
  * retryable network blip.
  */
 export function transientNetworkCode(err: unknown): string | null {
+  // A per-request timeout (AbortSignal.timeout) rejects with a DOMException named 'TimeoutError'.
+  // It carries no transient `.code` string (its legacy `.code` is the number 23) and its message is
+  // not "fetch failed", so the inspection below would return null — and in some runtimes DOMException
+  // isn't even an instanceof Error, tripping the guard. So match it first, by name. A caller-initiated
+  // cancel is an 'AbortError' DOMException and stays non-transient (returns null) so an intentional
+  // abort propagates instead of being retried.
+  if (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { name?: unknown }).name === 'TimeoutError'
+  ) {
+    return 'TimeoutError';
+  }
   if (!(err instanceof Error)) return null;
   if (err.message.includes('fetch failed')) return 'fetch failed';
   for (const candidate of [err.cause, err]) {

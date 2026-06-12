@@ -10,12 +10,15 @@ import {
   type CircuitBreaker,
   type CircuitBreakerSnapshot,
 } from './circuit-breaker.js';
+import { DEFAULT_OUTBOUND_TIMEOUT_MS, resolveOutboundTimeoutMs } from './outbound-timeout.js';
 
 export interface DeezerClientConfig {
   /** Milliseconds to sleep after every successful request. 120ms stays well under 50 req/5s. */
   delayMs: number;
   /** Minimum backoff on 429. Defaults to 1000ms. Set to 0 in tests to keep them fast. */
   backoffBaseMs?: number;
+  /** Per-request timeout in ms (#357). Falls back to the shared fetch default when omitted. */
+  timeoutMs?: number;
   /** Injectable RNG in [0,1) for deterministic backoff jitter in tests; defaults to Math.random. */
   random?: () => number;
   logger?: Logger;
@@ -63,6 +66,7 @@ export class DeezerClient {
       maxRetries: MAX_RETRIES,
       backoffBaseMs: config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS,
       retryStatuses: [429, 503],
+      ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
       ...(config.random !== undefined ? { random: config.random } : {}),
       ...(config.logger !== undefined ? { logger: config.logger } : {}),
       ...(this.breaker !== undefined ? { breaker: this.breaker } : {}),
@@ -131,6 +135,7 @@ export class DeezerClient {
 export function buildDeezerClientFromEnv(logger?: Logger): DeezerClient {
   return new DeezerClient({
     delayMs: 120,
+    timeoutMs: resolveOutboundTimeoutMs(DEFAULT_OUTBOUND_TIMEOUT_MS),
     ...(logger !== undefined ? { logger } : {}),
   });
 }
