@@ -13,7 +13,7 @@
     "test": "pnpm -r test",
     "lint": "eslint services/graph-service/src services/graph-service/scripts \"services/graph-service/*.config.ts\" scripts --ext .ts --ignore-pattern \"**/*.test.ts\" --max-warnings 0",
     "typecheck": "pnpm -r typecheck && tsc --noEmit -p scripts/tsconfig.json",
-    "verify": "prettier --check . && pnpm lint && pnpm typecheck && pnpm --filter graph-service test:unit:coverage && pnpm changelog:test",
+    "verify": "prettier --check . && pnpm lint && pnpm typecheck && pnpm --filter graph-service test:unit:coverage && pnpm changelog:test && pnpm prepare:test",
     "diagrams:generate": "tsx scripts/diagrams/generate.ts",
     "changelog:update": "tsx scripts/changelog/update.ts",
     "changelog:reconcile": "tsx scripts/changelog/reconcile.ts",
@@ -43,7 +43,8 @@
     "power:off": "scripts/admin/power.sh off",
     "power:auto": "scripts/admin/power.sh auto",
     "power:status": "scripts/admin/power.sh status",
-    "prepare": "husky || true"
+    "prepare": "if [ -f scripts/prepare.sh ]; then sh scripts/prepare.sh; fi",
+    "prepare:test": "tsx --test scripts/prepare.test.ts"
   },
   "lint-staged": {
     "**/*": "prettier --write --ignore-unknown"
