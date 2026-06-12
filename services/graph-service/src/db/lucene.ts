@@ -13,7 +13,7 @@ const LUCENE_STRIP = /[<>]/g;
 // Classic QueryParser special characters. The backslash is first in the class so a literal `\`
 // in the input is itself escaped; `replace` does a single pass and never re-scans its own output,
 // so there is no double-escaping.
-const LUCENE_ESCAPE = /[\\+\-!():^[\]"{}~*?|&/]/g;
+const LUCENE_ESCAPE = /[\\+\-!():^[\]"{}~*?|&\/]/g;
 // Bare uppercase AND/OR/NOT are boolean operators; a leading or standalone one is itself a parse
 // error (e.g. a query of just `AND`). Lowercasing turns them into ordinary terms — the index
 // analyzer lowercases anyway, so this also makes a literal search for a name like "AND ALSO THE
