@@ -1,3 +1,10 @@
+// Load .env* here, at the top of the module the entrypoint imports first (index.ts → buildServer),
+// so env vars are populated before any code runs. This is load-bearing and rests on an invariant:
+// NOTHING in src/ reads process.env at module top-level — every env read lives inside a function
+// (buildServer, the onReady hook, admin-auth, the build*FromEnv client factories). Keep it that
+// way; a new module-level env read elsewhere would observe undefined unless it were imported after
+// this line. It stays in server.ts (not index.ts) because tests import buildServer directly, so the
+// import must run wherever the server is constructed, not only via the index.ts entrypoint.
 import 'dotenv-flow/config';
 import Fastify, { FastifyInstance, FastifyServerOptions, FastifyRequest } from 'fastify';
 import swagger from '@fastify/swagger';
