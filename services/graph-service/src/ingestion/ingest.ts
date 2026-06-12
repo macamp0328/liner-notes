@@ -152,7 +152,9 @@ export async function ingestReleases(
     }
   }
 
-  onProgress(total, total);
+  // On abort, report the REAL processed count, not total, so live progress / shutdown logs don't
+  // read 100% for a run that checkpoint-exited early (#291).
+  onProgress(signal.aborted ? releasesProcessed : total, total);
   return { releasesProcessed, releasesFailed, errors };
 }
 

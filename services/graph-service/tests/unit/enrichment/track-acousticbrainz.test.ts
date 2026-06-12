@@ -279,17 +279,23 @@ describe('enrichTrackAcousticBrainz', () => {
       return new Map(mbids.map((m) => [m, FULL_FEATURES]));
     });
     const client = { getFeatures: getFeaturesSpy } as unknown as AcousticBrainzClient;
+    const onProgress = vi.fn();
 
     const summary = await enrichTrackAcousticBrainz(
       client,
       fakeDriver,
       silentLogger,
-      undefined,
+      onProgress,
       controller.signal,
     );
 
     expect(getFeaturesSpy).toHaveBeenCalledTimes(1); // 2nd batch skipped by the abort
     expect(summary.tracksProcessed).toBe(MAX_RECORDING_IDS_PER_CALL); // first batch persisted
     expect(mockSetFeatures).toHaveBeenCalledOnce();
+    // Honest partial progress: one batch's worth of recordings, not total (#291).
+    expect(onProgress).toHaveBeenLastCalledWith(
+      MAX_RECORDING_IDS_PER_CALL,
+      MAX_RECORDING_IDS_PER_CALL * 2,
+    );
   });
 });

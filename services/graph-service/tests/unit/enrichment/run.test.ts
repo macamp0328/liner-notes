@@ -452,6 +452,7 @@ describe('runEnrichment', () => {
         if (calls === 2) controller.abort();
         return 'x';
       });
+      const onProgress = vi.fn();
       const stage = makeStage({
         selectCandidates: vi.fn().mockResolvedValue(items),
         resolve,
@@ -462,10 +463,13 @@ describe('runEnrichment', () => {
       const summary = await runEnrichment(fakeDriver, stage, {
         signal: controller.signal,
         concurrency: 1,
+        onProgress,
       });
 
       expect(resolve).toHaveBeenCalledTimes(2);
       expect(summary.enriched).toBe(2);
+      // Honest final progress: reflects the 2 completed, not 5/5 (#291).
+      expect(onProgress).toHaveBeenLastCalledWith(2, 5);
     });
 
     it('logs a checkpoint line when aborted', async () => {

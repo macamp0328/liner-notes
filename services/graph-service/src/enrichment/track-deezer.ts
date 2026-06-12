@@ -112,11 +112,8 @@ export async function enrichTrackDeezer(
   let i = 0;
   for (const isrc of uniqueIsrcs) {
     // Checkpoint-and-exit on SIGTERM (#291): break before fetching the next ISRC. The post-loop
-    // flush() persists whatever is already buffered, so the partial run is consistent and resumes.
-    if (signal.aborted) {
-      log.info(`[track-deezer] Aborted at ${i}/${total} ISRCs — flushing and exiting`);
-      break;
-    }
+    // flush() persists the buffered batch and the tail logs the honest partial count.
+    if (signal.aborted) break;
     if (i > 0 && i % 50 === 0) {
       log.info(
         `[track-deezer] Progress: ${i}/${total} ISRCs — processed=${tracksProcessed}, skipped=${tracksSkipped}, failed=${tracksFailed}`,
@@ -158,11 +155,19 @@ export async function enrichTrackDeezer(
 
   await flush();
 
-  onProgress(total, total);
   const durationMs = Date.now() - startTime;
-  log.info(
-    `[track-deezer] Enrichment complete: processed=${tracksProcessed}, skipped=${tracksSkipped}, failed=${tracksFailed}, duration=${durationMs}ms`,
-  );
+  if (signal.aborted) {
+    // Report the REAL ISRC count, not total — an aborted run must not read as 100%/complete (#291).
+    onProgress(i, total);
+    log.info(
+      `[track-deezer] Aborted at ${i}/${total} ISRCs — processed=${tracksProcessed}, skipped=${tracksSkipped}, failed=${tracksFailed}, duration=${durationMs}ms`,
+    );
+  } else {
+    onProgress(total, total);
+    log.info(
+      `[track-deezer] Enrichment complete: processed=${tracksProcessed}, skipped=${tracksSkipped}, failed=${tracksFailed}, duration=${durationMs}ms`,
+    );
+  }
 
   return { tracksProcessed, tracksSkipped, tracksFailed, durationMs };
 }

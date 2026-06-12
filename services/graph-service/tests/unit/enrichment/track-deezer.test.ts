@@ -226,17 +226,19 @@ describe('enrichTrackDeezer', () => {
       return { bpm: 120, gain: -4 };
     });
     const client = { getTrackByIsrc: getTrackSpy } as unknown as DeezerClient;
+    const onProgress = vi.fn();
 
     const summary = await enrichTrackDeezer(
       client,
       fakeDriver,
       silentLogger,
-      undefined,
+      onProgress,
       controller.signal,
     );
 
     expect(getTrackSpy).toHaveBeenCalledTimes(1); // 2nd ISRC skipped by the abort
     expect(summary.tracksProcessed).toBe(1);
     expect(mockSetData).toHaveBeenCalledOnce(); // buffered result flushed post-loop
+    expect(onProgress).toHaveBeenLastCalledWith(1, 2); // honest partial progress, not 2/2 (#291)
   });
 });

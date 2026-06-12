@@ -103,13 +103,12 @@ export async function enrichTrackAcousticBrainz(
   onProgress(0, total);
 
   const batchCount = Math.ceil(total / MAX_RECORDING_IDS_PER_CALL);
-  for (let batchIndex = 0; batchIndex < batchCount; batchIndex++) {
+  // Hoisted out of the for-header so the post-loop tail can report how many batches actually ran.
+  let batchIndex = 0;
+  for (; batchIndex < batchCount; batchIndex++) {
     // Checkpoint-and-exit on SIGTERM (#291): each batch is a self-contained fetch+write, so breaking
-    // between batches leaves a consistent partial run. Unwritten MBIDs stay unstamped and resume.
-    if (signal.aborted) {
-      log.info(`[track-acousticbrainz] Aborted at batch ${batchIndex}/${batchCount} — exiting`);
-      break;
-    }
+    // between batches leaves a consistent partial run; unwritten MBIDs stay unstamped and resume.
+    if (signal.aborted) break;
     const batch = uniqueMbids.slice(
       batchIndex * MAX_RECORDING_IDS_PER_CALL,
       (batchIndex + 1) * MAX_RECORDING_IDS_PER_CALL,
@@ -157,11 +156,20 @@ export async function enrichTrackAcousticBrainz(
     onProgress(Math.min((batchIndex + 1) * MAX_RECORDING_IDS_PER_CALL, total), total);
   }
 
-  onProgress(total, total);
   const durationMs = Date.now() - startTime;
-  log.info(
-    `[track-acousticbrainz] Enrichment complete: processed=${tracksProcessed}, skipped=${tracksSkipped}, failed=${tracksFailed}, duration=${durationMs}ms`,
-  );
+  if (signal.aborted) {
+    // Report the REAL recording count, not total — an aborted run must not read as 100% (#291).
+    const attempted = Math.min(batchIndex * MAX_RECORDING_IDS_PER_CALL, total);
+    onProgress(attempted, total);
+    log.info(
+      `[track-acousticbrainz] Aborted at batch ${batchIndex}/${batchCount} (${attempted}/${total} recordings) — processed=${tracksProcessed}, skipped=${tracksSkipped}, failed=${tracksFailed}, duration=${durationMs}ms`,
+    );
+  } else {
+    onProgress(total, total);
+    log.info(
+      `[track-acousticbrainz] Enrichment complete: processed=${tracksProcessed}, skipped=${tracksSkipped}, failed=${tracksFailed}, duration=${durationMs}ms`,
+    );
+  }
 
   return { tracksProcessed, tracksSkipped, tracksFailed, durationMs };
 }

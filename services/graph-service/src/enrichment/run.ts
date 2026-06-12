@@ -182,15 +182,20 @@ export async function runEnrichment<TItem, TResolved>(
   });
   await Promise.all(workers);
 
-  if (signal.aborted) {
-    log.info(`[${stage.name}] Aborted at ${completed}/${total} — checkpointing and exiting`);
-  }
-
-  onProgress(total, total);
   const durationMs = Date.now() - startTime;
-  log.info(
-    `[${stage.name}] Enrichment complete: enriched=${enriched}, skipped=${skipped}, failed=${failed}, duration=${durationMs}ms`,
-  );
+  if (signal.aborted) {
+    // Report the REAL completed count, not total — an aborted run must not read as 100% done, or
+    // downstream live progress / shutdown logs would mislead operators (#291).
+    onProgress(completed, total);
+    log.info(
+      `[${stage.name}] Aborted at ${completed}/${total} — enriched=${enriched}, skipped=${skipped}, failed=${failed}, duration=${durationMs}ms`,
+    );
+  } else {
+    onProgress(total, total);
+    log.info(
+      `[${stage.name}] Enrichment complete: enriched=${enriched}, skipped=${skipped}, failed=${failed}, duration=${durationMs}ms`,
+    );
+  }
 
   return { enriched, skipped, failed, durationMs };
 }
