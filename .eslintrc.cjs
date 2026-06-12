@@ -49,13 +49,14 @@ module.exports = {
       // legitimately trip (mocks use `any`; callbacks omit return types) plus the
       // idiomatic test patterns that are noise rather than bugs — passing
       // `obj.method` to a mock/`expect` (unbound-method), `async` mock signatures
-      // with no `await` (require-await), `arr[i]`/`obj[key]` in assertions
-      // (detect-object-injection), and the odd belt-and-suspenders cast
-      // (no-unnecessary-type-assertion). KEEP the correctness rules — notably
-      // no-unused-vars and no-floating-promises: a missing `await` on an async
-      // assertion in a vitest test is a silent false-green. (no-floating-promises
-      // is turned OFF only for the node:test scripts below, where a top-level
-      // `test(...)` floats by design.)
+      // with no `await` (require-await), and `arr[i]`/`obj[key]` in assertions
+      // (detect-object-injection). KEEP the correctness rules — notably
+      // no-unused-vars, no-floating-promises (a missing `await` on an async
+      // assertion in a vitest test is a silent false-green), and
+      // no-unnecessary-type-assertion (it flags only provably-redundant casts, not
+      // the legitimate `as unknown as X` mock casting — worth keeping on).
+      // no-floating-promises is turned OFF only for the node:test scripts below,
+      // where a top-level `test(...)` floats by design.
       files: ['**/*.test.ts', 'services/graph-service/tests/**/*.ts', '**/*.config.ts'],
       rules: {
         '@typescript-eslint/explicit-function-return-type': 'off',
@@ -68,7 +69,6 @@ module.exports = {
         '@typescript-eslint/no-non-null-assertion': 'off',
         '@typescript-eslint/unbound-method': 'off',
         '@typescript-eslint/require-await': 'off',
-        '@typescript-eslint/no-unnecessary-type-assertion': 'off',
         'security/detect-object-injection': 'off',
       },
     },
