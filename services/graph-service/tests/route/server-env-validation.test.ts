@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../../src/server.js';
 
 // vi.hoisted ensures the mock is available when the vi.mock factory executes.

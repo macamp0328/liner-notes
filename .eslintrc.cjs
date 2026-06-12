@@ -46,9 +46,17 @@ module.exports = {
     },
     {
       // Test and config files: relax the type-strictness/style rules they
-      // legitimately trip (mocks use `any`; callbacks omit return types), while
-      // KEEPING correctness + security rules — notably no-unused-vars and
-      // no-floating-promises (a missing `await` in a test is a silent false-green).
+      // legitimately trip (mocks use `any`; callbacks omit return types) plus the
+      // idiomatic test patterns that are noise rather than bugs — passing
+      // `obj.method` to a mock/`expect` (unbound-method), `async` mock signatures
+      // with no `await` (require-await), and `arr[i]`/`obj[key]` in assertions
+      // (detect-object-injection). KEEP the correctness rules — notably
+      // no-unused-vars, no-floating-promises (a missing `await` on an async
+      // assertion in a vitest test is a silent false-green), and
+      // no-unnecessary-type-assertion (it flags only provably-redundant casts, not
+      // the legitimate `as unknown as X` mock casting — worth keeping on).
+      // no-floating-promises is turned OFF only for the node:test scripts below,
+      // where a top-level `test(...)` floats by design.
       files: ['**/*.test.ts', 'services/graph-service/tests/**/*.ts', '**/*.config.ts'],
       rules: {
         '@typescript-eslint/explicit-function-return-type': 'off',
@@ -59,6 +67,20 @@ module.exports = {
         '@typescript-eslint/no-unsafe-member-access': 'off',
         '@typescript-eslint/no-unsafe-return': 'off',
         '@typescript-eslint/no-non-null-assertion': 'off',
+        '@typescript-eslint/unbound-method': 'off',
+        '@typescript-eslint/require-await': 'off',
+        'security/detect-object-injection': 'off',
+      },
+    },
+    {
+      // Root scripts use node:test (the changelog suite): a top-level `test(...)`
+      // returns a promise that floats BY DESIGN — node's runner collects and
+      // awaits it. Vitest's test() does not, so no-floating-promises stays ON for
+      // the service tests above to catch real missing awaits. This block is last
+      // so it wins for the node:test files.
+      files: ['scripts/**/*.test.ts'],
+      rules: {
+        '@typescript-eslint/no-floating-promises': 'off',
       },
     },
     {
