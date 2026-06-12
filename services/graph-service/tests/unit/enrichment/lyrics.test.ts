@@ -3,6 +3,7 @@ import type { Driver } from 'neo4j-driver';
 import { enrichLyrics, type LyricsClients } from '../../../src/enrichment/lyrics.js';
 import { LrclibClient } from '../../../src/ingestion/lrclib-client.js';
 import { GeniusClient } from '../../../src/ingestion/genius-client.js';
+import { closedSnapshot } from '../../../src/ingestion/circuit-breaker.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks — factories run before module-level vi.mock() calls resolve.
@@ -12,6 +13,7 @@ const mockSetTrackLyrics = vi.hoisted(() => vi.fn());
 const mockMarkLyricsFetched = vi.hoisted(() => vi.fn());
 const mockMarkTrackInstrumental = vi.hoisted(() => vi.fn());
 const mockMarkTrackProbableInstrumental = vi.hoisted(() => vi.fn());
+const mockMarkTrackLowConfidence = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/db/lyrics-repository.js', () => ({
   getUnenrichedTracks: mockGetUnenrichedTracks,
@@ -19,6 +21,7 @@ vi.mock('../../../src/db/lyrics-repository.js', () => ({
   markLyricsFetched: mockMarkLyricsFetched,
   markTrackInstrumental: mockMarkTrackInstrumental,
   markTrackProbableInstrumental: mockMarkTrackProbableInstrumental,
+  markTrackLowConfidence: mockMarkTrackLowConfidence,
 }));
 
 // ---------------------------------------------------------------------------
@@ -84,6 +87,8 @@ const sampleTrack = {
   releaseDiscogsId: 13570466,
   artistName: 'Test Artist',
   voiceInstrumental: null as string | null,
+  // Matches lrclibHit.duration (180) so the LRCLIB resolved path exercises a confirmed duration.
+  durationSeconds: 180 as number | null,
 };
 
 // ---------------------------------------------------------------------------
@@ -152,6 +157,9 @@ describe('enrichLyrics', () => {
       sampleTrack.position,
       lrclibHit.plainLyrics,
       'lrclib',
+      expect.any(Number),
+      'Song Title',
+      'Test Artist',
     );
     // Progress is reported against the track work-list (1 track here).
     expect(onProgress).toHaveBeenCalledWith(0, 1);
@@ -166,6 +174,62 @@ describe('enrichLyrics', () => {
 
     const headers = (fetchSpy.mock.calls[0]?.[1] as RequestInit).headers as Record<string, string>;
     expect(headers['User-Agent']).toBe('liner-notes/test');
+  });
+
+  // -------------------------------------------------------------------------
+  // Match-confidence gate (#248)
+  // -------------------------------------------------------------------------
+  it('downgrades an LRCLIB hit with a divergent duration to low-confidence (lyrics not stored)', async () => {
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]); // durationSeconds 180
+    // Same title/artist but a wildly different duration — a live/remix, not this recording.
+    fetchSpy.mockResolvedValueOnce(makeOkResponse({ ...lrclibHit, duration: 600 }));
+
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(false));
+
+    expect(summary.enriched).toBe(1); // low-confidence still flows through write
+    expect(mockSetTrackLyrics).not.toHaveBeenCalled(); // lyric text is NOT stored
+    expect(mockMarkTrackLowConfidence).toHaveBeenCalledOnce();
+    expect(mockMarkTrackLowConfidence).toHaveBeenCalledWith(
+      fakeDriver,
+      sampleTrack.releaseDiscogsId,
+      sampleTrack.position,
+      'lrclib',
+      expect.any(Number),
+      'Song Title',
+      'Test Artist',
+    );
+  });
+
+  it('routes a below-gate Genius hit to low-confidence, storing provenance not lyrics', async () => {
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+    // The real GeniusClient's pre-fetch filter mirrors the gate, so a wrong-title hit never escapes
+    // it; inject a stub returning one to prove the orchestrator gate + low-confidence routing.
+    const fakeGenius = {
+      getLyrics: vi.fn().mockResolvedValue({
+        lyrics: 'Some words',
+        matchedTitle: 'A Completely Different Song',
+        matchedArtist: 'Test Artist',
+      }),
+      breakerSnapshot: () => closedSnapshot('genius'),
+    } as unknown as GeniusClient;
+    fetchSpy.mockResolvedValueOnce(makeOkResponse({}, 404)); // LRCLIB 404 → Genius fallback
+
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, {
+      lrclib: makeLrclib(),
+      genius: fakeGenius,
+    });
+
+    expect(summary.enriched).toBe(1);
+    expect(mockSetTrackLyrics).not.toHaveBeenCalled();
+    expect(mockMarkTrackLowConfidence).toHaveBeenCalledWith(
+      fakeDriver,
+      sampleTrack.releaseDiscogsId,
+      sampleTrack.position,
+      'genius',
+      expect.any(Number),
+      'A Completely Different Song',
+      'Test Artist',
+    );
   });
 
   // -------------------------------------------------------------------------
@@ -238,6 +302,9 @@ describe('enrichLyrics', () => {
       sampleTrack.position,
       'Hi',
       'genius',
+      expect.any(Number),
+      'Song Title',
+      'Test Artist',
     );
     expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
@@ -317,6 +384,9 @@ describe('enrichLyrics', () => {
       sampleTrack.position,
       'Hello\nWorld',
       'genius',
+      expect.any(Number),
+      'Song Title',
+      'Test Artist',
     );
     expect(mockMarkLyricsFetched).not.toHaveBeenCalled();
 
@@ -618,6 +688,9 @@ describe('enrichLyrics', () => {
       sampleTrack.position,
       'Actual lyrics would follow here',
       'genius',
+      expect.any(Number),
+      'Song Title',
+      'Test Artist',
     );
   });
 
@@ -679,6 +752,9 @@ describe('enrichLyrics', () => {
       sampleTrack.position,
       "I'll never leave you & me",
       'genius',
+      expect.any(Number),
+      'Song Title',
+      'Test Artist',
     );
   });
 
@@ -706,6 +782,9 @@ describe('enrichLyrics', () => {
       sampleTrack.position,
       'Verse 1\n\nChorus',
       'genius',
+      expect.any(Number),
+      'Song Title',
+      'Test Artist',
     );
   });
 
@@ -833,8 +912,9 @@ describe('enrichLyrics', () => {
   // LRCLIB write failure — counts failed and continues to the next track (#151)
   // -------------------------------------------------------------------------
   it('counts failed and continues when the LRCLIB lyrics write throws', async () => {
-    const track1 = { ...sampleTrack, position: 'A1', title: 'Track 1' };
-    const track2 = { ...sampleTrack, position: 'A2', title: 'Track 2' };
+    // Titles match the fixture's trackName so both clear the confidence gate and reach the write.
+    const track1 = { ...sampleTrack, position: 'A1' };
+    const track2 = { ...sampleTrack, position: 'A2' };
     mockGetUnenrichedTracks.mockResolvedValue([track1, track2]);
 
     fetchSpy

@@ -12,11 +12,18 @@ import {
   markLyricsFetched,
   markTrackInstrumental,
   markTrackProbableInstrumental,
+  markTrackLowConfidence,
   type UnenrichedTrack,
 } from '../db/lyrics-repository.js';
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 import { runEnrichment, type EnrichmentStage, type EnrichmentSummary } from './run.js';
 import { closedSnapshot } from '../ingestion/circuit-breaker.js';
+import {
+  scoreLyricsMatch,
+  isConfidentMatch,
+  LYRICS_CONFIDENCE_DEFAULT,
+  type LyricsMatchCandidate,
+} from './match-confidence.js';
 
 /**
  * The lyrics summary plus the per-run circuit-breaker outcome for each source (#242). The four
@@ -34,18 +41,36 @@ export interface LyricsEnrichmentSummary extends EnrichmentSummary {
 }
 
 /**
- * A terminal classification of a track's lyrics (issue #246). `resolve` returns one of these
+ * A classification of a track's lyrics (issues #246, #248). `resolve` returns one of these
  * or `null` (= not-found, retry per staleness):
- * - `resolved` — lyrics found, with the source that provided them.
+ * - `resolved` — lyrics found AND the match cleared the confidence gate; carries the source, the
+ *   confidence score, and the title/artist the source matched on (provenance).
+ * - `low-confidence` — a source returned lyrics but the match-confidence gate rejected them (wrong
+ *   song / wrong recording, #248). The lyric text is dropped; the score + provenance are stored so
+ *   the doubt is visible. Non-terminal — stays a candidate.
  * - `instrumental` — LRCLIB's authoritative `instrumental` flag; no lyrics exist.
  * - `probable-instrumental` — LRCLIB has no record, but the AcousticBrainz `voiceInstrumental`
  *   we already store classifies the track instrumental. Lower certainty than `instrumental`.
  *
- * All three flow through `write` (the runner counts them `enriched`); only `null` reaches
+ * All flow through `write` (the runner counts them `enriched`); only `null` reaches
  * `markAttempted`. The two instrumental kinds are terminal — excluded from candidate retries.
  */
 type LyricsResolved =
-  | { kind: 'resolved'; lyrics: string; source: 'lrclib' | 'genius' }
+  | {
+      kind: 'resolved';
+      lyrics: string;
+      source: 'lrclib' | 'genius';
+      confidence: number;
+      matchedTitle: string | null;
+      matchedArtist: string | null;
+    }
+  | {
+      kind: 'low-confidence';
+      source: 'lrclib' | 'genius';
+      confidence: number;
+      matchedTitle: string | null;
+      matchedArtist: string | null;
+    }
   | { kind: 'instrumental' }
   | { kind: 'probable-instrumental' };
 
@@ -71,6 +96,48 @@ function resolveConcurrency(): number {
   const parsed = parseInt(process.env['LYRICS_CONCURRENCY'] ?? '', 10);
   if (!Number.isFinite(parsed)) return DEFAULT_CONCURRENCY;
   return Math.min(Math.max(parsed, 1), MAX_CONCURRENCY);
+}
+
+/**
+ * Resolve `LYRICS_CONFIDENCE_THRESHOLD` (env) to the match-confidence gate (#248). Unset, empty,
+ * non-numeric, or out of `[0, 1]` → fall back to {@link LYRICS_CONFIDENCE_DEFAULT} (0.85): a
+ * fat-fingered value fails *safe* to the sensible default rather than silently accepting or
+ * rejecting everything (`Number('')` is 0, which is why the empty-string guard is explicit).
+ */
+function resolveConfidenceThreshold(): number {
+  const raw = process.env['LYRICS_CONFIDENCE_THRESHOLD'];
+  if (raw === undefined || raw.trim() === '') return LYRICS_CONFIDENCE_DEFAULT;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) return LYRICS_CONFIDENCE_DEFAULT;
+  return parsed;
+}
+
+/**
+ * Score a candidate's matched title/artist/duration against the query track and gate it (#248):
+ * a confident match becomes `resolved` (lyrics stored), below the gate becomes `low-confidence`
+ * (lyrics dropped, score + provenance stored). Shared by the LRCLIB and Genius paths so both go
+ * through one authoritative gate.
+ */
+function gradeMatch(
+  track: UnenrichedTrack,
+  source: 'lrclib' | 'genius',
+  lyrics: string,
+  candidate: LyricsMatchCandidate,
+  threshold: number,
+): LyricsResolved {
+  const score = scoreLyricsMatch(
+    { title: track.title, artist: track.artistName, durationSeconds: track.durationSeconds },
+    candidate,
+  );
+  const provenance = {
+    source,
+    confidence: score.confidence,
+    matchedTitle: candidate.matchedTitle,
+    matchedArtist: candidate.matchedArtist,
+  };
+  return isConfidentMatch(score, threshold)
+    ? { kind: 'resolved', lyrics, ...provenance }
+    : { kind: 'low-confidence', ...provenance };
 }
 
 /**
@@ -104,6 +171,7 @@ export async function enrichLyrics(
   const lrclib = clients?.lrclib ?? buildLrclibClientFromEnv(log);
   const genius = clients?.genius !== undefined ? clients.genius : buildGeniusClientFromEnv(log);
   const concurrency = resolveConcurrency();
+  const confidenceThreshold = resolveConfidenceThreshold();
 
   const stage: EnrichmentStage<UnenrichedTrack, LyricsResolved> = {
     name: 'lyrics',
@@ -113,8 +181,16 @@ export async function enrichLyrics(
       if (lrclibResult !== null) {
         // LRCLIB's authoritative instrumental flag — terminal, no Genius (#246).
         if (lrclibResult.instrumental) return { kind: 'instrumental' };
+        // LRCLIB matches title+artist closely, so its differentiator is the duration check (#248) —
+        // a same-title live/remix with a divergent length is downgraded to low-confidence.
         if (lrclibResult.lyrics !== null)
-          return { kind: 'resolved', lyrics: lrclibResult.lyrics, source: 'lrclib' };
+          return gradeMatch(
+            track,
+            'lrclib',
+            lrclibResult.lyrics,
+            lrclibResult,
+            confidenceThreshold,
+          );
       }
 
       // LRCLIB had no usable lyrics (404, or a record with no plain lyrics). Before spending a
@@ -128,9 +204,21 @@ export async function enrichLyrics(
         return null;
       }
       const geniusResult = await genius.getLyrics(track.artistName ?? '', track.title);
+      // Genius has no duration; its differentiator is the title-similarity gate (#248/#31). The
+      // client already pre-filters obvious title mismatches; this is the authoritative re-score.
       return geniusResult === null
         ? null
-        : { kind: 'resolved', lyrics: geniusResult.lyrics, source: 'genius' };
+        : gradeMatch(
+            track,
+            'genius',
+            geniusResult.lyrics,
+            {
+              matchedTitle: geniusResult.matchedTitle,
+              matchedArtist: geniusResult.matchedArtist,
+              matchedDurationSeconds: null,
+            },
+            confidenceThreshold,
+          );
     },
     write: (d, track, resolved) => {
       if (resolved.kind === 'resolved') {
@@ -140,6 +228,20 @@ export async function enrichLyrics(
           track.position,
           resolved.lyrics,
           resolved.source,
+          resolved.confidence,
+          resolved.matchedTitle,
+          resolved.matchedArtist,
+        );
+      }
+      if (resolved.kind === 'low-confidence') {
+        return markTrackLowConfidence(
+          d,
+          track.releaseDiscogsId,
+          track.position,
+          resolved.source,
+          resolved.confidence,
+          resolved.matchedTitle,
+          resolved.matchedArtist,
         );
       }
       if (resolved.kind === 'instrumental') {
