@@ -1,0 +1,71 @@
+name: Changelog release
+
+# Cut a PUBLISHED, tagged CalVer release after a successful production deploy — a
+# version means "this is what's live." Sweeps everything Unreleased into one
+# `vYYYY.MM.DD` GitHub Release whose note richness ramps with the importance tier
+# (see scripts/changelog/release.ts), then stamps those records and records the
+# version in the versions.json asset on the rolling draft.
+#
+# Why this is safe and loop-free: it creates a `refs/tags/*` ref, and every
+# workflow's `on: push` filters `branches: [main]` (no `tags:` trigger anywhere),
+# so a tag push cannot retrigger Deploy / CI / Changelog. Editing/creating a
+# release makes no commit, so this never touches protected main.
+#
+# Gotchas:
+#  - `workflow_run` runs THIS file from the DEFAULT branch — it only takes effect
+#    after merge to main; the PR that adds it will not self-trigger. Validate first
+#    with: DRY_RUN=1 HEAD_SHA=$(git rev-parse HEAD) pnpm changelog:release
+#  - `workflows: ['Deploy']` MUST match deploy.yml's `name: Deploy` exactly.
+#  - We check out the DEFAULT branch (trusted) for the scripts and pass the deployed
+#    commit as the HEAD_SHA env — DATA (the release tag's target), never the checkout
+#    ref. Checking out a payload-derived ref in a privileged (contents:write +
+#    secrets) workflow is the "untrusted checkout" anti-pattern; Deploy only runs on
+#    push-to-main / dispatch (never fork PRs) so head_sha is trusted in practice, but
+#    we still never execute code from it.
+#  - One-time, after merge, run `pnpm changelog:baseline` once before the first cut.
+
+on:
+  workflow_run:
+    workflows: ['Deploy'] # must equal deploy.yml `name:`
+    types: [completed]
+
+# contents:write → gh release create/edit/upload + the tag ref; pull-requests:read → gh pr view.
+permissions:
+  contents: write
+  pull-requests: read
+
+# Shared with changelog.yml / changelog-reconcile.yml so the read-modify-write of
+# the store never races a per-merge update or a reconcile.
+concurrency:
+  group: changelog
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Cut changelog version
+    # Only on a green deploy. A failed/cancelled deploy cuts nothing.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      # Default ref = the default branch (trusted). The deployed commit is data,
+      # passed as HEAD_SHA below — never checked out as code.
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cut the version release
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: pnpm changelog:release

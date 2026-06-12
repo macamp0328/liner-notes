@@ -8,12 +8,35 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   type PrInput,
+  type VersionSummaryInput,
   buildUserPrompt,
+  buildVersionPrompt,
   cleanTitle,
   fallbackCategory,
+  fallbackVersionNarrative,
   parseSummary,
+  parseVersionNarrative,
   recordFromText,
 } from './claude.js';
+import type { ChangelogRecord } from './lib.js';
+
+function vrecords(): ChangelogRecord[] {
+  return [
+    {
+      number: 11,
+      title: 't',
+      url: 'u',
+      author: 'a',
+      mergedAt: '2026-06-10T12:00:00Z',
+      category: 'Added',
+      summary: 'Adds a route.',
+      impact: 'user',
+      breaking: false,
+      summarySource: 'claude',
+      version: null,
+    },
+  ];
+}
 
 function pr(overrides: Partial<PrInput> = {}): PrInput {
   return {
@@ -57,12 +80,12 @@ test('parseSummary: non-string summary becomes empty (caller will fall back)', (
   assert.equal(parseSummary('{"category":"Added","impact":"user","breaking":false}')?.summary, '');
 });
 
-test('parseSummary: over-long summary is truncated to 240 chars', () => {
+test('parseSummary: over-long summary is truncated to 320 chars (two-sentence headroom)', () => {
   const long = 'a'.repeat(500);
   const out = parseSummary(
     `{"category":"Added","summary":"${long}","impact":"user","breaking":true}`,
   );
-  assert.equal(out?.summary.length, 240);
+  assert.equal(out?.summary.length, 320);
 });
 
 test('parseSummary: breaking is only true for a real boolean true', () => {
@@ -142,4 +165,60 @@ test('buildUserPrompt: includes title, labels, diffstat, and body', () => {
   assert.match(text, /enhancement, api/);
   assert.match(text, /src\/a\.ts {2}\+10 -2/);
   assert.match(text, /Adds CSV export\./);
+});
+
+// ── Version-level prose (headline + narrative) ───────────────────────────────
+
+test('buildVersionPrompt: lists changes, tier, prev; asks for narrative only when notable', () => {
+  const base: VersionSummaryInput = {
+    tag: 'v2026.06.11',
+    tier: 'notable',
+    records: vrecords(),
+    prevTag: 'v0.1.0',
+  };
+  const notable = buildVersionPrompt(base);
+  assert.match(notable, /Version: v2026\.06\.11/);
+  assert.match(notable, /Tier: notable/);
+  assert.match(notable, /Previous version: v0\.1\.0/);
+  assert.match(notable, /- Adds a route\. \(Added, user\)/);
+  assert.match(notable, /headline AND a 2–3 sentence narrative/);
+
+  const standard = buildVersionPrompt({ ...base, tier: 'standard', prevTag: null });
+  assert.match(standard, /This is the first version\./);
+  assert.match(standard, /headline only/);
+});
+
+test('parseVersionNarrative: well-formed, missing-narrative, malformed, over-long headline', () => {
+  assert.deepEqual(
+    parseVersionNarrative('{"headline":"big stuff","narrative":"Why it matters."}'),
+    {
+      headline: 'big stuff',
+      narrative: 'Why it matters.',
+    },
+  );
+  // headline only → narrative null
+  assert.deepEqual(parseVersionNarrative('{"headline":"just a headline"}'), {
+    headline: 'just a headline',
+    narrative: null,
+  });
+  // empty headline / malformed → null (caller falls back)
+  assert.equal(parseVersionNarrative('{"headline":"   "}'), null);
+  assert.equal(parseVersionNarrative('not json'), null);
+  assert.equal(parseVersionNarrative('["array"]'), null);
+  // over-long headline is truncated
+  const long = parseVersionNarrative(`{"headline":"${'h'.repeat(300)}"}`);
+  assert.equal(long?.headline.length, 100);
+});
+
+test('fallbackVersionNarrative: deterministic "N change(s)" headline, no narrative/model', () => {
+  assert.deepEqual(fallbackVersionNarrative(1), {
+    headline: '1 change',
+    narrative: null,
+    model: null,
+  });
+  assert.deepEqual(fallbackVersionNarrative(3), {
+    headline: '3 changes',
+    narrative: null,
+    model: null,
+  });
 });

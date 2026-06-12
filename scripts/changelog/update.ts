@@ -8,9 +8,16 @@
 
 import './env.js';
 import { appendFileSync } from 'node:fs';
-import { summarize } from './claude.js';
-import { getPrInput, readStore, writeStore } from './store.js';
-import { type ChangelogRecord, render, resolvePrNumber, upsert } from './lib.js';
+import { disclosureModel, summarize } from './claude.js';
+import { getPrInput, readStore, readVersions, writeDraft } from './store.js';
+import {
+  type ChangelogRecord,
+  preserveVersion,
+  recordsByNumber,
+  renderUnreleased,
+  resolvePrNumber,
+  upsert,
+} from './lib.js';
 
 function isDryRun(): boolean {
   const v = process.env['DRY_RUN'];
@@ -49,21 +56,26 @@ async function main(): Promise<void> {
 
   const pr = getPrInput(number);
   const { record, note } = await summarize(pr);
-  const records = upsert(readStore(), record);
+  const store = readStore();
+  const versions = readVersions();
+  // Carry forward any prior version stamp so re-running on a released PR doesn't
+  // move it back to Unreleased.
+  const merged = preserveVersion(record, recordsByNumber(store).get(number));
+  const records = upsert(store, merged);
 
-  console.log(previewLine(record));
+  console.log(previewLine(merged));
   console.log(note);
-  writeStepSummary(record, note);
+  writeStepSummary(merged, note);
 
   if (isDryRun()) {
     console.log('\n--- DRY RUN: record ---');
-    console.log(JSON.stringify(record, null, 2));
-    console.log('\n--- DRY RUN: rendered body ---\n');
-    console.log(render(records));
+    console.log(JSON.stringify(merged, null, 2));
+    console.log('\n--- DRY RUN: unreleased draft body ---\n');
+    console.log(renderUnreleased(records, { model: disclosureModel() }));
     return;
   }
 
-  writeStore(records);
+  writeDraft(records, versions, { model: disclosureModel() });
   console.log(`\nUpdated the "unreleased" draft release (${records.length} entries).`);
 }
 
