@@ -39,6 +39,7 @@ From this, establish:
 - **What is being asked for** (1-2 sentences in your own words)
 - **Issue type** — infer from labels or content: `feat`, `fix`, `chore`, `docs`, `refactor`, etc. Use it as an optional commit prefix when helpful.
 - **Which service is affected** — almost always `graph-service`
+- **Labels** — if the issue is missing an `area:*`, type, status, or `priority:*` label, apply the right ones now (see [docs/agents/triage-labels.md](../../../docs/agents/triage-labels.md)). You're about to work it, so its metadata should be correct for the backlog queries.
 
 ---
 

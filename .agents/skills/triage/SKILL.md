@@ -20,10 +20,12 @@ Every comment or issue posted to the issue tracker during triage **must** start 
 
 ## Roles
 
-Two **category** roles:
+A **type** role (the category axis):
 
-- `bug` — something is broken
 - `enhancement` — new feature or improvement
+- `bug` — something is broken
+- `refactor` — internal restructuring, no behavior change
+- `chore` — build, deps, tooling, tests, CI, maintenance
 
 Five **state** roles:
 
@@ -33,7 +35,7 @@ Five **state** roles:
 - `ready-for-human` — needs human implementation
 - `wontfix` — will not be actioned
 
-Every triaged issue should carry exactly one category role and one state role. If state roles conflict, flag it and ask the maintainer before doing anything else.
+Every triaged issue should carry exactly one of each axis — one **type**, one **state**, one `area:*`, and one `priority:*` — per the full taxonomy in [docs/agents/triage-labels.md](../../../docs/agents/triage-labels.md). `blocked` is a modifier that may co-exist with `ready-for-agent`/`ready-for-human` and does not count as a conflicting state role. If state roles genuinely conflict, flag it and ask the maintainer before doing anything else.
 
 These are canonical role names — the actual label strings used in the issue tracker may differ. The mapping should have been provided to you - run `/setup-matt-pocock-skills` if not.
 
