@@ -81,8 +81,12 @@ export type RateLimitedFetch = (url: string, init?: RequestInit) => Promise<Resp
 
 const DEFAULT_BACKOFF_CEIL_MS = 32_000;
 
-/** Fallback per-request timeout when a caller supplies none (or a non-positive/garbage value). */
-const DEFAULT_TIMEOUT_MS = 30_000;
+/**
+ * Fallback per-request timeout when a caller supplies none (or a non-positive/garbage value). This
+ * is also the canonical standard-client default — `outbound-timeout.ts` derives
+ * `DEFAULT_OUTBOUND_TIMEOUT_MS` from it so the two can't drift.
+ */
+export const DEFAULT_TIMEOUT_MS = 30_000;
 
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

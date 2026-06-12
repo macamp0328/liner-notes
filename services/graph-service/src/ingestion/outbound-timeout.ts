@@ -6,9 +6,13 @@
  * every client; when unset, each client uses its own default — standard clients 30s, the bulk
  * MusicBrainz/AcousticBrainz clients 60s (their batched calls legitimately run longer).
  */
+import { DEFAULT_TIMEOUT_MS } from './rate-limited-fetch.js';
 
-/** Default per-request timeout for the standard (non-bulk) clients. */
-export const DEFAULT_OUTBOUND_TIMEOUT_MS = 30_000;
+/**
+ * Default per-request timeout for the standard (non-bulk) clients. Derived from the core's
+ * {@link DEFAULT_TIMEOUT_MS} so the standard default and the core's own fallback can't drift apart.
+ */
+export const DEFAULT_OUTBOUND_TIMEOUT_MS = DEFAULT_TIMEOUT_MS;
 
 /** Longer default for the bulk MusicBrainz/AcousticBrainz clients whose batched calls run slower. */
 export const BULK_OUTBOUND_TIMEOUT_MS = 60_000;
