@@ -116,6 +116,11 @@ vi.mock('../../../src/db/group-members-repository.js', () => ({
   resetGroupMembers: mockResetGroupMembers,
 }));
 
+const mockEnrichPersonReconciliation = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/enrichment/person-reconciliation.js', () => ({
+  enrichPersonReconciliation: mockEnrichPersonReconciliation,
+}));
+
 const mockEnrichNationality = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/enrichment/artist-nationality.js', () => ({
   enrichNationality: mockEnrichNationality,
@@ -266,6 +271,11 @@ describe('Admin API', () => {
       durationMs: 4000,
     });
     mockResetGroupMembers.mockResolvedValue(11);
+    mockEnrichPersonReconciliation.mockResolvedValue({
+      linksReconciled: 23,
+      failed: 0,
+      durationMs: 150,
+    });
     mockFindResumableReloadJob.mockResolvedValue(null);
     mockCreateReloadJob.mockResolvedValue('job-new');
     mockGetLatestReloadJob.mockResolvedValue(null);
@@ -1330,6 +1340,55 @@ describe('Admin API', () => {
         url: '/api/v1/admin/group-members/reset',
       });
       expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── POST /person-reconciliation/enrich (#330) ────────────────────────────
+  describe('POST /api/v1/admin/person-reconciliation/enrich', () => {
+    it('returns 202 and starts the run in the background on success', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/person-reconciliation/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(202);
+      const body = JSON.parse(response.payload) as { data: { message: string; statusUrl: string } };
+      expect(body.data.message).toContain('started');
+      expect(body.data.statusUrl).toBe('/api/v1/admin/person-reconciliation/status');
+      await flushBackground();
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/person-reconciliation/enrich',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── GET /person-reconciliation/status ────────────────────────────────────
+  describe('GET /api/v1/admin/person-reconciliation/status', () => {
+    it('returns the reconciliation summary in lastResult after a successful run', async () => {
+      const accepted = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/person-reconciliation/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(accepted.statusCode).toBe(202);
+      await flushBackground();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/person-reconciliation/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { lastResult: { linksReconciled: number } | null };
+      };
+      expect(body.data.lastResult?.linksReconciled).toBe(23);
     });
   });
 

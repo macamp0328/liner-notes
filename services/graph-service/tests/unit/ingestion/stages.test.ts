@@ -17,6 +17,7 @@ import { enrichMasterData } from '../../../src/enrichment/master-data.js';
 import { enrichArtistGenres } from '../../../src/enrichment/artist-genres.js';
 import { enrichArtistProfiles } from '../../../src/enrichment/artist-profiles.js';
 import { enrichGroupMembers } from '../../../src/enrichment/group-members.js';
+import { enrichPersonReconciliation } from '../../../src/enrichment/person-reconciliation.js';
 import { enrichMbReleaseEvents } from '../../../src/enrichment/mb-release-events.js';
 import { enrichTrackMusicBrainz } from '../../../src/enrichment/track-musicbrainz.js';
 import { enrichTrackAcousticBrainz } from '../../../src/enrichment/track-acousticbrainz.js';
@@ -29,6 +30,9 @@ vi.mock('../../../src/enrichment/master-data.js', () => ({ enrichMasterData: vi.
 vi.mock('../../../src/enrichment/artist-genres.js', () => ({ enrichArtistGenres: vi.fn() }));
 vi.mock('../../../src/enrichment/artist-profiles.js', () => ({ enrichArtistProfiles: vi.fn() }));
 vi.mock('../../../src/enrichment/group-members.js', () => ({ enrichGroupMembers: vi.fn() }));
+vi.mock('../../../src/enrichment/person-reconciliation.js', () => ({
+  enrichPersonReconciliation: vi.fn(),
+}));
 vi.mock('../../../src/enrichment/mb-release-events.js', () => ({ enrichMbReleaseEvents: vi.fn() }));
 vi.mock('../../../src/enrichment/track-musicbrainz.js', () => ({
   enrichTrackMusicBrainz: vi.fn(),
@@ -81,6 +85,7 @@ beforeEach(() => {
     enrichArtistGenres,
     enrichArtistProfiles,
     enrichGroupMembers,
+    enrichPersonReconciliation,
     enrichMbReleaseEvents,
     enrichTrackMusicBrainz,
     enrichTrackAcousticBrainz,
@@ -113,6 +118,7 @@ describe('RELOAD_STAGES order', () => {
       'artist-profiles',
       'artist-genres',
       'group-members',
+      'person-reconciliation',
       'track-musicbrainz',
       'mb-release-events',
       'lyrics',
@@ -153,6 +159,13 @@ describe('RELOAD_STAGES dependency graph', () => {
     expect(stage('track-deezer').deps).toContain('track-musicbrainz');
   });
 
+  it('runs person-reconciliation after both single-axis batched writers (#330 deadlock avoidance)', () => {
+    // The dual-axis writer must not overlap artist-genres (Artist) or group-members (Musician).
+    expect(stage('person-reconciliation').deps).toEqual(
+      expect.arrayContaining(['artist-genres', 'group-members']),
+    );
+  });
+
   it('makes verify depend on every other stage so it runs strictly last', () => {
     const others = RELOAD_STAGES.filter((s) => s.name !== 'verify')
       .map((s) => s.name)
@@ -190,6 +203,9 @@ describe('RELOAD_STAGES resource lanes', () => {
 
   it('leaves the pure-Cypher and lyrics stages off every rate-limited lane', () => {
     expect(stage('artist-genres').resources).toEqual([]);
+    // #330: person-reconciliation is pure Cypher; it's serialized after the two single-axis batched
+    // writers via deps, not a resource lane.
+    expect(stage('person-reconciliation').resources).toEqual([]);
     expect(stage('lyrics').resources).toEqual([]);
   });
 });
@@ -228,6 +244,12 @@ describe('stage run() delegates to the right enrich function', () => {
   it('artist-genres → enrichArtistGenres', async () => {
     await stage('artist-genres').run(makeCtx());
     expect(enrichArtistGenres).toHaveBeenCalledOnce();
+  });
+
+  it('person-reconciliation → enrichPersonReconciliation(driver, log)', async () => {
+    const ctx = makeCtx();
+    await stage('person-reconciliation').run(ctx);
+    expect(enrichPersonReconciliation).toHaveBeenCalledWith(ctx.driver, ctx.log);
   });
 
   it('artist-profiles → enrichArtistProfiles(discogs, ..., onProgress)', async () => {

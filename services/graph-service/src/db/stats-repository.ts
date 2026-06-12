@@ -67,9 +67,11 @@ export interface StatsData {
     tracksWithDeezerBpm: CoverageMetric;
     tracksWithDeezerGain: CoverageMetric;
     mastersWithReleaseEvents: CoverageMetric;
-    // Entity resolution (#330). memberOfEdges/groupsWithMembers are raw counts (MEMBER_OF has no
-    // knowable denominator); they are not CoverageMetrics so the verify gate's CoverageMetricKey
-    // skips them, like lyricsFunnel.
+    // Entity resolution (#330). samePersonLinks IS a CoverageMetric (gated by the reload verify
+    // pass — covered/applicable over reconcilable Musicians). memberOfEdges/groupsWithMembers are
+    // raw counts (MEMBER_OF has no knowable denominator); not CoverageMetrics, so the verify gate's
+    // CoverageMetricKey skips them, like lyricsFunnel.
+    samePersonLinks: CoverageMetric;
     memberOfEdges: number;
     groupsWithMembers: number;
   };
@@ -162,14 +164,19 @@ const MASTER_QUERY = `
     count(m) AS total,
     count(CASE WHEN EXISTS { (m)-[:MB_RELEASED_IN]->() } THEN 1 END) AS releaseEventsCovered`;
 
-// Entity-resolution (#330) per-Musician scan. groupsWithMembers counts Musician nodes that are a
-// group (have ≥1 incoming MEMBER_OF). samePerson* (the reconciliation coverage gate) are added by
-// the person-reconciliation change. One scan; an aggregation over zero rows still returns a row of
-// zeros, so this is empty-graph safe.
+// Entity-resolution (#330) per-Musician scan. samePersonApplicable = Musicians whose discogsId
+// matches an Artist (the reconciliation target set); samePersonCovered = those already linked via
+// SAME_PERSON_AS. After the deterministic, exhaustive reconciliation pass runs, covered == applicable
+// — which is what makes the reload verify gate's minPct:100 meaningful. groupsWithMembers counts
+// Musician nodes that are a group (≥1 incoming MEMBER_OF). One scan; an aggregation over zero rows
+// still returns a row of zeros, so this is empty-graph safe.
 const MUSICIAN_QUERY = `
   MATCH (m:Musician)
+  WITH m, (m.discogsId IS NOT NULL AND EXISTS { MATCH (a:Artist) WHERE a.discogsId = m.discogsId }) AS samePersonApp
   RETURN
     count(m) AS total,
+    count(CASE WHEN samePersonApp THEN 1 END) AS samePersonApplicable,
+    count(CASE WHEN samePersonApp AND EXISTS { (m)-[:SAME_PERSON_AS]->(:Artist) } THEN 1 END) AS samePersonCovered,
     count(CASE WHEN EXISTS { (:Musician)-[:MEMBER_OF]->(m) } THEN 1 END) AS groupsWithMembers`;
 
 // MEMBER_OF edge count — a relationship scan can't ride the node scan above. count() over zero
@@ -332,6 +339,10 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       tracksWithDeezerBpm: coverage(n(track, 'deezerCovered'), isrcCovered),
       tracksWithDeezerGain: coverage(n(track, 'deezerGainCovered'), isrcCovered),
       mastersWithReleaseEvents: coverage(n(master, 'releaseEventsCovered'), n(master, 'total')),
+      samePersonLinks: coverage(
+        n(musician, 'samePersonCovered'),
+        n(musician, 'samePersonApplicable'),
+      ),
       memberOfEdges: n(memberOf, 'memberOfEdges'),
       groupsWithMembers: n(musician, 'groupsWithMembers'),
     },

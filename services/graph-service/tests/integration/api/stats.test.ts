@@ -116,6 +116,9 @@ describe('GET /api/v1/stats', () => {
     expect(body.data.counts.musicians).toBeGreaterThan(0);
     expect(body.data.enrichment.memberOfEdges).toBe(0);
     expect(body.data.enrichment.groupsWithMembers).toBe(0);
+    // samePersonLinks is a valid coverage metric (covered never exceeds applicable).
+    const spl = body.data.enrichment.samePersonLinks;
+    expect(spl.covered).toBeLessThanOrEqual(spl.applicable);
   });
 
   it('reports enrichment coverage for the manually enriched slice', async () => {

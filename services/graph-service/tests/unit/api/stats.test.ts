@@ -61,6 +61,7 @@ const STATS = {
     tracksWithDeezerBpm: { covered: 30, applicable: 60, pct: 50 },
     tracksWithDeezerGain: { covered: 24, applicable: 60, pct: 40 },
     mastersWithReleaseEvents: { covered: 5, applicable: 7, pct: 71.4 },
+    samePersonLinks: { covered: 25, applicable: 25, pct: 100 },
     memberOfEdges: 9,
     groupsWithMembers: 3,
   },

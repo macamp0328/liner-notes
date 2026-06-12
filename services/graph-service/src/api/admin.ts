@@ -34,6 +34,7 @@ import { resetArtistProfilesEnrichment } from '../db/artist-profiles-repository.
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
 import { enrichGroupMembers } from '../enrichment/group-members.js';
 import { resetGroupMembers } from '../db/group-members-repository.js';
+import { enrichPersonReconciliation } from '../enrichment/person-reconciliation.js';
 import { runReload } from '../ingestion/orchestrator.js';
 import { RELOAD_STAGES } from '../ingestion/stages.js';
 import {
@@ -312,6 +313,15 @@ const artistGenresSummarySchema = {
     genresEnriched: { type: 'integer' },
     stylesEnriched: { type: 'integer' },
     skipped: { type: 'integer' },
+    failed: { type: 'integer' },
+    durationMs: { type: 'integer' },
+  },
+};
+
+const personReconciliationSummarySchema = {
+  type: 'object',
+  properties: {
+    linksReconciled: { type: 'integer' },
     failed: { type: 'integer' },
     durationMs: { type: 'integer' },
   },
@@ -719,6 +729,30 @@ const PIPELINES: PipelineEntry[] = [
         'Group members enrichment is currently running — wait for it to finish before resetting',
       run: (driver) => resetGroupMembers(driver),
     },
+    state: makePipelineState(),
+  },
+  {
+    name: 'person-reconciliation',
+    statusLabel: 'person reconciliation',
+    runningMessage: 'Person reconciliation already in progress',
+    enrichSummary: 'Reconcile Musician identities with Artist nodes (SAME_PERSON_AS)',
+    enrichDescription:
+      'Links every Musician carrying a `discogsId` to the Artist node sharing that `discogsId` via ' +
+      'a `SAME_PERSON_AS` relationship. Backfills links the order-dependent inline write missed ' +
+      'because the Artist node arrived via a later release. Pure graph computation — no external ' +
+      'API. Idempotent and safe to re-run; picks up new collection additions without a full ' +
+      're-ingest. Blocks until complete.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest`** — run it after a re-ingest, or rely ' +
+      'on the orchestrated reload (`POST /api/v1/admin/reload`), which includes it.\n\n' +
+      '**No reset endpoint:** the pass re-links exhaustively every run, so it is inherently ' +
+      'idempotent and there is nothing to reset.',
+    statusSummarySchema: personReconciliationSummarySchema,
+    schemaHas503: false,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => ({
+      ok: true,
+      run: async (driver) => ({ ...(await enrichPersonReconciliation(driver, log)) }),
+    }),
     state: makePipelineState(),
   },
 ];

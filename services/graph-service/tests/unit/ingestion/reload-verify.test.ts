@@ -31,6 +31,8 @@ const ALL_STAGES: ReloadStageName[] = [
   'master-data',
   'artist-genres',
   'artist-profiles',
+  'group-members',
+  'person-reconciliation',
   'mb-release-events',
   'track-musicbrainz',
   'track-acousticbrainz',
@@ -68,6 +70,8 @@ function makeStats(
     tracksWithDeezerBpm: cov(20, 45),
     tracksWithDeezerGain: cov(20, 45),
     mastersWithReleaseEvents: cov(40, 50),
+    // #330: clears the minPct:100 gate — covered == applicable (deterministic exhaustive pass).
+    samePersonLinks: cov(80, 80),
     memberOfEdges: 12,
     groupsWithMembers: 4,
   };
@@ -203,6 +207,52 @@ describe('evaluateCoverage — verdict matrix', () => {
       reason: 'not-run',
     });
     expect(report.pass).toBe(true);
+  });
+
+  // #330: the samePersonLinks gate is minPct:100 — meaningful only because reconciliation is
+  // deterministic + exhaustive (covered == applicable after a good run). A 0 floor would be
+  // decorative since inline mergeSamePersonAs already guarantees covered>0.
+  it('fails samePersonLinks below 100% when person-reconciliation ran (broken/partial pass)', () => {
+    const report = evaluateCoverage(
+      makeStats({ enrichment: { samePersonLinks: cov(79, 80) } }),
+      ALL_RAN,
+    );
+    expect(report.pass).toBe(false);
+    expect(verdict(report, 'samePersonLinks')).toMatchObject({
+      pass: false,
+      reason: 'below-threshold',
+      stage: 'person-reconciliation',
+    });
+    expect(report.failingStages).toContain('person-reconciliation');
+  });
+
+  it('passes samePersonLinks when covered == applicable (100%)', () => {
+    const report = evaluateCoverage(
+      makeStats({ enrichment: { samePersonLinks: cov(50, 50) } }),
+      ALL_RAN,
+    );
+    expect(verdict(report, 'samePersonLinks')).toMatchObject({ pass: true, reason: 'ok' });
+  });
+
+  it('exempts samePersonLinks as not-applicable when no Musician matches an Artist', () => {
+    const report = evaluateCoverage(
+      makeStats({ enrichment: { samePersonLinks: cov(0, 0) } }),
+      ALL_RAN,
+    );
+    expect(verdict(report, 'samePersonLinks')).toMatchObject({
+      pass: true,
+      reason: 'not-applicable',
+    });
+  });
+
+  it('exempts samePersonLinks when person-reconciliation did not run', () => {
+    const ran = new Set(ALL_RAN);
+    ran.delete('person-reconciliation');
+    const report = evaluateCoverage(
+      makeStats({ enrichment: { samePersonLinks: cov(0, 80) } }),
+      ran,
+    );
+    expect(verdict(report, 'samePersonLinks')).toMatchObject({ pass: true, reason: 'not-run' });
   });
 
   it('fails an empty graph loudly (liveness floor)', () => {

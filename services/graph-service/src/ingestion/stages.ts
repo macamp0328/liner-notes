@@ -11,6 +11,7 @@ import { enrichMasterData } from '../enrichment/master-data.js';
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
 import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
 import { enrichGroupMembers } from '../enrichment/group-members.js';
+import { enrichPersonReconciliation } from '../enrichment/person-reconciliation.js';
 import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
 import { enrichTrackMusicBrainz } from '../enrichment/track-musicbrainz.js';
 import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
@@ -29,6 +30,7 @@ export type ReloadStageName =
   | 'artist-genres'
   | 'artist-profiles'
   | 'group-members'
+  | 'person-reconciliation'
   | 'mb-release-events'
   | 'track-musicbrainz'
   | 'track-acousticbrainz'
@@ -176,6 +178,19 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
       if (!ctx.discogs) return null;
       return { ...(await enrichGroupMembers(ctx.discogs, ctx.driver, ctx.log, onProgress)) };
     },
+  },
+  {
+    // #330: backfill SAME_PERSON_AS (Musician → Artist by shared discogsId) the order-dependent
+    // inline write missed. One big MERGE tx spanning BOTH the Artist axis (endpoint) and the
+    // Musician axis — the only writer that does — so it must not overlap the two single-axis batched
+    // writers. `deps` order it after both (artist-genres = Artist, group-members = Musician); those
+    // two touch disjoint labels and may overlap each other, so no resource lane is needed. No
+    // artist-profiles dep: that stage is single-node-per-tx (deadlock-immune) and holds no data this
+    // pass reads. Runs after `group-members` so its samePersonLinks coverage metric is final at verify.
+    name: 'person-reconciliation',
+    deps: ['artist-genres', 'group-members'],
+    resources: [],
+    run: async (ctx) => ({ ...(await enrichPersonReconciliation(ctx.driver, ctx.log)) }),
   },
   {
     name: 'track-musicbrainz',

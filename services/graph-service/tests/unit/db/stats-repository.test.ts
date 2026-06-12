@@ -90,7 +90,12 @@ describe('getStats', () => {
       natMusician: nat(50, 30, 10, 5),
       natProducer: nat(8, 4, 4, 0),
       natEngineer: nat(6, 3, 1, 1),
-      musician: { total: int(40), groupsWithMembers: int(3) },
+      musician: {
+        total: int(40),
+        samePersonApplicable: int(25),
+        samePersonCovered: int(25),
+        groupsWithMembers: int(3),
+      },
       memberOf: { memberOfEdges: int(9) },
     });
 
@@ -103,7 +108,8 @@ describe('getStats', () => {
       masters: 7,
       musicians: 40,
     });
-    // #330 entity-resolution counts.
+    // #330 entity-resolution stats: reconciliation coverage + raw MEMBER_OF counts.
+    expect(stats.enrichment.samePersonLinks).toEqual({ covered: 25, applicable: 25, pct: 100 });
     expect(stats.enrichment.memberOfEdges).toBe(9);
     expect(stats.enrichment.groupsWithMembers).toBe(3);
 
