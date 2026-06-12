@@ -23,7 +23,7 @@ const HTTP_VERBS = new Set(['get', 'post', 'put', 'patch', 'delete', 'options', 
 // Captures inline string literals and `${...}` template literals; the trailing query
 // string is stripped after capture. The char class deliberately stops at quotes,
 // backticks, commas, and parens so each literal is captured cleanly.
-const API_PATH_RE = /\/api\/[A-Za-z0-9_\-.\/:{}$%?=&]*/g;
+const API_PATH_RE = /\/api\/[A-Za-z0-9_\-./:{}$%?=&]*/g;
 
 // Paths an integration test hits ON PURPOSE that are NOT registered routes — e.g. a
 // future test asserting the global 404 handler against an unregistered path. Empty
@@ -42,6 +42,9 @@ interface RouteOperation {
 
 function collectTestFiles(dir: string): string[] {
   const files: string[] = [];
+  // dir descends from INTEGRATION_ROOT (derived from import.meta.url) over this
+  // repo's own test tree — no untrusted input reaches the path.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
@@ -86,14 +89,16 @@ function pathsMatch(routePath: string, testPath: string): boolean {
 }
 
 describe('integration route coverage guard', () => {
-  let app: FastifyInstance;
+  // Optional so afterAll's cleanup is safe even if beforeAll throws before assigning it.
+  let app: FastifyInstance | undefined;
   let registeredRoutes: RouteOperation[];
   let exercisedPaths: string[];
 
   beforeAll(async () => {
-    app = await buildDocsServer();
-    await app.ready();
-    const spec = app.swagger() as { paths: Record<string, Record<string, unknown>> };
+    const built = await buildDocsServer();
+    app = built;
+    await built.ready();
+    const spec = built.swagger() as { paths: Record<string, Record<string, unknown>> };
     registeredRoutes = Object.entries(spec.paths).flatMap(([path, operations]) =>
       Object.keys(operations)
         .filter((key) => HTTP_VERBS.has(key.toLowerCase()))
@@ -102,6 +107,8 @@ describe('integration route coverage guard', () => {
 
     const exercised = new Set<string>();
     for (const file of collectTestFiles(INTEGRATION_ROOT)) {
+      // file is one of this repo's own test sources (see collectTestFiles) — trusted path.
+      // eslint-disable-next-line security/detect-non-literal-fs-filename
       for (const apiPath of extractApiPaths(readFileSync(file, 'utf8'))) {
         exercised.add(apiPath);
       }
@@ -110,7 +117,7 @@ describe('integration route coverage guard', () => {
   });
 
   afterAll(async () => {
-    await app.close();
+    await app?.close();
   });
 
   it('registers at least the known API surface', () => {
