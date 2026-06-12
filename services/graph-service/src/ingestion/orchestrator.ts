@@ -155,7 +155,7 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
     const onProgress: ProgressReporter = (processed, total) =>
       reportStageProgress(jobId, descriptor.name, processed, total);
     try {
-      await markStageRunning(driver, jobId, descriptor.name);
+      await markStageRunning(driver, jobId, descriptor.name, log);
 
       // The verify gate (#178) runs here, not via descriptor.run, because it needs `ranStages`
       // (which stages produced output this job) that the run(ctx) signature can't carry. Its deps
@@ -184,7 +184,7 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
       }
 
       if (counts === null) {
-        await markStageComplete(driver, jobId, descriptor.name, {}, true);
+        await markStageComplete(driver, jobId, descriptor.name, {}, true, log);
         stagesSkipped++;
         log.info(`[reload] stage "${descriptor.name}" skipped — required client not configured`);
       } else {
@@ -193,6 +193,8 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
           jobId,
           descriptor.name,
           foldBreakerCounts(ctx, descriptor, counts),
+          false,
+          log,
         );
         stagesRun++;
         ranStages.add(descriptor.name);
@@ -209,6 +211,7 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
           descriptor.name,
           msg,
           foldBreakerCounts(ctx, descriptor, {}),
+          log,
         );
         log.error(`[reload] stage "${descriptor.name}" failed (recorded; continuing): ${msg}`);
       } catch (recordErr) {
@@ -258,7 +261,7 @@ export async function runReload(driver: Driver, options: RunReloadOptions): Prom
   const allSettled =
     stagesRun + stagesSkipped + stagesFailed + doneStages.size >= RELOAD_STAGES.length;
   const status: 'complete' | 'failed' = stagesFailed > 0 || !allSettled ? 'failed' : 'complete';
-  await finishReloadJob(driver, jobId, status);
+  await finishReloadJob(driver, jobId, status, log);
   log.info(
     `[reload] job ${jobId} ${status}: ${stagesRun} run, ${stagesSkipped} skipped, ${stagesFailed} failed`,
   );
@@ -284,18 +287,18 @@ export async function runVerifyGate(
     const report = evaluateCoverage(await getStats(driver), ranStages);
     const counts = reportToCounts(report);
     if (report.pass) {
-      await markStageComplete(driver, jobId, 'verify', counts);
+      await markStageComplete(driver, jobId, 'verify', counts, false, log);
       log.info('[reload] verify gate passed');
       return { passed: true };
     }
     const summary = formatVerifyFailure(report);
     log.error(`[reload] ${summary}`);
-    await markStageFailed(driver, jobId, 'verify', summary, counts);
+    await markStageFailed(driver, jobId, 'verify', summary, counts, log);
     return { passed: false };
   } catch (err) {
     const msg = `verify gate errored: ${err instanceof Error ? err.message : String(err)}`;
     log.error(`[reload] ${msg}`);
-    await markStageFailed(driver, jobId, 'verify', msg);
+    await markStageFailed(driver, jobId, 'verify', msg, undefined, log);
     return { passed: false };
   }
 }

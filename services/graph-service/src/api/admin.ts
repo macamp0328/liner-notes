@@ -36,6 +36,7 @@ import { runReload } from '../ingestion/orchestrator.js';
 import { RELOAD_STAGES } from '../ingestion/stages.js';
 import {
   createReloadJob,
+  finishReloadJob,
   findResumableReloadJob,
   getLatestReloadJob,
 } from '../db/job-repository.js';
@@ -923,6 +924,20 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       if (busy) {
         return reply.code(409).send({ error: busy });
       }
+      // busyWith() only sees the in-memory reload flag; a reload job that is `running` in Neo4j but
+      // has no live pod on it (cold-start resume skipped for missing creds, or a crash not yet
+      // resumed) is invisible to it. Wiping then DETACH DELETEs that job's ReloadJob/ReloadStage
+      // checkpoints and the orphaned orchestrator's writes silently no-op — re-arming a second
+      // concurrent reload (#290). Refuse while any reload job is still resumable.
+      const resumable = await findResumableReloadJob(getDriver());
+      if (resumable) {
+        return reply.code(409).send({
+          error: {
+            code: 'RELOAD_RUNNING',
+            message: 'A reload job is still in progress — let it finish or resume before wiping',
+          },
+        });
+      }
       const deleted = await wipeGraph(getDriver());
       // Log at error level (Pino 50) so this destructive action trips the
       // CloudWatch error metric filter (`$.data.level >= 50`) — a graph wipe is
@@ -1324,6 +1339,16 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       }).catch((err: unknown) => {
         markReloadInactive(jobId);
         request.log.error({ err }, '[reload] orchestrated reload failed');
+        // The orchestration rejected outside any stage's own catch (a transient Neo4j blip in
+        // getReloadJob/finishReloadJob/the scheduler), so the job is still `running` in Neo4j and
+        // would 409 every future /reload + /reset until a pod restart (#290). Flip it terminal so
+        // the operator can retry without a restart. Pass request.log so a zero-match (the job node
+        // was deleted out from under us) surfaces the same warning the orchestrator's writes do.
+        // Best-effort + fire-and-forget: on failure the prior behaviour stands (stuck `running`,
+        // recovered on the next cold-start resume).
+        void finishReloadJob(driver, jobId, 'failed', request.log).catch((markErr: unknown) => {
+          request.log.error({ err: markErr }, '[reload] failed to mark stuck reload job failed');
+        });
       });
       trackBackgroundJob(reloadRun);
 
