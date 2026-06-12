@@ -8,12 +8,31 @@
 // for a value embedded inside an *already-quoted* phrase query. This escapes an *unquoted* term
 // query, where the full special-character set matters.
 
-// `<` and `>` cannot be backslash-escaped in the classic parser — they must be removed.
-const LUCENE_STRIP = /[<>]/g;
-// Classic QueryParser special characters. The backslash is first in the class so a literal `\`
-// in the input is itself escaped; `replace` does a single pass and never re-scans its own output,
-// so there is no double-escaping.
-const LUCENE_ESCAPE = /[\\+\-!():^[\]"{}~*?|&\/]/g;
+// Classic QueryParser special characters, each backslash-escaped to a literal. Kept as a Set
+// scanned character-by-character rather than a regex character class on purpose: a `/` inside a
+// regex literal's `[...]` is a standing fight between Prettier (escapes it to `\/`) and ESLint
+// (`no-useless-escape` rejects `\/`), so the literal form is unstable across tool versions.
+const LUCENE_SPECIAL = new Set([
+  '\\',
+  '+',
+  '-',
+  '!',
+  '(',
+  ')',
+  '{',
+  '}',
+  '[',
+  ']',
+  '^',
+  '"',
+  '~',
+  '*',
+  '?',
+  ':',
+  '|',
+  '&',
+  '/',
+]);
 // Bare uppercase AND/OR/NOT are boolean operators; a leading or standalone one is itself a parse
 // error (e.g. a query of just `AND`). Lowercasing turns them into ordinary terms — the index
 // analyzer lowercases anyway, so this also makes a literal search for a name like "AND ALSO THE
@@ -23,13 +42,21 @@ const LUCENE_OPERATORS = /\b(?:AND|OR|NOT)\b/g;
 /**
  * Escape user input so it is interpreted as literal terms by Lucene's classic query parser.
  *
- * `&&`/`||`/`!` are already neutralised because `&`, `|`, and `!` are in the escape set. The result
- * can be all-whitespace (e.g. input `<>`); callers must treat that as "no query" rather than
- * passing it to `queryNodes`, which rejects an empty query.
+ * `<` and `>` cannot be backslash-escaped in the classic parser, so they are stripped to spaces.
+ * `&&`/`||`/`!` are already neutralised because `&`, `|`, and `!` are escaped. The result can be
+ * all-whitespace (e.g. input `<>`); callers must treat that as "no query" rather than passing it to
+ * `queryNodes`, which rejects an empty query.
  */
 export function escapeLuceneQuery(q: string): string {
-  return q
-    .replace(LUCENE_STRIP, ' ')
-    .replace(LUCENE_ESCAPE, '\\$&')
-    .replace(LUCENE_OPERATORS, (op) => op.toLowerCase());
+  let escaped = '';
+  for (const ch of q) {
+    if (ch === '<' || ch === '>') {
+      escaped += ' ';
+    } else if (LUCENE_SPECIAL.has(ch)) {
+      escaped += `\\${ch}`;
+    } else {
+      escaped += ch;
+    }
+  }
+  return escaped.replace(LUCENE_OPERATORS, (op) => op.toLowerCase());
 }
