@@ -522,7 +522,9 @@ ajv request/response validation. In dev this also enables:
 **Coverage requirements:**
 
 - Unit: 70% minimum
-- Integration: 100% of API routes covered
+- Integration: 100% of API routes covered — enforced by `tests/integration/api/route-coverage.test.ts`,
+  which diffs the live Fastify route table (`buildDocsServer().swagger()`) against the `/api/...` paths
+  the integration suite actually references and fails naming any route no integration test exercises.
 
 **Fixtures:** `tests/fixtures/` — JSON fixtures for mocked Discogs responses and seed data
 
