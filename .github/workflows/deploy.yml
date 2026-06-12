@@ -80,11 +80,15 @@ jobs:
         run: |
           set -euo pipefail
           acct=$(aws sts get-caller-identity --query Account --output text)
-          state=$(aws s3 cp "s3://${PROJECT_NAME}-tfstate-${acct}/graph-service/terraform.tfstate" -)
+          # Pipe the state straight into jq and keep ONLY `.outputs`. The rest of
+          # the document holds resource attributes (incl. secrets); never let the
+          # full state land in a shell variable where a future debug `echo` could
+          # leak it into the build log. pipefail catches an s3-cp/jq failure here.
+          outputs=$(aws s3 cp "s3://${PROJECT_NAME}-tfstate-${acct}/graph-service/terraform.tfstate" - | jq -c '.outputs')
           for pair in "EC2_INSTANCE_ID=ec2_instance_id" "ECR_REPOSITORY_URL=ecr_repository_url"; do
             name=${pair%%=*}
             out=${pair#*=}
-            val=$(jq -r --arg k "$out" '.outputs[$k].value // empty' <<<"$state")
+            val=$(jq -r --arg k "$out" '.[$k].value // empty' <<<"$outputs")
             if [ -z "$val" ]; then
               echo "::error::Terraform output '${out}' is empty or missing in state." >&2
               exit 1
@@ -231,16 +235,32 @@ jobs:
           kustomize edit set image "graph-service-image=${IMAGE}"
           kubectl apply -k .
 
+      # `kubectl rollout undo` reverts ONLY the Deployment's pod-template revision.
+      # The preceding `kubectl apply -k .` may also have (re)applied
+      # external-secret.yaml, ecr-pull-secret-refresher.yaml, and service.yaml; if
+      # one of THOSE is what broke the rollout, this undo does not revert it — the
+      # previous commit's kustomization would have to be re-applied by hand. The
+      # branches below report the undo outcome distinctly (`if … then` doesn't trip
+      # `set -e`) so a failed rollback is visible in the job summary instead of
+      # being indistinguishable from a clean one — both ended in `|| true` before.
       - name: Roll out (undo on failure)
         run: |
           set -euo pipefail
           if kubectl -n liner-notes rollout status deployment/graph-service --timeout=180s; then
             echo "Rollout succeeded."
           else
-            echo "::error::Rollout failed — rolling back to the previous revision." >&2
-            # `|| true` tolerates the first-ever deploy (no prior revision to undo).
-            kubectl -n liner-notes rollout undo deployment/graph-service || true
-            kubectl -n liner-notes rollout status deployment/graph-service --timeout=120s || true
+            echo "::error::Rollout failed — rolling back the Deployment to its previous revision." >&2
+            echo "::warning::Rollback reverts only the Deployment. Any service.yaml / external-secret.yaml / ecr-pull-secret-refresher.yaml changes in this apply are NOT reverted." >&2
+            if kubectl -n liner-notes rollout undo deployment/graph-service; then
+              if kubectl -n liner-notes rollout status deployment/graph-service --timeout=120s; then
+                echo "Rollback succeeded — Deployment is back on its previous revision."
+              else
+                echo "::error::Rollback was issued but the previous revision did not become healthy within 120s — manual intervention required." >&2
+              fi
+            else
+              # `rollout undo` also fails on the first-ever deploy (no prior revision).
+              echo "::error::Rollback failed (undo errored, or this was the first deploy with no prior revision) — cluster left on the failed revision; manual intervention required." >&2
+            fi
             exit 1
           fi
 
@@ -278,7 +298,11 @@ jobs:
 
           url="http://127.0.0.1:18080/api/v1/health"
           for i in $(seq 1 20); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || echo 000)
+            # On a connection failure curl already prints `000` via `-w`; `|| true`
+            # just stops its non-zero exit from tripping `set -e` (do NOT drop it —
+            # without it the loop dies on the first miss; `|| echo 000` would
+            # instead double-print to `000000`).
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || true)
             echo "Attempt ${i}: HTTP ${code}"
             if [ "$code" = "200" ]; then
               echo "Service is healthy."
