@@ -10,14 +10,16 @@ A personal, open-source, forkable monorepo for exploring a vinyl record collecti
 
 ## What's changed lately?
 
-The repo keeps a plain-English, **AI-written changelog** — one sentence per merged pull request,
-grouped by week and category, with breaking changes called out. It lives as a rolling
-"Changelog (unreleased)" **draft** GitHub Release, so anyone with repo access reads it in the
-**[Releases](../../releases)** tab (draft releases aren't shown to the public).
+The repo keeps a plain-English, **AI-written, versioned changelog**. Every successful production
+deploy auto-cuts a **published, tagged CalVer release** (`vYYYY.MM.DD`) describing what went live,
+with note richness that ramps with the release's importance; a rolling **`unreleased` draft** shows
+what's merged but not yet shipped. Read it in the **[Releases](../../releases)** tab — the latest
+version is the repo's "Latest release."
 
-It's generated automatically: every merge summarises the PR with Claude — falling back to the PR
-title when no `ANTHROPIC_API_KEY` is configured (e.g. on a fork) — into a structured store, and a
-weekly job self-heals anything missed. No manual upkeep, no committed `CHANGELOG.md`. See
+It's generated automatically: every merge summarises the PR with Claude (up to two sentences) —
+falling back to the PR title when no `ANTHROPIC_API_KEY` is configured (e.g. on a fork) — into a
+structured store; a deploy cuts the version; a weekly job self-heals anything missed. No manual
+upkeep, no committed `CHANGELOG.md`. See
 [`scripts/changelog/README.md`](scripts/changelog/README.md) for how it works and how to fork it.
 
 ## Quick Start

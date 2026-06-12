@@ -1,14 +1,13 @@
 /* eslint-disable security/detect-child-process -- fixed `gh` binary, array args (no shell). */
-// All GitHub I/O, isolated behind `gh`. The changelog "store" is a single
-// `changelog.jsonl` file attached as an ASSET on the rolling `unreleased` draft
-// release — so the source of truth lives in the Releases surface and never
-// commits to protected `main`. The human-readable release body is always a full
-// re-render of that store (see lib.render); we never edit the body by hand.
-//
-// A draft release doesn't create its git tag ref until published, so this never
-// tags `main`. GitHub still shows auto-generated "Source code" archives for the
-// draft's target commit; they're an unused GitHub artifact — readers consume the
-// body and the jsonl asset, so we deliberately don't keep the tag/target fresh.
+// All GitHub I/O, isolated behind `gh`. The changelog has two surfaces:
+//   1. The canonical STORE — `changelog.jsonl` (one record per PR) + `versions.json`
+//      (one record per cut release) — attached as ASSETS on a single rolling
+//      `unreleased` DRAFT release whose body is the live Unreleased preview. A draft
+//      never creates a git tag ref, so the store never commits to protected `main`.
+//   2. PUBLISHED per-version releases — one real, tagged Release per cut version
+//      (vYYYY.MM.DD, plus the v0.1.0 baseline), each body a rendered snapshot of the
+//      store. Creating a tag ref can't retrigger any branch-filtered workflow.
+// Everything human-facing is a re-render of the store; we never hand-edit a body.
 //
 // `gh` reads its token from GH_TOKEN / GITHUB_TOKEN (CI) or the local `gh auth`
 // session, and infers the repo from the checkout — no extra wiring needed.
@@ -17,10 +16,19 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type ChangelogRecord, parseRecords, render, serializeRecords } from './lib.js';
+import {
+  type ChangelogRecord,
+  type VersionRecord,
+  parseRecords,
+  parseVersions,
+  renderUnreleased,
+  serializeRecords,
+  serializeVersions,
+} from './lib.js';
 
 const RELEASE_TAG = 'unreleased';
 const ASSET_NAME = 'changelog.jsonl';
+const VERSIONS_ASSET_NAME = 'versions.json';
 const MAX_FILES_IN_DIFFSTAT = 40;
 const GH_LIST_LIMIT = 1000;
 
@@ -149,9 +157,9 @@ function releaseExists(): boolean {
   return tryGh(['release', 'view', RELEASE_TAG, '--json', 'tagName']) !== null;
 }
 
-/** Read the current record set from the release asset. Empty if absent. */
-export function readStore(): ChangelogRecord[] {
-  if (!releaseExists()) return [];
+/** Download one asset off the draft release into a fresh temp dir. Null if absent. */
+function downloadDraftAsset(assetName: string): string | null {
+  if (!releaseExists()) return null;
   const dir = mkdtempSync(join(tmpdir(), 'changelog-'));
   try {
     const ok = tryGh([
@@ -159,26 +167,49 @@ export function readStore(): ChangelogRecord[] {
       'download',
       RELEASE_TAG,
       '--pattern',
-      ASSET_NAME,
+      assetName,
       '--dir',
       dir,
       '--clobber',
     ]);
-    if (ok === null) return []; // release exists but has no asset yet
-    return parseRecords(readFileSync(join(dir, ASSET_NAME), 'utf8'));
+    if (ok === null) return null; // release exists but has no such asset yet
+    return readFileSync(join(dir, assetName), 'utf8');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
-/** Render the body from `records`, then write both the body and the jsonl asset. */
-export function writeStore(records: readonly ChangelogRecord[]): void {
+/** Read the current record set from the changelog.jsonl asset. Empty if absent. */
+export function readStore(): ChangelogRecord[] {
+  const raw = downloadDraftAsset(ASSET_NAME);
+  return raw === null ? [] : parseRecords(raw);
+}
+
+/** Read the version manifest from the versions.json asset. Empty if absent. */
+export function readVersions(): VersionRecord[] {
+  const raw = downloadDraftAsset(VERSIONS_ASSET_NAME);
+  return raw === null ? [] : parseVersions(raw);
+}
+
+/**
+ * Rewrite the `unreleased` DRAFT: body = the Unreleased preview (pending records),
+ * plus the canonical `changelog.jsonl` + `versions.json` assets. This is the single
+ * source of truth; published per-version releases are rendered snapshots of it. The
+ * draft never creates a git tag (so it never touches protected `main`).
+ */
+export function writeDraft(
+  records: readonly ChangelogRecord[],
+  versions: readonly VersionRecord[],
+  opts: { model: string | null },
+): void {
   const dir = mkdtempSync(join(tmpdir(), 'changelog-'));
   try {
-    const assetPath = join(dir, ASSET_NAME);
+    const recordsPath = join(dir, ASSET_NAME);
+    const versionsPath = join(dir, VERSIONS_ASSET_NAME);
     const bodyPath = join(dir, 'body.md');
-    writeFileSync(assetPath, `${serializeRecords(records)}\n`);
-    writeFileSync(bodyPath, render(records));
+    writeFileSync(recordsPath, `${serializeRecords(records)}\n`);
+    writeFileSync(versionsPath, `${serializeVersions(versions)}\n`);
+    writeFileSync(bodyPath, renderUnreleased(records, opts));
 
     if (releaseExists()) {
       gh(['release', 'edit', RELEASE_TAG, '--notes-file', bodyPath]);
@@ -194,8 +225,62 @@ export function writeStore(records: readonly ChangelogRecord[]): void {
         bodyPath,
       ]);
     }
-    gh(['release', 'upload', RELEASE_TAG, assetPath, '--clobber']);
+    gh(['release', 'upload', RELEASE_TAG, recordsPath, versionsPath, '--clobber']);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+function versionReleaseExists(tag: string): boolean {
+  return tryGh(['release', 'view', tag, '--json', 'tagName']) !== null;
+}
+
+/**
+ * Create (or re-render) one PUBLISHED per-version release. On first write,
+ * `gh release create <tag> --target <sha>` publishes a real, discoverable release
+ * and creates the tag ref at the deployed commit. On a re-render (reconcile),
+ * edit body+title only — NEVER pass `--target`, which can move an already-published
+ * tag. Throws (via `gh`) if the tag already exists on create — release.ts catches
+ * that to recompute the same-day `.N` suffix.
+ */
+export function writeVersionRelease(
+  tag: string,
+  targetSha: string,
+  title: string,
+  body: string,
+): void {
+  const dir = mkdtempSync(join(tmpdir(), 'changelog-'));
+  try {
+    const bodyPath = join(dir, 'body.md');
+    writeFileSync(bodyPath, body);
+    if (versionReleaseExists(tag)) {
+      gh(['release', 'edit', tag, '--title', title, '--notes-file', bodyPath]);
+    } else {
+      gh([
+        'release',
+        'create',
+        tag,
+        '--target',
+        targetSha,
+        '--title',
+        title,
+        '--notes-file',
+        bodyPath,
+      ]);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Every release tag name (published + draft). Feeds the CalVer `.N` suffix + prev-version lookup. */
+export function listReleaseTags(): string[] {
+  const json = gh(['release', 'list', '--json', 'tagName', '--limit', String(GH_LIST_LIMIT)]);
+  const items = JSON.parse(json) as Array<{ tagName?: string }>;
+  return items.map((i) => i.tagName ?? '').filter((t) => t !== '');
+}
+
+/** The default-branch HEAD SHA — the baseline release's `--target` when no deploy SHA is given. */
+export function defaultBranchSha(): string {
+  return gh(['api', 'repos/{owner}/{repo}/commits/main', '--jq', '.sha']).trim();
 }

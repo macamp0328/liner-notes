@@ -15,8 +15,10 @@ import { join } from 'node:path';
 import {
   type Category,
   type ChangelogRecord,
+  type ComputedTier,
   type Impact,
   type SummarySource,
+  type VersionNarrative,
   CATEGORIES,
   IMPACTS,
   isCategory,
@@ -45,6 +47,12 @@ export interface SummarizeOutcome {
 const DEFAULT_MODEL = 'claude-opus-4-8';
 const MAX_OUTPUT_TOKENS = 300;
 const MAX_BODY_CHARS = 4000;
+/** Headroom for the (rare) two-sentence summary; the schema still wants it terse. */
+const MAX_SUMMARY_CHARS = 320;
+/** Version-level prose (headline + optional 2–3 sentence narrative) needs more room. */
+const VERSION_MAX_OUTPUT_TOKENS = 400;
+const MAX_HEADLINE_CHARS = 100;
+const MAX_NARRATIVE_CHARS = 600;
 
 // Per-MTok USD (Opus 4.8). Only used to print an informational cost note.
 const PRICING: Record<string, { input: number; output: number }> = {
@@ -64,7 +72,7 @@ const SUMMARY_SCHEMA = {
   required: ['category', 'summary', 'impact', 'breaking'],
 } as const;
 
-function model(): string {
+export function currentModel(): string {
   return process.env['CHANGELOG_MODEL']?.trim() || DEFAULT_MODEL;
 }
 
@@ -115,7 +123,8 @@ export function parseSummary(text: string): ParsedSummary | null {
   const obj = raw as Record<string, unknown>;
   const category = isCategory(obj['category']) ? obj['category'] : 'Changed';
   const impact = isImpact(obj['impact']) ? obj['impact'] : 'developer';
-  const summary = typeof obj['summary'] === 'string' ? obj['summary'].trim().slice(0, 240) : '';
+  const summary =
+    typeof obj['summary'] === 'string' ? obj['summary'].trim().slice(0, MAX_SUMMARY_CHARS) : '';
   const breaking = obj['breaking'] === true;
   return { category, summary, impact, breaking };
 }
@@ -144,6 +153,7 @@ function toRecord(pr: PrInput, parsed: ParsedSummary, source: SummarySource): Ch
     impact: parsed.impact,
     breaking: parsed.breaking,
     summarySource: source,
+    version: null,
   };
 }
 
@@ -205,7 +215,7 @@ export async function summarize(pr: PrInput): Promise<SummarizeOutcome> {
   }
   try {
     const client = new Anthropic();
-    const modelId = model();
+    const modelId = currentModel();
     const message = await client.messages.create({
       model: modelId,
       max_tokens: MAX_OUTPUT_TOKENS,
@@ -247,7 +257,7 @@ export async function summarizeBatch(prs: PrInput[]): Promise<ChangelogRecord[]>
   }
 
   const client = new Anthropic();
-  const modelId = model();
+  const modelId = currentModel();
   const byId = new Map(prs.map((pr) => [`pr-${pr.number}`, pr]));
   const system = styleText();
 
@@ -291,4 +301,112 @@ export async function summarizeBatch(prs: PrInput[]): Promise<ChangelogRecord[]>
 
   // Any PR with no result at all (shouldn't happen) still gets a record.
   return prs.map((pr) => records.get(pr.number) ?? fallbackRecord(pr));
+}
+
+// ── Version-level prose (headline + narrative, one call per cut release) ──────
+//
+// A cut release gets ONE combined call: a short headline (the release title's
+// descriptive suffix) and — for Notable releases only — a 2–3 sentence narrative.
+// Standard releases keep just the headline; Maintenance releases skip the call
+// entirely (release.ts uses the deterministic fallback). The editorial voice lives
+// in version-style.md, separate from the per-PR style.md.
+
+const VERSION_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    headline: { type: 'string' },
+    narrative: { type: 'string' },
+  },
+  required: ['headline'],
+} as const;
+
+function versionStyleText(): string {
+  return readFileSync(join(import.meta.dirname, 'version-style.md'), 'utf8');
+}
+
+export interface VersionSummaryInput {
+  tag: string;
+  tier: ComputedTier;
+  records: ChangelogRecord[];
+  prevTag: string | null;
+}
+
+/**
+ * Deterministic title + null narrative — used for Maintenance, no key, or any error.
+ * The headline carries no tag prefix; `releaseTitle` composes `${tag} — ${headline}`.
+ */
+export function fallbackVersionNarrative(count: number): VersionNarrative {
+  return { headline: `${count} change${count === 1 ? '' : 's'}`, narrative: null, model: null };
+}
+
+/** Compose the version prompt from the slice of records. Pure → unit-testable. */
+export function buildVersionPrompt(input: VersionSummaryInput): string {
+  const lines = input.records.map((r) => {
+    const flags = [r.category, r.impact, r.breaking ? 'breaking' : null].filter(Boolean).join(', ');
+    return `- ${r.summary} (${flags})`;
+  });
+  return [
+    `Version: ${input.tag}`,
+    `Tier: ${input.tier}`,
+    input.prevTag ? `Previous version: ${input.prevTag}` : 'This is the first version.',
+    '',
+    `Changes in this version (${input.records.length}):`,
+    ...lines,
+    '',
+    input.tier === 'notable'
+      ? 'Write a headline AND a 2–3 sentence narrative.'
+      : 'Write a headline only — no narrative.',
+  ].join('\n');
+}
+
+/**
+ * Parse the model's JSON. Structured outputs guarantee the shape, but we never
+ * trust it blindly: malformed JSON, a non-object, or an empty headline returns
+ * `null` (caller falls back). Headline/narrative are length-capped defensively.
+ */
+export function parseVersionNarrative(
+  text: string,
+): { headline: string; narrative: string | null } | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const obj = raw as Record<string, unknown>;
+  const headline =
+    typeof obj['headline'] === 'string' ? obj['headline'].trim().slice(0, MAX_HEADLINE_CHARS) : '';
+  if (headline === '') return null;
+  const narrativeRaw = typeof obj['narrative'] === 'string' ? obj['narrative'].trim() : '';
+  const narrative = narrativeRaw === '' ? null : narrativeRaw.slice(0, MAX_NARRATIVE_CHARS);
+  return { headline, narrative };
+}
+
+/**
+ * Headline (+ narrative for Notable) for one version. Never throws: no key or any
+ * API/parse error degrades to `fallbackVersionNarrative`. A narrative produced for a
+ * non-Notable tier is discarded, so tier is the single gate on narrative prose.
+ */
+export async function summarizeVersion(input: VersionSummaryInput): Promise<VersionNarrative> {
+  const fallback = fallbackVersionNarrative(input.records.length);
+  if (!hasApiKey()) return fallback;
+  try {
+    const client = new Anthropic();
+    const modelId = currentModel();
+    const message = await client.messages.create({
+      model: modelId,
+      max_tokens: VERSION_MAX_OUTPUT_TOKENS,
+      system: versionStyleText(),
+      messages: [{ role: 'user', content: buildVersionPrompt(input) }],
+      output_config: { effort: 'high', format: { type: 'json_schema', schema: VERSION_SCHEMA } },
+    });
+    const parsed = parseVersionNarrative(findText(message.content));
+    if (parsed === null) return fallback;
+    const narrative = input.tier === 'notable' ? parsed.narrative : null;
+    return { headline: parsed.headline, narrative, model: modelId };
+  } catch {
+    return fallback;
+  }
 }

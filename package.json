@@ -18,6 +18,8 @@
     "changelog:update": "tsx scripts/changelog/update.ts",
     "changelog:reconcile": "tsx scripts/changelog/reconcile.ts",
     "changelog:backfill": "tsx scripts/changelog/backfill.ts",
+    "changelog:release": "tsx scripts/changelog/release.ts",
+    "changelog:baseline": "tsx scripts/changelog/release.ts --baseline",
     "changelog:test": "tsx --test scripts/changelog/*.test.ts",
     "insomnia:generate": "pnpm --filter graph-service docs:generate && tsx scripts/insomnia/generate.ts && prettier --write services/graph-service/docs/insomnia.collection.yaml",
     "enrich:lyrics": "scripts/admin/post.sh /api/v1/admin/lyrics/enrich",

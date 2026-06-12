@@ -13,9 +13,22 @@
 // DRY_RUN=1 prints the rebuilt body without writing.
 
 import './env.js';
-import { hasApiKey, summarizeBatch } from './claude.js';
-import { getPrInput, listAllMergedPrNumbers, readStore, writeStore } from './store.js';
-import { type ChangelogRecord, needsSummary, recordsByNumber, render, upsert } from './lib.js';
+import { currentModel, hasApiKey, summarizeBatch } from './claude.js';
+import {
+  getPrInput,
+  listAllMergedPrNumbers,
+  readStore,
+  readVersions,
+  writeDraft,
+} from './store.js';
+import {
+  type ChangelogRecord,
+  needsSummary,
+  preserveVersion,
+  recordsByNumber,
+  renderUnreleased,
+  upsert,
+} from './lib.js';
 
 function isDryRun(): boolean {
   const v = process.env['DRY_RUN'];
@@ -28,6 +41,7 @@ async function main(): Promise<void> {
 
   const all = listAllMergedPrNumbers();
   const store = readStore();
+  const versions = readVersions();
   const have = recordsByNumber(store);
   const targets = all.filter((n) => needsSummary(have.get(n), { refresh, hasKey: key }));
 
@@ -56,15 +70,16 @@ async function main(): Promise<void> {
 
   const summarised = await summarizeBatch(inputs);
   let records: ChangelogRecord[] = store;
-  for (const r of summarised) records = upsert(records, r);
+  // Carry forward existing version stamps so re-summarising never un-releases a PR.
+  for (const r of summarised) records = upsert(records, preserveVersion(r, have.get(r.number)));
 
   if (isDryRun()) {
-    console.log('\n--- DRY RUN: rebuilt body ---\n');
-    console.log(render(records));
+    console.log('\n--- DRY RUN: rebuilt unreleased body ---\n');
+    console.log(renderUnreleased(records, { model: currentModel() }));
     return;
   }
 
-  writeStore(records);
+  writeDraft(records, versions, { model: currentModel() });
   console.log(
     `\nWrote ${summarised.length} entr${summarised.length === 1 ? 'y' : 'ies'} (${records.length} total).`,
   );

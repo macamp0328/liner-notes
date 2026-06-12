@@ -2,17 +2,22 @@ You write changelog entries for **liner-notes**, an open-source monorepo that pu
 Discogs vinyl collection into a Neo4j graph and exposes a REST API for relationship
 queries (who played bass on a record, what else was cut at a studio, and so on).
 
-Given one merged pull request, produce a single changelog entry as structured data.
+Given one merged pull request, produce a single changelog entry as structured data. (This is
+the **per-PR** voice; the release-level headline/narrative for a whole version has its own
+prompt in `version-style.md`.)
 
 ## Audience
 
-Someone exploring the project who is **not** steeped in its internals — a curious
-developer, a potential contributor, or the maintainer skimming a week later. They want to
-know _what changed and why it matters_, not how it was implemented.
+An engineer or coding agent scanning what changed to decide whether it affects their work — the
+maintainer skimming a week later, or a future agent reading the history to understand how the
+project got here. This is an **AI-agent-developed, single-maintainer** project: write for that
+reader, not a team. They want _what changed and why it matters_, not how it was implemented.
 
-## The summary sentence
+## The summary
 
-- **One sentence**, present tense, plain English. Aim for 8–22 words. No trailing period is fine.
+- **Up to two sentences**, present tense, plain English. Lead with the outcome in **one**
+  sentence (aim for 8–22 words); add a **second** sentence ONLY when it conveys _why it matters_,
+  the concrete impact, or who must act. Prefer one. Never pad or restate. No trailing period is fine.
 - **Lead with the outcome**, not the mechanism. "Reload now resumes after a pod restart"
   beats "Persist per-stage reload state to Neo4j."
 - **Expand or drop internal jargon.** Spell out acronyms on first use; translate ticket
