@@ -135,11 +135,18 @@ liner-notes/
 │   └── workflows/
 │       ├── ci.yml               ← runs on every PR
 │       ├── deploy.yml           ← runs on merge to main
-│       └── diagrams.yml         ← regenerates architecture diagrams on infra changes
+│       ├── diagrams.yml         ← regenerates architecture diagrams on infra changes
+│       ├── insomnia.yml         ← regenerates openapi.json + Insomnia collection; fails on drift
+│       ├── changelog.yml        ← per-merge plain-English changelog updater
+│       └── changelog-reconcile.yml ← weekly self-healing changelog backfill
+├── docs/                        ← adr/ (architecture decision records)
 ├── scripts/
 │   ├── explore-discogs.ts
 │   ├── discogs-api-notes.md
-│   └── diagrams/                ← `pnpm diagrams:generate` — Inframap + per-file Mermaid
+│   ├── diagrams/                ← `pnpm diagrams:generate` — Inframap + per-file Mermaid
+│   ├── changelog/               ← `pnpm changelog:*` — AI-written release notes
+│   ├── insomnia/                ← `pnpm insomnia:generate` — Insomnia collection generator
+│   └── admin/                   ← operator shell helpers: get.sh/post.sh (admin HTTP), power.sh, mint-deploy-kubeconfig.sh
 ├── services/
 │   └── graph-service/           ← Fastify REST API + Neo4j ingestion
 │       ├── CLAUDE.md            ← service-specific handbook (read this too)
@@ -147,12 +154,18 @@ liner-notes/
 │       │   ├── api/             ← route handlers
 │       │   ├── db/              ← Neo4j driver + repository layer
 │       │   ├── ingestion/       ← Discogs ingestion pipeline
-│       │   ├── enrichment/      ← lyrics / originalYear / artist enrichment
+│       │   ├── enrichment/      ← post-ingest enrichment (lyrics, master-data, nationality, track audio, artist genres/profiles)
+│       │   ├── observability/   ← stats snapshots + Aura keep-warm timer
+│       │   ├── server.ts        ← Fastify instance builder
 │       │   └── index.ts         ← Fastify entry point
 │       ├── tests/
 │       │   ├── unit/
 │       │   ├── integration/
+│       │   ├── route/           ← per-route API tests
+│       │   ├── load/            ← load / perf checks
+│       │   ├── helpers/         ← cross-suite test utilities
 │       │   └── fixtures/        ← sample JSON responses for tests
+│       ├── docs/                ← committed openapi.json + insomnia.collection.yaml (`pnpm insomnia:generate`)
 │       └── Dockerfile
 ├── infra/
 │   ├── terraform/               ← AWS resources
@@ -182,20 +195,20 @@ Route handler (src/api/) → Repository (src/db/) → Neo4j driver (src/db/clien
 
 **Key source files:**
 
-| File                                  | Purpose                                                                            |
-| ------------------------------------- | ---------------------------------------------------------------------------------- |
-| `src/server.ts`                       | Fastify instance builder, plugin registration                                      |
-| `src/db/schema.ts`                    | Idempotent constraint/index application on startup                                 |
-| `src/ingestion/transforms.ts`         | Pure parsing functions — no I/O, fully unit-testable                               |
-| `src/ingestion/rate-limited-fetch.ts` | `createRateLimitedFetch` — shared retry/backoff/spacing core for the 5 API clients |
-| `src/ingestion/discogs-client.ts`     | Rate-limited Discogs HTTP client (60 req/min, 429 backoff)                         |
-| `src/ingestion/ingest.ts`             | First-5-stage pipeline (`runIngestion`) + shared `ingestReleases`                  |
-| `src/ingestion/stages.ts`             | `RELOAD_STAGES` — full reload sequence + per-stage `deps`/`resources`              |
-| `src/ingestion/scheduler.ts`          | `scheduleStages` — generic dependency/resource-aware concurrent scheduler          |
-| `src/ingestion/orchestrator.ts`       | `runReload` — drives the scheduler, DB-checkpointed, resumable                     |
-| `src/db/job-repository.ts`            | `ReloadJob`/`ReloadStage` persistence (checkpoint/resume)                          |
-| `src/db/ingestion-repository.ts`      | All Cypher MERGE writes                                                            |
-| `src/enrichment/`                     | Post-ingest lyrics, originalYear, artist genre/profile pipelines                   |
+| File                                  | Purpose                                                                                                                                          |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/server.ts`                       | Fastify instance builder, plugin registration                                                                                                    |
+| `src/db/schema.ts`                    | Idempotent constraint/index application on startup                                                                                               |
+| `src/ingestion/transforms.ts`         | Pure parsing functions — no I/O, fully unit-testable                                                                                             |
+| `src/ingestion/rate-limited-fetch.ts` | `createRateLimitedFetch` — shared retry/backoff/spacing core for the 5 API clients                                                               |
+| `src/ingestion/discogs-client.ts`     | Rate-limited Discogs HTTP client (60 req/min, 429 backoff)                                                                                       |
+| `src/ingestion/ingest.ts`             | First-5-stage pipeline (`runIngestion`) + shared `ingestReleases`                                                                                |
+| `src/ingestion/stages.ts`             | `RELOAD_STAGES` — full reload sequence + per-stage `deps`/`resources`                                                                            |
+| `src/ingestion/scheduler.ts`          | `scheduleStages` — generic dependency/resource-aware concurrent scheduler                                                                        |
+| `src/ingestion/orchestrator.ts`       | `runReload` — drives the scheduler, DB-checkpointed, resumable                                                                                   |
+| `src/db/job-repository.ts`            | `ReloadJob`/`ReloadStage` persistence (checkpoint/resume)                                                                                        |
+| `src/db/ingestion-repository.ts`      | All Cypher MERGE writes                                                                                                                          |
+| `src/enrichment/`                     | Post-ingest enrichment: lyrics, master-data (originalYear), nationality, track audio (MusicBrainz/AcousticBrainz/Deezer), artist genres/profiles |
 
 **Ingestion fires async** (`void runIngestion(...)`) — it does not block `onReady`, so the HTTP server starts immediately while ingestion runs in the background.
 
@@ -305,8 +318,12 @@ Enforced by `services/graph-service/vitest.config.ts`:
 
 ## Service Communication
 
+`graph-service` is currently the **only** service in the repo. The planned `collection-mcp` (not yet
+built — there is no `services/collection-mcp`) will reach the graph the same way any future client
+must:
+
 ```
-collection-mcp → graph-service REST API (/api/v1/*)
+collection-mcp (planned) → graph-service REST API (/api/v1/*)
 ```
 
 No service talks to Neo4j directly except `graph-service`.

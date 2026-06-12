@@ -455,7 +455,7 @@ The empty-graph auto-ingest fires on first boot:
 kubectl -n liner-notes logs deployment/graph-service -f
 ```
 
-**Expected:** progress logs starting with `Graph is empty — starting Discogs ingestion in background`. For the project's ~30-record reference collection that ends up around ~6,150 nodes and ~14,297 relationships, the base ingest takes ~4 minutes. The pipeline then runs `lyrics`, `master-data`, and `artist-profiles` enrichments in the background — watch for `Ingestion complete` followed by per-enrichment progress lines.
+**Expected:** progress logs starting with `Graph is empty — starting Discogs ingestion in background`. For the project's ~30-record reference collection that ends up around ~6,150 nodes and ~14,297 relationships, the base ingest takes ~4 minutes. The pipeline then runs `lyrics`, `master-data`, `artist-genres`, and `artist-profiles` enrichments in the background — watch for `Ingestion complete` followed by per-enrichment progress lines.
 
 Five further enrichments (`nationality`, `mb-release-events`, `track-musicbrainz`, `track-acousticbrainz`, `track-deezer`) are **not** part of `runIngestion` because they'd lengthen the cold-start path from ~4 min to ~45 min. They have to be triggered manually — see [Step 8b](#step-8b--first-deploy-enrichment-bootstrap).
 
@@ -485,7 +485,7 @@ pnpm status:track-musicbrainz
 pnpm status:track-acousticbrainz
 pnpm status:track-deezer
 
-# Run all four manual stages in dependency order
+# Run all five manual stages in dependency order
 pnpm enrich:bootstrap
 ```
 
