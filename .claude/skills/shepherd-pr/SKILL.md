@@ -36,7 +36,7 @@ gh pr view "$pr_number" --json number,title,headRefName,baseRefName,state
 
 Hold onto `pr_number` and the head branch name for the rest of the run.
 
-Then run the **shepherd loop** below: **Phase A → B → C**, repeating for up to **3 rounds**. Stop early (jump to Phase E) the moment the branch is up to date with `main` **and** CI is green. `main` is not a protected branch in this repo, so being a little behind never blocks a merge — exhausting the 3 rounds is a fine outcome, not a failure.
+Then run the **shepherd loop** below: **Phase A → B → C**, repeating for up to **3 rounds**. Stop early (jump to Phase E) the moment the branch is up to date with `main` **and** CI is green. `main`'s ruleset does **not** require branches to be up to date before merging (no strict status-check policy), so being a little behind never blocks a merge — exhausting the 3 rounds is a fine outcome, not a failure.
 
 ---
 
@@ -171,6 +171,6 @@ Then print a short status in chat:
 - **Only pause for genuine judgment:** (1) a non-trivial merge conflict with `main`, (2) a human-reviewer comment needing product judgment (handled inside `/tend-to-pr`), (3) a check still red after `/tend-to-pr`'s own 3-cycle cap. Otherwise finish with a notification, never a question.
 - **Never merge the PR** — shepherd to merge-ready and hand back.
 - **Never force-push.** Update the branch with `git merge origin/main` + `git push`. Never rebase-force an already-open branch.
-- **Bounded at 3 rounds.** `main` isn't protected, so a still-slightly-behind branch is still mergeable — don't chase a fast-moving `main` forever; report and stop.
+- **Bounded at 3 rounds.** `main` doesn't require up-to-date branches to merge (its ruleset has no strict status-check policy), so a still-slightly-behind branch is still mergeable — don't chase a fast-moving `main` forever; report and stop.
 - **Never** `git add -A` / `git add .` — stage specific files. **Never** `--no-verify`.
 - Re-run the pre-commit chain (`prettier --write` → `lint` → `typecheck` → `test:unit:coverage`) after any conflict resolution before pushing.
