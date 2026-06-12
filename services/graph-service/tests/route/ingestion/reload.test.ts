@@ -172,7 +172,13 @@ describe('Reload admin API', () => {
       // Still 202 — runReload is fire-and-forget; the recovery happens in its .catch (#290).
       expect(res.statusCode).toBe(202);
       await vi.waitFor(() =>
-        expect(repo.finishReloadJob).toHaveBeenCalledWith(expect.anything(), 'job-new', 'failed'),
+        // 4th arg is request.log, forwarded so a zero-match (deleted job node) warns (#290).
+        expect(repo.finishReloadJob).toHaveBeenCalledWith(
+          expect.anything(),
+          'job-new',
+          'failed',
+          expect.anything(),
+        ),
       );
     });
 

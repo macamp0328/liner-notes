@@ -1333,9 +1333,11 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           // The orchestration rejected outside any stage's own catch (a transient Neo4j blip in
           // getReloadJob/finishReloadJob/the scheduler), so the job is still `running` in Neo4j and
           // would 409 every future /reload + /reset until a pod restart (#290). Flip it terminal so
-          // the operator can retry without a restart. Best-effort + fire-and-forget: on failure the
-          // prior behaviour stands (stuck `running`, recovered on the next cold-start resume).
-          void finishReloadJob(driver, jobId, 'failed').catch((markErr: unknown) => {
+          // the operator can retry without a restart. Pass request.log so a zero-match (the job node
+          // was deleted out from under us) surfaces the same warning the orchestrator's writes do.
+          // Best-effort + fire-and-forget: on failure the prior behaviour stands (stuck `running`,
+          // recovered on the next cold-start resume).
+          void finishReloadJob(driver, jobId, 'failed', request.log).catch((markErr: unknown) => {
             request.log.error({ err: markErr }, '[reload] failed to mark stuck reload job failed');
           });
         },
