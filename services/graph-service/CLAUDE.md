@@ -5,9 +5,11 @@
 `graph-service` is the core backend for liner-notes. It:
 
 1. **Ingests** a Discogs vinyl collection into a Neo4j property graph
-2. **Enriches** tracks with lyrics from LRCLIB (primary) and Genius (fallback)
+2. **Enriches** tracks with lyrics from LRCLIB (primary). Genius is a **local-only** fallback — the
+   client is built only when `GENIUS_TOKEN` is set, and prod leaves it unset (#240/#258), so **prod is
+   effectively LRCLIB-only**. See the Lyrics notes below before touching this.
 3. **Serves** a Fastify REST API for relationship-driven collection exploration
-4. **Auto-generates** OpenAPI documentation via `@fastify/swagger`
+4. **Auto-generates** OpenAPI documentation via `@fastify/swagger` (mounted in **dev only** — see OpenAPI / Swagger)
 
 This is the **only service that talks to Neo4j**. All other services (future `collection-mcp`, etc.) query graph-service via REST.
 
@@ -66,55 +68,76 @@ Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At)
 
 ### Nodes
 
-| Label      | Key Properties                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Release`  | `discogsId` (unique), `title`, `pressingYear` (integer), `originalYear` (integer, nullable), `format`, `thumbUrl`, `masterDiscogsId`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `Artist`   | `discogsId` (unique), `name`, `realName`, `profile`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `Label`    | `discogsId` (unique), `name`, `profile`, `contactInfo`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `Track`    | `position` + `releaseDiscogsId` (composite MERGE key), `title`, `duration`, `lyrics` (nullable), `lyricsSource`, `lyricsStatus` (`resolved`/`instrumental`/`probable-instrumental`/`not-found`, nullable), `lyricsFetchedAt` (datetime), `recordingMbid` (nullable), `isrc` (nullable), `musicBrainzFetchedAt` (datetime), `tempo` (nullable), `musicalKey` (nullable), `musicalScale` (nullable), `loudnessDb` (nullable), `dynamicComplexity` (nullable), `danceabilityEstimate` (nullable), `voiceInstrumental` (nullable), `acousticBrainzFetchedAt` (datetime), `deezerBpm` (nullable), `deezerGain` (nullable), `deezerFetchedAt` (datetime) |
-| `Genre`    | `name` (unique)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `Style`    | `name` (unique)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `Country`  | `name` (unique)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `Studio`   | `name`, `location`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `Musician` | `discogsId` (if available), `name` — the generic "credited person" node. Every credited contributor (performers, producers, engineers, …) is a `Musician`; the specific role lives on the `CREDITED_ON` edge (`roleCategory` / `displayRole`), not on a distinct node label.                                                                                                                                                                                                                                                                                                                                                                       |
+| Label         | Key Properties                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Release`     | `discogsId` (unique), `title`, `pressingYear` (integer), `originalYear` (integer, nullable), `format`, `thumbUrl`, `masterDiscogsId`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `Artist`      | `discogsId` (unique), `name`, `realName`, `profile`, `genres[]`, `styles[]` (last two aggregated onto the Artist by the `artist-genres` enrichment)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `Label`       | `discogsId` (unique), `name`, `profile`, `contactInfo`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `Track`       | `position` + `releaseDiscogsId` (composite MERGE key), `title`, `duration`, `lyrics` (nullable), `lyricsSource`, `lyricsStatus` (`resolved`/`instrumental`/`probable-instrumental`/`not-found`, nullable), `lyricsFetchedAt` (datetime), `recordingMbid` (nullable), `isrc` (nullable), `musicBrainzFetchedAt` (datetime), `tempo` (nullable), `musicalKey` (nullable), `musicalScale` (nullable), `loudnessDb` (nullable), `dynamicComplexity` (nullable), `danceabilityEstimate` (nullable), `voiceInstrumental` (nullable), `acousticBrainzFetchedAt` (datetime), `deezerBpm` (nullable), `deezerGain` (nullable), `deezerFetchedAt` (datetime) |
+| `Genre`       | `name` (unique)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `Style`       | `name` (unique)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `Country`     | `name` (unique)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `Studio`      | `name`, `location`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `Musician`    | `discogsId` (if available), `name` — the generic "credited person" node. Every credited contributor (performers, producers, engineers, …) is a `Musician`; the specific role lives on the `CREDITED_ON` edge (`roleCategory` / `displayRole`), not on a distinct node label.                                                                                                                                                                                                                                                                                                                                                                       |
+| `Master`      | `discogsId` (unique), `title`, `year`, `mbReleaseEventsFetchedAt` (datetime) — the canonical album grouping a `Release` is a pressing of. Holds the original-year + global pressing-country/format facts (see `RELEASED_IN` / `MB_RELEASED_IN`).                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `ReloadJob`   | `jobId` (unique), `status`, `startedAt`, `completedAt`, `durationMs` — one node per orchestrated reload run (#175), the checkpoint root.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `ReloadStage` | `jobId` (indexed, **not** unique), `stage`, `ordinal`, `status`, `counts`, `error` — one per stage per job; linked from its `ReloadJob` by `HAS_STAGE`. Survives a pod restart so a killed reload resumes.                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 > `pressingYear` is the year this specific pressing was manufactured (from Discogs `release.year`). `originalYear` is the year the album was first released anywhere, fetched from the Discogs master release endpoint and stored as a post-ingestion enrichment step. Queries that order or filter by release date should prefer `coalesce(r.originalYear, r.pressingYear)`.
 
 ### Relationships
 
-| Relationship     | From → To                   | Properties                                                                                                                          |
-| ---------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `RELEASED_BY`    | Release → Artist            | `role`                                                                                                                              |
-| `CREDITED_ON`    | Musician → Release or Track | `role`, `displayRole`, `roleCategory` (`"performer"`/`"producer"`/`"engineer"`/…), `creditedAs`, `scope` (`"release"` or `"track"`) |
-| `ON_LABEL`       | Release → Label             | `catalogNumber`                                                                                                                     |
-| `IN_GENRE`       | Release → Genre             |                                                                                                                                     |
-| `IN_STYLE`       | Release → Style             |                                                                                                                                     |
-| `FROM_COUNTRY`   | Release → Country           |                                                                                                                                     |
-| `RECORDED_AT`    | Release → Studio            |                                                                                                                                     |
-| `HAS_TRACK`      | Release → Track             | `trackNumber`                                                                                                                       |
-| `PERFORMED_BY`   | Track → Artist              | `role`                                                                                                                              |
-| `SAME_PERSON_AS` | Musician → Artist           |                                                                                                                                     |
-| `MEMBER_OF`      | Artist → Artist             | `startYear`, `endYear`                                                                                                              |
-| `SUBSIDIARY_OF`  | Label → Label               |                                                                                                                                     |
+| Relationship     | From → To                    | Properties                                                                                                                          |
+| ---------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `RELEASED_BY`    | Release → Artist             | `role`                                                                                                                              |
+| `CREDITED_ON`    | Musician → Release or Track  | `role`, `displayRole`, `roleCategory` (`"performer"`/`"producer"`/`"engineer"`/…), `creditedAs`, `scope` (`"release"` or `"track"`) |
+| `ON_LABEL`       | Release → Label              | `catalogNumber`                                                                                                                     |
+| `IN_GENRE`       | Release → Genre              |                                                                                                                                     |
+| `IN_STYLE`       | Release → Style              |                                                                                                                                     |
+| `FROM_COUNTRY`   | Release → Country            |                                                                                                                                     |
+| `RECORDED_AT`    | Release → Studio             |                                                                                                                                     |
+| `HAS_TRACK`      | Release → Track              | `trackNumber`                                                                                                                       |
+| `SAME_PERSON_AS` | Musician → Artist            |                                                                                                                                     |
+| `ORIGIN_COUNTRY` | Artist or Musician → Country | `source` (`"musicbrainz"` / `"wikidata"`; absent on edges written before the prop existed → surfaces as `untagged` in `/stats`)     |
+| `RELEASED_IN`    | Master → Country             | `formats` — global pressing countries/formats from the Discogs master-data enrichment                                               |
+| `MB_RELEASED_IN` | Master → Country             | `mbReleaseId` (merge key), `date`, `formats` — release events from the MusicBrainz enrichment                                       |
+| `HAS_STAGE`      | ReloadJob → ReloadStage      | `ordinal`                                                                                                                           |
 
 ### Constraints & Indexes
 
+`src/db/schema.ts` is the **single source of truth** — it applies everything idempotently
+(`IF NOT EXISTS`) on startup, in **Neo4j 5.x syntax**. Do **not** copy the old 3.x forms
+(`CREATE CONSTRAINT ON … ASSERT …`, `db.index.fulltext.createNodeIndex(...)`) — Neo4j 5 / Aura / CI
+reject them.
+
+Uniqueness constraints:
+
 ```cypher
-CREATE CONSTRAINT ON (r:Release) ASSERT r.discogsId IS UNIQUE;
-CREATE CONSTRAINT ON (a:Artist) ASSERT a.discogsId IS UNIQUE;
-CREATE CONSTRAINT ON (l:Label) ASSERT l.discogsId IS UNIQUE;
-CREATE CONSTRAINT ON (g:Genre) ASSERT g.name IS UNIQUE;
-CREATE CONSTRAINT ON (s:Style) ASSERT s.name IS UNIQUE;
-CREATE CONSTRAINT ON (c:Country) ASSERT c.name IS UNIQUE;
-
-CALL db.index.fulltext.createNodeIndex("trackLyrics", ["Track"], ["lyrics", "title"]);
-
-CREATE INDEX ON :Release(pressingYear);
-CREATE INDEX ON :Musician(name);
-CREATE INDEX ON :Studio(name);
+CREATE CONSTRAINT release_discogs_id IF NOT EXISTS FOR (r:Release) REQUIRE r.discogsId IS UNIQUE;
+CREATE CONSTRAINT artist_discogs_id  IF NOT EXISTS FOR (a:Artist)  REQUIRE a.discogsId IS UNIQUE;
+CREATE CONSTRAINT label_discogs_id   IF NOT EXISTS FOR (l:Label)   REQUIRE l.discogsId IS UNIQUE;
+CREATE CONSTRAINT genre_name         IF NOT EXISTS FOR (g:Genre)   REQUIRE g.name IS UNIQUE;
+CREATE CONSTRAINT style_name         IF NOT EXISTS FOR (s:Style)   REQUIRE s.name IS UNIQUE;
+CREATE CONSTRAINT country_name       IF NOT EXISTS FOR (c:Country) REQUIRE c.name IS UNIQUE;
+CREATE CONSTRAINT master_discogs_id  IF NOT EXISTS FOR (m:Master)  REQUIRE m.discogsId IS UNIQUE;
+CREATE CONSTRAINT reload_job_id      IF NOT EXISTS FOR (j:ReloadJob) REQUIRE j.jobId IS UNIQUE;
+-- ReloadStage has a plain index on jobId, NOT a uniqueness constraint (many stages per job).
 ```
 
-Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
+Full-text indexes (note **which route each backs** — the search routes do NOT use `trackLyrics`):
+
+```cypher
+-- backs GET /api/v1/search (db.index.fulltext.queryNodes("releaseArtistTrackSearch", …))
+CREATE FULLTEXT INDEX releaseArtistTrackSearch IF NOT EXISTS FOR (n:Release|Artist|Track) ON EACH [n.title, n.name];
+-- backs GET /api/v1/search/lyrics
+CREATE FULLTEXT INDEX lyricsSearch IF NOT EXISTS FOR (t:Track) ON EACH [t.lyrics];
+-- legacy lyrics+title index; retained but unused by the search routes
+CREATE FULLTEXT INDEX trackLyrics IF NOT EXISTS FOR (t:Track) ON EACH [t.lyrics, t.title];
+```
+
+Plus range indexes on `Release.pressingYear`, `Musician.name`, `Studio.name`, the hot Track lookup
+props (`isrc`, `recordingMbid`, `tempo`, `musicalScale`), and every `*FetchedAt` enrichment marker —
+see `src/db/schema.ts` for the authoritative list (do not duplicate it here; it drifts).
 
 ---
 
@@ -131,81 +154,137 @@ Apply these idempotently in `src/db/schema.ts`. Re-running must be safe.
 
 ### Exploration
 
-| Method | Path                                     | Description                             |
-| ------ | ---------------------------------------- | --------------------------------------- |
-| `GET`  | `/api/v1/explore/musician/:name`         | Releases featuring this musician        |
-| `GET`  | `/api/v1/explore/producer/:name`         | Releases this person produced           |
-| `GET`  | `/api/v1/explore/engineer/:name`         | Releases this person engineered         |
-| `GET`  | `/api/v1/explore/studio/:name`           | Releases at this studio                 |
-| `GET`  | `/api/v1/explore/decade/:decade`         | Releases from this decade               |
-| `GET`  | `/api/v1/explore/year/:year`             | Releases from this exact year           |
-| `GET`  | `/api/v1/explore/label/:name`            | Releases on this label                  |
-| `GET`  | `/api/v1/explore/genre/:name`            | Releases in this genre                  |
-| `GET`  | `/api/v1/explore/style/:name`            | Releases in this style                  |
-| `GET`  | `/api/v1/explore/country/:name`          | Releases from this country              |
-| `GET`  | `/api/v1/explore/connections/:discogsId` | Graph traversal (`?depth=2`)            |
-| `GET`  | `/api/v1/explore/shared-musicians`       | Release pairs sharing session musicians |
+All `/explore/*` routes return a **bare JSON array** — _not_ a `{ data }` envelope — except
+`/explore/connections/:discogsId`, which returns `{ seed, nodes }`.
 
-### Search
+| Method | Path                                        | Description                                                                                      |
+| ------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `GET`  | `/api/v1/explore/musician/:name`            | Releases featuring this musician                                                                 |
+| `GET`  | `/api/v1/explore/producer/:name`            | Releases this person produced                                                                    |
+| `GET`  | `/api/v1/explore/engineer/:name`            | Releases this person engineered                                                                  |
+| `GET`  | `/api/v1/explore/studio/:name`              | Releases recorded at this studio                                                                 |
+| `GET`  | `/api/v1/explore/decade/:decade`            | Releases from this decade (accepts `1970s`)                                                      |
+| `GET`  | `/api/v1/explore/year/:year`                | Releases from this exact year                                                                    |
+| `GET`  | `/api/v1/explore/label/:name`               | Releases on this label                                                                           |
+| `GET`  | `/api/v1/explore/genre/:name`               | Releases in this genre                                                                           |
+| `GET`  | `/api/v1/explore/style/:name`               | Releases in this style                                                                           |
+| `GET`  | `/api/v1/explore/country/:name`             | Releases from this country                                                                       |
+| `GET`  | `/api/v1/explore/connections/:discogsId`    | Graph traversal (`?depth=N`, max 3) — returns `{ seed, nodes }`                                  |
+| `GET`  | `/api/v1/explore/shared-musicians`          | Release pairs sharing session musicians                                                          |
+| `GET`  | `/api/v1/explore/tracks/most-international` | Tracks whose credited musicians span the most countries of origin (needs nationality enrichment) |
+| `GET`  | `/api/v1/explore/releases/most-pressed`     | Releases with the widest global pressing reach (needs master-data enrichment)                    |
+| `GET`  | `/api/v1/explore/tracks/by-audio-features`  | Filter Tracks by audio features (tempo, key, scale, danceability, vocal/instrumental)            |
 
-| Method | Path                       | Description                              |
-| ------ | -------------------------- | ---------------------------------------- |
-| `GET`  | `/api/v1/search?q=`        | Full-text across titles, artists, tracks |
-| `GET`  | `/api/v1/search/lyrics?q=` | Full-text within lyrics                  |
+### Search & Stats
+
+| Method | Path                       | Description                                                                                                  |
+| ------ | -------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `GET`  | `/api/v1/search?q=`        | Full-text across release/artist/track titles (`releaseArtistTrackSearch` index); bare array                  |
+| `GET`  | `/api/v1/search/lyrics?q=` | Full-text within lyrics (`lyricsSearch` index); bare array                                                   |
+| `GET`  | `/api/v1/stats`            | Public graph + enrichment-coverage stats (`{ data }`); short-TTL cached, doubles as the Aura keep-warm query |
 
 ### Admin & Ops
 
-| Method | Path                           | Description                                             |
-| ------ | ------------------------------ | ------------------------------------------------------- |
-| `POST` | `/api/v1/admin/ingest`         | Trigger first-5-stage ingestion (in-memory job state)   |
-| `GET`  | `/api/v1/admin/ingest/status`  | Last ingestion stats                                    |
-| `POST` | `/api/v1/admin/reload`         | Orchestrated reload — all stages, resumable (see below) |
-| `GET`  | `/api/v1/admin/reload/status`  | Per-stage reload status/counts (DB-backed)              |
-| `POST` | `/api/v1/admin/<stage>/enrich` | Run a single enrichment stage (10 stages; see admin.ts) |
-| `GET`  | `/api/v1/health`               | Service + Neo4j status                                  |
-| `GET`  | `/api/docs`                    | Swagger UI                                              |
+Every `/api/v1/admin/*` route requires `Authorization: Bearer <ADMIN_TOKEN>`
+(`src/api/middleware/admin-auth.ts`) — a missing token yields `503 SERVICE_UNAVAILABLE`, a wrong one
+`401 UNAUTHORIZED`. `/health` and `/stats` are public.
+
+| Method | Path                                   | Description                                                                             |
+| ------ | -------------------------------------- | --------------------------------------------------------------------------------------- |
+| `POST` | `/api/v1/admin/ingest`                 | Trigger the first-5-stage ingestion (release load + 4 enrichments; in-memory job state) |
+| `GET`  | `/api/v1/admin/ingest/status`          | Last ingestion stats                                                                    |
+| `POST` | `/api/v1/admin/reload`                 | Orchestrated reload — every stage, DB-checkpointed & resumable (see below)              |
+| `GET`  | `/api/v1/admin/reload/status`          | Per-stage reload status/counts (DB-backed)                                              |
+| `POST` | `/api/v1/admin/reset?confirm=wipe-all` | Wipe the whole graph (`MATCH (n) DETACH DELETE n`); guarded by the `confirm` query      |
+| `POST` | `/api/v1/admin/lyrics/clear-genius`    | Clear Genius-sourced lyrics so they can be re-resolved                                  |
+| `GET`  | `/api/v1/health`                       | Service + Neo4j status (public)                                                         |
+| `GET`  | `/api/docs`                            | Swagger UI — **dev only**, not mounted in production (see OpenAPI / Swagger)            |
+
+**Per-pipeline enrichment routes** are generated from the `PIPELINES` array in `admin.ts`. There are
+**9** pipelines — `lyrics`, `nationality`, `master-data`, `mb-release-events`, `track-musicbrainz`,
+`track-acousticbrainz`, `track-deezer`, `artist-profiles`, `artist-genres` — and for each:
+
+- `POST /api/v1/admin/<stage>/enrich` — run that stage standalone (returns `202`; poll status). Four
+  also run inside `runIngestion`; the rest are manual-only (see Ingestion Pipeline below).
+- `GET /api/v1/admin/<stage>/status` — that stage's last-run counts / running flag.
+- `POST /api/v1/admin/<stage>/reset` — force a full re-fetch. **Exists for 6 stages only** — every
+  pipeline _except_ `lyrics` (use `/api/v1/admin/lyrics/clear-genius` instead) and `artist-genres`
+  (a self-idempotent whole-graph aggregation with nothing to reset).
 
 ### Response Shapes
 
+Envelope cheat-sheet — read this before writing a client:
+
+| Endpoint(s)                                             | Success shape           |
+| ------------------------------------------------------- | ----------------------- |
+| `releases`, `releases/:id`, `artists/:id`, `labels/:id` | `{ data, pagination? }` |
+| `stats`                                                 | `{ data }`              |
+| `explore/*` (except `connections`)                      | **bare array**          |
+| `explore/connections/:discogsId`                        | `{ seed, nodes }`       |
+| `search`, `search/lyrics`                               | **bare array**          |
+
 ```json
-// List
-{ "data": [...], "pagination": { "page": 1, "limit": 20, "total": 200 } }
+// List (collection)
+{ "data": [...], "pagination": { "page": 1, "limit": 20, "total": 200, "totalPages": 10 } }
 
 // Single
 { "data": { ... } }
+```
 
-// Error
+**Errors come in two shapes — know which.** There is no custom `setErrorHandler`/`setNotFoundHandler`,
+so:
+
+- **Application errors** (a handler calls `reply.code(4xx).send(...)`) use the `{ error: { code, message } }`
+  envelope — e.g. `404 NOT_FOUND`, `400 INVALID_DECADE` / `MISSING_QUERY` / `QUERY_TOO_LONG`,
+  `401 UNAUTHORIZED`, `409 JOB_RUNNING` / `RELOAD_RUNNING` / `ENRICHMENT_RUNNING`,
+  `503 SERVICE_UNAVAILABLE`.
+- **Framework errors** (Fastify rejects before/around the handler) use Fastify's default
+  `{ statusCode, error, message }` — schema-validation `400`s, unregistered-path `404`s, and
+  rate-limit `429`s (`@fastify/rate-limit`).
+
+A `400` or `404` can therefore be **either** shape depending on whether your code or Fastify rejected
+the request (see #288).
+
+```json
+// Application error
 { "error": { "code": "NOT_FOUND", "message": "Release not found" } }
+
+// Framework error (validation / unmatched route / rate-limit)
+{ "statusCode": 400, "error": "Bad Request", "message": "params/discogsId must be integer" }
 ```
 
 ---
 
 ## Ingestion Pipeline
 
+`runIngestion` (`src/ingestion/ingest.ts`) runs the **release load + 4 enrichments**. Each
+enrichment runs in isolation — a throw is logged and recorded but does not abort the stages that
+follow (#151).
+
 ```
 1. Validate config (env vars, Neo4j connectivity, Discogs auth)
 2. Apply schema (idempotent)
-3. Fetch collection paginated via GET /users/{username}/collection/folders/0/releases
-4. For each release:
-   a. GET /releases/{release_id}
-   b. Extract all entities
-   c. MERGE all nodes and relationships
-   d. Sleep DISCOGS_REQUEST_DELAY_MS
-5. Lyrics enrichment:
-   a. For each Track without lyrics → query LRCLIB
-   b. Fallback to Genius API if LRCLIB returns nothing
-   c. Update Track node with lyrics + lyricsSource
-6. originalYear enrichment:
-   a. For each Release where masterDiscogsId IS NOT NULL AND originalYear IS NULL
-   b. GET /masters/{masterDiscogsId} → extract year field
-   c. SET r.originalYear on the Release node
-7. Log summary: nodes, relationships, lyrics enriched, originalYear enriched, errors, duration
+3. Fetch collection paginated via GET /users/{username}/collection/folders/0/releases, then for
+   each release: GET /releases/{release_id} → extract entities → MERGE all nodes & relationships
+   → sleep DISCOGS_REQUEST_DELAY_MS   (the shared `ingestReleases` loop)
+   ── then the 4 enrichment stages ──
+4. enrichLyrics        — Track without lyrics → LRCLIB (primary); Genius fallback only when
+                         GENIUS_TOKEN is set (local/dev — prod is LRCLIB-only, #240/#258)
+5. enrichMasterData    — Releases with a master → originalYear + global pressing countries/formats
+                         (writes Master nodes + RELEASED_IN); replaces the old "originalYear" step
+6. enrichArtistGenres  — aggregate genres/styles from Release nodes onto Artist nodes
+7. enrichArtistProfiles — Artist realName + profile from the Discogs artist API
+8. Log summary: nodes, relationships, per-enrichment counts, errors, duration
 ```
+
+The 5 heavier stages (`nationality`, `mb-release-events`, `track-musicbrainz`,
+`track-acousticbrainz`, `track-deezer`) are **not** in `runIngestion` — they're manual-only via the
+per-stage admin routes, or run as part of the orchestrated reload below.
 
 **Triggers:**
 
 - Auto on startup if no `Release` nodes exist in the graph
-- Manual via `POST /api/v1/admin/ingest` (requires `ADMIN_TOKEN` header)
+- Manual via `POST /api/v1/admin/ingest` (requires `Authorization: Bearer <ADMIN_TOKEN>`)
 
 **Idempotency:** All writes use Cypher `MERGE`. Safe to re-run. New collection additions are picked up on re-run.
 
@@ -400,9 +479,15 @@ Added in Task 4. Source files:
 
 ## OpenAPI / Swagger
 
-Swagger UI is a **hard requirement** and must be available at `/api/docs`.
+Swagger UI is **dev-only by design** — `server.ts` registers `@fastify/swagger` +
+`@fastify/swagger-ui` only when `NODE_ENV !== 'production'`. In production **neither `/api/docs` nor
+`/api/docs/json` is mounted** (a request gets a `404`). The gate rides the same `NODE_ENV` switch as
+helmet's CSP: Swagger UI's inline scripts/styles need CSP disabled, so the full helmet defaults stay
+on in prod and Swagger stays off. Do not "fix" the missing prod docs route — it's intentional.
 
-Use `@fastify/swagger` + `@fastify/swagger-ui`. Define JSON schemas on all route inputs/outputs. This enables:
+Define JSON schemas on all route inputs/outputs regardless — they drive the committed `openapi.json`
+/ Insomnia collection (regenerated by `pnpm insomnia:generate`, drift-checked in CI) and Fastify's
+ajv request/response validation. In dev this also enables:
 
 - Auto-generated OpenAPI spec at `/api/docs/json`
 - Interactive Swagger UI at `/api/docs`
