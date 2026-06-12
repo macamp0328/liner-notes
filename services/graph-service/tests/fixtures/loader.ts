@@ -9,10 +9,15 @@ const releasesDir = join(dirname(fileURLToPath(import.meta.url)), 'releases');
 
 /** All seed releases, ordered deterministically by filename. */
 function loadReleases(): DiscogsRelease[] {
-  return readdirSync(releasesDir)
-    .filter((name) => name.endsWith('.json'))
-    .sort()
-    .map((name) => JSON.parse(readFileSync(join(releasesDir, name), 'utf8')) as DiscogsRelease);
+  return (
+    readdirSync(releasesDir)
+      .filter((name) => name.endsWith('.json'))
+      .sort()
+      // Trusted, bounded read: `name` is a fixture filename listed from the fixed
+      // in-repo `releasesDir`, never untrusted input — the pattern the rule targets.
+      // eslint-disable-next-line security/detect-non-literal-fs-filename
+      .map((name) => JSON.parse(readFileSync(join(releasesDir, name), 'utf8')) as DiscogsRelease)
+  );
 }
 
 /**
