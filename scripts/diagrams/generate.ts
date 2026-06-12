@@ -575,16 +575,16 @@ function postProcessDot(dot: string, extraNodes: Set<string> = new Set()): strin
   // version emitting multi-line node attrs would silently match nothing. The extraNodes
   // union below would then paper over it — refilling `nodes` from our HCL parser — and the
   // byte-identical SVG drift check would happily pass a structurally-truncated artifact.
-  // Capture the parsed count BEFORE the union and fail loudly if the parser extracted zero
-  // nodes from non-empty inframap output. This floor is unreachable on healthy input (the
-  // infra's IAM/SG/EC2 dependencies guarantee parsed edges/nodes); only a real format change
-  // can trip it, which is exactly when a human is in the loop bumping the inframap pin.
-  const parsedNodeCount = nodes.size;
-  if (parsedNodeCount === 0 && extraNodes.size > 0) {
+  // Check the inframap payload DIRECTLY (not extraNodes, an indirect proxy): a non-empty
+  // graph always carries at least one edge (`"a" -> "b"`), so if the raw DOT has edges but
+  // the parser extracted zero nodes, edgeRE/nodeRE no longer match inframap's format. Fail
+  // loudly. Unreachable on healthy input (the infra's IAM/SG/EC2 dependencies guarantee
+  // edges); only a real format change trips it — exactly when a human is bumping the pin.
+  if (nodes.size === 0 && /"\s*->\s*"/.test(dot)) {
     throw new Error(
-      `postProcessDot: parsed 0 nodes from non-empty inframap output, but ${extraNodes.size} ` +
-        `resources were declared — the DOT node/edge regex likely no longer matches inframap's ` +
-        `format (version bump?). Refusing to emit a silently-truncated diagram.`,
+      `postProcessDot: parsed 0 nodes from inframap output that contains edges — the DOT ` +
+        `node/edge regex likely no longer matches inframap's format (version bump?). ` +
+        `Refusing to emit a silently-truncated diagram.`,
     );
   }
 
