@@ -22,10 +22,10 @@ describe('enrichPersonReconciliation', () => {
     expect(mockReconcileSamePersonLinks).toHaveBeenCalledWith(fakeDriver);
   });
 
-  it('isolates a failure (failed=1, never throws)', async () => {
+  it('propagates the error (throws) so the reload stage is marked failed and retried on resume', async () => {
+    // All-or-nothing MERGE: a throw lets the orchestrator record the stage `failed` (kept out of
+    // ranStages/doneStages) rather than laundering it into a `complete` outcome that resume skips.
     mockReconcileSamePersonLinks.mockRejectedValue(new Error('neo4j down'));
-    const summary = await enrichPersonReconciliation(fakeDriver);
-    expect(summary.failed).toBe(1);
-    expect(summary.linksReconciled).toBe(0);
+    await expect(enrichPersonReconciliation(fakeDriver)).rejects.toThrow('neo4j down');
   });
 });

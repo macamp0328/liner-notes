@@ -47,7 +47,8 @@ export async function getGroupCandidates(driver: Driver): Promise<GroupCandidate
  *
  * MATCH-only: a member not credited anywhere has no Musician node and is silently skipped — no
  * phantom nodes (the repo's deterministic-clean-data rule). The marker is stamped even when no
- * member matches, so a group whose members are all uncollected is not re-fetched every run.
+ * member matches, so a group whose members are all uncollected is not re-fetched every run. A
+ * roster entry pointing at the group itself (`m <> group`) is skipped so no self-loop is created.
  */
 export async function setGroupMembers(
   driver: Driver,
@@ -62,6 +63,7 @@ export async function setGroupMembers(
        WITH group
        UNWIND $members AS member
        MATCH (m:Musician {discogsId: member.id})
+       WHERE m <> group
        MERGE (m)-[rel:MEMBER_OF]->(group)
        SET rel.active = member.active`,
       {

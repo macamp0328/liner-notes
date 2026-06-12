@@ -106,12 +106,16 @@ export async function getReleasesByMusician(
       OPTIONAL MATCH (rTrack:Release)-[:HAS_TRACK]->(target)
       WITH (CASE WHEN target:Release THEN target ELSE rTrack END) AS r, c
       WHERE r IS NOT NULL
+      // Pick ONE representative credit per release so instrument + role come from the SAME edge
+      // (independent min() could pair an instrument from one credit with a role from another).
+      WITH r, c ORDER BY c.displayRole, c.roleCategory
+      WITH r, head(collect({instrument: c.displayRole, role: c.roleCategory})) AS credit
       OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
-      WITH r, min(a.name) AS artist, min(c.displayRole) AS instrument, min(c.roleCategory) AS role
+      WITH r, credit, min(a.name) AS artist
       RETURN r.discogsId AS discogsId, r.title AS title, artist,
              coalesce(r.originalYear, r.pressingYear) AS pressingYear,
              r.format AS format, r.thumbUrl AS thumbUrl,
-             instrument, role
+             credit.instrument AS instrument, credit.role AS role
       ORDER BY pressingYear, discogsId
       `,
       { name },

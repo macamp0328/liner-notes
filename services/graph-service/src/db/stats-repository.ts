@@ -176,7 +176,7 @@ const MUSICIAN_QUERY = `
   RETURN
     count(m) AS total,
     count(CASE WHEN samePersonApp THEN 1 END) AS samePersonApplicable,
-    count(CASE WHEN samePersonApp AND EXISTS { (m)-[:SAME_PERSON_AS]->(:Artist) } THEN 1 END) AS samePersonCovered,
+    count(CASE WHEN samePersonApp AND EXISTS { MATCH (m)-[:SAME_PERSON_AS]->(a2:Artist) WHERE a2.discogsId = m.discogsId } THEN 1 END) AS samePersonCovered,
     count(CASE WHEN EXISTS { (:Musician)-[:MEMBER_OF]->(m) } THEN 1 END) AS groupsWithMembers`;
 
 // MEMBER_OF edge count — a relationship scan can't ride the node scan above. count() over zero
