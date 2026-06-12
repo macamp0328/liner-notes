@@ -26,3 +26,32 @@ updates:
     labels:
       - dependencies
       - ci
+
+  # Production base image (graph-service Dockerfile) — keep the node digest pin fresh.
+  # Tracks FROM images only, so it refreshes the node digest but not the npm-installed pnpm.
+  # Stays on Node 22 LTS (parity with .mise.toml); a node major bump is a deliberate manual call.
+  - package-ecosystem: docker
+    directory: /services/graph-service
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    ignore:
+      - dependency-name: node
+        update-types:
+          - version-update:semver-major
+
+  # Docker Compose (local dev + CI neo4j) — keep the neo4j image pin fresh. neo4j is intentionally
+  # not ignored: 5.26 is terminal for 5.x, so the next bump is a major we want surfaced for review.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
