@@ -14,8 +14,6 @@ import {
 import type { DiscogsRelease } from '../../../src/ingestion/types.js';
 import release7000001 from '../../fixtures/releases/release-7000001.json' with { type: 'json' };
 
-const RELEASE_ID = 7000001;
-
 // The crash point: stages before this were "already done" (complete); this one was mid-flight
 // when the pod died (left `running`); everything after is `pending`. track-musicbrainz is chosen
 // deliberately: its track-acousticbrainz/track-deezer dependents must resume after it re-runs and

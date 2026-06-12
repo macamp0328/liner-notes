@@ -280,7 +280,7 @@ describe('createRateLimitedFetch', () => {
       expect(sleeps).toHaveLength(3);
       expect(warn).toHaveBeenCalledTimes(3);
       for (const call of warn.mock.calls) {
-        expect(call[0] as string).not.toContain('attempt 4/4');
+        expect(call[0]).not.toContain('attempt 4/4');
       }
     });
   });

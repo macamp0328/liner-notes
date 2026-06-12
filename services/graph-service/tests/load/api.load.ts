@@ -130,4 +130,4 @@ async function runLoadTest() {
   }
 }
 
-runLoadTest();
+await runLoadTest();

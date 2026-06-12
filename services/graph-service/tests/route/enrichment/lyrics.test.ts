@@ -25,7 +25,6 @@ vi.mock('../../../src/db/lyrics-repository.js', () => ({
 // Fixtures
 // ---------------------------------------------------------------------------
 import lrclibHit from '../../fixtures/lrclib-hit.json' with { type: 'json' };
-import geniusSearchHit from '../../fixtures/genius-search-hit.json' with { type: 'json' };
 
 // ---------------------------------------------------------------------------
 // Helpers
