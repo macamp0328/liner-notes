@@ -67,10 +67,70 @@ describe('GeniusClient', () => {
 
     const result = await client.getLyrics('Test Artist', 'Song Title');
 
-    expect(result).toBe('Hello\nWorld');
+    expect(result).toEqual({
+      lyrics: 'Hello\nWorld',
+      matchedTitle: 'Song Title',
+      matchedArtist: 'Test Artist',
+    });
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(fetchSpy.mock.calls[0]?.[0]).toContain('api.genius.com/search');
     expect(fetchSpy.mock.calls[1]?.[0]).toBe('https://genius.com/Test-artist-song-title-lyrics');
+  });
+
+  it('rejects a wrong-song hit on title similarity BEFORE the page fetch (#248/#31)', async () => {
+    // Artist matches the query but the search resolved a different song — the #31 corruption class.
+    const wrongSong = {
+      response: {
+        hits: [
+          {
+            type: 'song',
+            result: {
+              id: 1,
+              url: 'https://genius.com/wrong-song',
+              title: 'Love Story',
+              primary_artist: { name: 'Stephen Stills' },
+            },
+          },
+        ],
+      },
+    };
+    fetchSpy.mockResolvedValueOnce(makeJsonResponse(wrongSong));
+
+    expect(await client.getLyrics('Stephen Stills', 'Stop')).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledOnce(); // no page scrape on an obvious title mismatch
+  });
+
+  it('honors a configured confidence threshold in the pre-fetch title filter (#248)', async () => {
+    // The same wrong-title hit, but with a threshold of 0 the pre-filter (titleSim < threshold) can
+    // never fire, so the page IS fetched — proving the filter tracks LYRICS_CONFIDENCE_THRESHOLD
+    // rather than a hard-coded 0.85, keeping it a strict subset of the gate at any threshold.
+    const wrongTitle = {
+      response: {
+        hits: [
+          {
+            type: 'song',
+            result: {
+              id: 1,
+              url: 'https://genius.com/x',
+              title: 'Love Story',
+              primary_artist: { name: 'Stephen Stills' },
+            },
+          },
+        ],
+      },
+    };
+    fetchSpy
+      .mockResolvedValueOnce(makeJsonResponse(wrongTitle))
+      .mockResolvedValueOnce(makeHtmlResponse(LYRICS_HTML));
+
+    const result = await client.getLyrics('Stephen Stills', 'Stop', 0);
+
+    expect(result).toEqual({
+      lyrics: 'Hello\nWorld',
+      matchedTitle: 'Love Story',
+      matchedArtist: 'Stephen Stills',
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(2); // threshold 0 → no pre-filter reject → page fetched
   });
 
   it('sends Bearer auth + browser UA on the search call and UA on the page call', async () => {

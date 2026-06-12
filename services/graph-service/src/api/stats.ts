@@ -43,14 +43,22 @@ const sourcedCoverageSchema = {
   },
 } as const;
 
-// The four-state lyrics funnel (#246): the buckets partition `total` exactly.
+// The five-state lyrics funnel (#246, #248): the buckets partition `total` exactly.
 const lyricsFunnelSchema = {
   type: 'object',
-  required: ['resolved', 'instrumental', 'probableInstrumental', 'notFound', 'total'],
+  required: [
+    'resolved',
+    'instrumental',
+    'probableInstrumental',
+    'lowConfidence',
+    'notFound',
+    'total',
+  ],
   properties: {
     resolved: { type: 'integer' },
     instrumental: { type: 'integer' },
     probableInstrumental: { type: 'integer' },
+    lowConfidence: { type: 'integer' },
     notFound: { type: 'integer' },
     total: { type: 'integer' },
   },
