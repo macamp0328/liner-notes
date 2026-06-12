@@ -139,7 +139,7 @@ liner-notes/
 │       ├── insomnia.yml         ← regenerates openapi.json + Insomnia collection; fails on drift
 │       ├── changelog.yml        ← per-merge plain-English changelog updater
 │       └── changelog-reconcile.yml ← weekly self-healing changelog backfill
-├── docs/                        ← adr/ (architecture decisions) + generated openapi.json + insomnia.collection.yaml
+├── docs/                        ← adr/ (architecture decision records)
 ├── scripts/
 │   ├── explore-discogs.ts
 │   ├── discogs-api-notes.md
@@ -165,6 +165,7 @@ liner-notes/
 │       │   ├── load/            ← load / perf checks
 │       │   ├── helpers/         ← cross-suite test utilities
 │       │   └── fixtures/        ← sample JSON responses for tests
+│       ├── docs/                ← committed openapi.json + insomnia.collection.yaml (`pnpm insomnia:generate`)
 │       └── Dockerfile
 ├── infra/
 │   ├── terraform/               ← AWS resources
