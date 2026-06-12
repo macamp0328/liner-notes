@@ -18,8 +18,13 @@ import { fileURLToPath } from 'node:url';
 const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), 'prepare.sh');
 
 interface RunOptions {
-  /** Create a `.git` dir in the script's cwd (simulates a real checkout). */
-  git: boolean;
+  /**
+   * How `.git` appears in the script's cwd:
+   * - `'dir'`    — a normal checkout (`.git` is a directory)
+   * - `'file'`   — a linked git worktree (`.git` is a file) — exercises the `-e` guard
+   * - `'absent'` — no checkout (Docker image build / npm-pack tarball)
+   */
+  git: 'dir' | 'file' | 'absent';
   /** Body of the fake `husky` shim (it always records that it was invoked first). */
   husky: string;
   /** Env overrides layered over a base that neutralizes ambient CI/HUSKY. */
@@ -37,7 +42,10 @@ function run(options: RunOptions): RunResult {
   try {
     const repo = join(work, 'repo');
     mkdirSync(repo);
-    if (options.git) mkdirSync(join(repo, '.git'));
+    if (options.git === 'dir') mkdirSync(join(repo, '.git'));
+    else if (options.git === 'file')
+      // A linked worktree's `.git` is a file pointing at the real gitdir.
+      writeFileSync(join(repo, '.git'), 'gitdir: /elsewhere/.git/worktrees/x\n');
 
     const bin = join(work, 'bin');
     mkdirSync(bin);
@@ -47,6 +55,9 @@ function run(options: RunOptions): RunResult {
     writeFileSync(huskyPath, shim);
     chmodSync(huskyPath, 0o755);
 
+    // Prepend the shim dir, but avoid a trailing `:` (an empty PATH entry = cwd)
+    // when the inherited PATH is somehow empty — keeps the harness isolated.
+    const basePath = process.env.PATH ?? '';
     const result = spawnSync('sh', [scriptPath], {
       cwd: repo,
       encoding: 'utf8',
@@ -56,7 +67,7 @@ function run(options: RunOptions): RunResult {
         // case that means to exercise husky actually does, then layer overrides.
         CI: '',
         HUSKY: '',
-        PATH: `${bin}:${process.env.PATH ?? ''}`,
+        PATH: basePath ? `${bin}:${basePath}` : bin,
         ...options.env,
       },
     });
@@ -72,25 +83,32 @@ function run(options: RunOptions): RunResult {
 }
 
 test('skips cleanly with no .git (Docker image build / npm-pack tarball)', () => {
-  const r = run({ git: false, husky: 'exit 0' });
+  const r = run({ git: 'absent', husky: 'exit 0' });
   assert.equal(r.status, 0);
   assert.equal(r.huskyCalled, false);
 });
 
+test('runs husky when .git is a file (git worktree — guards `-e` against a regression to `-d`)', () => {
+  const r = run({ git: 'file', husky: 'exit 0' });
+  assert.equal(r.status, 0);
+  // `-e` matches a file, so husky runs; a regression to `-d` would skip here.
+  assert.equal(r.huskyCalled, true);
+});
+
 test('skips when CI is set (runners never commit or push)', () => {
-  const r = run({ git: true, husky: 'exit 0', env: { CI: 'true' } });
+  const r = run({ git: 'dir', husky: 'exit 0', env: { CI: 'true' } });
   assert.equal(r.status, 0);
   assert.equal(r.huskyCalled, false);
 });
 
 test('skips on the HUSKY=0 opt-out', () => {
-  const r = run({ git: true, husky: 'exit 0', env: { HUSKY: '0' } });
+  const r = run({ git: 'dir', husky: 'exit 0', env: { HUSKY: '0' } });
   assert.equal(r.status, 0);
   assert.equal(r.huskyCalled, false);
 });
 
 test('propagates a hard husky failure (non-zero exit)', () => {
-  const r = run({ git: true, husky: 'echo boom >&2; exit 1' });
+  const r = run({ git: 'dir', husky: 'echo boom >&2; exit 1' });
   assert.notEqual(r.status, 0);
   assert.equal(r.huskyCalled, true);
   assert.match(r.stderr, /boom/);
@@ -98,7 +116,7 @@ test('propagates a hard husky failure (non-zero exit)', () => {
 });
 
 test('catches a husky soft failure (husky v9 exits 0 but emits a diagnostic)', () => {
-  const r = run({ git: true, husky: 'echo "git config failed"; exit 0' });
+  const r = run({ git: 'dir', husky: 'echo "git config failed"; exit 0' });
   assert.notEqual(r.status, 0);
   assert.equal(r.huskyCalled, true);
   assert.match(r.stderr, /git config failed/);
@@ -106,7 +124,7 @@ test('catches a husky soft failure (husky v9 exits 0 but emits a diagnostic)', (
 });
 
 test('succeeds silently when husky installs cleanly', () => {
-  const r = run({ git: true, husky: 'exit 0' });
+  const r = run({ git: 'dir', husky: 'exit 0' });
   assert.equal(r.status, 0);
   assert.equal(r.huskyCalled, true);
   assert.equal(r.stderr, '');
