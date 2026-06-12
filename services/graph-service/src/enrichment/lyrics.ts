@@ -203,7 +203,11 @@ export async function enrichLyrics(
         log.debug?.('[lyrics] Genius client not configured — skipping Genius fallback');
         return null;
       }
-      const geniusResult = await genius.getLyrics(track.artistName ?? '', track.title);
+      const geniusResult = await genius.getLyrics(
+        track.artistName ?? '',
+        track.title,
+        confidenceThreshold,
+      );
       // Genius has no duration; its differentiator is the title-similarity gate (#248/#31). The
       // client already pre-filters obvious title mismatches; this is the authoritative re-score.
       return geniusResult === null

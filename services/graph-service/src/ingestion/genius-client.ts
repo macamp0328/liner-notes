@@ -16,7 +16,7 @@ import {
   isValidGeniusLyrics,
   normalizeArtistName,
 } from '../enrichment/lyrics-extract.js';
-import { titleSimilarity, TITLE_SIMILARITY_THRESHOLD } from '../enrichment/match-confidence.js';
+import { titleSimilarity, LYRICS_CONFIDENCE_DEFAULT } from '../enrichment/match-confidence.js';
 
 // Browser-like User-Agent sent on every Genius request. Unlike DISCOGS_USER_AGENT /
 // LRCLIB_USER_AGENT — which are polite identifying strings — this default must look like a
@@ -152,10 +152,18 @@ export class GeniusClient {
    * title mismatch, or invalid/empty page). Throws on network/API errors — a non-retryable status
    * (notably the expected 403 bot-block) as a {@link GeniusHttpError}; a retryable status that
    * spends the budget as a `RetriesExhaustedError`.
+   *
+   * `confidenceThreshold` is the same gate the orchestrator applies (#248); pass the run's resolved
+   * `LYRICS_CONFIDENCE_THRESHOLD` so the pre-fetch title filter tracks it. Defaults to the standard
+   * gate so direct callers/tests behave as configured by default.
    */
-  async getLyrics(artistName: string, title: string): Promise<GeniusResult | null> {
+  async getLyrics(
+    artistName: string,
+    title: string,
+    confidenceThreshold: number = LYRICS_CONFIDENCE_DEFAULT,
+  ): Promise<GeniusResult | null> {
     try {
-      return await this.lookupLyrics(artistName, title);
+      return await this.lookupLyrics(artistName, title, confidenceThreshold);
     } catch (err) {
       // An open breaker is a clean no-hit (→ not-found, stamped) — not an error to propagate.
       if (err instanceof CircuitBreakerOpenError) return null;
@@ -163,7 +171,11 @@ export class GeniusClient {
     }
   }
 
-  private async lookupLyrics(artistName: string, title: string): Promise<GeniusResult | null> {
+  private async lookupLyrics(
+    artistName: string,
+    title: string,
+    confidenceThreshold: number,
+  ): Promise<GeniusResult | null> {
     const searchUrl = new URL(SEARCH_URL);
     searchUrl.searchParams.set('q', `${artistName} ${title}`);
 
@@ -197,9 +209,12 @@ export class GeniusClient {
     // Pre-fetch title-similarity filter (#248): Genius's search routinely returns a *different song*
     // by the matched artist (the #31 wrong-song class). The matched title is known before the page
     // fetch, so reject an obvious mismatch here to save the expensive scrape (and a 403-budget call
-    // in prod). This is a performance short-circuit, a strict subset of the orchestrator's gate — it
-    // uses the same threshold and only ever drops what the full gate would also reject.
-    if (titleSimilarity(title, matchedTitle) < TITLE_SIMILARITY_THRESHOLD) return null;
+    // in prod). This is a strict subset of the orchestrator's gate: the final confidence is
+    // `min(titleSim, artistSim) × durationFactor`, so titleSim is an UPPER BOUND on it — a hit with
+    // `titleSim < confidenceThreshold` can never clear the gate, so dropping it here only ever skips
+    // what the full gate would also reject. Using the run's resolved threshold (not a fixed 0.85)
+    // keeps that guarantee when LYRICS_CONFIDENCE_THRESHOLD is tuned.
+    if (titleSimilarity(title, matchedTitle) < confidenceThreshold) return null;
 
     const pageResponse = await this.rlFetch(firstHit.result.url, {
       headers: {
