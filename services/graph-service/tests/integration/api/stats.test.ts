@@ -70,6 +70,14 @@ describe('GET /api/v1/stats', () => {
         `MATCH (t:Track) WHERE t.lyrics IS NULL AND t.lyricsStatus IS NULL WITH t LIMIT 1
          SET t.lyricsStatus = 'not-found'`,
       );
+      // One low-confidence track (#248): a source matched but the gate rejected it — lyrics stay
+      // NULL, but confidence + provenance are stored and the track stays in the honest denominator.
+      await session.run(
+        `MATCH (t:Track) WHERE t.lyrics IS NULL AND t.lyricsStatus IS NULL WITH t LIMIT 1
+         SET t.lyricsStatus = 'low-confidence', t.lyricsSource = 'genius',
+             t.lyricsConfidence = 0.4, t.lyricsMatchedTitle = 'Wrong Song',
+             t.lyricsMatchedArtist = 'Right Artist'`,
+      );
       // Dirty/manual data our writers never produce: lyrics set AND an instrumental status.
       // The funnel must count it once (resolved), keeping the four buckets disjoint so the
       // partition invariant holds and notFound can't go negative.
@@ -148,7 +156,7 @@ describe('GET /api/v1/stats', () => {
     );
   });
 
-  it('reports the four-state lyrics funnel with a non-instrumental denominator (#246)', async () => {
+  it('reports the five-state lyrics funnel with a non-instrumental denominator (#246, #248)', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/v1/stats' });
     const { enrichment, counts } = (JSON.parse(res.payload) as StatsBody).data;
     const f = enrichment.lyricsFunnel;
@@ -159,8 +167,11 @@ describe('GET /api/v1/stats', () => {
     expect(f.resolved).toBe(2);
     expect(f.instrumental).toBe(1);
     expect(f.probableInstrumental).toBe(1);
-    // The four buckets partition total exactly (no double-count, notFound stays ≥ 0).
-    expect(f.resolved + f.instrumental + f.probableInstrumental + f.notFound).toBe(f.total);
+    expect(f.lowConfidence).toBe(1);
+    // The five buckets partition total exactly (no double-count, notFound stays ≥ 0).
+    expect(
+      f.resolved + f.instrumental + f.probableInstrumental + f.lowConfidence + f.notFound,
+    ).toBe(f.total);
     expect(f.notFound).toBeGreaterThanOrEqual(0);
 
     // The honest denominator excludes both instrumental classes (2 tracks), so it is
