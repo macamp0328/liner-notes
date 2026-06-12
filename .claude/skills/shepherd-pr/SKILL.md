@@ -32,9 +32,17 @@ else
   pr_number="$(gh pr view --json number --jq '.number')"
 fi
 gh pr view "$pr_number" --json number,title,headRefName,baseRefName,state
+
+# Make sure the working tree is ON the PR's head branch before the loop runs —
+# Phase C does `git merge`/`git push`, so a standalone invocation from a different
+# branch must switch first. (Handed off from /issue you're already on it: no-op.)
+head_branch="$(gh pr view "$pr_number" --json headRefName --jq '.headRefName')"
+if [ "$(git branch --show-current)" != "$head_branch" ]; then
+  gh pr checkout "$pr_number"   # switch to the head branch; commit/stash local work first
+fi
 ```
 
-Hold onto `pr_number` and the head branch name for the rest of the run.
+Hold onto `pr_number` and `head_branch` for the rest of the run.
 
 Then run the **shepherd loop** below: **Phase A → B → C**, repeating for up to **3 rounds**. Stop early (jump to Phase E) the moment the branch is up to date with `main` **and** CI is green. `main`'s ruleset does **not** require branches to be up to date before merging (no strict status-check policy), so being a little behind never blocks a merge — exhausting the 3 rounds is a fine outcome, not a failure.
 
@@ -49,8 +57,8 @@ PR="$pr_number"
 deadline=$(( $(date +%s) + 420 ))   # ~7 min cap
 while :; do
   pending=$(gh pr checks "$PR" --json bucket --jq '[.[] | select(.bucket=="pending")] | length' 2>/dev/null || echo 1)
-  copilot=$(gh api repos/{owner}/{repo}/pulls/"$PR"/reviews \
-    --jq '[.[] | select(.user.login | test("copilot"; "i"))] | length' 2>/dev/null || echo 0)
+  copilot=$(gh api --paginate repos/{owner}/{repo}/pulls/"$PR"/reviews \
+    --jq '.[] | select(.user.login | test("copilot"; "i")) | .id' 2>/dev/null | wc -l | tr -d ' ')
   { [ "$pending" = 0 ] && [ "$copilot" != 0 ]; } && break
   [ "$(date +%s)" -ge "$deadline" ] && break
   sleep 30
@@ -62,7 +70,7 @@ Notes:
 
 - `gh api` substitutes `{owner}`/`{repo}` from the current repo automatically.
 - `2>/dev/null || echo 1` tolerates the race where no checks are registered yet (treated as still-pending).
-- The `copilot` match is a case-insensitive substring, covering `Copilot`, `copilot-pull-request-reviewer[bot]`, `github-copilot[bot]`, etc.
+- The `copilot` match is a case-insensitive substring, covering `Copilot`, `copilot-pull-request-reviewer[bot]`, `github-copilot[bot]`, etc. The fetch uses `--paginate` and counts lines (not `| length`, which would print a per-page count) so a Copilot review isn't missed on a PR with many reviews.
 - If Copilot is not configured for this PR it simply never appears, the ~7-min cap fires, and you proceed.
 - **Rounds 2+** (after a Phase C push) don't need to wait for Copilot again — a plain `gh pr checks "$pr_number" --watch` is enough to wait for the new CI run.
 

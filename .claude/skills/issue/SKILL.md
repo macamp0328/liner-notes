@@ -179,7 +179,7 @@ The PR is open, which kicks off Copilot's review and the first CI run. Now drive
 
 Run the `/shepherd-pr` workflow for the PR you just opened (invoke the skill directly; if it can't be invoked from here, read `.claude/skills/shepherd-pr/SKILL.md` and follow its phases for this PR). It will:
 
-1. Wait for the first CI run and Copilot's review (~5 min, via a background poll — it yields rather than blocking on the user).
+1. Wait for the first CI run and Copilot's review (typically a few minutes, ~7 min cap; via a background poll — it yields rather than blocking on the user).
 2. Auto-run `/tend-to-pr` if there are any failing checks or review comments.
 3. Bring the branch up to date with `main` (the agent does the "Update branch" merge and resolves routine conflicts itself).
 4. Send a push notification when the PR is green and current.
