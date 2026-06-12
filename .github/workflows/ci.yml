@@ -268,6 +268,10 @@ jobs:
     # fetch-depth: 0 is required — TruffleHog diffs git history and needs the full log.
     # On PRs: scans from the default branch tip to HEAD (only new commits).
     # On pushes to main: scans from before the push to HEAD.
+    # Latent edge: `github.event.before` is the all-zeros SHA on the FIRST push to a brand-new
+    # branch — safe today only because the push trigger is main-only (a first push to main can't
+    # happen). If branch-push triggers are ever added, the zero-SHA breaks this base; switch to
+    # `github.event.pull_request.base.sha` (PRs) or guard the zero-SHA explicitly before doing so.
     # If this fails: the credential is in git history — rotate it immediately, then
     # use `git filter-branch` or BFG to scrub the history before re-pushing.
     runs-on: ubuntu-latest

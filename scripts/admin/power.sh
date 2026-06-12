@@ -42,7 +42,13 @@ INVOKE_META="$(aws lambda invoke \
   --payload "{\"action\":\"$MODE\"}" \
   "$RESPONSE_FILE")"
 
-jq . "$RESPONSE_FILE"
+# Pretty-print the Lambda response payload, but keep it non-fatal: a non-JSON payload makes
+# `jq` exit non-zero, which under `set -e` would abort the script BEFORE the FunctionError hint
+# below ever prints — so a crashed Lambda would surface only a cryptic `jq: parse error`.
+if ! jq . "$RESPONSE_FILE" 2>/dev/null; then
+  echo "Lambda response was not valid JSON; raw payload:" >&2
+  cat "$RESPONSE_FILE" >&2
+fi
 
 if echo "$INVOKE_META" | jq -e '.FunctionError' >/dev/null 2>&1; then
   echo "Lambda reported a function error (see payload above)." >&2

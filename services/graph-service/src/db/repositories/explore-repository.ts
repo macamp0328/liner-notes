@@ -328,7 +328,11 @@ export async function getReleasesByYear(driver: Driver, year: number): Promise<E
 
 // ---------------------------------------------------------------------------
 // getConnections
-// Depth is a validated literal (1 | 2 | 3) — safe to interpolate into Cypher.
+// Depth is a validated literal (1 | 2 | 3), so interpolating it into Cypher is
+// safe today. We still coerce it to an integer in [1, 3] at runtime as defense-in-
+// depth — the type/schema/cast gates live at the call site, so a future caller (or a
+// widened signature) can't turn this into an unbounded traversal or interpolate a
+// non-integer/NaN (`*1..2.5` / `*1..NaN`) that Cypher would reject at runtime.
 // ---------------------------------------------------------------------------
 
 export async function getConnections(
@@ -336,12 +340,14 @@ export async function getConnections(
   discogsId: number,
   depth: 1 | 2 | 3,
 ): Promise<ConnectionsResult | null> {
+  const rounded = Math.round(depth);
+  const safeDepth = Number.isFinite(rounded) ? Math.min(3, Math.max(1, rounded)) : 1;
   const session = driver.session();
   try {
     const query = `
       MATCH (start:Release {discogsId: $discogsId})
       OPTIONAL MATCH (start)-[:RELEASED_BY]->(sa:Artist)
-      OPTIONAL MATCH (start)-[*1..${depth}]-(connected)
+      OPTIONAL MATCH (start)-[*1..${safeDepth}]-(connected)
         WHERE (connected:Release OR connected:Artist OR connected:Musician OR connected:Studio)
           AND connected <> start
       WITH start, sa, connected WHERE connected IS NOT NULL
