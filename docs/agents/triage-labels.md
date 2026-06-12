@@ -73,8 +73,10 @@ agent without scanning the whole backlog.
 - **Needs me, not an agent**: `is:open label:"ready-for-human"`
 - **Stuck (waiting on a dependency)**: `is:open label:"blocked"`
 - **To triage (clear this bucket periodically)**: `is:open label:"needs-triage"`
-- **Drift safety-net — should be empty** (any open issue missing a status label):
-  `is:open -label:"needs-triage" -label:"ready-for-agent" -label:"ready-for-human" -label:"needs-info" -label:"blocked" -label:"wontfix"`
+- **Drift safety-net — should be empty** (any open issue missing a status label). Note `blocked` is
+  deliberately _not_ excluded here: it's a modifier, so a `blocked`-only issue with no real status
+  is drift and should surface.
+  `is:open -label:"needs-triage" -label:"ready-for-agent" -label:"ready-for-human" -label:"needs-info" -label:"wontfix"`
 
 Day-to-day: open the primary bookmark → take the top item → `/issue <url>`.
 

@@ -37,7 +37,7 @@ Five **state** roles:
 
 Every triaged issue should carry exactly one of each axis — one **type**, one **state**, one `area:*`, and one `priority:*` — per the full taxonomy in [docs/agents/triage-labels.md](../../../docs/agents/triage-labels.md). `blocked` is a modifier that may co-exist with `ready-for-agent`/`ready-for-human` and does not count as a conflicting state role. If state roles genuinely conflict, flag it and ask the maintainer before doing anything else.
 
-These are canonical role names — the actual label strings used in the issue tracker may differ. The mapping should have been provided to you - run `/setup-matt-pocock-skills` if not.
+These canonical role names map 1:1 to the label strings used in this repo; the full vocabulary (status, area, type, priority) lives in [docs/agents/triage-labels.md](../../../docs/agents/triage-labels.md).
 
 State transitions: an unlabeled issue normally goes to `needs-triage` first; from there it moves to `needs-info`, `ready-for-agent`, `ready-for-human`, or `wontfix`. `needs-info` returns to `needs-triage` once the reporter replies. The maintainer can override at any time — flag transitions that look unusual and ask before proceeding.
 
