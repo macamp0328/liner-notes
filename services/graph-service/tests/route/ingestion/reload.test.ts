@@ -50,6 +50,7 @@ vi.mock('../../../src/ingestion/job-state.js', () => ({
 
 const repo = vi.hoisted(() => ({
   createReloadJob: vi.fn(),
+  finishReloadJob: vi.fn(),
   findResumableReloadJob: vi.fn(),
   getLatestReloadJob: vi.fn(),
 }));
@@ -102,6 +103,7 @@ describe('Reload admin API', () => {
       stagesFailed: 0,
     });
     repo.createReloadJob.mockResolvedValue('job-new');
+    repo.finishReloadJob.mockResolvedValue(undefined);
     repo.findResumableReloadJob.mockResolvedValue(null);
     repo.getLatestReloadJob.mockResolvedValue(null);
 
@@ -156,6 +158,28 @@ describe('Reload admin API', () => {
       expect(body.error.jobId).toBe('running-7');
       expect(repo.createReloadJob).not.toHaveBeenCalled();
       expect(mockRunReload).not.toHaveBeenCalled();
+    });
+
+    it('marks the job failed when the orchestration rejects, so it does not stay stuck running', async () => {
+      mockRunReload.mockRejectedValue(new Error('boom'));
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/reload',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      // Still 202 — runReload is fire-and-forget; the recovery happens in its .catch (#290).
+      expect(res.statusCode).toBe(202);
+      await vi.waitFor(() =>
+        // 4th arg is request.log, forwarded so a zero-match (deleted job node) warns (#290).
+        expect(repo.finishReloadJob).toHaveBeenCalledWith(
+          expect.anything(),
+          'job-new',
+          'failed',
+          expect.anything(),
+        ),
+      );
     });
 
     it('returns 401 without a bearer token', async () => {
