@@ -8,7 +8,8 @@ name: CI
 #   format, lint, typecheck                                       ┐
 #   tests-and-coverage (unit + integration, Neo4j, 70% threshold) │  all start at
 #   schema-validation (Neo4j container, started via composite action) │  t=0, in
-#   audit, secrets-scan, codeql, actionlint                       ┘  parallel
+#   script-tests (changelog unit tests), terraform (fmt + validate) │  parallel
+#   audit, secrets-scan, codeql, actionlint (+ standalone shellcheck) ┘
 #
 #   lint, typecheck ──→ docker-build   (the ONLY gate: the multi-stage build
 #                                       compiles TS so it waits on typecheck —
@@ -365,3 +366,64 @@ jobs:
 
           # No path args: actionlint auto-discovers every workflow under .github/workflows/.
           /tmp/actionlint
+
+      - name: Shellcheck standalone scripts
+        # actionlint shellchecks `run:` blocks inside workflows, but never the
+        # standalone *.sh files in the repo. Reuse the pinned shellcheck installed
+        # above (on /usr/local/bin) to lint the admin HTTP/ops helpers and the
+        # agent bash-guard hook — the only enforcement against `--no-verify` /
+        # `git push --force`, so a silent break there matters.
+        run: shellcheck scripts/admin/*.sh .claude/hooks/bash-guard.sh
+
+  script-tests:
+    name: Script Tests
+    # Runs the changelog generator's unit tests (scripts/changelog/*.test.ts) via
+    # node:test/tsx. No Neo4j, no secrets, fully offline — so it joins the t=0
+    # fan-out with the static checks. These tests guard the render/parse logic the
+    # per-merge, on-deploy, and weekly-reconcile changelog workflows all depend on;
+    # they were previously local-only (`pnpm changelog:test`) and never gated.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run changelog script tests
+        run: pnpm changelog:test
+
+  terraform:
+    name: Terraform Validate
+    # Static validation of the Terraform config: `fmt -check` (style) + `validate`
+    # (syntax, references, required-provider wiring) for BOTH roots. `init
+    # -backend=false` downloads the providers without touching the remote S3 state
+    # or needing AWS creds; `validate` evaluates config structure only (no plan, no
+    # variable values, no API calls). Runs unconditionally (no path filter) like
+    # the rest of ci.yml so it stays a required-eligible gate — unlike the
+    # path-filtered, advisory diagrams/insomnia drift guards. terraform 1.15.3
+    # matches .mise.toml; terraform_wrapper:false keeps fmt/validate exit codes clean.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.15.3
+          terraform_wrapper: false
+      - name: Format check (recursive)
+        # Fix locally: terraform fmt -recursive infra/terraform
+        run: terraform fmt -check -recursive infra/terraform
+      - name: Validate root module
+        run: |
+          terraform -chdir=infra/terraform init -backend=false
+          terraform -chdir=infra/terraform validate
+      - name: Validate bootstrap module
+        run: |
+          terraform -chdir=infra/terraform/bootstrap init -backend=false
+          terraform -chdir=infra/terraform/bootstrap validate

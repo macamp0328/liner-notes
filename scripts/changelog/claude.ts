@@ -169,7 +169,11 @@ function toRecord(pr: PrInput, parsed: ParsedSummary, source: SummarySource): Ch
 
 // ── Fallback (no API key, or API error) ────────────────────────────────────
 
+// Anchored, no nested quantifiers (`[^)]*` is linear, the scope group is
+// optional-not-repeated); runs on a bounded PR title. safe-regex false-positives
+// on the digit/alternation.
 const CONVENTIONAL_PREFIX =
+  // eslint-disable-next-line security/detect-unsafe-regex
   /^(task\/\d+|feat|fix|chore|docs|build|ci|refactor|perf|style|test)(\([^)]*\))?!?:\s*/i;
 
 export function cleanTitle(title: string): string {

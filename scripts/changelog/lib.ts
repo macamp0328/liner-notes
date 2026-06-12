@@ -262,6 +262,10 @@ export function calverTag(date: Date, existingTags: readonly string[]): string {
 
 /** Parse a CalVer tag → `{ y, m, d, n }` (n defaults to 1). Null for non-CalVer (e.g. `v0.1.0`). */
 export function parseCalver(tag: string): { y: number; m: number; d: number; n: number } | null {
+  // Fully anchored, fixed-width digit groups with a single optional
+  // `(?:\.(\d+))?` tail; no backtracking blow-up. safe-regex false-positives on
+  // the `\d{N}` quantifiers.
+  // eslint-disable-next-line security/detect-unsafe-regex
   const match = tag.match(/^v(\d{4})\.(\d{2})\.(\d{2})(?:\.(\d+))?$/);
   if (!match) return null;
   return {

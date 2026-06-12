@@ -112,11 +112,17 @@ function parseBlocks(src: string, file: string): Block[] {
       }
       i++;
     }
+    const kind = m[1];
+    const type = m[2];
+    const name = m[3];
+    // The header regex guarantees all three capture groups; the guard just
+    // satisfies noUncheckedIndexedAccess without altering runtime behaviour.
+    if (kind === undefined || type === undefined || name === undefined) continue;
     out.push({
       decl: {
-        kind: m[1] as 'resource' | 'data',
-        type: m[2],
-        name: m[3],
+        kind: kind as 'resource' | 'data',
+        type,
+        name,
         file,
       },
       body: src.slice(bodyStart, i - 1),
@@ -127,6 +133,19 @@ function parseBlocks(src: string, file: string): Block[] {
 
 function addressOf(r: ResourceRef): Address {
   return r.kind === 'data' ? `data.${r.type}.${r.name}` : `${r.type}.${r.name}`;
+}
+
+// Split a Terraform address into its resource type + name, tolerating the
+// optional `data.` prefix (`data.aws_ami.x` → type `aws_ami`, name `x`;
+// `aws_instance.k3s` → type `aws_instance`, name `k3s`). A missing segment
+// falls back to the whole address so the result is always a string — a
+// well-formed address always has the segments; the fallback only satisfies
+// noUncheckedIndexedAccess for the categorize()/label callers.
+function splitAddress(addr: string): { type: string; name: string } {
+  const segments = addr.split('.');
+  return addr.startsWith('data.')
+    ? { type: segments[1] ?? addr, name: segments[2] ?? addr }
+    : { type: segments[0] ?? addr, name: segments[1] ?? addr };
 }
 
 // Find which declared addresses are referenced in `src`. We look for token
@@ -217,8 +236,7 @@ function buildPerFileMermaid(
   const categoriesUsed = new Set<Category>();
   for (const b of blocksInFile) categoriesUsed.add(categorize(b.decl.type));
   for (const addr of externalAddrs) {
-    const type = addr.startsWith('data.') ? addr.split('.')[1] : addr.split('.')[0];
-    categoriesUsed.add(categorize(type));
+    categoriesUsed.add(categorize(splitAddress(addr).type));
   }
   for (const cat of [...categoriesUsed].sort()) {
     lines.push(categoryClassDef(cat));
@@ -251,10 +269,7 @@ function buildPerFileMermaid(
     const sgId = `ext_${mermaidId(otherFile)}`;
     lines.push(`  subgraph ${sgId}["${otherFile}"]`);
     for (const addr of addrs) {
-      const isData = addr.startsWith('data.');
-      const segments = addr.split('.');
-      const resourceType = isData ? segments[1] : segments[0];
-      const resourceName = isData ? segments[2] : segments[1];
+      const { type: resourceType, name: resourceName } = splitAddress(addr);
       const cat = categorize(resourceType);
       const label = nodeLabel(addr, resourceType, resourceName);
       lines.push(`    ${mermaidId(addr)}(["${label}"]):::${cat}`);
@@ -338,7 +353,9 @@ function loadMermaidBody(mmdPath: string): string | null {
   const lines = raw.split('\n');
   // Drop leading %% comment lines (and any blank lines between them).
   let i = 0;
-  while (i < lines.length && (lines[i].startsWith('%%') || lines[i].trim() === '')) {
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line === undefined || !(line.startsWith('%%') || line.trim() === '')) break;
     i++;
   }
   return lines.slice(i).join('\n').trimEnd();
@@ -540,13 +557,18 @@ function postProcessDot(dot: string, extraNodes: Set<string> = new Set()): strin
   for (const line of dot.split('\n')) {
     const e = line.match(edgeRE);
     if (e) {
-      nodes.add(e[1]);
-      nodes.add(e[2]);
-      edges.push([e[1], e[2]]);
+      const from = e[1];
+      const to = e[2];
+      // edgeRE guarantees both capture groups; guard for noUncheckedIndexedAccess.
+      if (from !== undefined && to !== undefined) {
+        nodes.add(from);
+        nodes.add(to);
+        edges.push([from, to]);
+      }
       continue;
     }
     const n = line.match(nodeRE);
-    if (n) nodes.add(n[1]);
+    if (n && n[1] !== undefined) nodes.add(n[1]);
   }
 
   // Inframap silently drops resources with no edges (e.g. an isolated
@@ -560,8 +582,7 @@ function postProcessDot(dot: string, extraNodes: Set<string> = new Set()): strin
   const byCategory = new Map<Category, string[]>();
   for (const node of [...nodes].sort()) {
     // node looks like "aws_instance.k3s" or "data.aws_ami.al2023"
-    const typePart = node.startsWith('data.') ? node.split('.')[1] : node.split('.')[0];
-    const cat = categorize(typePart);
+    const cat = categorize(splitAddress(node).type);
     if (!byCategory.has(cat)) byCategory.set(cat, []);
     byCategory.get(cat)!.push(node);
   }
@@ -613,9 +634,7 @@ function postProcessDot(dot: string, extraNodes: Set<string> = new Set()): strin
     out.push(`      margin=14;`);
     for (const node of ns) {
       const isData = node.startsWith('data.');
-      const segments = node.split('.');
-      const resourceType = isData ? segments[1] : segments[0];
-      const resourceName = isData ? segments[2] : segments[1];
+      const { type: resourceType, name: resourceName } = splitAddress(node);
       const icon = iconFor(resourceType);
       const typeLabel = shortTypeLabel(resourceType);
       // Graphviz HTML-like label: icon + bold name on line 1, soft-gray short
