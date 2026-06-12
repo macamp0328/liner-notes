@@ -1,10 +1,21 @@
 name: Changelog release
 
-# Cut a PUBLISHED, tagged CalVer release after a successful production deploy — a
-# version means "this is what's live." Sweeps everything Unreleased into one
+# Cut a PUBLISHED, tagged CalVer release from everything currently Unreleased — a
+# DELIBERATE, batched action you run when you've shipped a batch of merged PRs and
+# want to declare them released. Sweeps every Unreleased record into one
 # `vYYYY.MM.DD` GitHub Release whose note richness ramps with the importance tier
 # (see scripts/changelog/release.ts), then stamps those records and records the
 # version in the versions.json asset on the rolling draft.
+#
+# Run it from the Actions tab ("Run workflow"), or locally:
+#   HEAD_SHA=$(git rev-parse HEAD) pnpm changelog:release   # pin an explicit commit
+#   pnpm changelog:release                                  # default: current main HEAD
+#
+# This used to fire automatically on every successful Deploy (workflow_run). That
+# tied "cut a release" to "a deploy happened" and swept the WHOLE backlog on any
+# green deploy — including PRs that never deployed (docs/scripts) and PRs you were
+# deliberately batching. Cutting is now an explicit dispatch so merged PRs
+# accumulate in the Unreleased draft until you decide to release them.
 #
 # Why this is safe and loop-free: it creates a `refs/tags/*` ref, and every
 # workflow's `on: push` filters `branches: [main]` (no `tags:` trigger anywhere),
@@ -12,22 +23,18 @@ name: Changelog release
 # release makes no commit, so this never touches protected main.
 #
 # Gotchas:
-#  - `workflow_run` runs THIS file from the DEFAULT branch — it only takes effect
-#    after merge to main; the PR that adds it will not self-trigger. Validate first
-#    with: DRY_RUN=1 HEAD_SHA=$(git rev-parse HEAD) pnpm changelog:release
-#  - `workflows: ['Deploy']` MUST match deploy.yml's `name: Deploy` exactly.
-#  - We check out the DEFAULT branch (trusted) for the scripts and pass the deployed
-#    commit as the HEAD_SHA env — DATA (the release tag's target), never the checkout
-#    ref. Checking out a payload-derived ref in a privileged (contents:write +
-#    secrets) workflow is the "untrusted checkout" anti-pattern; Deploy only runs on
-#    push-to-main / dispatch (never fork PRs) so head_sha is trusted in practice, but
-#    we still never execute code from it.
+#  - `workflow_dispatch` runs THIS file from the DEFAULT branch — it only takes
+#    effect after merge to main; the PR that adds it cannot be dispatched yet.
+#    Validate first with: DRY_RUN=1 pnpm changelog:release
 #  - One-time, after merge, run `pnpm changelog:baseline` once before the first cut.
 
 on:
-  workflow_run:
-    workflows: ['Deploy'] # must equal deploy.yml `name:`
-    types: [completed]
+  workflow_dispatch:
+    inputs:
+      head_sha:
+        description: 'Commit to tag the release at (the deployed commit). Default: current main HEAD.'
+        required: false
+        type: string
 
 # contents:write → gh release create/edit/upload + the tag ref; pull-requests:read → gh pr view.
 permissions:
@@ -43,12 +50,8 @@ concurrency:
 jobs:
   release:
     name: Cut changelog version
-    # Only on a green deploy. A failed/cancelled deploy cuts nothing.
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      # Default ref = the default branch (trusted). The deployed commit is data,
-      # passed as HEAD_SHA below — never checked out as code.
       - uses: actions/checkout@v6
 
       - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
@@ -64,8 +67,10 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Cut the version release
+        # HEAD_SHA is the tag's git target. Empty (the default) → release.ts falls
+        # back to current main HEAD. Passed as DATA, never checked out as code.
         env:
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_SHA: ${{ inputs.head_sha }}
           GH_TOKEN: ${{ github.token }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: pnpm changelog:release

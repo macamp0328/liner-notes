@@ -1,12 +1,14 @@
 #!/usr/bin/env tsx
 // Cut a PUBLISHED, tagged CalVer release from everything currently Unreleased.
-// Driven by changelog-release.yml on a successful production deploy (HEAD_SHA =
-// the deployed commit). A version means "this is what's live": it sweeps every
-// record with `version === null`, assigns a `vYYYY.MM.DD` tag, writes a real
+// A DELIBERATE, batched action: run it when you've shipped a batch and want to
+// declare it released. Driven by changelog-release.yml's workflow_dispatch (or
+// run locally). It sweeps every record with `version === null`, assigns a
+// `vYYYY.MM.DD` tag at HEAD_SHA (default: current main HEAD), writes a real
 // (non-draft) GitHub Release whose richness ramps with the release's importance
 // tier, then stamps those records and records the version in versions.json.
 //
-//   pnpm changelog:release              # cut a version (needs HEAD_SHA)
+//   pnpm changelog:release              # cut a version (tags current main HEAD)
+//   HEAD_SHA=$(git rev-parse HEAD) …    # ...or pin an explicit deployed commit
 //   pnpm changelog:baseline             # one-shot: publish the v0.1.0 history baseline
 //   DRY_RUN=1 …                         # preview, no GitHub writes, no AI heal
 //   RELEASE_DATE=2026-06-11 …           # override the cut date (tests)
@@ -85,12 +87,10 @@ function writeStepSummary(lines: string[]): void {
 // ── The cut ───────────────────────────────────────────────────────────────────
 
 async function runCut(): Promise<void> {
-  const headSha = process.env['HEAD_SHA']?.trim();
-  if (!headSha) {
-    throw new Error(
-      'HEAD_SHA is required (the deployed commit). Set it from workflow_run.head_sha.',
-    );
-  }
+  // The tag's git target — the commit this version points at. A deliberate cut
+  // (workflow_dispatch / local) defaults to current main HEAD; pass HEAD_SHA to
+  // pin an explicit deployed commit. Mirrors runBaseline's target resolution.
+  const headSha = process.env['HEAD_SHA']?.trim() || defaultBranchSha();
   const dryRun = isDryRun();
   const key = hasApiKey();
   const releaseDate = resolveReleaseDate();
