@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import type { Driver } from 'neo4j-driver';
 import type { Logger } from '../../../src/ingestion/discogs-client.js';
 import {
@@ -8,6 +8,7 @@ import {
   runVerifyGate,
 } from '../../../src/ingestion/orchestrator.js';
 import type { ReloadStageName } from '../../../src/ingestion/stages.js';
+import { requestShutdown, __resetShutdown } from '../../../src/lifecycle/shutdown.js';
 import { snapshotEnv } from '../../helpers/env.js';
 
 const stageMocks = vi.hoisted(() => ({
@@ -252,6 +253,45 @@ describe('runReload — skip', () => {
     expect(repo.markStageComplete).toHaveBeenCalledWith(driver, 'job-new', 'master-data', {}, true);
     expect(repo.finishReloadJob).toHaveBeenCalledWith(driver, 'job-new', 'complete');
     expect(result).toMatchObject({ status: 'complete', stagesRun: 2, stagesSkipped: 1 });
+  });
+});
+
+describe('runReload — shutdown abort (#291)', () => {
+  afterEach(() => __resetShutdown());
+
+  it('leaves the interrupted stage running and skips finishReloadJob so the job resumes', async () => {
+    // releases completes; lyrics signals shutdown mid-run and returns partial counts.
+    stageMocks.lyricsRun.mockImplementation(async () => {
+      requestShutdown();
+      return { enriched: 2 };
+    });
+
+    const result = await runReload(driver, { username: 'tester', logger: log, concurrency: 1 });
+
+    // releases settled before the abort.
+    expect(repo.markStageComplete).toHaveBeenCalledWith(driver, 'job-new', 'releases', {
+      releasesProcessed: 2,
+    });
+    // lyrics was started but NOT marked complete/failed — left `running` for cold-start resume.
+    expect(repo.markStageRunning).toHaveBeenCalledWith(driver, 'job-new', 'lyrics');
+    expect(repo.markStageComplete).not.toHaveBeenCalledWith(
+      driver,
+      'job-new',
+      'lyrics',
+      expect.anything(),
+    );
+    expect(repo.markStageFailed).not.toHaveBeenCalledWith(
+      driver,
+      'job-new',
+      'lyrics',
+      expect.anything(),
+      expect.anything(),
+    );
+    // master-data never launched after the abort.
+    expect(stageMocks.masterRun).not.toHaveBeenCalled();
+    // The job row is left `running` (finishReloadJob skipped) so findResumableReloadJob picks it up.
+    expect(repo.finishReloadJob).not.toHaveBeenCalled();
+    expect(result.status).toBe('failed');
   });
 });
 

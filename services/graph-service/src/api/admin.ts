@@ -47,6 +47,7 @@ import {
   markReloadInactive,
   type LiveStageProgress,
 } from '../ingestion/reload-progress.js';
+import { trackBackgroundJob } from '../lifecycle/shutdown.js';
 import { errorResponseRef } from './schemas.js';
 
 // Shared response shape for the nationality summary, used by both POST /nationality/enrich and
@@ -810,7 +811,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       const jobId = startJob();
       const driver = getDriver();
 
-      void runIngestion(discogsClient, driver, { username, logger: request.log })
+      // Track the detached run so graceful shutdown drains it before closing the driver (#291).
+      const ingestRun = runIngestion(discogsClient, driver, { username, logger: request.log })
         .then((summary) => {
           const stats: IngestionStats = {
             nodes: {},
@@ -826,6 +828,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         .catch((err: unknown) => {
           failJob(err instanceof Error ? err.message : String(err));
         });
+      trackBackgroundJob(ingestRun);
 
       return reply.code(202).send({ data: { jobId, message: 'Ingestion started' } });
     },
@@ -1081,7 +1084,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         // Capture just the logger — these runs last hours, and closing over `request` would pin
         // its headers/body/raw socket in memory for the whole run; the pino child logger doesn't.
         const log = request.log;
-        void prepared
+        // Track the detached run so graceful shutdown drains it before closing the driver (#291).
+        const enrichRun = prepared
           .run(getDriver())
           .then((summary) => {
             entry.state.lastResult = summary;
@@ -1097,6 +1101,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           .finally(() => {
             entry.state.running = false;
           });
+        trackBackgroundJob(enrichRun);
 
         return reply.code(202).send({
           data: {
@@ -1311,12 +1316,16 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       // it (idempotent) and clears it in its finally on normal completion; the .catch clears it
       // if runReload rejects before reaching that finally, so the flag can't leak.
       markReloadActive(jobId);
-      void runReload(driver, { username, logger: request.log, resumeJobId: jobId }).catch(
-        (err: unknown) => {
-          markReloadInactive(jobId);
-          request.log.error({ err }, '[reload] orchestrated reload failed');
-        },
-      );
+      // Track the detached run so graceful shutdown drains it before closing the driver (#291).
+      const reloadRun = runReload(driver, {
+        username,
+        logger: request.log,
+        resumeJobId: jobId,
+      }).catch((err: unknown) => {
+        markReloadInactive(jobId);
+        request.log.error({ err }, '[reload] orchestrated reload failed');
+      });
+      trackBackgroundJob(reloadRun);
 
       return reply.code(202).send({ data: { jobId, message: 'Reload started' } });
     },
@@ -1358,4 +1367,12 @@ export function resetAllPipelineStates(): void {
   for (const entry of PIPELINES) {
     Object.assign(entry.state, makePipelineState());
   }
+}
+
+/**
+ * Names of the standalone enrichment pipelines currently running — read by the entry point at
+ * shutdown to log which detached enrich runs are being drained/interrupted (#291).
+ */
+export function getRunningPipelineNames(): string[] {
+  return PIPELINES.filter((entry) => entry.state.running).map((entry) => entry.name);
 }

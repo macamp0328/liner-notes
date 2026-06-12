@@ -20,6 +20,7 @@ import { buildDiscogsClientFromEnv, runIngestion } from './ingestion/ingest.js';
 import { startJob, completeJob, failJob, type IngestionStats } from './ingestion/job-state.js';
 import { findResumableReloadJob } from './db/job-repository.js';
 import { runReload } from './ingestion/orchestrator.js';
+import { trackBackgroundJob } from './lifecycle/shutdown.js';
 
 const OPENAPI_CONFIG = {
   openapi: {
@@ -300,11 +301,15 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
           { jobId: resumable.jobId },
           'Interrupted reload detected — resuming from the last completed stage',
         );
-        void runReload(driver, { username, logger: app.log, resumeJobId: resumable.jobId }).catch(
-          (err: unknown) => {
-            app.log.error({ err }, 'Reload resume failed');
-          },
-        );
+        // Track the detached resume so graceful shutdown drains it before closing the driver (#291).
+        const resumeRun = runReload(driver, {
+          username,
+          logger: app.log,
+          resumeJobId: resumable.jobId,
+        }).catch((err: unknown) => {
+          app.log.error({ err }, 'Reload resume failed');
+        });
+        trackBackgroundJob(resumeRun);
       } else {
         app.log.warn(
           { jobId: resumable.jobId },
@@ -328,7 +333,8 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
       if (discogsClient && username) {
         app.log.info('Graph is empty — starting Discogs ingestion in background');
         startJob();
-        void runIngestion(discogsClient, driver, { username, logger: app.log })
+        // Track the detached run so graceful shutdown drains it before closing the driver (#291).
+        const ingestRun = runIngestion(discogsClient, driver, { username, logger: app.log })
           .then((summary) => {
             const stats: IngestionStats = {
               nodes: {},
@@ -347,6 +353,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
             failJob(msg);
             app.log.error({ err }, 'Discogs ingestion failed');
           });
+        trackBackgroundJob(ingestRun);
       } else {
         app.log.warn(
           'Graph is empty but DISCOGS_TOKEN or DISCOGS_USERNAME not set — skipping auto-ingestion',

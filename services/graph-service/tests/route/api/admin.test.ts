@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../../../src/server.js';
-import { resetAllPipelineStates, busyWith } from '../../../src/api/admin.js';
+import {
+  resetAllPipelineStates,
+  busyWith,
+  getRunningPipelineNames,
+} from '../../../src/api/admin.js';
 import { markReloadActive, __resetReloadProgress } from '../../../src/ingestion/reload-progress.js';
 import type { IngestionSummary } from '../../../src/ingestion/ingest.js';
 import type { JobState } from '../../../src/ingestion/job-state.js';
@@ -583,6 +587,40 @@ describe('Admin API', () => {
 
       release({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
       await flushBackground();
+    });
+
+    it('reports the stage via getRunningPipelineNames while a run is in flight (#291)', async () => {
+      // Nothing running before the trigger (false-branch of the filter).
+      expect(getRunningPipelineNames()).toEqual([]);
+
+      let release!: (value: {
+        enriched: number;
+        skipped: number;
+        failed: number;
+        durationMs: number;
+      }) => void;
+      mockEnrichLyrics.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+
+      const accepted = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/lyrics/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(accepted.statusCode).toBe(202);
+
+      // Mid-run: the lyrics pipeline is reported running (true-branch of the filter).
+      expect(getRunningPipelineNames()).toContain('lyrics');
+
+      release({ enriched: 0, skipped: 0, failed: 0, durationMs: 0 });
+      await flushBackground();
+
+      // Settled — nothing running again.
+      expect(getRunningPipelineNames()).toEqual([]);
     });
   });
 

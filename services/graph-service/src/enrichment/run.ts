@@ -1,6 +1,7 @@
 import type { Driver } from 'neo4j-driver';
 import type { Logger } from '../ingestion/discogs-client.js';
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
+import { getShutdownSignal } from '../lifecycle/shutdown.js';
 
 /**
  * The shared summary every per-item enrichment run returns. Stages that track extra
@@ -78,14 +79,25 @@ const DEFAULT_PROGRESS_EVERY_ITEMS = 25;
  * it is deadlock-immune (one Track per transaction; see the #176 scheduler notes). Counters are
  * mutated synchronously between awaits, so the single-threaded event loop keeps them race-free;
  * under concurrency the progress line is keyed off completion count, not arrival order.
+ *
+ * `signal` (default the process shutdown signal) makes the run checkpoint-and-exit on SIGTERM (#291):
+ * workers stop drawing new items once it aborts, in-flight items finish, and the partial summary is
+ * returned (never thrown — a throw would land a reload stage `failed` and break resume). Every write
+ * is stamp-on-attempt idempotent, so an aborted run resumes cleanly on the next pass.
  */
 export async function runEnrichment<TItem, TResolved>(
   driver: Driver,
   stage: EnrichmentStage<TItem, TResolved>,
-  opts?: { logger?: Logger; onProgress?: ProgressReporter; concurrency?: number },
+  opts?: {
+    logger?: Logger;
+    onProgress?: ProgressReporter;
+    concurrency?: number;
+    signal?: AbortSignal;
+  },
 ): Promise<EnrichmentSummary> {
   const log: Logger = opts?.logger ?? console;
   const onProgress: ProgressReporter = opts?.onProgress ?? NOOP_PROGRESS;
+  const signal: AbortSignal = opts?.signal ?? getShutdownSignal();
   const requested = opts?.concurrency;
   const concurrency =
     Number.isInteger(requested) && (requested as number) > 0 ? (requested as number) : 1;
@@ -161,12 +173,18 @@ export async function runEnrichment<TItem, TResolved>(
   let next = 0;
   const workerCount = Math.min(concurrency, total);
   const workers = Array.from({ length: workerCount }, async () => {
-    while (next < total) {
+    // `!signal.aborted` lets a SIGTERM stop the drain between items (#291): each worker finishes its
+    // in-flight item, then the bound check ends the loop, leaving the rest for the next run.
+    while (next < total && !signal.aborted) {
       const item = items[next++];
       if (item !== undefined) await handleItem(item);
     }
   });
   await Promise.all(workers);
+
+  if (signal.aborted) {
+    log.info(`[${stage.name}] Aborted at ${completed}/${total} — checkpointing and exiting`);
+  }
 
   onProgress(total, total);
   const durationMs = Date.now() - startTime;

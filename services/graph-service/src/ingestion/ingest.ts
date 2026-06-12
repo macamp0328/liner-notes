@@ -3,6 +3,7 @@ import { DiscogsClient } from './discogs-client.js';
 import type { Logger } from './discogs-client.js';
 import { mergeReleaseGraph } from '../db/ingestion-repository.js';
 import { NOOP_PROGRESS, type ProgressReporter } from '../enrichment/progress.js';
+import { getShutdownSignal } from '../lifecycle/shutdown.js';
 import { enrichLyrics } from '../enrichment/lyrics.js';
 import type { LyricsEnrichmentSummary } from '../enrichment/lyrics.js';
 import { enrichMasterData } from '../enrichment/master-data.js';
@@ -99,6 +100,7 @@ export async function ingestReleases(
   username: string,
   log: Logger,
   onProgress: ProgressReporter = NOOP_PROGRESS,
+  signal: AbortSignal = getShutdownSignal(),
 ): Promise<ReleasesIngestSummary> {
   const errors: string[] = [];
   let releasesProcessed = 0;
@@ -127,6 +129,12 @@ export async function ingestReleases(
 
   // Step 2: Fetch and MERGE each release
   for (const releaseId of releaseIds) {
+    // Checkpoint-and-exit on SIGTERM (#291): every write is a MERGE, so the partial load resumes
+    // cleanly (the reload's `releases` stage re-fetches the whole collection on resume).
+    if (signal.aborted) {
+      log.info(`[ingest] Aborted at ${releasesProcessed}/${total} — checkpointing and exiting`);
+      break;
+    }
     try {
       const release = await client.getRelease(releaseId);
       await mergeReleaseGraph(driver, release);
@@ -154,6 +162,7 @@ export async function runIngestion(
   config: IngestionConfig,
 ): Promise<IngestionSummary> {
   const log: Logger = config.logger ?? console;
+  const signal = getShutdownSignal();
   const startTime = Date.now();
 
   // Don't interpolate config.username (sourced from the DISCOGS_USERNAME env var) into the
@@ -163,9 +172,65 @@ export async function runIngestion(
 
   // Steps 1-2: fetch the collection and MERGE each release (shared with the reload's
   // `releases` stage via ingestReleases — issue #175).
-  const releasesSummary = await ingestReleases(client, driver, config.username, log);
+  const releasesSummary = await ingestReleases(
+    client,
+    driver,
+    config.username,
+    log,
+    NOOP_PROGRESS,
+    signal,
+  );
   const { releasesProcessed, releasesFailed } = releasesSummary;
   const errors: string[] = [...releasesSummary.errors];
+
+  // Empty per-stage summaries — used both as the runStage fallback when a stage throws and as the
+  // value for every enrichment stage when shutdown was signalled mid-ingest (#291).
+  const emptyLyrics: LyricsEnrichmentSummary = {
+    enriched: 0,
+    skipped: 0,
+    failed: 0,
+    durationMs: 0,
+    geniusFatalCount: 0,
+    geniusBreakerOpen: 0,
+    lrclibFatalCount: 0,
+    lrclibBreakerOpen: 0,
+  };
+  const emptyMasterData: MasterDataEnrichmentSummary = {
+    enriched: 0,
+    skipped: 0,
+    failed: 0,
+    durationMs: 0,
+  };
+  const emptyArtistGenres: ArtistGenresEnrichmentSummary = {
+    genresEnriched: 0,
+    stylesEnriched: 0,
+    skipped: 0,
+    failed: 0,
+    durationMs: 0,
+  };
+  const emptyArtistProfiles: ArtistProfilesEnrichmentSummary = {
+    enriched: 0,
+    skipped: 0,
+    failed: 0,
+    durationMs: 0,
+  };
+
+  // Shutdown signalled during the release load — checkpoint-and-exit before the slow enrichment
+  // stages. The legacy /ingest job is in-memory (it evaporates on restart anyway); skipping here
+  // just stops cleanly before closeDriver() rather than throwing "driver closed" mid-write.
+  if (signal.aborted) {
+    log.info('[ingest] Shutdown signalled — skipping enrichment stages');
+    return {
+      releasesProcessed,
+      releasesFailed,
+      errors,
+      durationMs: Date.now() - startTime,
+      lyricsEnrichment: emptyLyrics,
+      masterDataEnrichment: emptyMasterData,
+      artistGenresEnrichment: emptyArtistGenres,
+      artistProfilesEnrichment: emptyArtistProfiles,
+    };
+  }
 
   // Steps 3-7: Enrichment stages. Each runs in isolation via runStage — a throw
   // in one stage is logged and recorded in `errors` but must NOT abort the stages
@@ -177,16 +242,7 @@ export async function runIngestion(
   const lyricsEnrichment = await runStage(
     'lyrics',
     () => enrichLyrics(driver, log),
-    {
-      enriched: 0,
-      skipped: 0,
-      failed: 0,
-      durationMs: 0,
-      geniusFatalCount: 0,
-      geniusBreakerOpen: 0,
-      lrclibFatalCount: 0,
-      lrclibBreakerOpen: 0,
-    },
+    emptyLyrics,
     log,
     errors,
   );
@@ -195,7 +251,7 @@ export async function runIngestion(
   const masterDataEnrichment = await runStage(
     'master-data',
     () => enrichMasterData(client, driver, log),
-    { enriched: 0, skipped: 0, failed: 0, durationMs: 0 },
+    emptyMasterData,
     log,
     errors,
   );
@@ -204,7 +260,7 @@ export async function runIngestion(
   const artistGenresEnrichment = await runStage(
     'artist-genres',
     () => enrichArtistGenres(driver, log),
-    { genresEnriched: 0, stylesEnriched: 0, skipped: 0, failed: 0, durationMs: 0 },
+    emptyArtistGenres,
     log,
     errors,
   );
@@ -213,7 +269,7 @@ export async function runIngestion(
   const artistProfilesEnrichment = await runStage(
     'artist-profiles',
     () => enrichArtistProfiles(client, driver, log),
-    { enriched: 0, skipped: 0, failed: 0, durationMs: 0 },
+    emptyArtistProfiles,
     log,
     errors,
   );

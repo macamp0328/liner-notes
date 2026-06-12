@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Driver } from 'neo4j-driver';
+import { requestShutdown, __resetShutdown } from '../../../src/lifecycle/shutdown.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks — the repository write + every enrichment stage are replaced
@@ -59,6 +60,19 @@ describe('runIngestion', () => {
     mockEnrichArtistGenres.mockResolvedValue(GENRES_OK);
     mockEnrichArtistProfiles.mockResolvedValue(PROFILES_OK);
   });
+
+  afterEach(() => __resetShutdown());
+
+  const EMPTY_LYRICS = {
+    enriched: 0,
+    skipped: 0,
+    failed: 0,
+    durationMs: 0,
+    geniusFatalCount: 0,
+    geniusBreakerOpen: 0,
+    lrclibFatalCount: 0,
+    lrclibBreakerOpen: 0,
+  };
 
   it('runs every enrichment stage and aggregates their summaries', async () => {
     const client = makeClient();
@@ -143,5 +157,47 @@ describe('runIngestion', () => {
     expect(mockMergeReleaseGraph).toHaveBeenCalledOnce();
     // Enrichment still runs after per-release failures.
     expect(mockEnrichLyrics).toHaveBeenCalledOnce();
+  });
+
+  // -------------------------------------------------------------------------
+  // Cooperative shutdown abort (#291)
+  // -------------------------------------------------------------------------
+  it('breaks the release loop and skips all enrichment when shutdown is pre-signalled', async () => {
+    requestShutdown();
+    const client = makeClient({
+      getCollectionReleases: vi
+        .fn()
+        .mockResolvedValue({ pagination: { pages: 1 }, releases: [{ id: 1 }, { id: 2 }] }),
+      getRelease: vi.fn().mockResolvedValue({ id: 1 }),
+    });
+
+    const summary = await runIngestion(client, fakeDriver, { username: 'tester', logger: log });
+
+    expect(client.getRelease).not.toHaveBeenCalled();
+    expect(mockMergeReleaseGraph).not.toHaveBeenCalled();
+    expect(mockEnrichLyrics).not.toHaveBeenCalled();
+    expect(mockEnrichMasterData).not.toHaveBeenCalled();
+    expect(summary.releasesProcessed).toBe(0);
+    expect(summary.lyricsEnrichment).toEqual(EMPTY_LYRICS);
+  });
+
+  it('checkpoint-exits mid-load: finishes the in-flight release, then skips enrichment', async () => {
+    const client = makeClient({
+      getCollectionReleases: vi
+        .fn()
+        .mockResolvedValue({ pagination: { pages: 1 }, releases: [{ id: 1 }, { id: 2 }] }),
+      getRelease: vi.fn().mockImplementation(async (id: number) => {
+        if (id === 1) requestShutdown(); // signal arrives during the first release
+        return { id };
+      }),
+    });
+
+    const summary = await runIngestion(client, fakeDriver, { username: 'tester', logger: log });
+
+    // Release 1 finished; release 2 skipped by the abort; enrichment skipped entirely.
+    expect(client.getRelease).toHaveBeenCalledTimes(1);
+    expect(summary.releasesProcessed).toBe(1);
+    expect(mockEnrichLyrics).not.toHaveBeenCalled();
+    expect(summary.lyricsEnrichment).toEqual(EMPTY_LYRICS);
   });
 });

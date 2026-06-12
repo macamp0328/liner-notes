@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { Driver } from 'neo4j-driver';
 import { runEnrichment, type EnrichmentStage } from '../../../src/enrichment/run.js';
+import { __resetShutdown } from '../../../src/lifecycle/shutdown.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -418,5 +419,71 @@ describe('runEnrichment', () => {
     await runEnrichment(fakeDriver, stage, { concurrency: 0 });
 
     expect(peak).toBe(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Cooperative shutdown abort (#291)
+  // -------------------------------------------------------------------------
+  describe('shutdown abort', () => {
+    afterEach(() => __resetShutdown());
+
+    it('processes no items when the signal is already aborted', async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const items = Array.from({ length: 5 }, (_, k) => ({ id: k }));
+      const resolve = vi.fn().mockResolvedValue('x');
+      const stage = makeStage({
+        selectCandidates: vi.fn().mockResolvedValue(items),
+        resolve,
+      });
+
+      const summary = await runEnrichment(fakeDriver, stage, { signal: controller.signal });
+
+      expect(resolve).not.toHaveBeenCalled();
+      expect(summary).toMatchObject({ enriched: 0, skipped: 0, failed: 0 });
+    });
+
+    it('stops drawing new items after a mid-run abort and returns partial counts (no throw)', async () => {
+      const controller = new AbortController();
+      const items = Array.from({ length: 5 }, (_, k) => ({ id: k }));
+      let calls = 0;
+      const resolve = vi.fn().mockImplementation(async () => {
+        calls++;
+        if (calls === 2) controller.abort();
+        return 'x';
+      });
+      const stage = makeStage({
+        selectCandidates: vi.fn().mockResolvedValue(items),
+        resolve,
+      });
+
+      // Serial pool: after the 2nd item aborts the controller, the `!signal.aborted` guard ends the
+      // drain before drawing the 3rd — the rest are left for the next (resumed) run.
+      const summary = await runEnrichment(fakeDriver, stage, {
+        signal: controller.signal,
+        concurrency: 1,
+      });
+
+      expect(resolve).toHaveBeenCalledTimes(2);
+      expect(summary.enriched).toBe(2);
+    });
+
+    it('logs a checkpoint line when aborted', async () => {
+      const logger = makeMockLogger();
+      const controller = new AbortController();
+      controller.abort();
+      const stage = makeStage({
+        selectCandidates: vi.fn().mockResolvedValue([{ id: 1 }]),
+        resolve: vi.fn().mockResolvedValue('x'),
+      });
+
+      const summary = await runEnrichment(fakeDriver, stage, {
+        signal: controller.signal,
+        logger,
+      });
+
+      expect(summary.enriched).toBe(0);
+      expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Aborted at 0/1'));
+    });
   });
 });

@@ -11,6 +11,7 @@ import {
 } from '../db/track-acousticbrainz-repository.js';
 import type { TrackAcousticBrainzResult } from '../db/track-acousticbrainz-repository.js';
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
+import { getShutdownSignal } from '../lifecycle/shutdown.js';
 
 export interface TrackAcousticBrainzEnrichmentSummary {
   /** Tracks that received at least one non-null feature. */
@@ -59,6 +60,7 @@ export async function enrichTrackAcousticBrainz(
   driver: Driver,
   logger?: Logger,
   onProgress: ProgressReporter = NOOP_PROGRESS,
+  signal: AbortSignal = getShutdownSignal(),
 ): Promise<TrackAcousticBrainzEnrichmentSummary> {
   const log: Logger = logger ?? console;
   const startTime = Date.now();
@@ -102,6 +104,12 @@ export async function enrichTrackAcousticBrainz(
 
   const batchCount = Math.ceil(total / MAX_RECORDING_IDS_PER_CALL);
   for (let batchIndex = 0; batchIndex < batchCount; batchIndex++) {
+    // Checkpoint-and-exit on SIGTERM (#291): each batch is a self-contained fetch+write, so breaking
+    // between batches leaves a consistent partial run. Unwritten MBIDs stay unstamped and resume.
+    if (signal.aborted) {
+      log.info(`[track-acousticbrainz] Aborted at batch ${batchIndex}/${batchCount} — exiting`);
+      break;
+    }
     const batch = uniqueMbids.slice(
       batchIndex * MAX_RECORDING_IDS_PER_CALL,
       (batchIndex + 1) * MAX_RECORDING_IDS_PER_CALL,

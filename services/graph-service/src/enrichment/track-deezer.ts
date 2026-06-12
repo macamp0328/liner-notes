@@ -4,6 +4,7 @@ import type { Logger } from '../ingestion/discogs-client.js';
 import { getTracksForDeezerEnrichment, setTrackDeezerData } from '../db/track-deezer-repository.js';
 import type { TrackDeezerResult } from '../db/track-deezer-repository.js';
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
+import { getShutdownSignal } from '../lifecycle/shutdown.js';
 
 export interface TrackDeezerEnrichmentSummary {
   /** Tracks that received a non-null bpm or gain. */
@@ -43,6 +44,7 @@ export async function enrichTrackDeezer(
   driver: Driver,
   logger?: Logger,
   onProgress: ProgressReporter = NOOP_PROGRESS,
+  signal: AbortSignal = getShutdownSignal(),
 ): Promise<TrackDeezerEnrichmentSummary> {
   const log: Logger = logger ?? console;
   const startTime = Date.now();
@@ -109,6 +111,12 @@ export async function enrichTrackDeezer(
 
   let i = 0;
   for (const isrc of uniqueIsrcs) {
+    // Checkpoint-and-exit on SIGTERM (#291): break before fetching the next ISRC. The post-loop
+    // flush() persists whatever is already buffered, so the partial run is consistent and resumes.
+    if (signal.aborted) {
+      log.info(`[track-deezer] Aborted at ${i}/${total} ISRCs — flushing and exiting`);
+      break;
+    }
     if (i > 0 && i % 50 === 0) {
       log.info(
         `[track-deezer] Progress: ${i}/${total} ISRCs — processed=${tracksProcessed}, skipped=${tracksSkipped}, failed=${tracksFailed}`,
