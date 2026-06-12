@@ -130,7 +130,7 @@ export async function enrichLyrics(
       const geniusResult = await genius.getLyrics(track.artistName ?? '', track.title);
       return geniusResult === null
         ? null
-        : { kind: 'resolved', lyrics: geniusResult, source: 'genius' };
+        : { kind: 'resolved', lyrics: geniusResult.lyrics, source: 'genius' };
     },
     write: (d, track, resolved) => {
       if (resolved.kind === 'resolved') {

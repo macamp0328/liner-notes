@@ -35,17 +35,26 @@ interface LrclibResponse {
   // LRCLIB's authoritative instrumental flag. `true` means the track has no lyrics by
   // nature (issue #246) — a terminal answer, never a miss to retry or fall back on.
   instrumental?: boolean;
+  // What LRCLIB matched on. Echoed back on every 200 — used by the match-confidence gate
+  // (#248) to confirm we got the right recording, not a same-title different version.
+  trackName?: string | null;
+  artistName?: string | null;
+  duration?: number | null;
 }
 
 /**
- * What a 200 from LRCLIB carries: the plain lyrics (null when absent) and whether LRCLIB
- * marked the track instrumental (#246). `getLyrics` returns this on 200 and `null` only on a
- * 404 (no record at all). An instrumental track comes back as `{ lyrics: null, instrumental:
- * true }`, which the caller treats as a terminal classification rather than a miss.
+ * What a 200 from LRCLIB carries: the plain lyrics (null when absent), whether LRCLIB marked the
+ * track instrumental (#246), and the title/artist/duration LRCLIB *matched on* (#248) so the caller
+ * can confirm the recording. `getLyrics` returns this on 200 and `null` only on a 404 (no record at
+ * all). An instrumental track comes back as `{ lyrics: null, instrumental: true, ... }`, which the
+ * caller treats as a terminal classification rather than a miss.
  */
 export interface LrclibResult {
   lyrics: string | null;
   instrumental: boolean;
+  matchedTitle: string | null;
+  matchedArtist: string | null;
+  matchedDurationSeconds: number | null;
 }
 
 const BASE_URL = 'https://lrclib.net/api/get';
@@ -119,7 +128,13 @@ export class LrclibClient {
     }
 
     const data = (await response.json()) as LrclibResponse;
-    return { lyrics: data.plainLyrics ?? null, instrumental: data.instrumental === true };
+    return {
+      lyrics: data.plainLyrics ?? null,
+      instrumental: data.instrumental === true,
+      matchedTitle: data.trackName ?? null,
+      matchedArtist: data.artistName ?? null,
+      matchedDurationSeconds: typeof data.duration === 'number' ? data.duration : null,
+    };
   }
 }
 
