@@ -46,6 +46,20 @@ describe('search routes', () => {
       expect(res.statusCode).toBe(400);
     });
 
+    // #289: hostile Lucene syntax must not reach the parser as a 500 (which would trip the
+    // CloudWatch level>=50 alarm). Real Neo4j is the only layer that proves this end-to-end.
+    it.each(['(', '"', 'AND', '*a*~', 'foo )', 'a~b^', '<>'])(
+      'returns 200 (never 500) for hostile q=%s',
+      async (q) => {
+        const res = await app.inject({
+          method: 'GET',
+          url: `/api/v1/search?q=${encodeURIComponent(q)}`,
+        });
+        expect(res.statusCode).toBe(200);
+        expect(Array.isArray(JSON.parse(res.payload))).toBe(true);
+      },
+    );
+
     it('returns 400 when q exceeds 500 chars', async () => {
       const long = 'a'.repeat(501);
       const res = await app.inject({ method: 'GET', url: `/api/v1/search?q=${long}` });
@@ -62,6 +76,19 @@ describe('search routes', () => {
       expect(res.statusCode).toBe(200);
       expect(Array.isArray(JSON.parse(res.payload))).toBe(true);
     });
+
+    // #289: same hostile-input guard for the lyrics index.
+    it.each(['(', '"', 'AND', '*a*~', 'foo )', 'a~b^', '<>'])(
+      'returns 200 (never 500) for hostile q=%s',
+      async (q) => {
+        const res = await app.inject({
+          method: 'GET',
+          url: `/api/v1/search/lyrics?q=${encodeURIComponent(q)}`,
+        });
+        expect(res.statusCode).toBe(200);
+        expect(Array.isArray(JSON.parse(res.payload))).toBe(true);
+      },
+    );
 
     it('returns 400 when q is missing', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/v1/search/lyrics' });

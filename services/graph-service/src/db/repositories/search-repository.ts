@@ -1,5 +1,6 @@
 import { Driver } from 'neo4j-driver';
 import { toInt, toStr, toFloat } from '../coercions.js';
+import { escapeLuceneQuery } from '../lucene.js';
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -34,6 +35,10 @@ export interface LyricsSearchResult {
 // ---------------------------------------------------------------------------
 
 export async function searchGeneral(driver: Driver, q: string): Promise<SearchResultItem[]> {
+  const escaped = escapeLuceneQuery(q);
+  if (escaped.trim().length === 0) {
+    return [];
+  }
   const session = driver.session();
   try {
     const result = await session.run(
@@ -51,7 +56,7 @@ export async function searchGeneral(driver: Driver, q: string): Promise<SearchRe
       ORDER BY score DESC
       LIMIT 50
 `,
-      { q },
+      { q: escaped },
     );
 
     return result.records.flatMap((rec): SearchResultItem[] => {
@@ -110,6 +115,10 @@ export async function searchGeneral(driver: Driver, q: string): Promise<SearchRe
 // ---------------------------------------------------------------------------
 
 export async function searchLyrics(driver: Driver, q: string): Promise<LyricsSearchResult[]> {
+  const escaped = escapeLuceneQuery(q);
+  if (escaped.trim().length === 0) {
+    return [];
+  }
   const session = driver.session();
   try {
     const result = await session.run(
@@ -121,7 +130,7 @@ export async function searchLyrics(driver: Driver, q: string): Promise<LyricsSea
       ORDER BY score DESC
       LIMIT 50
       `,
-      { q },
+      { q: escaped },
     );
 
     return result.records.map((rec) => ({
