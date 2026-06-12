@@ -13,6 +13,8 @@ const start = async (): Promise<void> => {
   let stopSnapshots: (() => void) | null = null;
   try {
     app = await buildServer();
+    // Listen port — defaults to 3000, the container port targeted in production
+    // (the k8s Service and the deploy health gate both reach the pod on 3000).
     const port = parseInt(process.env['PORT'] ?? '3000', 10);
 
     // Graceful shutdown — stop the stats-snapshot timer, then close (which fires
