@@ -131,7 +131,7 @@ jobs:
 
   tests-and-coverage:
     name: Tests & Coverage
-    # Two-phase test run, both against the live neo4j:5 service container:
+    # Two-phase test run, both against the live neo4j:5.26 service container:
     #
     # Phase 1 — driver-free suite (tests/unit + tests/route) with coverage enforcement.
     #   Route handlers are exercised via Fastify inject() with a mocked DB (tests/route/).
@@ -143,12 +143,12 @@ jobs:
     #   graph with fixture data, and exercises the full route→repository→Cypher→Neo4j stack.
     #   Fix locally: start docker-compose Neo4j, then pnpm --filter graph-service test:integration
     #
-    # Note: the neo4j:5 image is Community edition — only the single default "neo4j" database
+    # Note: the neo4j:5.26 image is Community edition — only the single default "neo4j" database
     # exists. CREATE DATABASE is not supported. Test isolation is by full graph wipe between files.
     #
     # Neo4j is started by the ./.github/actions/start-neo4j composite action instead of a
     # `services:` block: the runner pulls `services:` images with a fixed, untunable retry that
-    # intermittently fails on a Docker Hub blip; the action pulls neo4j:5 with our own
+    # intermittently fails on a Docker Hub blip; the action pulls neo4j:5.26 with our own
     # retry/backoff and then waits on Docker's healthcheck. Connection is bolt://localhost:7687,
     # unchanged.
     runs-on: ubuntu-latest

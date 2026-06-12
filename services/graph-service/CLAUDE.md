@@ -545,7 +545,7 @@ fast, naming the var. An explicitly-set empty value is honored.
 skips `.env.local` in that mode. Put the vars in `.env.test.local` (gitignored) or
 export them in your shell — values in `.env.local` never reach the suite.
 
-**Isolation:** both the CI `neo4j:5` image (Community edition) and Neo4j Aura Free
+**Isolation:** both the CI `neo4j:5.26` image (Community edition) and Neo4j Aura Free
 support only the single default database — `CREATE DATABASE test` is unsupported on
 either. Tests isolate by instance plus a full graph wipe
 (`MATCH (n) DETACH DELETE n`) between files, so point `NEO4J_TEST_*` at a database
