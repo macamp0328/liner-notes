@@ -182,6 +182,21 @@ describe('DiscogsClient', () => {
   });
 
   // -------------------------------------------------------------------------
+  // getLabel
+  // -------------------------------------------------------------------------
+  describe('getLabel', () => {
+    it('calls the correct label URL and returns parsed data', async () => {
+      const fakeData = { id: 634, name: '4AD', parent_label: { id: 123, name: 'Beggars Group' } };
+      fetchSpy.mockResolvedValueOnce(makeOkResponse(fakeData));
+
+      const result = await client.getLabel(634);
+
+      expect(result).toEqual(fakeData);
+      expect(fetchSpy.mock.calls[0]?.[0]).toContain('/labels/634');
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Error handling
   // -------------------------------------------------------------------------
   describe('error handling', () => {
