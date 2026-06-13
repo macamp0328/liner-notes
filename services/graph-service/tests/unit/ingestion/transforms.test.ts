@@ -213,6 +213,18 @@ describe('parseInstrument', () => {
     expect(parseInstrument('Harp')).toBe('harp');
   });
 
+  it('does not misclassify instruments whose names contain a shorter family keyword', () => {
+    // Substring matching would otherwise fold these into the wrong high-traffic
+    // family ("Bassoon" -> bass, "Harpsichord" -> harp); the specific families are
+    // ordered ahead of the generic keyword to keep them distinct.
+    expect(parseInstrument('Bassoon')).toBe('bassoon');
+    expect(parseInstrument('Contrabassoon')).toBe('bassoon');
+    expect(parseInstrument('Harpsichord')).toBe('harpsichord');
+    // The genuine basses still resolve to bass.
+    expect(parseInstrument('Double Bass')).toBe('bass');
+    expect(parseInstrument('Contrabass')).toBe('bass');
+  });
+
   it('keeps named bowed instruments distinct from generic strings', () => {
     expect(parseInstrument('Violin')).toBe('violin');
     expect(parseInstrument('Viola')).toBe('viola');

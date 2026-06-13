@@ -139,7 +139,6 @@ function tokenizeRole(role: string): string[] {
       .trim()
       .toLowerCase();
     if (base.length > 0) tokens.push(base);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for (const match of segment.matchAll(/\[([^\]]*)\]/g)) {
       const inner = match[1]!.trim().toLowerCase();
       if (inner.length > 0) tokens.push(inner);
@@ -188,10 +187,12 @@ export type Instrument =
   | 'strings'
   | 'flute'
   | 'clarinet'
+  | 'bassoon'
   | 'harmonica'
   | 'banjo'
   | 'mandolin'
   | 'harp'
+  | 'harpsichord'
   | 'accordion'
   | 'vibraphone';
 
@@ -201,11 +202,14 @@ export type Instrument =
 //   • bass BEFORE guitar               → "Bass Guitar" → bass (and "String Bass" → bass)
 //   • vibraphone BEFORE percussion     → "Marimba" → vibraphone, not generic percussion
 //   • bowed (violin/viola/cello) BEFORE strings → a named instrument beats a generic "Strings"
+//   • bassoon BEFORE bass              → "Bassoon"/"Contrabassoon" contain 'bass' but aren't basses
+//   • harpsichord BEFORE harp          → "Harpsichord" contains 'harp' but is a keyboard, not a harp
 //   • harmonica BEFORE harp            → 'harp' is a substring of 'harmonica'
 //   • synthesizer BEFORE keyboards     → a "Synthesizer [Moog]" credit isn't generic keys
 const INSTRUMENT_RULES: ReadonlyArray<readonly [Instrument, readonly string[]]> = [
   ['drums', ['drums', 'drum']],
   ['clarinet', ['clarinet']],
+  ['bassoon', ['bassoon']],
   ['bass', ['bass']],
   ['guitar', ['guitar']],
   ['vibraphone', ['vibraphone', 'vibes', 'marimba', 'xylophone']],
@@ -234,6 +238,7 @@ const INSTRUMENT_RULES: ReadonlyArray<readonly [Instrument, readonly string[]]> 
   ['strings', ['strings', 'string']],
   ['flute', ['flute']],
   ['harmonica', ['harmonica', 'blues harp']],
+  ['harpsichord', ['harpsichord']],
   ['harp', ['harp']],
   ['banjo', ['banjo']],
   ['mandolin', ['mandolin']],
