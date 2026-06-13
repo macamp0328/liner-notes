@@ -284,20 +284,21 @@ describe('explore routes', () => {
       expect(ids(canonicalRes.payload)).toContain(7000001);
     });
 
-    it('expands a group query to its members’ work (≥2 members resolved)', async () => {
+    it('does NOT expand a group query to its members’ solo work (precision, #330 review)', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/explore/musician/The%20Test%20Swampers',
       });
       expect(res.statusCode).toBe(200);
       const got = ids(res.payload);
-      // The group's own credit (7000001) plus both members' releases (7000002, 7000003).
+      // Returns the group's OWN credit (7000001) only — branch 3 (group→members) was dropped so the
+      // group is not over-attributed with the members' unrelated solo credits (7000002, 7000003).
       expect(got).toContain(7000001);
-      expect(got).toContain(7000002);
-      expect(got).toContain(7000003);
+      expect(got).not.toContain(7000002);
+      expect(got).not.toContain(7000003);
     });
 
-    it('expands a member query to the group’s work (vice-versa)', async () => {
+    it('expands a member query to the group’s work (member→group, the kept direction)', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/explore/musician/Test%20Hood',
@@ -305,7 +306,7 @@ describe('explore routes', () => {
       expect(res.statusCode).toBe(200);
       const got = ids(res.payload);
       expect(got).toContain(7000002); // the member's own credit
-      expect(got).toContain(7000001); // the group's credit, via MEMBER_OF
+      expect(got).toContain(7000001); // the group's credit, via MEMBER_OF (inferred involvement)
     });
   });
 

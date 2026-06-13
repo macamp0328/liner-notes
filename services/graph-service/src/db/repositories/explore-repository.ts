@@ -75,11 +75,18 @@ function mapExploreRelease(record: { get: (key: string) => unknown }): ExploreRe
 
 /**
  * Releases a person worked on, resolving entity-resolution edges (#330). The query name is
- * resolved to a *set* of Musician nodes — the directly-named node, the canonical name via
- * SAME_PERSON_AS (so an alias and the Artist's canonical name return the same set), alias siblings
- * sharing that Artist, and (both directions) MEMBER_OF group↔member — then returns their CREDITED_ON
- * releases including track-scoped credits (resolved track→release via HAS_TRACK), deduped by release.
- * `min(...)` picks a deterministic representative artist/instrument/role per release.
+ * resolved to a *set* of Musician nodes via the CALL{} below:
+ *   - the directly-named node, and the canonical name via SAME_PERSON_AS (so an alias and the
+ *     Artist's canonical name return the same set) + its alias siblings — pure accuracy, same person.
+ *   - the groups a queried *member* belongs to (MEMBER_OF, member→group): a member's results
+ *     additionally include their group's records — an INFERRED, temporally-unguarded involvement
+ *     (the group's catalog, not necessarily records the person personally played on; date-qualified
+ *     membership is roadmapped #339/#341). The reverse (group→members) is deliberately NOT expanded:
+ *     it would attribute every member's unrelated solo credit to the group, making the group look
+ *     involved in records it never touched (PR #330 review). A group query therefore returns only
+ *     the group's own credits; the MEMBER_OF edges still exist and are surfaced via /stats.
+ * Then returns their CREDITED_ON releases incl. track-scoped credits (track→release via HAS_TRACK),
+ * deduped by release, with one representative artist/instrument/role per release.
  */
 export async function getReleasesByMusician(
   driver: Driver,
@@ -97,7 +104,6 @@ export async function getReleasesByMusician(
       CALL {
         WITH s RETURN s AS person
         UNION WITH s MATCH (s)-[:SAME_PERSON_AS]->(:Artist)<-[:SAME_PERSON_AS]-(sib:Musician) RETURN sib AS person
-        UNION WITH s MATCH (mem:Musician)-[:MEMBER_OF]->(s) RETURN mem AS person
         UNION WITH s MATCH (s)-[:MEMBER_OF]->(grp:Musician) RETURN grp AS person
       }
       WITH DISTINCT person

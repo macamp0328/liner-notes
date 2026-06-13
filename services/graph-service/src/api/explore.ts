@@ -156,12 +156,13 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
         description:
           'Resolves entity-resolution edges (#330), so results are not limited to the named credit ' +
           "node. The name is matched against Musician nodes AND, via `SAME_PERSON_AS`, an Artist's " +
-          'canonical name — so querying an alias or the canonical name returns the same release set. ' +
-          'Aliases of the same person are consolidated, both release- and track-scoped credits are ' +
-          'included, and `MEMBER_OF` group membership is expanded in both directions: querying a ' +
-          "group also returns its members' work, and querying an individual also returns releases " +
-          'credited only to a group they belong to. (A future `?expand=` parameter may make the ' +
-          'group expansion opt-in; today it is always on.)',
+          'canonical name — so querying an alias or the canonical name returns the same release set, ' +
+          'over both release- and track-scoped credits. `MEMBER_OF` is expanded one way only: ' +
+          "querying an individual also returns their group's records (an INFERRED, temporally-" +
+          "unguarded involvement — the group's catalog, not necessarily records they personally " +
+          'played on; date-qualified membership is roadmapped). Querying a group returns only the ' +
+          "group's own credits — it is deliberately NOT expanded to its members' solo work, which " +
+          'would over-attribute the group.',
         params: {
           type: 'object',
           required: ['name'],

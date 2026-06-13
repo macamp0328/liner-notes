@@ -21,6 +21,12 @@ export interface GroupMember {
  * is purely staleness-based: every Musician-with-discogsId is checked once per window and stamped
  * (groups get MEMBER_OF edges, non-groups just get the marker). `membersFetchedAt` throttles the
  * re-check to once per window rather than every run.
+ *
+ * FOLLOW-UP (PR #330 review, not blocking): group-ness is immutable — a Musician that returned no
+ * members[] is a person and will never become a group — yet this re-checks ALL ~2.9k
+ * Musicians-with-discogsId every window (~49 min of Discogs calls re-confirming non-groups). A
+ * permanent "not a group" marker (so only known groups re-check for lineup changes) is an
+ * accuracy-neutral recurring-cost win; the first sweep must fetch everything regardless.
  */
 export async function getGroupCandidates(driver: Driver): Promise<GroupCandidate[]> {
   const session = driver.session();
@@ -49,6 +55,13 @@ export async function getGroupCandidates(driver: Driver): Promise<GroupCandidate
  * phantom nodes (the repo's deterministic-clean-data rule). The marker is stamped even when no
  * member matches, so a group whose members are all uncollected is not re-fetched every run. A
  * roster entry pointing at the group itself (`m <> group`) is skipped so no self-loop is created.
+ *
+ * `active` is stored but is NOT a tenure signal: Discogs members[] carries no join/leave dates, so
+ * `MEMBER_OF` attributes a member to ALL of a group's work regardless of when they were in the
+ * lineup (fine for stable session collectives, lossy for bands with changing rosters). No explore
+ * query reads `active` today; date-qualified membership is roadmapped (#339 MB membership dates,
+ * #341 Wikidata P463 begin/end) — until then the member→group expansion in getReleasesByMusician is
+ * documented as an inferred involvement, not ground truth.
  */
 export async function setGroupMembers(
   driver: Driver,

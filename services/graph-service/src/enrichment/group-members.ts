@@ -44,6 +44,10 @@ export async function enrichGroupMembers(
       const members: GroupMember[] = (profile.members ?? [])
         .filter((m) => m.id !== 0)
         .map((m) => ({ id: m.id, active: m.active }));
+      // Non-null whenever Discogs lists ANY member, so `enriched` counts groups-with-members-listed,
+      // NOT MEMBER_OF edges actually written — a group whose members are all uncollected (MATCH-only
+      // writes 0 edges) still counts enriched. The authoritative linkage yield is
+      // /stats.memberOfEdges / groupsWithMembers; watch those after the first prod run (#330 review).
       return members.length === 0 ? null : { members };
     },
     write: (d, candidate, resolved) => setGroupMembers(d, candidate.discogsId, resolved.members),
