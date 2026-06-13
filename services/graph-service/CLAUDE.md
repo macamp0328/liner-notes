@@ -72,7 +72,7 @@ Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At)
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Release`     | `discogsId` (unique), `title`, `pressingYear` (integer), `originalYear` (integer, nullable), `format`, `thumbUrl`, `masterDiscogsId`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `Artist`      | `discogsId` (unique), `name`, `realName`, `profile`, `genres[]`, `styles[]` (last two aggregated onto the Artist by the `artist-genres` enrichment)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `Label`       | `discogsId` (unique), `name`, `profile`, `contactInfo`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `Label`       | `discogsId` (unique), `name`, `profile`, `contactInfo`, `labelHierarchyFetchedAt` (datetime — set by the label-hierarchy enrichment, #332)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `Track`       | `position` + `releaseDiscogsId` (composite MERGE key), `title`, `duration`, `durationSeconds` (integer, nullable), `lyrics` (nullable), `lyricsSource`, `lyricsStatus` (`resolved`/`instrumental`/`probable-instrumental`/`low-confidence`/`not-found`, nullable), `lyricsConfidence` (float 0–1, nullable), `lyricsMatchedTitle` (nullable), `lyricsMatchedArtist` (nullable), `lyricsFetchedAt` (datetime), `recordingMbid` (nullable), `isrc` (nullable), `musicBrainzFetchedAt` (datetime), `tempo` (nullable), `musicalKey` (nullable), `musicalScale` (nullable), `loudnessDb` (nullable), `dynamicComplexity` (nullable), `danceabilityEstimate` (nullable), `voiceInstrumental` (nullable), `acousticBrainzFetchedAt` (datetime), `deezerBpm` (nullable), `deezerGain` (nullable), `deezerFetchedAt` (datetime) |
 | `Genre`       | `name` (unique)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `Style`       | `name` (unique)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -87,22 +87,23 @@ Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At)
 
 ### Relationships
 
-| Relationship     | From → To                    | Properties                                                                                                                              |
-| ---------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `RELEASED_BY`    | Release → Artist             | `role`                                                                                                                                  |
-| `CREDITED_ON`    | Musician → Release or Track  | `role`, `displayRole`, `roleCategory` (`"performer"`/`"producer"`/`"engineer"`/…), `creditedAs`, `scope` (`"release"` or `"track"`)     |
-| `ON_LABEL`       | Release → Label              | `catalogNumber`                                                                                                                         |
-| `IN_GENRE`       | Release → Genre              |                                                                                                                                         |
-| `IN_STYLE`       | Release → Style              |                                                                                                                                         |
-| `FROM_COUNTRY`   | Release → Country            |                                                                                                                                         |
-| `RECORDED_AT`    | Release → Studio             |                                                                                                                                         |
-| `HAS_TRACK`      | Release → Track              | `trackNumber`                                                                                                                           |
-| `SAME_PERSON_AS` | Musician → Artist            | by shared `discogsId` — written inline on ingest AND by the standalone `person-reconciliation` pass (#330, backfills late-Artist links) |
-| `MEMBER_OF`      | Musician → Musician          | `active` (Boolean) — group membership from Discogs `/artists/{id}` `members[]`, written by the `group-members` pass (#330)              |
-| `ORIGIN_COUNTRY` | Artist or Musician → Country | `source` (`"musicbrainz"` / `"wikidata"`; absent on edges written before the prop existed → surfaces as `untagged` in `/stats`)         |
-| `RELEASED_IN`    | Master → Country             | `formats` — global pressing countries/formats from the Discogs master-data enrichment                                                   |
-| `MB_RELEASED_IN` | Master → Country             | `mbReleaseId` (merge key), `date`, `formats` — release events from the MusicBrainz enrichment                                           |
-| `HAS_STAGE`      | ReloadJob → ReloadStage      | `ordinal`                                                                                                                               |
+| Relationship     | From → To                    | Properties                                                                                                                                     |
+| ---------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RELEASED_BY`    | Release → Artist             | `role`                                                                                                                                         |
+| `CREDITED_ON`    | Musician → Release or Track  | `role`, `displayRole`, `roleCategory` (`"performer"`/`"producer"`/`"engineer"`/…), `creditedAs`, `scope` (`"release"` or `"track"`)            |
+| `ON_LABEL`       | Release → Label              | `catalogNumber`                                                                                                                                |
+| `PARENT_LABEL`   | Label → Label                | child → parent; the Discogs label hierarchy (#332). Populated by the label-hierarchy enrichment from `parent_label` (sublabels[] not ingested) |
+| `IN_GENRE`       | Release → Genre              |                                                                                                                                                |
+| `IN_STYLE`       | Release → Style              |                                                                                                                                                |
+| `FROM_COUNTRY`   | Release → Country            |                                                                                                                                                |
+| `RECORDED_AT`    | Release → Studio             |                                                                                                                                                |
+| `HAS_TRACK`      | Release → Track              | `trackNumber`                                                                                                                                  |
+| `SAME_PERSON_AS` | Musician → Artist            | by shared `discogsId` — written inline on ingest AND by the standalone `person-reconciliation` pass (#330, backfills late-Artist links)        |
+| `MEMBER_OF`      | Musician → Musician          | `active` (Boolean) — group membership from Discogs `/artists/{id}` `members[]`, written by the `group-members` pass (#330)                     |
+| `ORIGIN_COUNTRY` | Artist or Musician → Country | `source` (`"musicbrainz"` / `"wikidata"`; absent on edges written before the prop existed → surfaces as `untagged` in `/stats`)                |
+| `RELEASED_IN`    | Master → Country             | `formats` — global pressing countries/formats from the Discogs master-data enrichment                                                          |
+| `MB_RELEASED_IN` | Master → Country             | `mbReleaseId` (merge key), `date`, `formats` — release events from the MusicBrainz enrichment                                                  |
+| `HAS_STAGE`      | ReloadJob → ReloadStage      | `ordinal`                                                                                                                                      |
 
 ### Constraints & Indexes
 
@@ -166,7 +167,7 @@ All `/explore/*` routes return a **bare JSON array** — _not_ a `{ data }` enve
 | `GET`  | `/api/v1/explore/studio/:name`              | Releases recorded at this studio                                                                 |
 | `GET`  | `/api/v1/explore/decade/:decade`            | Releases from this decade (accepts `1970s`)                                                      |
 | `GET`  | `/api/v1/explore/year/:year`                | Releases from this exact year                                                                    |
-| `GET`  | `/api/v1/explore/label/:name`               | Releases on this label                                                                           |
+| `GET`  | `/api/v1/explore/label/:name`               | Releases on this label (`?includeSublabels=true` rolls up the whole PARENT_LABEL family, #332)   |
 | `GET`  | `/api/v1/explore/genre/:name`               | Releases in this genre                                                                           |
 | `GET`  | `/api/v1/explore/style/:name`               | Releases in this style                                                                           |
 | `GET`  | `/api/v1/explore/country/:name`             | Releases from this country                                                                       |
@@ -202,19 +203,21 @@ Every `/api/v1/admin/*` route requires `Authorization: Bearer <ADMIN_TOKEN>`
 | `GET`  | `/api/docs`                            | Swagger UI — **dev only**, not mounted in production (see OpenAPI / Swagger)            |
 
 **Per-pipeline enrichment routes** are generated from the `PIPELINES` array in `admin.ts`. There are
-**11** pipelines — `lyrics`, `nationality`, `master-data`, `mb-release-events`, `track-musicbrainz`,
-`track-acousticbrainz`, `track-deezer`, `artist-profiles`, `artist-genres`, `group-members` (#330,
-writes `MEMBER_OF` from a per-Musician `/artists/{id}` sweep), `person-reconciliation` (#330,
-backfills `SAME_PERSON_AS`) — and for each:
+**12** pipelines — `lyrics`, `nationality`, `master-data`, `mb-release-events`, `track-musicbrainz`,
+`track-acousticbrainz`, `track-deezer`, `artist-profiles`, `artist-genres`, `label-hierarchy` (#332,
+writes `PARENT_LABEL` from a per-Label `/labels/{id}` fetch), `group-members` (#330, writes
+`MEMBER_OF` from a per-Musician `/artists/{id}` sweep), `person-reconciliation` (#330, backfills
+`SAME_PERSON_AS`) — and for each:
 
 - `POST /api/v1/admin/<stage>/enrich` — run that stage standalone (returns `202`; poll status). Four
   also run inside `runIngestion`; the rest are manual-only (see Ingestion Pipeline below).
 - `GET /api/v1/admin/<stage>/status` — that stage's last-run counts / running flag.
-- `POST /api/v1/admin/<stage>/reset` — force a full re-fetch. **Exists for 7 stages only** — the
+- `POST /api/v1/admin/<stage>/reset` — force a full re-fetch. **Exists for 8 stages only** — the
   four _without_ a `reset` route are `lyrics` (use `/api/v1/admin/lyrics/clear-genius` instead),
   `master-data`, `artist-genres` (a self-idempotent whole-graph aggregation with nothing to reset),
-  and `person-reconciliation` (re-links exhaustively every run — nothing to reset). `group-members`
-  _has_ a reset (deletes every `MEMBER_OF` edge + clears the `membersFetchedAt` marker).
+  and `person-reconciliation` (re-links exhaustively every run — nothing to reset). `label-hierarchy`
+  and `group-members` both _have_ a reset (label-hierarchy clears `labelHierarchyFetchedAt` + deletes
+  PARENT_LABEL edges; group-members deletes every `MEMBER_OF` edge + clears `membersFetchedAt`).
 
 ### Response Shapes
 
@@ -282,9 +285,10 @@ follow (#151).
 8. Log summary: nodes, relationships, per-enrichment counts, errors, duration
 ```
 
-The 5 heavier stages (`nationality`, `mb-release-events`, `track-musicbrainz`,
-`track-acousticbrainz`, `track-deezer`) are **not** in `runIngestion` — they're manual-only via the
-per-stage admin routes, or run as part of the orchestrated reload below.
+The 8 heavier/optional stages (`nationality`, `mb-release-events`, `track-musicbrainz`,
+`track-acousticbrainz`, `track-deezer`, `label-hierarchy`, `group-members`, `person-reconciliation`)
+are **not** in `runIngestion` — they're manual-only via the per-stage admin routes, or run as part of
+the orchestrated reload below.
 
 **Triggers:**
 

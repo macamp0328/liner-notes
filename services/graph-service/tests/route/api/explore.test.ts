@@ -175,12 +175,23 @@ describe('explore routes', () => {
 
   // GET /api/v1/explore/label/:name
   describe('GET /api/v1/explore/label/:name', () => {
-    it('returns 200 with label releases', async () => {
+    it('returns 200 with label releases (exact label by default)', async () => {
       mockGetReleasesByLabel.mockResolvedValue([sampleRelease]);
       const response = await app.inject({ method: 'GET', url: '/api/v1/explore/label/4AD' });
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.payload) as (typeof sampleRelease)[];
       expect(body).toHaveLength(1);
+      expect(mockGetReleasesByLabel).toHaveBeenCalledWith(expect.anything(), '4AD', false);
+    });
+
+    it('passes includeSublabels=true through to the repository', async () => {
+      mockGetReleasesByLabel.mockResolvedValue([sampleRelease]);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/label/Columbia?includeSublabels=true',
+      });
+      expect(response.statusCode).toBe(200);
+      expect(mockGetReleasesByLabel).toHaveBeenCalledWith(expect.anything(), 'Columbia', true);
     });
   });
 

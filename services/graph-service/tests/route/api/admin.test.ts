@@ -106,6 +106,16 @@ vi.mock('../../../src/enrichment/artist-genres.js', () => ({
   enrichArtistGenres: mockEnrichArtistGenres,
 }));
 
+const mockEnrichLabelHierarchy = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/enrichment/label-hierarchy.js', () => ({
+  enrichLabelHierarchy: mockEnrichLabelHierarchy,
+}));
+
+const mockResetLabelHierarchyEnrichment = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/db/label-hierarchy-repository.js', () => ({
+  resetLabelHierarchyEnrichment: mockResetLabelHierarchyEnrichment,
+}));
+
 const mockEnrichGroupMembers = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/enrichment/group-members.js', () => ({
   enrichGroupMembers: mockEnrichGroupMembers,
@@ -256,6 +266,13 @@ describe('Admin API', () => {
       durationMs: 9000,
     });
     mockResetArtistProfilesEnrichment.mockResolvedValue(15);
+    mockEnrichLabelHierarchy.mockResolvedValue({
+      enriched: 8,
+      skipped: 2,
+      failed: 0,
+      durationMs: 4000,
+    });
+    mockResetLabelHierarchyEnrichment.mockResolvedValue(11);
     mockEnrichArtistGenres.mockResolvedValue({
       genresEnriched: 20,
       stylesEnriched: 18,
@@ -1142,6 +1159,82 @@ describe('Admin API', () => {
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/admin/artist-profiles/status',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── POST /label-hierarchy/enrich ─────────────────────────────────────────
+  describe('POST /api/v1/admin/label-hierarchy/enrich', () => {
+    it('returns 202 and starts the run in the background on success', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/label-hierarchy/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(202);
+      const body = JSON.parse(response.payload) as { data: { message: string; statusUrl: string } };
+      expect(body.data.message).toContain('started');
+      expect(body.data.statusUrl).toBe('/api/v1/admin/label-hierarchy/status');
+      await flushBackground();
+      expect(mockEnrichLabelHierarchy).toHaveBeenCalledOnce();
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/label-hierarchy/enrich',
+      });
+      expect(response.statusCode).toBe(401);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('UNAUTHORIZED');
+    });
+  });
+
+  // ── POST /label-hierarchy/reset ──────────────────────────────────────────
+  describe('POST /api/v1/admin/label-hierarchy/reset', () => {
+    it('returns 200 with count of reset labels', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/label-hierarchy/reset',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as { data: { reset: number } };
+      expect(body.data.reset).toBe(11);
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/label-hierarchy/reset',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── GET /label-hierarchy/status ──────────────────────────────────────────
+  describe('GET /api/v1/admin/label-hierarchy/status', () => {
+    it('returns 200 with running:false and null lastResult before any run', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/label-hierarchy/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { running: boolean; lastResult: unknown };
+      };
+      expect(body.data.running).toBe(false);
+      expect(body.data.lastResult).toBeNull();
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/label-hierarchy/status',
       });
       expect(response.statusCode).toBe(401);
     });

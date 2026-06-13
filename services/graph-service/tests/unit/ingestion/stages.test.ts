@@ -16,6 +16,7 @@ import { enrichLyrics } from '../../../src/enrichment/lyrics.js';
 import { enrichMasterData } from '../../../src/enrichment/master-data.js';
 import { enrichArtistGenres } from '../../../src/enrichment/artist-genres.js';
 import { enrichArtistProfiles } from '../../../src/enrichment/artist-profiles.js';
+import { enrichLabelHierarchy } from '../../../src/enrichment/label-hierarchy.js';
 import { enrichGroupMembers } from '../../../src/enrichment/group-members.js';
 import { enrichPersonReconciliation } from '../../../src/enrichment/person-reconciliation.js';
 import { enrichMbReleaseEvents } from '../../../src/enrichment/mb-release-events.js';
@@ -29,6 +30,7 @@ vi.mock('../../../src/enrichment/lyrics.js', () => ({ enrichLyrics: vi.fn() }));
 vi.mock('../../../src/enrichment/master-data.js', () => ({ enrichMasterData: vi.fn() }));
 vi.mock('../../../src/enrichment/artist-genres.js', () => ({ enrichArtistGenres: vi.fn() }));
 vi.mock('../../../src/enrichment/artist-profiles.js', () => ({ enrichArtistProfiles: vi.fn() }));
+vi.mock('../../../src/enrichment/label-hierarchy.js', () => ({ enrichLabelHierarchy: vi.fn() }));
 vi.mock('../../../src/enrichment/group-members.js', () => ({ enrichGroupMembers: vi.fn() }));
 vi.mock('../../../src/enrichment/person-reconciliation.js', () => ({
   enrichPersonReconciliation: vi.fn(),
@@ -84,6 +86,7 @@ beforeEach(() => {
     enrichMasterData,
     enrichArtistGenres,
     enrichArtistProfiles,
+    enrichLabelHierarchy,
     enrichGroupMembers,
     enrichPersonReconciliation,
     enrichMbReleaseEvents,
@@ -117,6 +120,7 @@ describe('RELOAD_STAGES order', () => {
       'master-data',
       'artist-profiles',
       'artist-genres',
+      'label-hierarchy',
       'group-members',
       'person-reconciliation',
       'track-musicbrainz',
@@ -180,6 +184,7 @@ describe('RELOAD_STAGES resource lanes', () => {
       'releases',
       'master-data',
       'artist-profiles',
+      'label-hierarchy',
       'group-members',
       'nationality',
     ] as const) {
@@ -257,6 +262,13 @@ describe('stage run() delegates to the right enrich function', () => {
     const onProgress = vi.fn();
     await stage('artist-profiles').run(ctx, onProgress);
     expect(enrichArtistProfiles).toHaveBeenCalledWith(ctx.discogs, ctx.driver, ctx.log, onProgress);
+  });
+
+  it('label-hierarchy → enrichLabelHierarchy(discogs, ..., onProgress)', async () => {
+    const ctx = makeCtx();
+    const onProgress = vi.fn();
+    await stage('label-hierarchy').run(ctx, onProgress);
+    expect(enrichLabelHierarchy).toHaveBeenCalledWith(ctx.discogs, ctx.driver, ctx.log, onProgress);
   });
 
   it('group-members → enrichGroupMembers(discogs, ..., onProgress)', async () => {
@@ -357,6 +369,11 @@ describe('stages skip (return null) when a required client is missing', () => {
 
   it('artist-profiles skips with no discogs client', async () => {
     expect(await stage('artist-profiles').run(makeCtx({ discogs: null }))).toBeNull();
+  });
+
+  it('label-hierarchy skips with no discogs client', async () => {
+    expect(await stage('label-hierarchy').run(makeCtx({ discogs: null }))).toBeNull();
+    expect(enrichLabelHierarchy).not.toHaveBeenCalled();
   });
 
   it('group-members skips with no discogs client', async () => {

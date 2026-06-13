@@ -52,6 +52,8 @@ const statements = [
   'CREATE INDEX track_acousticbrainz_fetched_at IF NOT EXISTS FOR (t:Track) ON (t.acousticBrainzFetchedAt)',
   'CREATE INDEX track_deezer_fetched_at IF NOT EXISTS FOR (t:Track) ON (t.deezerFetchedAt)',
   'CREATE INDEX track_lyrics_fetched_at IF NOT EXISTS FOR (t:Track) ON (t.lyricsFetchedAt)',
+  // issue #332: label hierarchy enrichment marker (PARENT_LABEL).
+  'CREATE INDEX label_hierarchy_fetched_at IF NOT EXISTS FOR (l:Label) ON (l.labelHierarchyFetchedAt)',
 
   // One-time cleanup: remove the superseded boolean markers. The `*FetchedAt` queries
   // never read them, so this is cosmetic — but it keeps the graph free of vestigial

@@ -205,15 +205,31 @@ export async function getReleasesByStudio(driver: Driver, name: string): Promise
 // getReleasesByLabel
 // ---------------------------------------------------------------------------
 
-export async function getReleasesByLabel(driver: Driver, name: string): Promise<ExploreRelease[]> {
+export async function getReleasesByLabel(
+  driver: Driver,
+  name: string,
+  includeSublabels = false,
+): Promise<ExploreRelease[]> {
   const session = driver.session();
   try {
+    // Only the match that binds the release set `r` varies between the two modes; the
+    // OPTIONAL MATCH + projection + ordering tail is shared so a future projection change
+    // touches one place. includeSublabels rolls up the whole label family — the named label
+    // plus every label connected through PARENT_LABEL in either direction (parent, ancestors,
+    // and their sublabels), bounded to a shallow depth — and adds DISTINCT, which is then
+    // load-bearing: a release on two family labels, or multiple same-name seeds, would
+    // otherwise duplicate (issue #332).
+    const match = includeSublabels
+      ? `MATCH (seed:Label) WHERE toLower(seed.name) = toLower($name)
+         MATCH (fam:Label) WHERE fam = seed OR (fam)-[:PARENT_LABEL*1..4]-(seed)
+         MATCH (r:Release)-[:ON_LABEL]->(fam)`
+      : `MATCH (r:Release)-[:ON_LABEL]->(l:Label)
+         WHERE toLower(l.name) = toLower($name)`;
     const result = await session.run(
       `
-      MATCH (r:Release)-[:ON_LABEL]->(l:Label)
-      WHERE toLower(l.name) = toLower($name)
+      ${match}
       OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
-      RETURN r.discogsId AS discogsId, r.title AS title, a.name AS artist,
+      RETURN ${includeSublabels ? 'DISTINCT ' : ''}r.discogsId AS discogsId, r.title AS title, a.name AS artist,
              coalesce(r.originalYear, r.pressingYear) AS pressingYear,
              r.format AS format, r.thumbUrl AS thumbUrl
       ORDER BY pressingYear

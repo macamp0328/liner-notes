@@ -233,6 +233,24 @@ describe('getReleasesByLabel', () => {
     const results = await getReleasesByLabel(driver, 'Unknown Label');
     expect(results).toHaveLength(0);
   });
+
+  it('uses the exact-label query by default (no family roll-up)', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    await getReleasesByLabel(makeMockDriver(session), '4AD');
+    const [query] = runSpy.mock.calls[0] as [string];
+    expect(query).toContain('MATCH (r:Release)-[:ON_LABEL]->(l:Label)');
+    expect(query).not.toContain('PARENT_LABEL');
+  });
+
+  it('rolls up the label family when includeSublabels is true', async () => {
+    const rec = makeRecord(sampleReleaseRecord);
+    const { session, runSpy } = makeMockSession([makeResult([rec])]);
+    const results = await getReleasesByLabel(makeMockDriver(session), 'Columbia', true);
+    expect(results).toHaveLength(1);
+    const [query] = runSpy.mock.calls[0] as [string];
+    expect(query).toContain('(fam)-[:PARENT_LABEL*1..4]-(seed)');
+    expect(query).toContain('RETURN DISTINCT');
+  });
 });
 
 // ---------------------------------------------------------------------------

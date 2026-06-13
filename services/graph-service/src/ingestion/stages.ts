@@ -10,6 +10,7 @@ import { enrichLyrics } from '../enrichment/lyrics.js';
 import { enrichMasterData } from '../enrichment/master-data.js';
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
 import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
+import { enrichLabelHierarchy } from '../enrichment/label-hierarchy.js';
 import { enrichGroupMembers } from '../enrichment/group-members.js';
 import { enrichPersonReconciliation } from '../enrichment/person-reconciliation.js';
 import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
@@ -29,6 +30,7 @@ export type ReloadStageName =
   | 'master-data'
   | 'artist-genres'
   | 'artist-profiles'
+  | 'label-hierarchy'
   | 'group-members'
   | 'person-reconciliation'
   | 'mb-release-events'
@@ -164,6 +166,16 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     deps: ['releases'],
     resources: [],
     run: async (ctx) => ({ ...(await enrichArtistGenres(ctx.driver, ctx.log)) }),
+  },
+  {
+    name: 'label-hierarchy',
+    deps: ['releases'],
+    resources: ['discogs'],
+    sources: ['discogs'],
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
+      if (!ctx.discogs) return null;
+      return { ...(await enrichLabelHierarchy(ctx.discogs, ctx.driver, ctx.log, onProgress)) };
+    },
   },
   {
     // #330: fetch /artists/{id} per Musician-with-discogsId to discover groups and write MEMBER_OF.
