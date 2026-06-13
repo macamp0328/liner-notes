@@ -242,16 +242,30 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   // GET /api/v1/explore/label/:name
-  fastify.get<{ Params: NameParams; Reply: ExploreRelease[] | ErrorReply }>(
+  fastify.get<{
+    Params: NameParams;
+    Querystring: { includeSublabels?: boolean };
+    Reply: ExploreRelease[] | ErrorReply;
+  }>(
     '/api/v1/explore/label/:name',
     {
       schema: {
         tags: ['explore'],
         summary: 'Releases on this label',
+        description:
+          'With `includeSublabels=true`, rolls up releases across the whole label family — the ' +
+          'named label plus every label connected to it through PARENT_LABEL edges (its parent, ' +
+          'ancestors, and their sublabels). Requires the label-hierarchy enrichment to have run.',
         params: {
           type: 'object',
           required: ['name'],
           properties: { name: { type: 'string' } },
+        },
+        querystring: {
+          type: 'object',
+          properties: {
+            includeSublabels: { type: 'boolean', default: false },
+          },
         },
         response: {
           200: { type: 'array', items: exploreReleaseSchema },
@@ -259,7 +273,11 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
       },
     },
     async (request, reply): Promise<ExploreRelease[] | ErrorReply> => {
-      const items = await getReleasesByLabel(getDriver(), request.params.name);
+      const items = await getReleasesByLabel(
+        getDriver(),
+        request.params.name,
+        request.query.includeSublabels ?? false,
+      );
       return reply.send(items);
     },
   );

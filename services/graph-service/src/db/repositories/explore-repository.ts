@@ -171,21 +171,38 @@ export async function getReleasesByStudio(driver: Driver, name: string): Promise
 // getReleasesByLabel
 // ---------------------------------------------------------------------------
 
-export async function getReleasesByLabel(driver: Driver, name: string): Promise<ExploreRelease[]> {
+export async function getReleasesByLabel(
+  driver: Driver,
+  name: string,
+  includeSublabels = false,
+): Promise<ExploreRelease[]> {
   const session = driver.session();
   try {
-    const result = await session.run(
-      `
-      MATCH (r:Release)-[:ON_LABEL]->(l:Label)
-      WHERE toLower(l.name) = toLower($name)
-      OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
-      RETURN r.discogsId AS discogsId, r.title AS title, a.name AS artist,
-             coalesce(r.originalYear, r.pressingYear) AS pressingYear,
-             r.format AS format, r.thumbUrl AS thumbUrl
-      ORDER BY pressingYear
-      `,
-      { name },
-    );
+    // includeSublabels rolls up the whole label family: the named label plus every label
+    // connected to it through PARENT_LABEL edges in either direction (parent, ancestors, and
+    // their sublabels), bounded to a shallow depth. DISTINCT is load-bearing — a release on two
+    // family labels, or multiple same-name seeds, would otherwise duplicate (issue #332).
+    const query = includeSublabels
+      ? `
+        MATCH (seed:Label) WHERE toLower(seed.name) = toLower($name)
+        MATCH (fam:Label) WHERE fam = seed OR (fam)-[:PARENT_LABEL*1..4]-(seed)
+        MATCH (r:Release)-[:ON_LABEL]->(fam)
+        OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
+        RETURN DISTINCT r.discogsId AS discogsId, r.title AS title, a.name AS artist,
+               coalesce(r.originalYear, r.pressingYear) AS pressingYear,
+               r.format AS format, r.thumbUrl AS thumbUrl
+        ORDER BY pressingYear
+        `
+      : `
+        MATCH (r:Release)-[:ON_LABEL]->(l:Label)
+        WHERE toLower(l.name) = toLower($name)
+        OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
+        RETURN r.discogsId AS discogsId, r.title AS title, a.name AS artist,
+               coalesce(r.originalYear, r.pressingYear) AS pressingYear,
+               r.format AS format, r.thumbUrl AS thumbUrl
+        ORDER BY pressingYear
+        `;
+    const result = await session.run(query, { name });
     return result.records.map(mapExploreRelease);
   } finally {
     await session.close();
