@@ -50,6 +50,9 @@ export async function enrichLabelHierarchy(
     write: (d, label, resolved) => setLabelParent(d, label.discogsId, resolved),
     markAttempted: (d, label) => setLabelHierarchyFetched(d, label.discogsId),
     describeItem: (label) => `label ${label.discogsId}`,
+    // ~1 Discogs call/s under the rate limiter, hundreds of labels — report progress at the
+    // denser cadence the other rate-limited stages use, not the default 25.
+    progressEveryItems: 10,
   };
 
   return runEnrichment(driver, stage, { logger: log, onProgress });
