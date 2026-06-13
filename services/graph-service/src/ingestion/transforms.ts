@@ -180,6 +180,7 @@ export type Instrument =
   | 'saxophone'
   | 'trumpet'
   | 'trombone'
+  | 'tuba'
   | 'horn'
   | 'violin'
   | 'viola'
@@ -187,10 +188,12 @@ export type Instrument =
   | 'strings'
   | 'flute'
   | 'clarinet'
+  | 'oboe'
   | 'bassoon'
   | 'harmonica'
   | 'banjo'
   | 'mandolin'
+  | 'sitar'
   | 'harp'
   | 'harpsichord'
   | 'accordion'
@@ -211,7 +214,7 @@ const INSTRUMENT_RULES: ReadonlyArray<readonly [Instrument, readonly string[]]> 
   ['clarinet', ['clarinet']],
   ['bassoon', ['bassoon']],
   ['bass', ['bass']],
-  ['guitar', ['guitar']],
+  ['guitar', ['guitar', 'dobro']],
   ['vibraphone', ['vibraphone', 'vibes', 'marimba', 'xylophone']],
   [
     'percussion',
@@ -225,23 +228,29 @@ const INSTRUMENT_RULES: ReadonlyArray<readonly [Instrument, readonly string[]]> 
       'cabasa',
       'cowbell',
       'claves',
+      'maracas',
+      'triangle',
+      'chimes',
     ],
   ],
   ['vocals', ['vocals', 'vocal', 'voice', 'choir']],
   ['saxophone', ['saxophone', 'sax']],
   ['trumpet', ['trumpet', 'cornet']],
   ['trombone', ['trombone']],
+  ['tuba', ['tuba']],
   ['horn', ['french horn', 'flugelhorn', 'horns', 'horn', 'brass']],
   ['violin', ['violin', 'fiddle']],
   ['viola', ['viola']],
   ['cello', ['cello']],
   ['strings', ['strings', 'string']],
   ['flute', ['flute']],
+  ['oboe', ['oboe']],
   ['harmonica', ['harmonica', 'blues harp']],
   ['harpsichord', ['harpsichord']],
   ['harp', ['harp']],
   ['banjo', ['banjo']],
   ['mandolin', ['mandolin']],
+  ['sitar', ['sitar']],
   ['accordion', ['accordion']],
   ['organ', ['hammond', 'organ']],
   ['piano', ['rhodes', 'wurlitzer', 'piano']],

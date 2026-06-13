@@ -213,6 +213,17 @@ describe('parseInstrument', () => {
     expect(parseInstrument('Harp')).toBe('harp');
   });
 
+  it('covers the long-tail instruments measured in the collection', () => {
+    // Added from a coverage pass over the real CREDITED_ON role distribution.
+    expect(parseInstrument('Oboe')).toBe('oboe');
+    expect(parseInstrument('Tuba')).toBe('tuba');
+    expect(parseInstrument('Sitar')).toBe('sitar');
+    expect(parseInstrument('Dobro')).toBe('guitar'); // resonator guitar
+    expect(parseInstrument('Maracas')).toBe('percussion');
+    expect(parseInstrument('Triangle')).toBe('percussion');
+    expect(parseInstrument('Chimes')).toBe('percussion');
+  });
+
   it('does not misclassify instruments whose names contain a shorter family keyword', () => {
     // Substring matching would otherwise fold these into the wrong high-traffic
     // family ("Bassoon" -> bass, "Harpsichord" -> harp); the specific families are
