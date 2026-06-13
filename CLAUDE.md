@@ -236,6 +236,7 @@ Route handler (src/api/) → Repository (src/db/) → Neo4j driver (src/db/clien
 - **Studio filter:** uses numeric `entity_type` codes `"23"` (Recorded At) and `"27"` (Mixed At) — not `entity_type_name`, which is inconsistently formatted.
 - **`CREDITED_ON` scope:** `"release"` when musician → Release, `"track"` when musician → Track. Stored as property for query convenience; explore-by-musician queries depend on it.
 - **`anv` → `creditedAs`:** when `extraartists[n].anv` is non-empty, stored as `creditedAs` on `CREDITED_ON`. Captures sleeve credits where an artist used a different name.
+- **`instrument` is derived, not raw (#333):** `parseInstrument(role)` normalizes the Discogs role onto a controlled vocabulary and is stored as a **separate** `CREDITED_ON` property; the raw `role`/`displayRole` are kept verbatim. Derived independently of `roleCategory` (gating on `performer` would drop trombone/viola/clarinet, which bucket as `other`); `null` for non-instrument roles. Backs `/api/v1/explore/instrument/:name`.
 - **`formats[].qty` is a string** in the Discogs API — always `parseInt` before storing.
 - **Track `duration` is frequently `""`** — treat as null, do not store.
 - **`basic_information` in collection responses is incomplete** — always fetch the full release via `GET /releases/{id}`.

@@ -87,21 +87,21 @@ Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At)
 
 ### Relationships
 
-| Relationship     | From → To                    | Properties                                                                                                                          |
-| ---------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `RELEASED_BY`    | Release → Artist             | `role`                                                                                                                              |
-| `CREDITED_ON`    | Musician → Release or Track  | `role`, `displayRole`, `roleCategory` (`"performer"`/`"producer"`/`"engineer"`/…), `creditedAs`, `scope` (`"release"` or `"track"`) |
-| `ON_LABEL`       | Release → Label              | `catalogNumber`                                                                                                                     |
-| `IN_GENRE`       | Release → Genre              |                                                                                                                                     |
-| `IN_STYLE`       | Release → Style              |                                                                                                                                     |
-| `FROM_COUNTRY`   | Release → Country            |                                                                                                                                     |
-| `RECORDED_AT`    | Release → Studio             |                                                                                                                                     |
-| `HAS_TRACK`      | Release → Track              | `trackNumber`                                                                                                                       |
-| `SAME_PERSON_AS` | Musician → Artist            |                                                                                                                                     |
-| `ORIGIN_COUNTRY` | Artist or Musician → Country | `source` (`"musicbrainz"` / `"wikidata"`; absent on edges written before the prop existed → surfaces as `untagged` in `/stats`)     |
-| `RELEASED_IN`    | Master → Country             | `formats` — global pressing countries/formats from the Discogs master-data enrichment                                               |
-| `MB_RELEASED_IN` | Master → Country             | `mbReleaseId` (merge key), `date`, `formats` — release events from the MusicBrainz enrichment                                       |
-| `HAS_STAGE`      | ReloadJob → ReloadStage      | `ordinal`                                                                                                                           |
+| Relationship     | From → To                    | Properties                                                                                                                                                                                                                            |
+| ---------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RELEASED_BY`    | Release → Artist             | `role`                                                                                                                                                                                                                                |
+| `CREDITED_ON`    | Musician → Release or Track  | `role`, `displayRole`, `roleCategory` (`"performer"`/`"producer"`/`"engineer"`/…), `instrument` (normalized instrument family derived from `role`; `null` for non-instrument roles), `creditedAs`, `scope` (`"release"` or `"track"`) |
+| `ON_LABEL`       | Release → Label              | `catalogNumber`                                                                                                                                                                                                                       |
+| `IN_GENRE`       | Release → Genre              |                                                                                                                                                                                                                                       |
+| `IN_STYLE`       | Release → Style              |                                                                                                                                                                                                                                       |
+| `FROM_COUNTRY`   | Release → Country            |                                                                                                                                                                                                                                       |
+| `RECORDED_AT`    | Release → Studio             |                                                                                                                                                                                                                                       |
+| `HAS_TRACK`      | Release → Track              | `trackNumber`                                                                                                                                                                                                                         |
+| `SAME_PERSON_AS` | Musician → Artist            |                                                                                                                                                                                                                                       |
+| `ORIGIN_COUNTRY` | Artist or Musician → Country | `source` (`"musicbrainz"` / `"wikidata"`; absent on edges written before the prop existed → surfaces as `untagged` in `/stats`)                                                                                                       |
+| `RELEASED_IN`    | Master → Country             | `formats` — global pressing countries/formats from the Discogs master-data enrichment                                                                                                                                                 |
+| `MB_RELEASED_IN` | Master → Country             | `mbReleaseId` (merge key), `date`, `formats` — release events from the MusicBrainz enrichment                                                                                                                                         |
+| `HAS_STAGE`      | ReloadJob → ReloadStage      | `ordinal`                                                                                                                                                                                                                             |
 
 ### Constraints & Indexes
 
@@ -157,23 +157,24 @@ see `src/db/schema.ts` for the authoritative list (do not duplicate it here; it 
 All `/explore/*` routes return a **bare JSON array** — _not_ a `{ data }` envelope — except
 `/explore/connections/:discogsId`, which returns `{ seed, nodes }`.
 
-| Method | Path                                        | Description                                                                                      |
-| ------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `GET`  | `/api/v1/explore/musician/:name`            | Releases featuring this musician                                                                 |
-| `GET`  | `/api/v1/explore/producer/:name`            | Releases this person produced                                                                    |
-| `GET`  | `/api/v1/explore/engineer/:name`            | Releases this person engineered                                                                  |
-| `GET`  | `/api/v1/explore/studio/:name`              | Releases recorded at this studio                                                                 |
-| `GET`  | `/api/v1/explore/decade/:decade`            | Releases from this decade (accepts `1970s`)                                                      |
-| `GET`  | `/api/v1/explore/year/:year`                | Releases from this exact year                                                                    |
-| `GET`  | `/api/v1/explore/label/:name`               | Releases on this label                                                                           |
-| `GET`  | `/api/v1/explore/genre/:name`               | Releases in this genre                                                                           |
-| `GET`  | `/api/v1/explore/style/:name`               | Releases in this style                                                                           |
-| `GET`  | `/api/v1/explore/country/:name`             | Releases from this country                                                                       |
-| `GET`  | `/api/v1/explore/connections/:discogsId`    | Graph traversal (`?depth=N`, max 3) — returns `{ seed, nodes }`                                  |
-| `GET`  | `/api/v1/explore/shared-musicians`          | Release pairs sharing session musicians                                                          |
-| `GET`  | `/api/v1/explore/tracks/most-international` | Tracks whose credited musicians span the most countries of origin (needs nationality enrichment) |
-| `GET`  | `/api/v1/explore/releases/most-pressed`     | Releases with the widest global pressing reach (needs master-data enrichment)                    |
-| `GET`  | `/api/v1/explore/tracks/by-audio-features`  | Filter Tracks by audio features (tempo, key, scale, danceability, vocal/instrumental)            |
+| Method | Path                                        | Description                                                                                        |
+| ------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/v1/explore/musician/:name`            | Releases featuring this musician                                                                   |
+| `GET`  | `/api/v1/explore/producer/:name`            | Releases this person produced                                                                      |
+| `GET`  | `/api/v1/explore/engineer/:name`            | Releases this person engineered                                                                    |
+| `GET`  | `/api/v1/explore/instrument/:name`          | Musicians who play this normalized instrument (e.g. `bass`) and the releases — release-scoped (v1) |
+| `GET`  | `/api/v1/explore/studio/:name`              | Releases recorded at this studio                                                                   |
+| `GET`  | `/api/v1/explore/decade/:decade`            | Releases from this decade (accepts `1970s`)                                                        |
+| `GET`  | `/api/v1/explore/year/:year`                | Releases from this exact year                                                                      |
+| `GET`  | `/api/v1/explore/label/:name`               | Releases on this label                                                                             |
+| `GET`  | `/api/v1/explore/genre/:name`               | Releases in this genre                                                                             |
+| `GET`  | `/api/v1/explore/style/:name`               | Releases in this style                                                                             |
+| `GET`  | `/api/v1/explore/country/:name`             | Releases from this country                                                                         |
+| `GET`  | `/api/v1/explore/connections/:discogsId`    | Graph traversal (`?depth=N`, max 3) — returns `{ seed, nodes }`                                    |
+| `GET`  | `/api/v1/explore/shared-musicians`          | Release pairs sharing session musicians                                                            |
+| `GET`  | `/api/v1/explore/tracks/most-international` | Tracks whose credited musicians span the most countries of origin (needs nationality enrichment)   |
+| `GET`  | `/api/v1/explore/releases/most-pressed`     | Releases with the widest global pressing reach (needs master-data enrichment)                      |
+| `GET`  | `/api/v1/explore/tracks/by-audio-features`  | Filter Tracks by audio features (tempo, key, scale, danceability, vocal/instrumental)              |
 
 ### Search & Stats
 
@@ -472,6 +473,8 @@ Added in Task 4. Source files:
 6. **`anv` → `creditedAs`.** When `extraartists[n].anv` is non-empty, it is stored as `creditedAs` on the `CREDITED_ON` relationship. This captures sleeve credits where an artist used a different name (e.g. "Dom Monks" credited as "Dominic Monks"). When `anv` is empty string, `creditedAs` is `null`.
 
 7. **MusicBrainz keys the release-group relation under `release_group` (underscore), not `release-group` (hyphen).** In the `/ws/2/url` relation JSON, the embedded entity is `release_group` and `target-type` is `"release_group"` — unlike the single-word `release` / `artist` keys, which have no hyphen/underscore ambiguity. Parsing it as `release-group` silently returns `null` for every master (the #183 no-op). Relatedly, the release **browse** endpoint (`/ws/2/release?release-group=…`) returns `release-events` by default and rejects `inc=release-events` as invalid — pass `inc=media` only to populate per-release formats.
+
+8. **`instrument` is a derived, separate `CREDITED_ON` property (#333).** `parseInstrument(role)` in `transforms.ts` normalizes the free-text Discogs role onto a controlled 25-family vocabulary (`bass`, `guitar`, …) so credit queries don't enumerate every spelling. The raw `role` and first-token `displayRole` are kept verbatim for provenance — `instrument` never overwrites them. It is **not** gated on `roleCategory === 'performer'`: the role-category performer keyword list is narrower than the instrument vocabulary, so gating would silently null real instruments (`Trombone`, `Viola`, `Clarinet`, `Vibraphone` all bucket as `roleCategory: 'other'`). Non-instrument roles (producers, engineers, visual, crew) store `instrument = null`. `INSTRUMENT_RULES` is priority-ordered and the order is load-bearing (drums/clarinet before bass, vibraphone before percussion, bowed before strings, harmonica before harp) — see the comment on the table. Backs `GET /api/v1/explore/instrument/:name`.
 
 **Regression guards — what breaks if you change X:**
 
