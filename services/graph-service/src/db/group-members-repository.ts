@@ -30,6 +30,10 @@ export interface GroupMember {
  * (~49 min of Discogs calls saved per sweep). A group whose members are all uncollected keeps
  * `notAGroup` unset (it IS a group, just edge-less for now), so it stays in the staleness re-check
  * and backfills MEMBER_OF edges as those members are later collected.
+ *
+ * This terminal-skip (`notAGroup`) vs. throttled-recheck (`membersFetchedAt`) split is the same
+ * two-state shape `lyrics` uses (`instrumental`/`probable-instrumental` vs `lyricsFetchedAt`);
+ * generalising it across every enrichment source is tracked in #367.
  */
 export async function getGroupCandidates(driver: Driver): Promise<GroupCandidate[]> {
   const session = driver.session();
