@@ -57,6 +57,8 @@ describe('getGroupCandidates', () => {
     const [query] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(query).toContain('m.discogsId IS NOT NULL');
     expect(query).toContain('membersFetchedAt');
+    // Confirmed non-groups are permanently gated out of the re-check (issue #330 follow-up).
+    expect(query).toContain('m.notAGroup IS NULL');
     expect(session.close).toHaveBeenCalledOnce();
   });
 });
@@ -86,11 +88,13 @@ describe('setGroupMembers', () => {
 describe('stampMembersFetched', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('stamps membersFetchedAt without writing edges', async () => {
+  it('stamps membersFetchedAt and the permanent notAGroup marker without writing edges', async () => {
     const { session, runSpy } = makeMockSession();
     await stampMembersFetched(makeDriver(session), 555);
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(query).toContain('SET m.membersFetchedAt = datetime()');
+    // The markAttempted path proves the node is a person → mark it a non-group for good.
+    expect(query).toContain('m.notAGroup = true');
     expect(query).not.toContain('MEMBER_OF');
     expect((params['discogsId'] as { toNumber(): number }).toNumber()).toBe(555);
   });
@@ -110,6 +114,8 @@ describe('resetGroupMembers', () => {
     expect(deleteQuery).toContain('DELETE r');
     const [clearQuery] = runSpy.mock.calls[1] as [string];
     expect(clearQuery).toContain('REMOVE m.membersFetchedAt');
+    // Reset must also clear the permanent non-group marker so the next sweep re-fetches everything.
+    expect(clearQuery).toContain('notAGroup');
   });
 
   it('returns 0 when no markers exist', async () => {
