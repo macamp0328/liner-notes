@@ -48,6 +48,7 @@ export interface StatsData {
     artists: number;
     tracks: number;
     masters: number;
+    musicians: number;
   };
   enrichment: {
     releasesWithOriginalYear: CoverageMetric;
@@ -66,6 +67,13 @@ export interface StatsData {
     tracksWithDeezerBpm: CoverageMetric;
     tracksWithDeezerGain: CoverageMetric;
     mastersWithReleaseEvents: CoverageMetric;
+    // Entity resolution (#330). samePersonLinks IS a CoverageMetric (gated by the reload verify
+    // pass — covered/applicable over reconcilable Musicians). memberOfEdges/groupsWithMembers are
+    // raw counts (MEMBER_OF has no knowable denominator); not CoverageMetrics, so the verify gate's
+    // CoverageMetricKey skips them, like lyricsFunnel.
+    samePersonLinks: CoverageMetric;
+    memberOfEdges: number;
+    groupsWithMembers: number;
   };
 }
 
@@ -156,6 +164,27 @@ const MASTER_QUERY = `
     count(m) AS total,
     count(CASE WHEN EXISTS { (m)-[:MB_RELEASED_IN]->() } THEN 1 END) AS releaseEventsCovered`;
 
+// Entity-resolution (#330) per-Musician scan. samePersonApplicable = Musicians whose discogsId
+// matches an Artist (the reconciliation target set); samePersonCovered = those already linked via
+// SAME_PERSON_AS. After the deterministic, exhaustive reconciliation pass runs, covered == applicable
+// — which is what makes the reload verify gate's minPct:100 meaningful. groupsWithMembers counts
+// Musician nodes that are a group (≥1 incoming MEMBER_OF). One scan; an aggregation over zero rows
+// still returns a row of zeros, so this is empty-graph safe.
+const MUSICIAN_QUERY = `
+  MATCH (m:Musician)
+  WITH m, (m.discogsId IS NOT NULL AND EXISTS { MATCH (a:Artist) WHERE a.discogsId = m.discogsId }) AS samePersonApp
+  RETURN
+    count(m) AS total,
+    count(CASE WHEN samePersonApp THEN 1 END) AS samePersonApplicable,
+    count(CASE WHEN samePersonApp AND EXISTS { MATCH (m)-[:SAME_PERSON_AS]->(a2:Artist) WHERE a2.discogsId = m.discogsId } THEN 1 END) AS samePersonCovered,
+    count(CASE WHEN EXISTS { (:Musician)-[:MEMBER_OF]->(m) } THEN 1 END) AS groupsWithMembers`;
+
+// MEMBER_OF edge count — a relationship scan can't ride the node scan above. count() over zero
+// matched rows returns one row with 0, so this is empty-graph safe.
+const MEMBER_OF_QUERY = `
+  MATCH (:Musician)-[r:MEMBER_OF]->(:Musician)
+  RETURN count(r) AS memberOfEdges`;
+
 // Nationality (ORIGIN_COUNTRY) coverage for one people-label, split by the
 // `source` stored on the relationship. One scan per label; the applicable gate
 // mirrors that label's enrichment selector. `label` and `applicableExpr` are
@@ -214,17 +243,29 @@ async function runCounts(driver: Driver, cypher: string): Promise<Map<string, nu
  * the route layer caches the result so repeated public hits don't re-scan.
  */
 export async function getStats(driver: Driver): Promise<StatsData> {
-  const [release, artist, track, master, natArtist, natMusician, natProducer, natEngineer] =
-    await Promise.all([
-      runCounts(driver, RELEASE_QUERY),
-      runCounts(driver, ARTIST_QUERY),
-      runCounts(driver, TRACK_QUERY),
-      runCounts(driver, MASTER_QUERY),
-      runCounts(driver, ARTIST_NATIONALITY_QUERY),
-      runCounts(driver, MUSICIAN_NATIONALITY_QUERY),
-      runCounts(driver, PRODUCER_NATIONALITY_QUERY),
-      runCounts(driver, ENGINEER_NATIONALITY_QUERY),
-    ]);
+  const [
+    release,
+    artist,
+    track,
+    master,
+    natArtist,
+    natMusician,
+    natProducer,
+    natEngineer,
+    musician,
+    memberOf,
+  ] = await Promise.all([
+    runCounts(driver, RELEASE_QUERY),
+    runCounts(driver, ARTIST_QUERY),
+    runCounts(driver, TRACK_QUERY),
+    runCounts(driver, MASTER_QUERY),
+    runCounts(driver, ARTIST_NATIONALITY_QUERY),
+    runCounts(driver, MUSICIAN_NATIONALITY_QUERY),
+    runCounts(driver, PRODUCER_NATIONALITY_QUERY),
+    runCounts(driver, ENGINEER_NATIONALITY_QUERY),
+    runCounts(driver, MUSICIAN_QUERY),
+    runCounts(driver, MEMBER_OF_QUERY),
+  ]);
 
   const n = (m: Map<string, number>, key: string): number => m.get(key) ?? 0;
 
@@ -265,6 +306,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       artists: n(artist, 'total'),
       tracks: trackTotal,
       masters: n(master, 'total'),
+      musicians: n(musician, 'total'),
     },
     enrichment: {
       releasesWithOriginalYear: coverage(n(release, 'oyCovered'), n(release, 'oyApplicable')),
@@ -297,6 +339,12 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       tracksWithDeezerBpm: coverage(n(track, 'deezerCovered'), isrcCovered),
       tracksWithDeezerGain: coverage(n(track, 'deezerGainCovered'), isrcCovered),
       mastersWithReleaseEvents: coverage(n(master, 'releaseEventsCovered'), n(master, 'total')),
+      samePersonLinks: coverage(
+        n(musician, 'samePersonCovered'),
+        n(musician, 'samePersonApplicable'),
+      ),
+      memberOfEdges: n(memberOf, 'memberOfEdges'),
+      groupsWithMembers: n(musician, 'groupsWithMembers'),
     },
   };
 }

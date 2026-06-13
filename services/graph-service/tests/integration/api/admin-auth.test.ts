@@ -52,6 +52,11 @@ const ADMIN_ROUTES: { method: 'GET' | 'POST'; url: string }[] = [
   { method: 'POST', url: '/api/v1/admin/label-hierarchy/enrich' },
   { method: 'POST', url: '/api/v1/admin/label-hierarchy/reset' },
   { method: 'GET', url: '/api/v1/admin/label-hierarchy/status' },
+  { method: 'POST', url: '/api/v1/admin/group-members/enrich' },
+  { method: 'POST', url: '/api/v1/admin/group-members/reset' },
+  { method: 'GET', url: '/api/v1/admin/group-members/status' },
+  { method: 'POST', url: '/api/v1/admin/person-reconciliation/enrich' },
+  { method: 'GET', url: '/api/v1/admin/person-reconciliation/status' },
   { method: 'POST', url: '/api/v1/admin/reload' },
   { method: 'GET', url: '/api/v1/admin/reload/status' },
 ];

@@ -98,7 +98,8 @@ Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At)
 | `FROM_COUNTRY`   | Release → Country            |                                                                                                                                                |
 | `RECORDED_AT`    | Release → Studio             |                                                                                                                                                |
 | `HAS_TRACK`      | Release → Track              | `trackNumber`                                                                                                                                  |
-| `SAME_PERSON_AS` | Musician → Artist            |                                                                                                                                                |
+| `SAME_PERSON_AS` | Musician → Artist            | by shared `discogsId` — written inline on ingest AND by the standalone `person-reconciliation` pass (#330, backfills late-Artist links)        |
+| `MEMBER_OF`      | Musician → Musician          | `active` (Boolean) — group membership from Discogs `/artists/{id}` `members[]`, written by the `group-members` pass (#330)                     |
 | `ORIGIN_COUNTRY` | Artist or Musician → Country | `source` (`"musicbrainz"` / `"wikidata"`; absent on edges written before the prop existed → surfaces as `untagged` in `/stats`)                |
 | `RELEASED_IN`    | Master → Country             | `formats` — global pressing countries/formats from the Discogs master-data enrichment                                                          |
 | `MB_RELEASED_IN` | Master → Country             | `mbReleaseId` (merge key), `date`, `formats` — release events from the MusicBrainz enrichment                                                  |
@@ -202,17 +203,21 @@ Every `/api/v1/admin/*` route requires `Authorization: Bearer <ADMIN_TOKEN>`
 | `GET`  | `/api/docs`                            | Swagger UI — **dev only**, not mounted in production (see OpenAPI / Swagger)            |
 
 **Per-pipeline enrichment routes** are generated from the `PIPELINES` array in `admin.ts`. There are
-**10** pipelines — `lyrics`, `nationality`, `master-data`, `mb-release-events`, `track-musicbrainz`,
-`track-acousticbrainz`, `track-deezer`, `artist-profiles`, `artist-genres`, `label-hierarchy` — and
-for each:
+**12** pipelines — `lyrics`, `nationality`, `master-data`, `mb-release-events`, `track-musicbrainz`,
+`track-acousticbrainz`, `track-deezer`, `artist-profiles`, `artist-genres`, `label-hierarchy` (#332,
+writes `PARENT_LABEL` from a per-Label `/labels/{id}` fetch), `group-members` (#330, writes
+`MEMBER_OF` from a per-Musician `/artists/{id}` sweep), `person-reconciliation` (#330, backfills
+`SAME_PERSON_AS`) — and for each:
 
 - `POST /api/v1/admin/<stage>/enrich` — run that stage standalone (returns `202`; poll status). Four
   also run inside `runIngestion`; the rest are manual-only (see Ingestion Pipeline below).
 - `GET /api/v1/admin/<stage>/status` — that stage's last-run counts / running flag.
-- `POST /api/v1/admin/<stage>/reset` — force a full re-fetch. **Exists for 7 stages only** — the
-  three _without_ a `reset` route are `lyrics` (use `/api/v1/admin/lyrics/clear-genius` instead),
-  `master-data`, and `artist-genres` (a self-idempotent whole-graph aggregation with nothing to
-  reset).
+- `POST /api/v1/admin/<stage>/reset` — force a full re-fetch. **Exists for 8 stages only** — the
+  four _without_ a `reset` route are `lyrics` (use `/api/v1/admin/lyrics/clear-genius` instead),
+  `master-data`, `artist-genres` (a self-idempotent whole-graph aggregation with nothing to reset),
+  and `person-reconciliation` (re-links exhaustively every run — nothing to reset). `label-hierarchy`
+  and `group-members` both _have_ a reset (label-hierarchy clears `labelHierarchyFetchedAt` + deletes
+  PARENT_LABEL edges; group-members deletes every `MEMBER_OF` edge + clears `membersFetchedAt`).
 
 ### Response Shapes
 
@@ -280,9 +285,10 @@ follow (#151).
 8. Log summary: nodes, relationships, per-enrichment counts, errors, duration
 ```
 
-The 6 heavier/optional stages (`nationality`, `mb-release-events`, `track-musicbrainz`,
-`track-acousticbrainz`, `track-deezer`, `label-hierarchy`) are **not** in `runIngestion` — they're
-manual-only via the per-stage admin routes, or run as part of the orchestrated reload below.
+The 8 heavier/optional stages (`nationality`, `mb-release-events`, `track-musicbrainz`,
+`track-acousticbrainz`, `track-deezer`, `label-hierarchy`, `group-members`, `person-reconciliation`)
+are **not** in `runIngestion` — they're manual-only via the per-stage admin routes, or run as part of
+the orchestrated reload below.
 
 **Triggers:**
 
@@ -332,7 +338,9 @@ ranStages)` produces a structured per-metric pass/fail report reused by the gate
   - **`deps`** — a stage starts only once every dep has reached a terminal state (complete/skipped/
     failed; an ordering edge, not a success gate). Load-bearing edges: every enrichment deps
     `releases`; `mb-release-events` deps `master-data` (it `MATCH`es the Master nodes only
-    master-data creates); `track-acousticbrainz`/`track-deezer` dep `track-musicbrainz`.
+    master-data creates); `track-acousticbrainz`/`track-deezer` dep `track-musicbrainz`;
+    `person-reconciliation` deps `artist-genres` **and** `group-members` (#330 — see the lane note:
+    deps double as the deadlock guard for the one dual-axis writer).
   - **`resources`** — stages sharing a lane never overlap. `discogs`/`musicbrainz` guard the
     **shared HTTP client's rate limiter** (the clients have no shared request queue, so two
     concurrent stages on one would double the request rate — every client user carries its tag).
@@ -341,8 +349,14 @@ ranStages)` produces a structured per-metric pass/fail report reused by the gate
     and-waiting on ≥2 nodes, so it is only possible between two batched writers of the same label.
     **`lyrics` writes one Track per transaction (deadlock-immune) and is intentionally untagged**,
     free to overlap the batched lane — _if it ever moves to a batched write, give it the `track`
-    tag._ There is no `artist` lane: `artist-genres` is the only batched Artist writer, so no
-    Artist-axis deadlock is possible. Net effect: the #165 gate stages finish in the first minutes
+    tag._ There is no `artist`/`musician` node-lock lane: `artist-genres` is the only batched
+    **Artist** writer and `group-members` the only batched **Musician** writer (#330) — disjoint
+    labels, so they may overlap. The one writer spanning **both** axes, `person-reconciliation` (its
+    single `MERGE` locks Musician + Artist), must not overlap either, and is serialized after both
+    via `deps` rather than a lane — cheaper than adding two lanes, since those two never conflict.
+    `group-members` itself only contends with reconciliation (handled by that dep), so it carries no
+    node-lock lane (just `discogs` for the rate limiter). Net effect: the #165 gate stages finish in
+    the first minutes
     while the slow `lyrics`/`track-musicbrainz` run on their own lanes.
 - **Resume, not restart.** On `POST /reload` and on **cold start** (`server.ts` onReady, after
   the `autoIngest` guard), a still-`running` job is resumed from where it left off. A
@@ -609,7 +623,7 @@ Route handler → Repository (Cypher) → Neo4j driver
 ## Known Limitations
 
 - **Studio data is sparse.** `companies[]` in Discogs is inconsistently populated. `Studio` nodes will exist for only a fraction of releases. This is a data quality issue upstream, not a bug.
-- **Musician/Artist deduplication is manual.** Session musicians and credited artists may be the same person with different Discogs IDs. Use `SAME_PERSON_AS` relationships to link them when discovered. No automated deduplication — this is a known tradeoff.
+- **Musician/Artist resolution is by shared `discogsId`, not fuzzy matching (#330).** A person credited as a session `Musician` and listed as a primary `Artist` is linked via `SAME_PERSON_AS` when they share a `discogsId` — written inline on ingest and backfilled exhaustively by the standalone `person-reconciliation` pass (so late-arriving Artist nodes get linked without a re-ingest). Group membership (`MEMBER_OF`) comes from Discogs `members[]` via the `group-members` pass. The explore queries (`getReleasesByMusician`, `getSharedMusicians`) traverse these edges to consolidate aliases; `getReleasesByMusician` also expands `MEMBER_OF` **one way only** — a member's results include their group's records (an inferred, temporally-unguarded involvement), but a group query is NOT expanded to its members' solo credits (which would over-attribute the group — PR #330 review). `/stats.samePersonLinks` (verify-gated at 100%) + `memberOfEdges`/`groupsWithMembers` make the result measurable. **Still unresolved:** name-only (`id === 0`) credits carry no `discogsId`, so they don't collapse — that needs Discogs `namevariations` (a deliberate follow-up). There is no fuzzy name matching by design.
 - **Lyrics are best-effort.** LRCLIB and Genius coverage is incomplete. Missing lyrics are acceptable — the `lyrics` property on `Track` is nullable by design.
 - **Lyrics resolution is a five-state, confidence-gated model (issues #246, #248).** `lyricsStatus ∈ {resolved, instrumental, probable-instrumental, low-confidence, not-found}` distinguishes "no lyrics exist" from "we missed them" from "we found the wrong song". `instrumental` (LRCLIB's authoritative flag) and `probable-instrumental` (the AcousticBrainz `voiceInstrumental` signal we already store) are **terminal** — excluded from the candidate query and short-circuited before any Genius call, killing the wasted-call/403-spam loop. `not-found` and `low-confidence` stay candidates, throttled per staleness window. `probable-instrumental` depends on `track-acousticbrainz` having run first, which finishes after `lyrics` in a fresh reload — so it mostly classifies on a later staleness re-run (lyrics is deliberately not made a dep of that ~2.5hr stage). `/stats` reports coverage over the non-instrumental denominator plus a `lyricsFunnel`; coverage keys on `lyrics IS NOT NULL` so tracks enriched before the field existed still count.
   - **Match confidence (#248).** Before a candidate's lyrics are stored, `enrichLyrics` scores the match with `scoreLyricsMatch` (`src/enrichment/match-confidence.ts`, the shared Sørensen–Dice title/artist similarity + duration tolerance also used by the MusicBrainz matcher): `confidence = min(titleSim, artistSim) × (duration disagrees ? 0.5 : 1)`, where an absent axis or unknown duration scores 1.0 (absence is not evidence against — this keeps Genius, which never carries a duration, viable). A match at or above `LYRICS_CONFIDENCE_THRESHOLD` (env, default **0.85**, fails safe to the default on garbage/out-of-range) is stored `resolved` with `lyricsConfidence` + `lyricsMatchedTitle`/`lyricsMatchedArtist` provenance; below it is stamped `low-confidence` (the lyric **text is dropped**, `lyrics` stays NULL so honest coverage and the fulltext index stay clean) with the score + provenance recorded so the doubt is visible and auditable. This is the gate that prevents the #31 wrong-song corruption class (artist matched, wrong song) and the live/remix-with-different-lyrics class (duration mismatch). The `GeniusClient` additionally pre-filters obvious title mismatches before the page scrape (a strict subset of this gate). `low-confidence` is **non-terminal** — a better catalog match or a retuned threshold can upgrade it later — and stays in the honest coverage denominator. Cross-source LRCLIB↔Genius agreement (the issue's signal #3) is a deliberate follow-up: the short-circuit flow never fetches both for one track.

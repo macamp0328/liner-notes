@@ -14,6 +14,12 @@ const statements = [
   // Safe to re-run: the WHERE guard makes it a no-op once all nodes are migrated.
   'MATCH (r:Release) WHERE r.year IS NOT NULL AND r.pressingYear IS NULL SET r.pressingYear = r.year',
   'CREATE INDEX musician_name IF NOT EXISTS FOR (m:Musician) ON (m.name)',
+  // issue #330: backs the (:Musician {discogsId}) point lookups in setGroupMembers (group + each
+  // member). The reconciliation/stats queries full-scan Musician regardless, so this is for the
+  // group-members write path, not those.
+  'CREATE INDEX musician_discogs_id IF NOT EXISTS FOR (m:Musician) ON (m.discogsId)',
+  // issue #330: backs the staleness-gated group-members candidate scan (getGroupCandidates).
+  'CREATE INDEX musician_members_fetched_at IF NOT EXISTS FOR (m:Musician) ON (m.membersFetchedAt)',
   'CREATE INDEX studio_name IF NOT EXISTS FOR (s:Studio) ON (s.name)',
   // issue #196: the track-versions stage (sole reader of t.normalizedTitle) was dropped.
   // Drop its now-unused index; IF EXISTS keeps this a no-op once cleared.

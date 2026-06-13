@@ -73,6 +73,21 @@ function mapExploreRelease(record: { get: (key: string) => unknown }): ExploreRe
 // getReleasesByMusician
 // ---------------------------------------------------------------------------
 
+/**
+ * Releases a person worked on, resolving entity-resolution edges (#330). The query name is
+ * resolved to a *set* of Musician nodes via the CALL{} below:
+ *   - the directly-named node, and the canonical name via SAME_PERSON_AS (so an alias and the
+ *     Artist's canonical name return the same set) + its alias siblings — pure accuracy, same person.
+ *   - the groups a queried *member* belongs to (MEMBER_OF, member→group): a member's results
+ *     additionally include their group's records — an INFERRED, temporally-unguarded involvement
+ *     (the group's catalog, not necessarily records the person personally played on; date-qualified
+ *     membership is roadmapped #339/#341). The reverse (group→members) is deliberately NOT expanded:
+ *     it would attribute every member's unrelated solo credit to the group, making the group look
+ *     involved in records it never touched (PR #330 review). A group query therefore returns only
+ *     the group's own credits; the MEMBER_OF edges still exist and are surfaced via /stats.
+ * Then returns their CREDITED_ON releases incl. track-scoped credits (track→release via HAS_TRACK),
+ * deduped by release, with one representative artist/instrument/role per release.
+ */
 export async function getReleasesByMusician(
   driver: Driver,
   name: string,
@@ -81,14 +96,33 @@ export async function getReleasesByMusician(
   try {
     const result = await session.run(
       `
-      MATCH (m:Musician)-[c:CREDITED_ON]->(r:Release)
-      WHERE toLower(m.name) = toLower($name)
+      MATCH (seed:Musician)
+      WHERE toLower(seed.name) = toLower($name)
+         OR EXISTS { MATCH (seed)-[:SAME_PERSON_AS]->(a:Artist) WHERE toLower(a.name) = toLower($name) }
+      WITH collect(DISTINCT seed) AS seeds
+      UNWIND seeds AS s
+      CALL {
+        WITH s RETURN s AS person
+        UNION WITH s MATCH (s)-[:SAME_PERSON_AS]->(:Artist)<-[:SAME_PERSON_AS]-(sib:Musician) RETURN sib AS person
+        UNION WITH s MATCH (s)-[:MEMBER_OF]->(grp:Musician) RETURN grp AS person
+      }
+      WITH DISTINCT person
+      MATCH (person)-[c:CREDITED_ON]->(target)
+      WHERE target:Release OR target:Track
+      OPTIONAL MATCH (rTrack:Release)-[:HAS_TRACK]->(target)
+      WITH (CASE WHEN target:Release THEN target ELSE rTrack END) AS r, c
+      WHERE r IS NOT NULL
+      // Pick ONE representative credit per release so instrument + role come from the SAME edge
+      // (independent min() could pair an instrument from one credit with a role from another).
+      WITH r, c ORDER BY c.displayRole, c.roleCategory
+      WITH r, head(collect({instrument: c.displayRole, role: c.roleCategory})) AS credit
       OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
-      RETURN r.discogsId AS discogsId, r.title AS title, a.name AS artist,
+      WITH r, credit, min(a.name) AS artist
+      RETURN r.discogsId AS discogsId, r.title AS title, artist,
              coalesce(r.originalYear, r.pressingYear) AS pressingYear,
              r.format AS format, r.thumbUrl AS thumbUrl,
-             c.displayRole AS instrument, c.roleCategory AS role
-      ORDER BY pressingYear
+             credit.instrument AS instrument, credit.role AS role
+      ORDER BY pressingYear, discogsId
       `,
       { name },
     );
@@ -487,19 +521,38 @@ export async function getMostPressedReleases(
 // getSharedMusicians
 // ---------------------------------------------------------------------------
 
+/**
+ * Release pairs that share a session person, collapsing SAME_PERSON_AS aliases so one person counts
+ * once across their alias nodes (#330). Each credit is resolved to a canonical identity key
+ * (Artist.discogsId via SAME_PERSON_AS, else the Musician's own discogsId, else its name) and
+ * includes track-scoped credits (track→release via HAS_TRACK), consistent with getReleasesByMusician.
+ */
 export async function getSharedMusicians(driver: Driver): Promise<SharedMusiciansResult[]> {
   const session = driver.session();
   try {
     const result = await session.run(
       `
-      MATCH (m:Musician)-[c1:CREDITED_ON]->(r1:Release),
-            (m)-[:CREDITED_ON]->(r2:Release)
+      MATCH (m:Musician)-[c:CREDITED_ON]->(target)
+      WHERE target:Release OR target:Track
+      OPTIONAL MATCH (rt:Release)-[:HAS_TRACK]->(target)
+      WITH m, c, (CASE WHEN target:Release THEN target ELSE rt END) AS r
+      WHERE r IS NOT NULL
+      OPTIONAL MATCH (m)-[:SAME_PERSON_AS]->(a:Artist)
+      WITH r, c,
+           coalesce(toString(a.discogsId), toString(m.discogsId), 'name:' + m.name) AS personKey,
+           coalesce(a.name, m.name) AS personName
+      WITH personKey, personName, r, min(c.displayRole) AS instrument
+      WITH personKey, personName, collect({release: r, instrument: instrument}) AS apps
+      WHERE size(apps) >= 2
+      UNWIND apps AS app1
+      UNWIND apps AS app2
+      WITH personName, app1.release AS r1, app1.instrument AS instrument, app2.release AS r2
       WHERE r1.discogsId < r2.discogsId
-      WITH r1, r2, collect(DISTINCT {name: m.name, instrument: c1.displayRole}) AS sharedMusicians
-      WHERE size(sharedMusicians) > 0
+      WITH r1, r2, collect(DISTINCT {name: personName, instrument: instrument}) AS sharedMusicians
       RETURN r1.discogsId AS releaseAId, r1.title AS releaseATitle,
              r2.discogsId AS releaseBId, r2.title AS releaseBTitle,
              sharedMusicians
+      ORDER BY releaseAId, releaseBId
       LIMIT 200
       `,
     );
