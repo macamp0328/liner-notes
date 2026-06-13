@@ -49,6 +49,11 @@ const ADMIN_ROUTES: { method: 'GET' | 'POST'; url: string }[] = [
   { method: 'GET', url: '/api/v1/admin/artist-profiles/status' },
   { method: 'POST', url: '/api/v1/admin/artist-genres/enrich' },
   { method: 'GET', url: '/api/v1/admin/artist-genres/status' },
+  { method: 'POST', url: '/api/v1/admin/group-members/enrich' },
+  { method: 'POST', url: '/api/v1/admin/group-members/reset' },
+  { method: 'GET', url: '/api/v1/admin/group-members/status' },
+  { method: 'POST', url: '/api/v1/admin/person-reconciliation/enrich' },
+  { method: 'GET', url: '/api/v1/admin/person-reconciliation/status' },
   { method: 'POST', url: '/api/v1/admin/reload' },
   { method: 'GET', url: '/api/v1/admin/reload/status' },
 ];

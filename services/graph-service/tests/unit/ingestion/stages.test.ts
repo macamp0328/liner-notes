@@ -16,6 +16,8 @@ import { enrichLyrics } from '../../../src/enrichment/lyrics.js';
 import { enrichMasterData } from '../../../src/enrichment/master-data.js';
 import { enrichArtistGenres } from '../../../src/enrichment/artist-genres.js';
 import { enrichArtistProfiles } from '../../../src/enrichment/artist-profiles.js';
+import { enrichGroupMembers } from '../../../src/enrichment/group-members.js';
+import { enrichPersonReconciliation } from '../../../src/enrichment/person-reconciliation.js';
 import { enrichMbReleaseEvents } from '../../../src/enrichment/mb-release-events.js';
 import { enrichTrackMusicBrainz } from '../../../src/enrichment/track-musicbrainz.js';
 import { enrichTrackAcousticBrainz } from '../../../src/enrichment/track-acousticbrainz.js';
@@ -27,6 +29,10 @@ vi.mock('../../../src/enrichment/lyrics.js', () => ({ enrichLyrics: vi.fn() }));
 vi.mock('../../../src/enrichment/master-data.js', () => ({ enrichMasterData: vi.fn() }));
 vi.mock('../../../src/enrichment/artist-genres.js', () => ({ enrichArtistGenres: vi.fn() }));
 vi.mock('../../../src/enrichment/artist-profiles.js', () => ({ enrichArtistProfiles: vi.fn() }));
+vi.mock('../../../src/enrichment/group-members.js', () => ({ enrichGroupMembers: vi.fn() }));
+vi.mock('../../../src/enrichment/person-reconciliation.js', () => ({
+  enrichPersonReconciliation: vi.fn(),
+}));
 vi.mock('../../../src/enrichment/mb-release-events.js', () => ({ enrichMbReleaseEvents: vi.fn() }));
 vi.mock('../../../src/enrichment/track-musicbrainz.js', () => ({
   enrichTrackMusicBrainz: vi.fn(),
@@ -78,6 +84,8 @@ beforeEach(() => {
     enrichMasterData,
     enrichArtistGenres,
     enrichArtistProfiles,
+    enrichGroupMembers,
+    enrichPersonReconciliation,
     enrichMbReleaseEvents,
     enrichTrackMusicBrainz,
     enrichTrackAcousticBrainz,
@@ -109,6 +117,8 @@ describe('RELOAD_STAGES order', () => {
       'master-data',
       'artist-profiles',
       'artist-genres',
+      'group-members',
+      'person-reconciliation',
       'track-musicbrainz',
       'mb-release-events',
       'lyrics',
@@ -149,6 +159,13 @@ describe('RELOAD_STAGES dependency graph', () => {
     expect(stage('track-deezer').deps).toContain('track-musicbrainz');
   });
 
+  it('runs person-reconciliation after both single-axis batched writers (#330 deadlock avoidance)', () => {
+    // The dual-axis writer must not overlap artist-genres (Artist) or group-members (Musician).
+    expect(stage('person-reconciliation').deps).toEqual(
+      expect.arrayContaining(['artist-genres', 'group-members']),
+    );
+  });
+
   it('makes verify depend on every other stage so it runs strictly last', () => {
     const others = RELOAD_STAGES.filter((s) => s.name !== 'verify')
       .map((s) => s.name)
@@ -159,7 +176,13 @@ describe('RELOAD_STAGES dependency graph', () => {
 
 describe('RELOAD_STAGES resource lanes', () => {
   it('tags every Discogs-client stage with the discogs lane (shared rate limiter)', () => {
-    for (const name of ['releases', 'master-data', 'artist-profiles', 'nationality'] as const) {
+    for (const name of [
+      'releases',
+      'master-data',
+      'artist-profiles',
+      'group-members',
+      'nationality',
+    ] as const) {
       expect(stage(name).resources).toContain('discogs');
     }
   });
@@ -180,6 +203,9 @@ describe('RELOAD_STAGES resource lanes', () => {
 
   it('leaves the pure-Cypher and lyrics stages off every rate-limited lane', () => {
     expect(stage('artist-genres').resources).toEqual([]);
+    // #330: person-reconciliation is pure Cypher; it's serialized after the two single-axis batched
+    // writers via deps, not a resource lane.
+    expect(stage('person-reconciliation').resources).toEqual([]);
     expect(stage('lyrics').resources).toEqual([]);
   });
 });
@@ -220,11 +246,24 @@ describe('stage run() delegates to the right enrich function', () => {
     expect(enrichArtistGenres).toHaveBeenCalledOnce();
   });
 
+  it('person-reconciliation → enrichPersonReconciliation(driver, log)', async () => {
+    const ctx = makeCtx();
+    await stage('person-reconciliation').run(ctx);
+    expect(enrichPersonReconciliation).toHaveBeenCalledWith(ctx.driver, ctx.log);
+  });
+
   it('artist-profiles → enrichArtistProfiles(discogs, ..., onProgress)', async () => {
     const ctx = makeCtx();
     const onProgress = vi.fn();
     await stage('artist-profiles').run(ctx, onProgress);
     expect(enrichArtistProfiles).toHaveBeenCalledWith(ctx.discogs, ctx.driver, ctx.log, onProgress);
+  });
+
+  it('group-members → enrichGroupMembers(discogs, ..., onProgress)', async () => {
+    const ctx = makeCtx();
+    const onProgress = vi.fn();
+    await stage('group-members').run(ctx, onProgress);
+    expect(enrichGroupMembers).toHaveBeenCalledWith(ctx.discogs, ctx.driver, ctx.log, onProgress);
   });
 
   it('mb-release-events → enrichMbReleaseEvents(musicbrainz, ..., onProgress)', async () => {
@@ -318,6 +357,11 @@ describe('stages skip (return null) when a required client is missing', () => {
 
   it('artist-profiles skips with no discogs client', async () => {
     expect(await stage('artist-profiles').run(makeCtx({ discogs: null }))).toBeNull();
+  });
+
+  it('group-members skips with no discogs client', async () => {
+    expect(await stage('group-members').run(makeCtx({ discogs: null }))).toBeNull();
+    expect(enrichGroupMembers).not.toHaveBeenCalled();
   });
 
   it('mb-release-events skips with no musicbrainz client', async () => {

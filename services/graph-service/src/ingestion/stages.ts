@@ -10,6 +10,8 @@ import { enrichLyrics } from '../enrichment/lyrics.js';
 import { enrichMasterData } from '../enrichment/master-data.js';
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
 import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
+import { enrichGroupMembers } from '../enrichment/group-members.js';
+import { enrichPersonReconciliation } from '../enrichment/person-reconciliation.js';
 import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
 import { enrichTrackMusicBrainz } from '../enrichment/track-musicbrainz.js';
 import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
@@ -27,6 +29,8 @@ export type ReloadStageName =
   | 'master-data'
   | 'artist-genres'
   | 'artist-profiles'
+  | 'group-members'
+  | 'person-reconciliation'
   | 'mb-release-events'
   | 'track-musicbrainz'
   | 'track-acousticbrainz'
@@ -160,6 +164,33 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     deps: ['releases'],
     resources: [],
     run: async (ctx) => ({ ...(await enrichArtistGenres(ctx.driver, ctx.log)) }),
+  },
+  {
+    // #330: fetch /artists/{id} per Musician-with-discogsId to discover groups and write MEMBER_OF.
+    // Holds the `discogs` rate-limiter lane. Its per-group write touches the group + member Musician
+    // nodes (Musician axis); the only concurrent Musician multi-writer is `person-reconciliation`,
+    // which deps this stage (so they never overlap) — no `track`-style node-lock lane is needed.
+    name: 'group-members',
+    deps: ['releases'],
+    resources: ['discogs'],
+    sources: ['discogs'],
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
+      if (!ctx.discogs) return null;
+      return { ...(await enrichGroupMembers(ctx.discogs, ctx.driver, ctx.log, onProgress)) };
+    },
+  },
+  {
+    // #330: backfill SAME_PERSON_AS (Musician → Artist by shared discogsId) the order-dependent
+    // inline write missed. One big MERGE tx spanning BOTH the Artist axis (endpoint) and the
+    // Musician axis — the only writer that does — so it must not overlap the two single-axis batched
+    // writers. `deps` order it after both (artist-genres = Artist, group-members = Musician); those
+    // two touch disjoint labels and may overlap each other, so no resource lane is needed. No
+    // artist-profiles dep: that stage is single-node-per-tx (deadlock-immune) and holds no data this
+    // pass reads. Runs after `group-members` so its samePersonLinks coverage metric is final at verify.
+    name: 'person-reconciliation',
+    deps: ['artist-genres', 'group-members'],
+    resources: [],
+    run: async (ctx) => ({ ...(await enrichPersonReconciliation(ctx.driver, ctx.log)) }),
   },
   {
     name: 'track-musicbrainz',

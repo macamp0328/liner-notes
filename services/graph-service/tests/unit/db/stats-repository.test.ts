@@ -22,7 +22,7 @@ function makeRecord(fields: Record<string, unknown>): unknown {
 
 /**
  * Build a mock driver whose session().run(cypher) returns the record matching
- * the queried label. getStats fires eight label queries via Promise.all, each on
+ * the queried label. getStats fires ten label queries via Promise.all, each on
  * its own session, so we route by a substring of the MATCH clause. The producer/
  * engineer nationality queries scan `(p:Musician)` too (role lives on CREDITED_ON,
  * not a label), so they're routed by their `roleCategory` gate — checked before the
@@ -37,13 +37,20 @@ function makeDriver(byLabel: {
   natMusician: Record<string, unknown>;
   natProducer: Record<string, unknown>;
   natEngineer: Record<string, unknown>;
+  // #330: optional so existing cases (which don't assert resolution stats) need no change.
+  musician?: Record<string, unknown>;
+  memberOf?: Record<string, unknown>;
 }): Driver {
+  const musician = byLabel.musician ?? { total: int(0), groupsWithMembers: int(0) };
+  const memberOf = byLabel.memberOf ?? { memberOfEdges: int(0) };
   const run = vi.fn(async (cypher: string) => {
     let fields: Record<string, unknown>;
     if (cypher.includes('(p:Artist)')) fields = byLabel.natArtist;
     else if (cypher.includes("roleCategory = 'producer'")) fields = byLabel.natProducer;
     else if (cypher.includes("roleCategory = 'engineer'")) fields = byLabel.natEngineer;
     else if (cypher.includes('(p:Musician)')) fields = byLabel.natMusician;
+    else if (cypher.includes('[r:MEMBER_OF]')) fields = memberOf;
+    else if (cypher.includes('(m:Musician)')) fields = musician;
     else if (cypher.includes('(r:Release)')) fields = byLabel.release;
     else if (cypher.includes('(a:Artist)')) fields = byLabel.artist;
     else if (cypher.includes('(t:Track)')) fields = byLabel.track;
@@ -83,11 +90,28 @@ describe('getStats', () => {
       natMusician: nat(50, 30, 10, 5),
       natProducer: nat(8, 4, 4, 0),
       natEngineer: nat(6, 3, 1, 1),
+      musician: {
+        total: int(40),
+        samePersonApplicable: int(25),
+        samePersonCovered: int(25),
+        groupsWithMembers: int(3),
+      },
+      memberOf: { memberOfEdges: int(9) },
     });
 
     const stats = await getStats(driver);
 
-    expect(stats.counts).toEqual({ releases: 10, artists: 20, tracks: 100, masters: 7 });
+    expect(stats.counts).toEqual({
+      releases: 10,
+      artists: 20,
+      tracks: 100,
+      masters: 7,
+      musicians: 40,
+    });
+    // #330 entity-resolution stats: reconciliation coverage + raw MEMBER_OF counts.
+    expect(stats.enrichment.samePersonLinks).toEqual({ covered: 25, applicable: 25, pct: 100 });
+    expect(stats.enrichment.memberOfEdges).toBe(9);
+    expect(stats.enrichment.groupsWithMembers).toBe(3);
 
     // master-gated denominator
     expect(stats.enrichment.releasesWithOriginalYear).toEqual({
@@ -239,7 +263,7 @@ describe('getStats', () => {
 
     const stats = await getStats(driver);
 
-    expect(stats.counts).toEqual({ releases: 0, artists: 0, tracks: 0, masters: 0 });
+    expect(stats.counts).toEqual({ releases: 0, artists: 0, tracks: 0, masters: 0, musicians: 0 });
     expect(stats.enrichment.releasesWithOriginalYear.pct).toBeNull();
     expect(stats.enrichment.artistsWithGenres.pct).toBeNull();
     expect(stats.enrichment.tracksWithLyrics.pct).toBeNull();
