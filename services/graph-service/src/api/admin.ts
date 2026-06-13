@@ -32,6 +32,11 @@ import { resetTrackDeezerEnrichment } from '../db/track-deezer-repository.js';
 import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
 import { resetArtistProfilesEnrichment } from '../db/artist-profiles-repository.js';
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
+import { enrichLabelHierarchy } from '../enrichment/label-hierarchy.js';
+import { resetLabelHierarchyEnrichment } from '../db/label-hierarchy-repository.js';
+import { enrichGroupMembers } from '../enrichment/group-members.js';
+import { resetGroupMembers } from '../db/group-members-repository.js';
+import { enrichPersonReconciliation } from '../enrichment/person-reconciliation.js';
 import { runReload } from '../ingestion/orchestrator.js';
 import { RELOAD_STAGES } from '../ingestion/stages.js';
 import {
@@ -310,6 +315,15 @@ const artistGenresSummarySchema = {
     genresEnriched: { type: 'integer' },
     stylesEnriched: { type: 'integer' },
     skipped: { type: 'integer' },
+    failed: { type: 'integer' },
+    durationMs: { type: 'integer' },
+  },
+};
+
+const personReconciliationSummarySchema = {
+  type: 'object',
+  properties: {
+    linksReconciled: { type: 'integer' },
     failed: { type: 'integer' },
     durationMs: { type: 'integer' },
   },
@@ -673,6 +687,112 @@ const PIPELINES: PipelineEntry[] = [
     prepare: (log): PreparedRun => ({
       ok: true,
       run: async (driver) => ({ ...(await enrichArtistGenres(driver, log)) }),
+    }),
+    state: makePipelineState(),
+  },
+  {
+    name: 'label-hierarchy',
+    statusLabel: 'label hierarchy enrichment',
+    runningMessage: 'Label hierarchy enrichment already in progress',
+    enrichSummary: 'Enrich Label nodes with their parent label from the Discogs label API',
+    enrichDescription:
+      'For each Label referenced by a release whose last attempt has aged past ' +
+      '`ENRICHMENT_STALENESS_DAYS` (default 30), fetches `GET /labels/{id}` and records a single ' +
+      '`(child)-[:PARENT_LABEL]->(parent)` edge, stamping `labelHierarchyFetchedAt`. Blocks until complete.\n\n' +
+      'Only the upward `parent_label` is ingested (not `sublabels[]`): the upward edges alone connect ' +
+      'every collection label in a family via their shared ancestor, which powers the ' +
+      '`?includeSublabels=true` roll-up on `GET /api/v1/explore/label/:name`.\n\n' +
+      'A label Discogs reports as having no parent is stamped without an edge and retried at most once ' +
+      'per window; run `POST /api/v1/admin/label-hierarchy/reset` first to re-fetch every label.\n\n' +
+      'Requires `DISCOGS_TOKEN` env var.',
+    statusSummarySchema: standardSummarySchema,
+    schemaHas503: true,
+    clientCheckFirst: true,
+    prepare: (log): PreparedRun => {
+      const discogsClient = buildDiscogsClientFromEnv(log);
+      if (!discogsClient) return { ok: false, message: 'DISCOGS_TOKEN not configured' };
+      return {
+        ok: true,
+        run: async (driver) => ({ ...(await enrichLabelHierarchy(discogsClient, driver, log)) }),
+      };
+    },
+    reset: {
+      summary: 'Reset label hierarchy enrichment markers for a full re-run',
+      description:
+        'Removes the `labelHierarchyFetchedAt` marker from all Label nodes and deletes every ' +
+        'PARENT_LABEL edge, causing the next `POST /api/v1/admin/label-hierarchy/enrich` call to ' +
+        're-fetch every label from scratch.\n\n' +
+        'This endpoint is blocked while enrichment is running.',
+      runningMessage:
+        'Label hierarchy enrichment is currently running — wait for it to finish before resetting',
+      run: (driver) => resetLabelHierarchyEnrichment(driver),
+    },
+    state: makePipelineState(),
+  },
+  {
+    name: 'group-members',
+    statusLabel: 'group members enrichment',
+    runningMessage: 'Group members enrichment already in progress',
+    enrichSummary: 'Link group members via MEMBER_OF from the Discogs artist API',
+    enrichDescription:
+      'For each Musician node carrying a `discogsId` whose last members check has aged past ' +
+      '`ENRICHMENT_STALENESS_DAYS` (default 30), fetches `GET /artists/{id}` and — when the profile ' +
+      "lists members — links each member's existing Musician node to the group via " +
+      '`(member)-[:MEMBER_OF { active }]->(group)`, stamping `membersFetchedAt`. Blocks until ' +
+      'complete.\n\n' +
+      'Group-ness is not knowable without the fetch, so every Musician-with-discogsId is checked ' +
+      'once per window (non-groups are stamped and skipped). Member linking is MATCH-only — a member ' +
+      'not credited anywhere in the collection has no Musician node and is skipped, never created.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually** (it ' +
+      'is a full `/artists/{id}` sweep over the credited musicians). Run ' +
+      '`POST /api/v1/admin/group-members/reset` first to delete every MEMBER_OF edge and re-fetch ' +
+      'from scratch.\n\n' +
+      'Requires `DISCOGS_TOKEN` env var.',
+    statusSummarySchema: standardSummarySchema,
+    schemaHas503: true,
+    clientCheckFirst: true,
+    prepare: (log): PreparedRun => {
+      const discogsClient = buildDiscogsClientFromEnv(log);
+      if (!discogsClient) return { ok: false, message: 'DISCOGS_TOKEN not configured' };
+      return {
+        ok: true,
+        run: async (driver) => ({ ...(await enrichGroupMembers(discogsClient, driver, log)) }),
+      };
+    },
+    reset: {
+      summary: 'Delete all MEMBER_OF edges and reset group-members markers for a full re-run',
+      description:
+        'Deletes every `MEMBER_OF` relationship and removes the `membersFetchedAt` marker from all ' +
+        'Musician nodes, causing the next `POST /api/v1/admin/group-members/enrich` call to re-fetch ' +
+        'every group from scratch.\n\n' +
+        'This endpoint is blocked while enrichment is running.',
+      runningMessage:
+        'Group members enrichment is currently running — wait for it to finish before resetting',
+      run: (driver) => resetGroupMembers(driver),
+    },
+    state: makePipelineState(),
+  },
+  {
+    name: 'person-reconciliation',
+    statusLabel: 'person reconciliation',
+    runningMessage: 'Person reconciliation already in progress',
+    enrichSummary: 'Reconcile Musician identities with Artist nodes (SAME_PERSON_AS)',
+    enrichDescription:
+      'Links every Musician carrying a `discogsId` to the Artist node sharing that `discogsId` via ' +
+      'a `SAME_PERSON_AS` relationship. Backfills links the order-dependent inline write missed ' +
+      'because the Artist node arrived via a later release. Pure graph computation — no external ' +
+      'API. Idempotent and safe to re-run; picks up new collection additions without a full ' +
+      're-ingest. Blocks until complete.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest`** — run it after a re-ingest, or rely ' +
+      'on the orchestrated reload (`POST /api/v1/admin/reload`), which includes it.\n\n' +
+      '**No reset endpoint:** the pass re-links exhaustively every run, so it is inherently ' +
+      'idempotent and there is nothing to reset.',
+    statusSummarySchema: personReconciliationSummarySchema,
+    schemaHas503: false,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => ({
+      ok: true,
+      run: async (driver) => ({ ...(await enrichPersonReconciliation(driver, log)) }),
     }),
     state: makePipelineState(),
   },

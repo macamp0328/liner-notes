@@ -140,3 +140,77 @@ export async function seedExploreEnrichment(driver: Driver): Promise<void> {
     await session.close();
   }
 }
+
+/**
+ * Seed entity-resolution fixtures (#330) for the explore + reconciliation tests. Call AFTER
+ * seedGraph(). All entities use discogsIds ≥ 900000 and distinct names so they don't perturb the
+ * other explore assertions (which match by their own names / use `>=` bounds). Writes the same
+ * node/relationship shapes the production writers do, via direct Cypher:
+ *
+ *   - alias case:  a Musician credited at TRACK scope under an alias name, SAME_PERSON_AS-linked to
+ *     an Artist whose canonical name differs → exercises track-scope inclusion + alias==canonical.
+ *   - group case:  a group Musician credited release-scope, two member Musicians credited on other
+ *     releases, linked via MEMBER_OF → exercises group↔member expansion both directions.
+ *   - reconcile:   a Musician + Artist sharing a discogsId with NO SAME_PERSON_AS yet → the
+ *     person-reconciliation pass must create the edge.
+ */
+export async function seedEntityResolution(driver: Driver): Promise<void> {
+  const session = driver.session();
+  try {
+    // alias: "Jimmy Test (4)" (Musician) ≡ "Jimmy Test" (Artist), track-scope credit on A1.
+    await session.run(
+      `MERGE (a:Artist {discogsId: 900200}) SET a.name = 'Jimmy Test'
+       MERGE (m:Musician {discogsId: 900200}) SET m.name = 'Jimmy Test (4)'
+       MERGE (m)-[:SAME_PERSON_AS]->(a)
+       WITH m
+       MATCH (t:Track {position: 'A1', releaseDiscogsId: 7000001})
+       MERGE (m)-[co:CREDITED_ON]->(t)
+       SET co.role = 'Guitar', co.displayRole = 'Guitar', co.roleCategory = 'performer',
+           co.creditedAs = null, co.scope = 'track'`,
+    );
+    // group: "The Test Swampers" credited release-scope on 7000001.
+    await session.run(
+      `MERGE (g:Musician {discogsId: 900300}) SET g.name = 'The Test Swampers'
+       WITH g MATCH (r:Release {discogsId: 7000001})
+       MERGE (g)-[co:CREDITED_ON]->(r)
+       SET co.role = 'Rhythm Section', co.displayRole = 'Rhythm Section',
+           co.roleCategory = 'performer', co.creditedAs = null, co.scope = 'release'`,
+    );
+    // members credited on other releases, linked via MEMBER_OF to the group.
+    await session.run(
+      `UNWIND [
+         {discogsId: 900301, name: 'Test Hood', release: 7000002, active: true},
+         {discogsId: 900302, name: 'Test Hawkins', release: 7000003, active: false}
+       ] AS mem
+       MERGE (m:Musician {discogsId: mem.discogsId}) SET m.name = mem.name
+       WITH m, mem
+       MATCH (g:Musician {discogsId: 900300})
+       MERGE (m)-[rel:MEMBER_OF]->(g) SET rel.active = mem.active
+       WITH m, mem
+       MATCH (r:Release {discogsId: mem.release})
+       MERGE (m)-[co:CREDITED_ON]->(r)
+       SET co.role = 'Bass', co.displayRole = 'Bass', co.roleCategory = 'performer',
+           co.creditedAs = null, co.scope = 'release'`,
+    );
+    // reconcile: Musician + Artist sharing a discogsId, deliberately UNLINKED.
+    await session.run(
+      `MERGE (a:Artist {discogsId: 900400}) SET a.name = 'Reconcile Me'
+       MERGE (m:Musician {discogsId: 900400}) SET m.name = 'Reconcile Me'`,
+    );
+    // shared-musicians alias collapse: an aliased person credited on two releases — should appear in
+    // the (7000004, 7000005) pair once, under the canonical Artist name (not the alias node name).
+    await session.run(
+      `MERGE (a:Artist {discogsId: 900500}) SET a.name = 'Canonical Person'
+       MERGE (m:Musician {discogsId: 900500}) SET m.name = 'Canon Alias'
+       MERGE (m)-[:SAME_PERSON_AS]->(a)
+       WITH m
+       UNWIND [7000004, 7000005] AS rid
+       MATCH (r:Release {discogsId: rid})
+       MERGE (m)-[co:CREDITED_ON]->(r)
+       SET co.role = 'Piano', co.displayRole = 'Piano', co.roleCategory = 'performer',
+           co.creditedAs = null, co.scope = 'release'`,
+    );
+  } finally {
+    await session.close();
+  }
+}

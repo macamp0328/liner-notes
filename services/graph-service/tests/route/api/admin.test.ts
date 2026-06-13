@@ -55,9 +55,12 @@ vi.mock('../../../src/db/ingestion-repository.js', () => ({
 }));
 
 const mockRunIngestion = vi.hoisted(() => vi.fn());
+const mockBuildDiscogsClientFromEnv = vi.hoisted(() =>
+  vi.fn().mockReturnValue({ getCollectionReleases: vi.fn() }),
+);
 vi.mock('../../../src/ingestion/ingest.js', () => ({
   runIngestion: mockRunIngestion,
-  buildDiscogsClientFromEnv: vi.fn().mockReturnValue({ getCollectionReleases: vi.fn() }),
+  buildDiscogsClientFromEnv: mockBuildDiscogsClientFromEnv,
 }));
 
 const mockEnrichTrackAcousticBrainz = vi.hoisted(() => vi.fn());
@@ -101,6 +104,31 @@ vi.mock('../../../src/db/artist-profiles-repository.js', () => ({
 const mockEnrichArtistGenres = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/enrichment/artist-genres.js', () => ({
   enrichArtistGenres: mockEnrichArtistGenres,
+}));
+
+const mockEnrichLabelHierarchy = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/enrichment/label-hierarchy.js', () => ({
+  enrichLabelHierarchy: mockEnrichLabelHierarchy,
+}));
+
+const mockResetLabelHierarchyEnrichment = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/db/label-hierarchy-repository.js', () => ({
+  resetLabelHierarchyEnrichment: mockResetLabelHierarchyEnrichment,
+}));
+
+const mockEnrichGroupMembers = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/enrichment/group-members.js', () => ({
+  enrichGroupMembers: mockEnrichGroupMembers,
+}));
+
+const mockResetGroupMembers = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/db/group-members-repository.js', () => ({
+  resetGroupMembers: mockResetGroupMembers,
+}));
+
+const mockEnrichPersonReconciliation = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/enrichment/person-reconciliation.js', () => ({
+  enrichPersonReconciliation: mockEnrichPersonReconciliation,
 }));
 
 const mockEnrichNationality = vi.hoisted(() => vi.fn());
@@ -238,6 +266,13 @@ describe('Admin API', () => {
       durationMs: 9000,
     });
     mockResetArtistProfilesEnrichment.mockResolvedValue(15);
+    mockEnrichLabelHierarchy.mockResolvedValue({
+      enriched: 8,
+      skipped: 2,
+      failed: 0,
+      durationMs: 4000,
+    });
+    mockResetLabelHierarchyEnrichment.mockResolvedValue(11);
     mockEnrichArtistGenres.mockResolvedValue({
       genresEnriched: 20,
       stylesEnriched: 18,
@@ -246,6 +281,18 @@ describe('Admin API', () => {
       durationMs: 300,
     });
     mockEnrichNationality.mockResolvedValue(nationalitySummary);
+    mockEnrichGroupMembers.mockResolvedValue({
+      enriched: 6,
+      skipped: 30,
+      failed: 0,
+      durationMs: 4000,
+    });
+    mockResetGroupMembers.mockResolvedValue(11);
+    mockEnrichPersonReconciliation.mockResolvedValue({
+      linksReconciled: 23,
+      failed: 0,
+      durationMs: 150,
+    });
     mockFindResumableReloadJob.mockResolvedValue(null);
     mockCreateReloadJob.mockResolvedValue('job-new');
     mockGetLatestReloadJob.mockResolvedValue(null);
@@ -1117,6 +1164,82 @@ describe('Admin API', () => {
     });
   });
 
+  // ── POST /label-hierarchy/enrich ─────────────────────────────────────────
+  describe('POST /api/v1/admin/label-hierarchy/enrich', () => {
+    it('returns 202 and starts the run in the background on success', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/label-hierarchy/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(202);
+      const body = JSON.parse(response.payload) as { data: { message: string; statusUrl: string } };
+      expect(body.data.message).toContain('started');
+      expect(body.data.statusUrl).toBe('/api/v1/admin/label-hierarchy/status');
+      await flushBackground();
+      expect(mockEnrichLabelHierarchy).toHaveBeenCalledOnce();
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/label-hierarchy/enrich',
+      });
+      expect(response.statusCode).toBe(401);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('UNAUTHORIZED');
+    });
+  });
+
+  // ── POST /label-hierarchy/reset ──────────────────────────────────────────
+  describe('POST /api/v1/admin/label-hierarchy/reset', () => {
+    it('returns 200 with count of reset labels', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/label-hierarchy/reset',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as { data: { reset: number } };
+      expect(body.data.reset).toBe(11);
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/label-hierarchy/reset',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── GET /label-hierarchy/status ──────────────────────────────────────────
+  describe('GET /api/v1/admin/label-hierarchy/status', () => {
+    it('returns 200 with running:false and null lastResult before any run', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/label-hierarchy/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { running: boolean; lastResult: unknown };
+      };
+      expect(body.data.running).toBe(false);
+      expect(body.data.lastResult).toBeNull();
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/label-hierarchy/status',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
   // ── POST /artist-genres/enrich ───────────────────────────────────────────
   describe('POST /api/v1/admin/artist-genres/enrich', () => {
     it('returns 202 and starts the run in the background on success', async () => {
@@ -1226,6 +1349,139 @@ describe('Admin API', () => {
         url: '/api/v1/admin/artist-genres/status',
       });
       expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── POST /group-members/enrich (#330) ────────────────────────────────────
+  describe('POST /api/v1/admin/group-members/enrich', () => {
+    it('returns 202 and starts the run in the background on success', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/group-members/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(202);
+      const body = JSON.parse(response.payload) as { data: { message: string; statusUrl: string } };
+      expect(body.data.message).toContain('started');
+      expect(body.data.statusUrl).toBe('/api/v1/admin/group-members/status');
+      await flushBackground();
+    });
+
+    it('returns 503 when DISCOGS_TOKEN is not configured', async () => {
+      mockBuildDiscogsClientFromEnv.mockReturnValueOnce(null);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/group-members/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(503);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('SERVICE_UNAVAILABLE');
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/group-members/enrich',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── GET /group-members/status ────────────────────────────────────────────
+  describe('GET /api/v1/admin/group-members/status', () => {
+    it('returns the members summary in lastResult after a successful run', async () => {
+      const accepted = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/group-members/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(accepted.statusCode).toBe(202);
+      await flushBackground();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/group-members/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { lastResult: { enriched: number; skipped: number } | null };
+      };
+      expect(body.data.lastResult?.enriched).toBe(6);
+      expect(body.data.lastResult?.skipped).toBe(30);
+    });
+  });
+
+  // ── POST /group-members/reset ────────────────────────────────────────────
+  describe('POST /api/v1/admin/group-members/reset', () => {
+    it('returns 200 with count of cleared markers', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/group-members/reset',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as { data: { reset: number } };
+      expect(body.data.reset).toBe(11);
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/group-members/reset',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── POST /person-reconciliation/enrich (#330) ────────────────────────────
+  describe('POST /api/v1/admin/person-reconciliation/enrich', () => {
+    it('returns 202 and starts the run in the background on success', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/person-reconciliation/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(202);
+      const body = JSON.parse(response.payload) as { data: { message: string; statusUrl: string } };
+      expect(body.data.message).toContain('started');
+      expect(body.data.statusUrl).toBe('/api/v1/admin/person-reconciliation/status');
+      await flushBackground();
+    });
+
+    it('returns 401 when token is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/person-reconciliation/enrich',
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── GET /person-reconciliation/status ────────────────────────────────────
+  describe('GET /api/v1/admin/person-reconciliation/status', () => {
+    it('returns the reconciliation summary in lastResult after a successful run', async () => {
+      const accepted = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/person-reconciliation/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(accepted.statusCode).toBe(202);
+      await flushBackground();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/person-reconciliation/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { lastResult: { linksReconciled: number } | null };
+      };
+      expect(body.data.lastResult?.linksReconciled).toBe(23);
     });
   });
 

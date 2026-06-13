@@ -1,6 +1,7 @@
 import type {
   DiscogsArtistProfile,
   DiscogsCollectionPage,
+  DiscogsLabelDetail,
   DiscogsMasterRelease,
   DiscogsMasterVersionsPage,
   DiscogsRelease,
@@ -111,6 +112,11 @@ export class DiscogsClient {
   async getArtist(artistId: number): Promise<DiscogsArtistProfile> {
     const url = `${BASE_URL}/artists/${artistId}`;
     return this.fetchWithBackoff<DiscogsArtistProfile>(url);
+  }
+
+  async getLabel(labelId: number): Promise<DiscogsLabelDetail> {
+    const url = `${BASE_URL}/labels/${labelId}`;
+    return this.fetchWithBackoff<DiscogsLabelDetail>(url);
   }
 
   private async fetchWithBackoff<T>(url: string): Promise<T> {

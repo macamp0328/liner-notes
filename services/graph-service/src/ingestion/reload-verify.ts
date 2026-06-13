@@ -44,6 +44,12 @@ export const RELOAD_COVERAGE_THRESHOLDS: readonly CoverageThreshold[] = [
   { metric: 'tracksWithIsrc', stage: 'track-musicbrainz', minPct: 40 },
   { metric: 'tracksWithTempo', stage: 'track-acousticbrainz', minPct: 0 },
   { metric: 'tracksWithDeezerBpm', stage: 'track-deezer', minPct: 0 },
+  // #330: reconciliation is deterministic + exhaustive (Artist.discogsId is unique), so after it
+  // runs covered == applicable exactly. minPct:100 (not 0) is therefore the meaningful floor — a
+  // 0 floor would be decorative, since the inline mergeSamePersonAs already guarantees covered>0.
+  // verify runs strictly last and no stage creates Musicians after reconciliation, so it's a clean
+  // post-condition: any missing late-Artist link → covered<applicable → reload failed.
+  { metric: 'samePersonLinks', stage: 'person-reconciliation', minPct: 100 },
 ];
 
 /** Why a metric passed or failed — drives the human-readable failure summary. */

@@ -172,6 +172,16 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
       schema: {
         tags: ['explore'],
         summary: 'Releases featuring this musician, with instrument and role on each result',
+        description:
+          'Resolves entity-resolution edges (#330), so results are not limited to the named credit ' +
+          "node. The name is matched against Musician nodes AND, via `SAME_PERSON_AS`, an Artist's " +
+          'canonical name — so querying an alias or the canonical name returns the same release set, ' +
+          'over both release- and track-scoped credits. `MEMBER_OF` is expanded one way only: ' +
+          "querying an individual also returns their group's records (an INFERRED, temporally-" +
+          "unguarded involvement — the group's catalog, not necessarily records they personally " +
+          'played on; date-qualified membership is roadmapped). Querying a group returns only the ' +
+          "group's own credits — it is deliberately NOT expanded to its members' solo work, which " +
+          'would over-attribute the group.',
         params: {
           type: 'object',
           required: ['name'],
@@ -285,16 +295,30 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   // GET /api/v1/explore/label/:name
-  fastify.get<{ Params: NameParams; Reply: ExploreRelease[] | ErrorReply }>(
+  fastify.get<{
+    Params: NameParams;
+    Querystring: { includeSublabels?: boolean };
+    Reply: ExploreRelease[] | ErrorReply;
+  }>(
     '/api/v1/explore/label/:name',
     {
       schema: {
         tags: ['explore'],
         summary: 'Releases on this label',
+        description:
+          'With `includeSublabels=true`, rolls up releases across the whole label family — the ' +
+          'named label plus every label connected to it through PARENT_LABEL edges (its parent, ' +
+          'ancestors, and their sublabels). Requires the label-hierarchy enrichment to have run.',
         params: {
           type: 'object',
           required: ['name'],
           properties: { name: { type: 'string' } },
+        },
+        querystring: {
+          type: 'object',
+          properties: {
+            includeSublabels: { type: 'boolean', default: false },
+          },
         },
         response: {
           200: { type: 'array', items: exploreReleaseSchema },
@@ -302,7 +326,11 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
       },
     },
     async (request, reply): Promise<ExploreRelease[] | ErrorReply> => {
-      const items = await getReleasesByLabel(getDriver(), request.params.name);
+      const items = await getReleasesByLabel(
+        getDriver(),
+        request.params.name,
+        request.query.includeSublabels ?? false,
+      );
       return reply.send(items);
     },
   );

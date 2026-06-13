@@ -30,6 +30,16 @@ export interface DiscogsLabel {
 // companies[] uses the same shape as labels[]
 export type DiscogsCompany = DiscogsLabel;
 
+// The full label entity from GET /labels/{id} — richer than the labels[] embedded in a release.
+// We ingest only `parent_label` (the upward edge, issue #332); `sublabels[]`, `profile`, and
+// `contact_info` are deliberately omitted. `parent_label` is absent when the label has no parent;
+// its `id` can be unkeyable (null/0) on malformed entries, same as DiscogsLabel.id.
+export interface DiscogsLabelDetail {
+  id: number;
+  name: string;
+  parent_label?: { id: number | null; name: string };
+}
+
 export interface DiscogsFormat {
   name: string;
   qty: string; // NOTE: API returns qty as a string, not a number — must parseInt
