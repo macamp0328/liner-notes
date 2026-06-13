@@ -126,13 +126,12 @@ const ROLE_CATEGORY_RULES: ReadonlyArray<readonly [RoleCategory, readonly string
 ];
 
 /**
- * Derive a role category from a comma-delimited Discogs role string.
- * Each token is checked against the lookup table using substring matching.
- * Bracket content is also scanned as additional tokens — some roles encode
- * the real category inside brackets (e.g. "Other [Catered By]" → "crew").
- * Falls back to "other" when no category matches.
+ * Tokenize a comma-delimited Discogs role string for keyword matching.
+ * Splits on commas; per segment emits the bracket-stripped base token plus each
+ * [...] inner as a separate lowercased token, dropping empties. Shared by
+ * parseRoleCategory and parseInstrument so their tokenization cannot drift.
  */
-export function parseRoleCategory(role: string): RoleCategory {
+function tokenizeRole(role: string): string[] {
   const tokens: string[] = [];
   for (const segment of role.split(',')) {
     const base = segment
@@ -146,7 +145,18 @@ export function parseRoleCategory(role: string): RoleCategory {
       if (inner.length > 0) tokens.push(inner);
     }
   }
+  return tokens;
+}
 
+/**
+ * Derive a role category from a comma-delimited Discogs role string.
+ * Each token is checked against the lookup table using substring matching.
+ * Bracket content is also scanned as additional tokens — some roles encode
+ * the real category inside brackets (e.g. "Other [Catered By]" → "crew").
+ * Falls back to "other" when no category matches.
+ */
+export function parseRoleCategory(role: string): RoleCategory {
+  const tokens = tokenizeRole(role);
   for (const [category, keywords] of ROLE_CATEGORY_RULES) {
     for (const token of tokens) {
       for (const keyword of keywords) {
@@ -156,6 +166,108 @@ export function parseRoleCategory(role: string): RoleCategory {
   }
 
   return 'other';
+}
+
+export type Instrument =
+  | 'bass'
+  | 'guitar'
+  | 'drums'
+  | 'percussion'
+  | 'vocals'
+  | 'piano'
+  | 'keyboards'
+  | 'organ'
+  | 'synthesizer'
+  | 'saxophone'
+  | 'trumpet'
+  | 'trombone'
+  | 'horn'
+  | 'violin'
+  | 'viola'
+  | 'cello'
+  | 'strings'
+  | 'flute'
+  | 'clarinet'
+  | 'harmonica'
+  | 'banjo'
+  | 'mandolin'
+  | 'harp'
+  | 'accordion'
+  | 'vibraphone';
+
+// Priority-ordered: the first family whose keyword substring-matches any token wins.
+// ORDER IS LOAD-BEARING — it disambiguates multi-instrument credit strings:
+//   • drums + clarinet BEFORE bass     → "Bass Drum [Kick]" → drums, "Bass Clarinet" → clarinet
+//   • bass BEFORE guitar               → "Bass Guitar" → bass (and "String Bass" → bass)
+//   • vibraphone BEFORE percussion     → "Marimba" → vibraphone, not generic percussion
+//   • bowed (violin/viola/cello) BEFORE strings → a named instrument beats a generic "Strings"
+//   • harmonica BEFORE harp            → 'harp' is a substring of 'harmonica'
+//   • synthesizer BEFORE keyboards     → a "Synthesizer [Moog]" credit isn't generic keys
+const INSTRUMENT_RULES: ReadonlyArray<readonly [Instrument, readonly string[]]> = [
+  ['drums', ['drums', 'drum']],
+  ['clarinet', ['clarinet']],
+  ['bass', ['bass']],
+  ['guitar', ['guitar']],
+  ['vibraphone', ['vibraphone', 'vibes', 'marimba', 'xylophone']],
+  [
+    'percussion',
+    [
+      'percussion',
+      'conga',
+      'bongo',
+      'tambourine',
+      'shaker',
+      'timbales',
+      'cabasa',
+      'cowbell',
+      'claves',
+    ],
+  ],
+  ['vocals', ['vocals', 'vocal', 'voice', 'choir']],
+  ['saxophone', ['saxophone', 'sax']],
+  ['trumpet', ['trumpet', 'cornet']],
+  ['trombone', ['trombone']],
+  ['horn', ['french horn', 'flugelhorn', 'horns', 'horn', 'brass']],
+  ['violin', ['violin', 'fiddle']],
+  ['viola', ['viola']],
+  ['cello', ['cello']],
+  ['strings', ['strings', 'string']],
+  ['flute', ['flute']],
+  ['harmonica', ['harmonica', 'blues harp']],
+  ['harp', ['harp']],
+  ['banjo', ['banjo']],
+  ['mandolin', ['mandolin']],
+  ['accordion', ['accordion']],
+  ['organ', ['hammond', 'organ']],
+  ['piano', ['rhodes', 'wurlitzer', 'piano']],
+  ['synthesizer', ['synthesizer', 'synth', 'moog', 'mellotron', 'clavinet']],
+  ['keyboards', ['keyboards', 'keyboard', 'keys', 'celeste']],
+];
+
+/**
+ * Derive a normalized instrument family from a comma-delimited Discogs role string.
+ * Reuses parseRoleCategory's tokenization, then walks INSTRUMENT_RULES in priority
+ * order and returns the first family whose keyword is a substring of any token.
+ * Returns null when no instrument keyword matches (producers, engineers, visual,
+ * crew, and anything uncatalogued).
+ *
+ * DERIVED value: the raw `role` and the first-token `displayRole` are kept verbatim
+ * for provenance; this is stored separately as CREDITED_ON.instrument.
+ *
+ * Deliberately NOT gated on parseRoleCategory === 'performer': the role-category
+ * performer keyword list is narrower than this vocabulary (e.g. "Trombone", "Viola",
+ * "Clarinet" fall through to 'other'), so gating would silently drop real instruments.
+ */
+export function parseInstrument(role: string): Instrument | null {
+  const tokens = tokenizeRole(role);
+  for (const [instrument, keywords] of INSTRUMENT_RULES) {
+    for (const token of tokens) {
+      for (const keyword of keywords) {
+        if (token.includes(keyword)) return instrument;
+      }
+    }
+  }
+  return null;
 }
 
 /**
