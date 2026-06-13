@@ -260,10 +260,33 @@ collection:
               sortKey: 100
             url: '{{ _.base_url }}/api/v1/admin/artist-genres/status'
             method: GET
+      - name: label-hierarchy
+        meta:
+          id: fld_083702ea93a8197853c12e4adb8ee28e
+          sortKey: 1100
+        children:
+          - name: Enrich Label nodes with their parent label from the Discogs label API
+            meta:
+              id: req_91df56e56f9e673c8927e9f799c793fd
+              sortKey: 0
+            url: '{{ _.base_url }}/api/v1/admin/label-hierarchy/enrich'
+            method: POST
+          - name: Reset label hierarchy enrichment markers for a full re-run
+            meta:
+              id: req_da929e67e29fa58166c311a1f1c991aa
+              sortKey: 100
+            url: '{{ _.base_url }}/api/v1/admin/label-hierarchy/reset'
+            method: POST
+          - name: Status of the most recent label hierarchy enrichment run
+            meta:
+              id: req_3941fe31b5c9fc6ac8618c7dfa5940ce
+              sortKey: 200
+            url: '{{ _.base_url }}/api/v1/admin/label-hierarchy/status'
+            method: GET
       - name: reload
         meta:
           id: fld_5808d8d0499fb9db11f9d9870b1ff194
-          sortKey: 1100
+          sortKey: 1200
         children:
           - name: Trigger the orchestrated reload (ingest + every enrichment) with resume
             meta:
@@ -371,6 +394,10 @@ collection:
           sortKey: 400
         url: '{{ _.base_url }}/api/v1/explore/label/:name'
         method: GET
+        parameters:
+          - name: includeSublabels
+            value: 'false'
+            disabled: true
         pathParameters:
           - name: name
             value: Blue Note

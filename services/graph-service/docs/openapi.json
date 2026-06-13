@@ -1382,6 +1382,131 @@
         }
       }
     },
+    "/api/v1/admin/label-hierarchy/enrich": {
+      "post": {
+        "summary": "Enrich Label nodes with their parent label from the Discogs label API",
+        "tags": ["admin"],
+        "description": "For each Label referenced by a release whose last attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), fetches `GET /labels/{id}` and records a single `(child)-[:PARENT_LABEL]->(parent)` edge, stamping `labelHierarchyFetchedAt`. Blocks until complete.\n\nOnly the upward `parent_label` is ingested (not `sublabels[]`): the upward edges alone connect every collection label in a family via their shared ancestor, which powers the `?includeSublabels=true` roll-up on `GET /api/v1/explore/label/:name`.\n\nA label Discogs reports as having no parent is stamped without an edge and retried at most once per window; run `POST /api/v1/admin/label-hierarchy/reset` first to re-fetch every label.\n\nRequires `DISCOGS_TOKEN` env var.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["message", "statusUrl"],
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "statusUrl": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/label-hierarchy/reset": {
+      "post": {
+        "summary": "Reset label hierarchy enrichment markers for a full re-run",
+        "tags": ["admin"],
+        "description": "Removes the `labelHierarchyFetchedAt` marker from all Label nodes and deletes every PARENT_LABEL edge, causing the next `POST /api/v1/admin/label-hierarchy/enrich` call to re-fetch every label from scratch.\n\nThis endpoint is blocked while enrichment is running.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["reset"],
+                      "properties": {
+                        "reset": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/lyrics/status": {
       "get": {
         "summary": "Status of the most recent lyrics enrichment run",
@@ -2150,6 +2275,92 @@
                               "type": "integer"
                             },
                             "stylesEnriched": {
+                              "type": "integer"
+                            },
+                            "skipped": {
+                              "type": "integer"
+                            },
+                            "failed": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/label-hierarchy/status": {
+      "get": {
+        "summary": "Status of the most recent label hierarchy enrichment run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult",
+                        "lastError"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "enriched": {
                               "type": "integer"
                             },
                             "skipped": {
@@ -3257,7 +3468,17 @@
       "get": {
         "summary": "Releases on this label",
         "tags": ["explore"],
+        "description": "With `includeSublabels=true`, rolls up releases across the whole label family — the named label plus every label connected to it through PARENT_LABEL edges (its parent, ancestors, and their sublabels). Requires the label-hierarchy enrichment to have run.",
         "parameters": [
+          {
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "in": "query",
+            "name": "includeSublabels",
+            "required": false
+          },
           {
             "schema": {
               "type": "string"
