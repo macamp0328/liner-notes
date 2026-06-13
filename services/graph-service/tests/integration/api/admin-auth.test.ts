@@ -59,6 +59,7 @@ const ADMIN_ROUTES: { method: 'GET' | 'POST'; url: string }[] = [
   { method: 'GET', url: '/api/v1/admin/person-reconciliation/status' },
   { method: 'POST', url: '/api/v1/admin/reload' },
   { method: 'GET', url: '/api/v1/admin/reload/status' },
+  { method: 'POST', url: '/api/v1/admin/reload/abort' },
 ];
 
 // Status routes only — safe to call with a valid token because they touch

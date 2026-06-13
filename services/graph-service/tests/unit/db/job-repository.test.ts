@@ -6,7 +6,9 @@ import {
   markStageComplete,
   markStageFailed,
   finishReloadJob,
+  abortReloadJob,
   getReloadJob,
+  getReloadJobAgeMs,
   getLatestReloadJob,
   findResumableReloadJob,
 } from '../../../src/db/job-repository.js';
@@ -202,6 +204,74 @@ describe('checkpoint zero-match warnings', () => {
     await expect(
       markStageFailed(makeMockDriver(session), 'job-1', 'lyrics', 'boom'),
     ).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// abortReloadJob (#326): force a stuck job + its running stages terminal
+// ---------------------------------------------------------------------------
+describe('abortReloadJob', () => {
+  const aborted = (matched: number, stages: number) => ({
+    records: [makeRecord({ matched: makeNeo4jInt(matched), abortedStages: makeNeo4jInt(stages) })],
+  });
+
+  it('marks the job failed, fails its running stages, and returns the stage count', async () => {
+    const { session, runSpy } = makeMockSession(aborted(1, 3));
+
+    const count = await abortReloadJob(makeMockDriver(session), 'job-1');
+
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain("MATCH (j:ReloadJob {jobId: $jobId, status: 'running'})");
+    expect(query).toContain("SET j.status = 'failed'");
+    expect(query).toContain('j.durationMs = datetime().epochMillis - j.startedAt.epochMillis');
+    expect(query).toContain('OPTIONAL MATCH (j)-[:HAS_STAGE]->(st:ReloadStage {status: ');
+    expect(query).toContain("st.error = 'Aborted by operator'");
+    expect(query).toContain('count(DISTINCT j) AS matched');
+    expect(query).toContain('count(st) AS abortedStages');
+    expect(params).toMatchObject({ jobId: 'job-1' });
+    expect(count).toBe(3);
+    expect(session.close).toHaveBeenCalled();
+  });
+
+  it('returns 0 when no stage was running', async () => {
+    const { session } = makeMockSession(aborted(1, 0));
+    const count = await abortReloadJob(makeMockDriver(session), 'job-1');
+    expect(count).toBe(0);
+  });
+
+  it('warns on a zero job match when a logger is passed', async () => {
+    const { session } = makeMockSession(aborted(0, 0));
+    const log = { warn: vi.fn() };
+    await abortReloadJob(makeMockDriver(session), 'job-1', log);
+    expect(log.warn).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getReloadJobAgeMs (#326): server-side age for the /reload/status staleness signal
+// ---------------------------------------------------------------------------
+describe('getReloadJobAgeMs', () => {
+  it('computes age server-side and coerces the neo4j integer', async () => {
+    const { session, runSpy } = makeMockSession({
+      records: [makeRecord({ ageMs: makeNeo4jInt(90000) })],
+    });
+
+    const ageMs = await getReloadJobAgeMs(makeMockDriver(session), 'job-1');
+
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('datetime().epochMillis - j.startedAt.epochMillis');
+    expect(query).toContain('j.startedAt IS NULL');
+    expect(params).toMatchObject({ jobId: 'job-1' });
+    expect(ageMs).toBe(90000);
+    expect(session.close).toHaveBeenCalled();
+  });
+
+  it('returns null when the job is missing or has no startedAt', async () => {
+    const { session: noRow } = makeMockSession({ records: [] });
+    expect(await getReloadJobAgeMs(makeMockDriver(noRow), 'missing')).toBeNull();
+
+    const { session: nullAge } = makeMockSession({ records: [makeRecord({ ageMs: null })] });
+    expect(await getReloadJobAgeMs(makeMockDriver(nullAge), 'job-1')).toBeNull();
   });
 });
 
