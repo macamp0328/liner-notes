@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { overlayLiveProgress, reloadStaleness } from '../../../src/api/admin.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import {
+  overlayLiveProgress,
+  reloadStaleness,
+  resolveStaleAfterMs,
+} from '../../../src/api/admin.js';
 import type { PersistedJob } from '../../../src/db/job-repository.js';
 import type { LiveStageProgress } from '../../../src/ingestion/reload-progress.js';
 
@@ -135,5 +139,32 @@ describe('reloadStaleness', () => {
       ageMs: null,
       stale: false,
     });
+  });
+});
+
+describe('resolveStaleAfterMs', () => {
+  afterEach(() => {
+    delete process.env['RELOAD_STALE_AFTER_HOURS'];
+  });
+
+  it('defaults to 12h when unset', () => {
+    expect(resolveStaleAfterMs()).toBe(12 * 3_600_000);
+  });
+
+  it('parses an all-digits value', () => {
+    process.env['RELOAD_STALE_AFTER_HOURS'] = '24';
+    expect(resolveStaleAfterMs()).toBe(24 * 3_600_000);
+  });
+
+  it('accepts 0 (flag any stuck job immediately)', () => {
+    process.env['RELOAD_STALE_AFTER_HOURS'] = '0';
+    expect(resolveStaleAfterMs()).toBe(0);
+  });
+
+  it('falls back to the default on a malformed or empty value (no parseInt-to-leading-digits)', () => {
+    process.env['RELOAD_STALE_AFTER_HOURS'] = '12foo';
+    expect(resolveStaleAfterMs()).toBe(12 * 3_600_000);
+    process.env['RELOAD_STALE_AFTER_HOURS'] = '   ';
+    expect(resolveStaleAfterMs()).toBe(12 * 3_600_000);
   });
 });

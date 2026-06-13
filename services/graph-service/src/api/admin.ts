@@ -216,7 +216,7 @@ const DEFAULT_RELOAD_STALE_AFTER_HOURS = 12;
  * to its leading digits (matching `resolveConcurrency`). Default 12 h is well above a full reload's
  * ~4–6 h, so a legitimately-long live run never trips it.
  */
-function resolveStaleAfterMs(): number {
+export function resolveStaleAfterMs(): number {
   const raw = process.env['RELOAD_STALE_AFTER_HOURS']?.trim() ?? '';
   const hours = /^[0-9]+$/.test(raw) ? Number(raw) : DEFAULT_RELOAD_STALE_AFTER_HOURS;
   return hours * 3_600_000;
@@ -1558,8 +1558,9 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       const job = await getLatestReloadJob(driver);
       // Age is computed server-side (getReloadJobAgeMs) rather than from `startedAt` — the stored
       // datetime stringifies to a 9-fractional-digit ISO value that Date.parse handles only by
-      // parser leniency. Only fetched for an existing job (admin-only, low-frequency endpoint).
-      const ageMs = job === null ? null : await getReloadJobAgeMs(driver, job.jobId);
+      // parser leniency. Only fetched for a *running* job — reloadStaleness discards age for a
+      // terminal one, so skip the round-trip on the common (latest job already finished) case.
+      const ageMs = job?.status === 'running' ? await getReloadJobAgeMs(driver, job.jobId) : null;
       const view = overlayLiveProgress(job, getLiveProgress(), Date.now());
       const staleness = reloadStaleness(job, isReloadActive(), ageMs, resolveStaleAfterMs());
       return reply.send({

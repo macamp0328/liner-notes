@@ -221,6 +221,7 @@ describe('abortReloadJob', () => {
     const count = await abortReloadJob(makeMockDriver(session), 'job-1');
 
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain("MATCH (j:ReloadJob {jobId: $jobId, status: 'running'})");
     expect(query).toContain("SET j.status = 'failed'");
     expect(query).toContain('j.durationMs = datetime().epochMillis - j.startedAt.epochMillis');
     expect(query).toContain('OPTIONAL MATCH (j)-[:HAS_STAGE]->(st:ReloadStage {status: ');

@@ -294,6 +294,12 @@ export async function finishReloadJob(
  * the `OPTIONAL MATCH` keeps that single row when no stage matches (`count(st)` then 0). `count(DISTINCT
  * j)` — a plain `count(j)` would return the post-fan-out row count, not 1. Returns the number of stages
  * failed. Mirrors `finishReloadJob`'s server-side `durationMs` so it never depends on the client clock.
+ *
+ * The `status: 'running'` filter on the job MATCH makes abort a no-op on an already-terminal job:
+ * `runReload` clears the in-memory `isReloadActive()` flag (which the route's 409 guard reads) in its
+ * `finally` *before* it `finishReloadJob`s, so a race could let abort pass that guard while the live
+ * run is between those two writes — filtering on `running` means abort then matches nothing and
+ * returns 0 instead of resurrecting a `complete` job back to `failed`.
  */
 export async function abortReloadJob(
   driver: Driver,
@@ -303,7 +309,7 @@ export async function abortReloadJob(
   const session = driver.session();
   try {
     const result = await session.run(
-      `MATCH (j:ReloadJob {jobId: $jobId})
+      `MATCH (j:ReloadJob {jobId: $jobId, status: 'running'})
        SET j.status = 'failed', j.completedAt = datetime(),
            j.durationMs = datetime().epochMillis - j.startedAt.epochMillis
        WITH j
