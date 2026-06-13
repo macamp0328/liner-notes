@@ -32,6 +32,8 @@ import { resetTrackDeezerEnrichment } from '../db/track-deezer-repository.js';
 import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
 import { resetArtistProfilesEnrichment } from '../db/artist-profiles-repository.js';
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
+import { enrichLabelHierarchy } from '../enrichment/label-hierarchy.js';
+import { resetLabelHierarchyEnrichment } from '../db/label-hierarchy-repository.js';
 import { runReload } from '../ingestion/orchestrator.js';
 import { RELOAD_STAGES } from '../ingestion/stages.js';
 import {
@@ -674,6 +676,45 @@ const PIPELINES: PipelineEntry[] = [
       ok: true,
       run: async (driver) => ({ ...(await enrichArtistGenres(driver, log)) }),
     }),
+    state: makePipelineState(),
+  },
+  {
+    name: 'label-hierarchy',
+    statusLabel: 'label hierarchy enrichment',
+    runningMessage: 'Label hierarchy enrichment already in progress',
+    enrichSummary: 'Enrich Label nodes with their parent label from the Discogs label API',
+    enrichDescription:
+      'For each Label referenced by a release whose last attempt has aged past ' +
+      '`ENRICHMENT_STALENESS_DAYS` (default 30), fetches `GET /labels/{id}` and records a single ' +
+      '`(child)-[:PARENT_LABEL]->(parent)` edge, stamping `labelHierarchyFetchedAt`. Blocks until complete.\n\n' +
+      'Only the upward `parent_label` is ingested (not `sublabels[]`): the upward edges alone connect ' +
+      'every collection label in a family via their shared ancestor, which powers the ' +
+      '`?includeSublabels=true` roll-up on `GET /api/v1/explore/label/:name`.\n\n' +
+      'A label Discogs reports as having no parent is stamped without an edge and retried at most once ' +
+      'per window; run `POST /api/v1/admin/label-hierarchy/reset` first to re-fetch every label.\n\n' +
+      'Requires `DISCOGS_TOKEN` env var.',
+    statusSummarySchema: standardSummarySchema,
+    schemaHas503: true,
+    clientCheckFirst: true,
+    prepare: (log): PreparedRun => {
+      const discogsClient = buildDiscogsClientFromEnv(log);
+      if (!discogsClient) return { ok: false, message: 'DISCOGS_TOKEN not configured' };
+      return {
+        ok: true,
+        run: async (driver) => ({ ...(await enrichLabelHierarchy(discogsClient, driver, log)) }),
+      };
+    },
+    reset: {
+      summary: 'Reset label hierarchy enrichment markers for a full re-run',
+      description:
+        'Removes the `labelHierarchyFetchedAt` marker from all Label nodes and deletes every ' +
+        'PARENT_LABEL edge, causing the next `POST /api/v1/admin/label-hierarchy/enrich` call to ' +
+        're-fetch every label from scratch.\n\n' +
+        'This endpoint is blocked while enrichment is running.',
+      runningMessage:
+        'Label hierarchy enrichment is currently running — wait for it to finish before resetting',
+      run: (driver) => resetLabelHierarchyEnrichment(driver),
+    },
     state: makePipelineState(),
   },
 ];
