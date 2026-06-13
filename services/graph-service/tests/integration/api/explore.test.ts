@@ -78,6 +78,46 @@ describe('explore routes', () => {
     });
   });
 
+  describe('GET /api/v1/explore/instrument/:name', () => {
+    interface InstrumentCreditBody {
+      musician: string;
+      instrument: string | null;
+      displayRole: string | null;
+    }
+
+    it('returns the musicians who play a normalized instrument', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/instrument/bass' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as InstrumentCreditBody[];
+      expect(body.length).toBeGreaterThan(0);
+      expect(body.every((r) => r.instrument === 'bass')).toBe(true);
+      expect(body.some((r) => r.musician === 'Ron Carter')).toBe(true);
+    });
+
+    it('collapses a specific Discogs spelling onto its family', async () => {
+      // George Coleman is credited verbatim as "Tenor Saxophone"; the normalized
+      // instrument axis answers the broader "saxophone" query.
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/instrument/saxophone' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as InstrumentCreditBody[];
+      expect(
+        body.some((r) => r.musician === 'George Coleman' && r.displayRole === 'Tenor Saxophone'),
+      ).toBe(true);
+    });
+
+    it('is case-insensitive on the instrument name', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/instrument/Bass' });
+      expect(res.statusCode).toBe(200);
+      expect((JSON.parse(res.payload) as InstrumentCreditBody[]).length).toBeGreaterThan(0);
+    });
+
+    it('returns an empty array for an instrument nobody plays', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/instrument/harp' });
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.payload)).toEqual([]);
+    });
+  });
+
   describe('GET /api/v1/explore/studio/:name', () => {
     it('returns releases for a known studio', async () => {
       const res = await app.inject({

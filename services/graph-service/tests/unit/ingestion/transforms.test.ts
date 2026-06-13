@@ -3,6 +3,7 @@ import {
   parsePosition,
   parseDisplayRole,
   parseRoleCategory,
+  parseInstrument,
   filterTracks,
   extractStudios,
   extractBarcode,
@@ -158,6 +159,111 @@ describe('parseRoleCategory', () => {
     // but waste a comparison loop iteration).
     expect(parseRoleCategory('Other []')).toBe('other');
     expect(parseRoleCategory('Bass []')).toBe('performer');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseInstrument
+// ---------------------------------------------------------------------------
+describe('parseInstrument', () => {
+  it('normalizes common instrument families', () => {
+    expect(parseInstrument('Bass')).toBe('bass');
+    expect(parseInstrument('Guitar')).toBe('guitar');
+    expect(parseInstrument('Drums')).toBe('drums');
+    expect(parseInstrument('Piano')).toBe('piano');
+    expect(parseInstrument('Vocals')).toBe('vocals');
+    expect(parseInstrument('Trumpet')).toBe('trumpet');
+    expect(parseInstrument('Trombone')).toBe('trombone');
+    expect(parseInstrument('Flute')).toBe('flute');
+    expect(parseInstrument('Banjo')).toBe('banjo');
+    expect(parseInstrument('Mandolin')).toBe('mandolin');
+    expect(parseInstrument('Accordion')).toBe('accordion');
+  });
+
+  it('collapses Discogs spelling variants onto one family', () => {
+    // The whole point of the field: every spelling of an instrument answers
+    // one normalized query.
+    expect(parseInstrument('Electric Bass [Elec. Bass]')).toBe('bass');
+    expect(parseInstrument('Double Bass')).toBe('bass');
+    expect(parseInstrument('Upright Bass')).toBe('bass');
+    expect(parseInstrument('Electric Guitar [Elec. Guitar]')).toBe('guitar');
+    expect(parseInstrument('Acoustic Guitar')).toBe('guitar');
+    expect(parseInstrument('Tenor Saxophone')).toBe('saxophone');
+    expect(parseInstrument('Alto Sax')).toBe('saxophone');
+    expect(parseInstrument('Backing Vocals')).toBe('vocals');
+  });
+
+  it('maps keyboard-family instruments to their canonical bucket', () => {
+    expect(parseInstrument('Rhodes')).toBe('piano');
+    expect(parseInstrument('Wurlitzer')).toBe('piano');
+    expect(parseInstrument('Hammond B3')).toBe('organ');
+    expect(parseInstrument('Organ')).toBe('organ');
+    expect(parseInstrument('Moog')).toBe('synthesizer');
+    expect(parseInstrument('Synthesizer')).toBe('synthesizer');
+    expect(parseInstrument('Keyboards')).toBe('keyboards');
+  });
+
+  it('resolves load-bearing ordering collisions', () => {
+    expect(parseInstrument('Bass Guitar')).toBe('bass'); // bass before guitar
+    expect(parseInstrument('Bass Drum [Kick]')).toBe('drums'); // drums before bass
+    expect(parseInstrument('Bass Clarinet')).toBe('clarinet'); // clarinet before bass
+    expect(parseInstrument('String Bass')).toBe('bass'); // bass before strings
+    expect(parseInstrument('Marimba')).toBe('vibraphone'); // vibraphone before percussion
+    expect(parseInstrument('Harmonica')).toBe('harmonica'); // harmonica before harp
+    expect(parseInstrument('Harp')).toBe('harp');
+  });
+
+  it('covers the long-tail instruments measured in the collection', () => {
+    // Added from a coverage pass over the real CREDITED_ON role distribution.
+    expect(parseInstrument('Oboe')).toBe('oboe');
+    expect(parseInstrument('Tuba')).toBe('tuba');
+    expect(parseInstrument('Sitar')).toBe('sitar');
+    expect(parseInstrument('Dobro')).toBe('guitar'); // resonator guitar
+    expect(parseInstrument('Maracas')).toBe('percussion');
+    expect(parseInstrument('Triangle')).toBe('percussion');
+    expect(parseInstrument('Chimes')).toBe('percussion');
+  });
+
+  it('does not misclassify instruments whose names contain a shorter family keyword', () => {
+    // Substring matching would otherwise fold these into the wrong high-traffic
+    // family ("Bassoon" -> bass, "Harpsichord" -> harp); the specific families are
+    // ordered ahead of the generic keyword to keep them distinct.
+    expect(parseInstrument('Bassoon')).toBe('bassoon');
+    expect(parseInstrument('Contrabassoon')).toBe('bassoon');
+    expect(parseInstrument('Harpsichord')).toBe('harpsichord');
+    // The genuine basses still resolve to bass.
+    expect(parseInstrument('Double Bass')).toBe('bass');
+    expect(parseInstrument('Contrabass')).toBe('bass');
+  });
+
+  it('keeps named bowed instruments distinct from generic strings', () => {
+    expect(parseInstrument('Violin')).toBe('violin');
+    expect(parseInstrument('Viola')).toBe('viola');
+    expect(parseInstrument('Cello')).toBe('cello');
+    expect(parseInstrument('Strings')).toBe('strings');
+  });
+
+  it('returns the first family on a multi-instrument credit', () => {
+    expect(parseInstrument('Acoustic Guitar, Electric Guitar, Vocals')).toBe('guitar');
+    expect(parseInstrument('Drums, Bass')).toBe('drums');
+  });
+
+  it('matches via bracket content and is case-insensitive', () => {
+    expect(parseInstrument('Sounds [Bass]')).toBe('bass');
+    expect(parseInstrument('BASS GUITAR')).toBe('bass');
+  });
+
+  it('skips empty bracket content without throwing', () => {
+    expect(parseInstrument('Bass []')).toBe('bass');
+  });
+
+  it('returns null when no instrument keyword matches', () => {
+    expect(parseInstrument('Producer')).toBeNull();
+    expect(parseInstrument('Mixed By')).toBeNull();
+    expect(parseInstrument('Mastered By')).toBeNull();
+    expect(parseInstrument('Photography By [Cover Photography]')).toBeNull();
+    expect(parseInstrument('Other')).toBeNull();
+    expect(parseInstrument('')).toBeNull();
   });
 });
 

@@ -20,6 +20,13 @@ export interface MusicianRelease extends ExploreRelease {
   role: string | null;
 }
 
+export interface InstrumentCredit extends ExploreRelease {
+  musician: string;
+  instrument: string | null;
+  displayRole: string | null;
+  scope: string | null;
+}
+
 export interface ConnectionNode {
   type: string;
   discogsId: number | null;
@@ -170,6 +177,54 @@ export async function getReleasesByCredit(
       ...mapExploreRelease(rec),
       instrument: toStr(rec.get('instrument')),
       role: toStr(rec.get('role')),
+    }));
+  } finally {
+    await session.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// getReleasesByInstrument
+// ---------------------------------------------------------------------------
+
+/**
+ * Who plays a given instrument family in the collection, and on which releases.
+ * Filters CREDITED_ON.instrument — the normalized, derived value parseInstrument()
+ * tags each credit with at ingest — so one query answers "who plays bass" without
+ * enumerating every Discogs spelling. The verbatim displayRole is returned per row
+ * so the caller still sees the specific credit (e.g. "Upright Bass").
+ *
+ * The param is lowercased to match the canonical stored family; stored values are
+ * always lowercase, so the equality also excludes the many null-instrument credits.
+ * v1 is release-scoped (Musician → Release), mirroring producer/engineer; track-scope
+ * credits are a deliberate follow-up.
+ */
+export async function getReleasesByInstrument(
+  driver: Driver,
+  instrument: string,
+): Promise<InstrumentCredit[]> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `
+      MATCH (m:Musician)-[c:CREDITED_ON]->(r:Release)
+      WHERE c.instrument = toLower($instrument)
+      OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
+      RETURN r.discogsId AS discogsId, r.title AS title, a.name AS artist,
+             coalesce(r.originalYear, r.pressingYear) AS pressingYear,
+             r.format AS format, r.thumbUrl AS thumbUrl,
+             m.name AS musician, c.instrument AS instrument,
+             c.displayRole AS displayRole, c.scope AS scope
+      ORDER BY musician, pressingYear
+      `,
+      { instrument },
+    );
+    return result.records.map((rec) => ({
+      ...mapExploreRelease(rec),
+      musician: toStr(rec.get('musician')) ?? '',
+      instrument: toStr(rec.get('instrument')),
+      displayRole: toStr(rec.get('displayRole')),
+      scope: toStr(rec.get('scope')),
     }));
   } finally {
     await session.close();

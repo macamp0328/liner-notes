@@ -9,6 +9,7 @@ import { buildServer } from '../../../src/server.js';
 const mockVerifyConnectivity = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const mockGetReleasesByMusician = vi.hoisted(() => vi.fn());
 const mockGetReleasesByCredit = vi.hoisted(() => vi.fn());
+const mockGetReleasesByInstrument = vi.hoisted(() => vi.fn());
 const mockGetReleasesByStudio = vi.hoisted(() => vi.fn());
 const mockGetReleasesByLabel = vi.hoisted(() => vi.fn());
 const mockGetReleasesByGenre = vi.hoisted(() => vi.fn());
@@ -44,6 +45,7 @@ vi.mock('../../../src/db/ingestion-repository.js', () => ({
 vi.mock('../../../src/db/repositories/explore-repository.js', () => ({
   getReleasesByMusician: mockGetReleasesByMusician,
   getReleasesByCredit: mockGetReleasesByCredit,
+  getReleasesByInstrument: mockGetReleasesByInstrument,
   getReleasesByStudio: mockGetReleasesByStudio,
   getReleasesByLabel: mockGetReleasesByLabel,
   getReleasesByGenre: mockGetReleasesByGenre,
@@ -75,6 +77,14 @@ const sampleMusicianRelease = {
   ...sampleRelease,
   instrument: 'Guitar',
   role: 'performer',
+};
+
+const sampleInstrumentCredit = {
+  ...sampleRelease,
+  musician: 'Ron Carter',
+  instrument: 'bass',
+  displayRole: 'Upright Bass',
+  scope: 'release',
 };
 
 // ---------------------------------------------------------------------------
@@ -155,6 +165,34 @@ describe('explore routes', () => {
         'Dominic Monks',
         'engineer',
       );
+    });
+  });
+
+  // GET /api/v1/explore/instrument/:name
+  describe('GET /api/v1/explore/instrument/:name', () => {
+    it('returns 200 with instrument credits and passes the name through', async () => {
+      mockGetReleasesByInstrument.mockResolvedValue([sampleInstrumentCredit]);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/instrument/bass',
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as (typeof sampleInstrumentCredit)[];
+      expect(body).toHaveLength(1);
+      expect(body[0]!.musician).toBe('Ron Carter');
+      expect(body[0]!.instrument).toBe('bass');
+      expect(body[0]!.displayRole).toBe('Upright Bass');
+      expect(mockGetReleasesByInstrument).toHaveBeenCalledWith(expect.anything(), 'bass');
+    });
+
+    it('returns 200 with empty array when no results', async () => {
+      mockGetReleasesByInstrument.mockResolvedValue([]);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/instrument/harp',
+      });
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.payload)).toEqual([]);
     });
   });
 

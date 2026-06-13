@@ -3762,6 +3762,87 @@
         }
       }
     },
+    "/api/v1/explore/instrument/{name}": {
+      "get": {
+        "summary": "Musicians who play this instrument and the releases they play it on",
+        "tags": ["explore"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "name",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["discogsId", "title", "musician"],
+                    "properties": {
+                      "discogsId": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "artist": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "pressingYear": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "format": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "thumbUrl": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "musician": {
+                        "type": "string"
+                      },
+                      "instrument": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "displayRole": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "scope": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/explore/studio/{name}": {
       "get": {
         "summary": "Releases recorded at this studio",
