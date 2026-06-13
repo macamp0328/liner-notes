@@ -2843,7 +2843,7 @@
       "get": {
         "summary": "Per-stage status of the most recent orchestrated reload",
         "tags": ["admin"],
-        "description": "Returns the latest reload job with each stage’s status (`pending`/`running`/`complete`/`skipped`/`failed`), counts, and error. While a reload is running, the active stage also carries live `processed`/`total` and a rough `etaMs` (linear extrapolation for that stage only). `null` if no reload has ever run.",
+        "description": "Returns the latest reload job with each stage’s status (`pending`/`running`/`complete`/`skipped`/`failed`), counts, and error. While a reload is running, the active stage also carries live `processed`/`total` and a rough `etaMs` (linear extrapolation for that stage only). A running job also carries `ageMs` (its server-computed age) and `stale` (#326): `true` when it is older than `RELOAD_STALE_AFTER_HOURS` (default 12) with no live pod on it — i.e. stuck `running` after a crash/missing-creds cold start and a candidate for `POST /api/v1/admin/reload/abort`. `null` if no reload has ever run.",
         "security": [
           {
             "bearerAuth": []
@@ -2881,6 +2881,13 @@
                         "durationMs": {
                           "type": "number",
                           "nullable": true
+                        },
+                        "ageMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "stale": {
+                          "type": "boolean"
                         },
                         "stages": {
                           "type": "array",
@@ -2939,6 +2946,85 @@
             }
           },
           "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/reload/abort": {
+      "post": {
+        "summary": "Force a stuck reload job terminal (operator escape hatch)",
+        "tags": ["admin"],
+        "description": "Marks the in-progress reload job (and any of its still-`running` stages) `failed` so it stops 409-blocking `POST /api/v1/admin/reload` and `POST /api/v1/admin/reset` (#326). Use this for a job that is `running` in Neo4j but has **no live pod** executing it — a crash whose recovery never fired, or a cold-start resume skipped because Discogs creds were unset. `GET /api/v1/admin/reload/status` flags such a job with `stale: true`.\n\nReturns 404 if no reload job is in progress, and 409 if a reload is **actively running** on this pod (restart the pod to interrupt a live reload — it resumes from its last completed stage; abort only clears a stuck one). Pairs with `/reset`: abort, then wipe.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["jobId", "abortedStages"],
+                      "properties": {
+                        "jobId": {
+                          "type": "string"
+                        },
+                        "abortedStages": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "Default Response",
             "content": {
               "application/json": {

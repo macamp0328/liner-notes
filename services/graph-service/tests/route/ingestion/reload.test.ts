@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../../../src/server.js';
-import { __resetReloadProgress } from '../../../src/ingestion/reload-progress.js';
+import { __resetReloadProgress, markReloadActive } from '../../../src/ingestion/reload-progress.js';
 
 const mockVerifyConnectivity = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 
@@ -51,8 +51,10 @@ vi.mock('../../../src/ingestion/job-state.js', () => ({
 const repo = vi.hoisted(() => ({
   createReloadJob: vi.fn(),
   finishReloadJob: vi.fn(),
+  abortReloadJob: vi.fn(),
   findResumableReloadJob: vi.fn(),
   getLatestReloadJob: vi.fn(),
+  getReloadJobAgeMs: vi.fn(),
 }));
 vi.mock('../../../src/db/job-repository.js', () => repo);
 
@@ -104,8 +106,10 @@ describe('Reload admin API', () => {
     });
     repo.createReloadJob.mockResolvedValue('job-new');
     repo.finishReloadJob.mockResolvedValue(undefined);
+    repo.abortReloadJob.mockResolvedValue(0);
     repo.findResumableReloadJob.mockResolvedValue(null);
     repo.getLatestReloadJob.mockResolvedValue(null);
+    repo.getReloadJobAgeMs.mockResolvedValue(null);
 
     process.env['NEO4J_URI'] = 'bolt://localhost:7687';
     process.env['NEO4J_USER'] = 'neo4j';
@@ -216,6 +220,37 @@ describe('Reload admin API', () => {
       expect(body.data.stages[0]?.counts).toEqual({ releasesProcessed: 3 });
     });
 
+    it('flags a running job with no live pod past the threshold as stale (#326)', async () => {
+      repo.getLatestReloadJob.mockResolvedValue(sampleJob);
+      repo.getReloadJobAgeMs.mockResolvedValue(50 * 3_600_000); // 50h, past the 12h default
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/reload/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as { data: { stale: boolean; ageMs: number } };
+      expect(body.data.stale).toBe(true);
+      expect(body.data.ageMs).toBe(50 * 3_600_000);
+    });
+
+    it('does not flag a running job as stale while a reload is active on this pod', async () => {
+      repo.getLatestReloadJob.mockResolvedValue(sampleJob);
+      repo.getReloadJobAgeMs.mockResolvedValue(50 * 3_600_000);
+      markReloadActive('job-1');
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/reload/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      const body = JSON.parse(res.payload) as { data: { stale: boolean } };
+      expect(body.data.stale).toBe(false);
+    });
+
     it('returns data: null when no reload has ever run', async () => {
       repo.getLatestReloadJob.mockResolvedValue(null);
 
@@ -233,6 +268,65 @@ describe('Reload admin API', () => {
     it('returns 401 without a bearer token', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/v1/admin/reload/status' });
       expect(res.statusCode).toBe(401);
+    });
+  });
+
+  describe('POST /api/v1/admin/reload/abort', () => {
+    it('returns 404 when no reload job is in progress', async () => {
+      repo.findResumableReloadJob.mockResolvedValue(null);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/reload/abort',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(res.statusCode).toBe(404);
+      const body = JSON.parse(res.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('NO_RELOAD_RUNNING');
+      expect(repo.abortReloadJob).not.toHaveBeenCalled();
+    });
+
+    it('aborts a stuck job (running in Neo4j, no live pod) and reports the failed-stage count', async () => {
+      repo.findResumableReloadJob.mockResolvedValue({ ...sampleJob, jobId: 'stuck-9' });
+      repo.abortReloadJob.mockResolvedValue(2);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/reload/abort',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as { data: { jobId: string; abortedStages: number } };
+      expect(body.data).toEqual({ jobId: 'stuck-9', abortedStages: 2 });
+      expect(repo.abortReloadJob).toHaveBeenCalledWith(
+        expect.anything(),
+        'stuck-9',
+        expect.anything(),
+      );
+    });
+
+    it('returns 409 and does not abort while a reload is actively running on this pod', async () => {
+      repo.findResumableReloadJob.mockResolvedValue({ ...sampleJob, jobId: 'live-3' });
+      markReloadActive('live-3');
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/reload/abort',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(res.statusCode).toBe(409);
+      const body = JSON.parse(res.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('RELOAD_RUNNING');
+      expect(repo.abortReloadJob).not.toHaveBeenCalled();
+    });
+
+    it('returns 401 without a bearer token', async () => {
+      const res = await app.inject({ method: 'POST', url: '/api/v1/admin/reload/abort' });
+      expect(res.statusCode).toBe(401);
+      expect(repo.abortReloadJob).not.toHaveBeenCalled();
     });
   });
 });

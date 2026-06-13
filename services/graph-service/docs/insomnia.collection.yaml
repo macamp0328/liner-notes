@@ -340,6 +340,12 @@ collection:
               sortKey: 100
             url: '{{ _.base_url }}/api/v1/admin/reload/status'
             method: GET
+          - name: Force a stuck reload job terminal (operator escape hatch)
+            meta:
+              id: req_f72f2244942a8feb79171d51b6307c4a
+              sortKey: 200
+            url: '{{ _.base_url }}/api/v1/admin/reload/abort'
+            method: POST
   - name: collection
     meta:
       id: fld_0df53349a0079405a0f0f1fa85863bcb

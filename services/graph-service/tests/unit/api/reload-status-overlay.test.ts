@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { overlayLiveProgress } from '../../../src/api/admin.js';
+import { overlayLiveProgress, reloadStaleness } from '../../../src/api/admin.js';
 import type { PersistedJob } from '../../../src/db/job-repository.js';
 import type { LiveStageProgress } from '../../../src/ingestion/reload-progress.js';
 
@@ -93,5 +93,47 @@ describe('overlayLiveProgress', () => {
     // Live says master-data, but the persisted running stage is lyrics → no match.
     const view = overlayLiveProgress(makeJob(), makeLive({ stage: 'master-data' }), 10_000);
     expect(view?.stages.find((s) => s.stage === 'lyrics')).not.toHaveProperty('processed');
+  });
+});
+
+describe('reloadStaleness', () => {
+  const THRESHOLD = 12 * 3_600_000; // 12h
+
+  it('flags a running job past the threshold with no live pod as stale', () => {
+    expect(reloadStaleness(makeJob(), false, 50 * 3_600_000, THRESHOLD)).toEqual({
+      ageMs: 50 * 3_600_000,
+      stale: true,
+    });
+  });
+
+  it('does not flag a running job while a reload is active (live pod)', () => {
+    expect(reloadStaleness(makeJob(), true, 50 * 3_600_000, THRESHOLD)).toEqual({
+      ageMs: 50 * 3_600_000,
+      stale: false,
+    });
+  });
+
+  it('does not flag a running job younger than the threshold (still surfaces ageMs)', () => {
+    expect(reloadStaleness(makeJob(), false, 60_000, THRESHOLD)).toEqual({
+      ageMs: 60_000,
+      stale: false,
+    });
+  });
+
+  it('is not stale for a non-running (terminal) job', () => {
+    expect(
+      reloadStaleness(makeJob({ status: 'complete' }), false, 50 * 3_600_000, THRESHOLD),
+    ).toEqual({ ageMs: null, stale: false });
+  });
+
+  it('is not stale for a null job or a null age', () => {
+    expect(reloadStaleness(null, false, 50 * 3_600_000, THRESHOLD)).toEqual({
+      ageMs: null,
+      stale: false,
+    });
+    expect(reloadStaleness(makeJob(), false, null, THRESHOLD)).toEqual({
+      ageMs: null,
+      stale: false,
+    });
   });
 });

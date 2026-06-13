@@ -40,10 +40,12 @@ import { enrichPersonReconciliation } from '../enrichment/person-reconciliation.
 import { runReload } from '../ingestion/orchestrator.js';
 import { RELOAD_STAGES } from '../ingestion/stages.js';
 import {
+  abortReloadJob,
   createReloadJob,
   finishReloadJob,
   findResumableReloadJob,
   getLatestReloadJob,
+  getReloadJobAgeMs,
 } from '../db/job-repository.js';
 import type { PersistedJob, PersistedStage } from '../db/job-repository.js';
 import {
@@ -130,6 +132,12 @@ const reloadJobShape = {
     startedAt: { type: 'string', nullable: true },
     completedAt: { type: 'string', nullable: true },
     durationMs: { type: 'number', nullable: true },
+    // Staleness signal (#326), attached by the /reload/status handler. `ageMs` is the
+    // server-computed age of a running job; `stale` flags a running job past
+    // RELOAD_STALE_AFTER_HOURS with no live pod on it (a candidate for /reload/abort). Both are
+    // optional, not required — overlayLiveProgress returns the raw job unchanged on several paths.
+    ageMs: { type: 'number', nullable: true },
+    stale: { type: 'boolean' },
     stages: {
       type: 'array',
       items: {
@@ -164,8 +172,13 @@ type StageView = PersistedStage & {
   etaMs?: number | null;
 };
 
-/** The /reload/status payload: the persisted job with live progress overlaid on its running stage. */
-type ReloadJobView = (Omit<PersistedJob, 'stages'> & { stages: StageView[] }) | null;
+/**
+ * The /reload/status payload: the persisted job with live progress overlaid on its running stage,
+ * plus the #326 staleness signal (`ageMs`/`stale`) the handler attaches after `overlayLiveProgress`.
+ */
+type ReloadJobView =
+  | (Omit<PersistedJob, 'stages'> & { stages: StageView[]; ageMs?: number | null; stale?: boolean })
+  | null;
 
 /**
  * Overlay the live in-memory progress (processed/total + a rough ETA) onto the running stage of
@@ -192,6 +205,42 @@ export function overlayLiveProgress(
       return { ...s, processed: live.processed, total: live.total, etaMs };
     }),
   };
+}
+
+/** Default age before a running reload with no live pod is flagged stale (#326). */
+const DEFAULT_RELOAD_STALE_AFTER_HOURS = 12;
+
+/**
+ * Resolve the staleness threshold (ms) from `RELOAD_STALE_AFTER_HOURS`. All-digits or fall back to
+ * the default — a malformed value like `"12foo"` resolves to the default rather than `parseInt`-ing
+ * to its leading digits (matching `resolveConcurrency`). Default 12 h is well above a full reload's
+ * ~4–6 h, so a legitimately-long live run never trips it.
+ */
+function resolveStaleAfterMs(): number {
+  const raw = process.env['RELOAD_STALE_AFTER_HOURS']?.trim() ?? '';
+  const hours = /^[0-9]+$/.test(raw) ? Number(raw) : DEFAULT_RELOAD_STALE_AFTER_HOURS;
+  return hours * 3_600_000;
+}
+
+/**
+ * Staleness signal for /reload/status (#326). A reload is `stale` when it is `running` in Neo4j,
+ * older than `staleAfterMs`, and has no live pod on it (`!isActive`) — i.e. a job stuck `running`
+ * after a crash/missing-creds cold start, a candidate for `POST /reload/abort`. Pure (takes the
+ * DB-computed `ageMs`, never `Date.parse`s the 9-digit `startedAt`) so it is unit-testable without
+ * a Fastify app. `stale` requires `!isActive` so a legitimately-long live reload is never flagged;
+ * a *freshly* stuck job (age below the threshold) is not yet `stale` — abort clears it regardless,
+ * this is only the discovery aid.
+ */
+export function reloadStaleness(
+  job: PersistedJob | null,
+  isActive: boolean,
+  ageMs: number | null,
+  staleAfterMs: number,
+): { ageMs: number | null; stale: boolean } {
+  if (job === null || job.status !== 'running' || ageMs === null) {
+    return { ageMs: null, stale: false };
+  }
+  return { ageMs, stale: !isActive && ageMs > staleAfterMs };
 }
 
 interface PipelineState {
@@ -1487,7 +1536,10 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           '(`pending`/`running`/`complete`/`skipped`/`failed`), counts, and error. ' +
           'While a reload is running, the active stage also carries live `processed`/`total` ' +
           'and a rough `etaMs` (linear extrapolation for that stage only). ' +
-          '`null` if no reload has ever run.',
+          'A running job also carries `ageMs` (its server-computed age) and `stale` (#326): ' +
+          '`true` when it is older than `RELOAD_STALE_AFTER_HOURS` (default 12) with no live pod ' +
+          'on it — i.e. stuck `running` after a crash/missing-creds cold start and a candidate for ' +
+          '`POST /api/v1/admin/reload/abort`. `null` if no reload has ever run.',
         security: [{ bearerAuth: [] }],
         response: {
           200: {
@@ -1502,8 +1554,95 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: adminAuthHook,
     },
     async (_request, reply) => {
-      const job = await getLatestReloadJob(getDriver());
-      return reply.send({ data: overlayLiveProgress(job, getLiveProgress(), Date.now()) });
+      const driver = getDriver();
+      const job = await getLatestReloadJob(driver);
+      // Age is computed server-side (getReloadJobAgeMs) rather than from `startedAt` — the stored
+      // datetime stringifies to a 9-fractional-digit ISO value that Date.parse handles only by
+      // parser leniency. Only fetched for an existing job (admin-only, low-frequency endpoint).
+      const ageMs = job === null ? null : await getReloadJobAgeMs(driver, job.jobId);
+      const view = overlayLiveProgress(job, getLiveProgress(), Date.now());
+      const staleness = reloadStaleness(job, isReloadActive(), ageMs, resolveStaleAfterMs());
+      return reply.send({
+        data: view === null ? null : { ...view, ageMs: staleness.ageMs, stale: staleness.stale },
+      });
+    },
+  );
+
+  fastify.post<{
+    Reply:
+      | { data: { jobId: string; abortedStages: number } }
+      | { error: { code: string; message: string } };
+  }>(
+    '/reload/abort',
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Force a stuck reload job terminal (operator escape hatch)',
+        description:
+          'Marks the in-progress reload job (and any of its still-`running` stages) `failed` so it ' +
+          'stops 409-blocking `POST /api/v1/admin/reload` and `POST /api/v1/admin/reset` (#326). ' +
+          'Use this for a job that is `running` in Neo4j but has **no live pod** executing it — a ' +
+          'crash whose recovery never fired, or a cold-start resume skipped because Discogs creds ' +
+          'were unset. `GET /api/v1/admin/reload/status` flags such a job with `stale: true`.\n\n' +
+          'Returns 404 if no reload job is in progress, and 409 if a reload is **actively running** ' +
+          'on this pod (restart the pod to interrupt a live reload — it resumes from its last ' +
+          'completed stage; abort only clears a stuck one). Pairs with `/reset`: abort, then wipe.',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                type: 'object',
+                required: ['jobId', 'abortedStages'],
+                properties: {
+                  jobId: { type: 'string' },
+                  abortedStages: { type: 'integer' },
+                },
+              },
+            },
+          },
+          401: errorResponseRef,
+          404: errorResponseRef,
+          409: errorResponseRef,
+          503: errorResponseRef,
+        },
+      },
+      preHandler: adminAuthHook,
+    },
+    async (request, reply) => {
+      const driver = getDriver();
+      // Not gated by busyWith(): abort mutates only the ReloadJob/ReloadStage checkpoint nodes, never
+      // graph data, and the stuck job it targets is invisible to busyWith (which reads only the
+      // in-memory isReloadActive() flag) anyway.
+      const resumable = await findResumableReloadJob(driver);
+      if (resumable === null) {
+        return reply.code(404).send({
+          error: { code: 'NO_RELOAD_RUNNING', message: 'No reload job is in progress to abort' },
+        });
+      }
+      // Refuse to abort a reload that is *actively* running on this (single) pod: the in-process
+      // scheduler can't be safely interrupted mid-flight, and a concurrent finishReloadJob from the
+      // live run would race this. Restarting the pod is the live-interrupt path (#291 leaves the job
+      // `running` for resume). Asymmetry vs /reset, which refuses on either signal: abort refuses on
+      // the in-memory live signal and *acts* on the DB-only stuck signal.
+      if (isReloadActive()) {
+        return reply.code(409).send({
+          error: {
+            code: 'RELOAD_RUNNING',
+            message:
+              'A reload is actively running — restart the pod to interrupt it; ' +
+              'abort only clears a stuck job',
+          },
+        });
+      }
+      const abortedStages = await abortReloadJob(driver, resumable.jobId, request.log);
+      request.log.warn(
+        { jobId: resumable.jobId, abortedStages },
+        '[admin] stuck reload job aborted via POST /reload/abort',
+      );
+      return reply.send({ data: { jobId: resumable.jobId, abortedStages } });
     },
   );
 }

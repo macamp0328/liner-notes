@@ -38,10 +38,16 @@ vi.mock('../../../src/db/schema.js', () => ({
 const mockFindResumableReloadJob = vi.hoisted(() => vi.fn());
 const mockCreateReloadJob = vi.hoisted(() => vi.fn());
 const mockGetLatestReloadJob = vi.hoisted(() => vi.fn());
+const mockGetReloadJobAgeMs = vi.hoisted(() => vi.fn());
+const mockFinishReloadJob = vi.hoisted(() => vi.fn());
+const mockAbortReloadJob = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/db/job-repository.js', () => ({
   findResumableReloadJob: mockFindResumableReloadJob,
   createReloadJob: mockCreateReloadJob,
   getLatestReloadJob: mockGetLatestReloadJob,
+  getReloadJobAgeMs: mockGetReloadJobAgeMs,
+  finishReloadJob: mockFinishReloadJob,
+  abortReloadJob: mockAbortReloadJob,
 }));
 
 // orchestrator.runReload is fired-and-forgotten by POST /reload; mock it so a real reload never
@@ -296,6 +302,9 @@ describe('Admin API', () => {
     mockFindResumableReloadJob.mockResolvedValue(null);
     mockCreateReloadJob.mockResolvedValue('job-new');
     mockGetLatestReloadJob.mockResolvedValue(null);
+    mockGetReloadJobAgeMs.mockResolvedValue(null);
+    mockFinishReloadJob.mockResolvedValue(undefined);
+    mockAbortReloadJob.mockResolvedValue(0);
     mockRunReload.mockResolvedValue({ jobId: 'job-new', status: 'complete' });
     resetAllPipelineStates();
     // Clear the real (unmocked) reload-progress singleton so a markReloadActive() from one test

@@ -285,10 +285,66 @@ export async function finishReloadJob(
   }
 }
 
+/**
+ * Force a job terminal (`failed`) and fail any of its still-`running` stages — the operator escape
+ * hatch (#326) for a job that is `running` in Neo4j but has no live pod executing it (cold-start
+ * resume skipped for missing creds, or a crash whose `.catch` recovery never fired). Without this a
+ * stuck job 409s every future `/reload` + `/reset` until a pod restart (#290). Atomic so a job with
+ * zero running stages is still flipped: the job `SET` applies once before the `WITH j` boundary, and
+ * the `OPTIONAL MATCH` keeps that single row when no stage matches (`count(st)` then 0). `count(DISTINCT
+ * j)` — a plain `count(j)` would return the post-fan-out row count, not 1. Returns the number of stages
+ * failed. Mirrors `finishReloadJob`'s server-side `durationMs` so it never depends on the client clock.
+ */
+export async function abortReloadJob(
+  driver: Driver,
+  jobId: string,
+  log?: CheckpointLogger,
+): Promise<number> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `MATCH (j:ReloadJob {jobId: $jobId})
+       SET j.status = 'failed', j.completedAt = datetime(),
+           j.durationMs = datetime().epochMillis - j.startedAt.epochMillis
+       WITH j
+       OPTIONAL MATCH (j)-[:HAS_STAGE]->(st:ReloadStage {status: 'running'})
+       SET st.status = 'failed', st.completedAt = datetime(), st.error = 'Aborted by operator'
+       RETURN count(DISTINCT j) AS matched, count(st) AS abortedStages`,
+      { jobId },
+    );
+    const record = result.records[0];
+    warnIfUnmatched(record?.get('matched'), log, `abortReloadJob(${jobId})`);
+    return toNumberOrNull(record?.get('abortedStages')) ?? 0;
+  } finally {
+    await session.close();
+  }
+}
+
 export async function getReloadJob(driver: Driver, jobId: string): Promise<PersistedJob | null> {
   const session = driver.session();
   try {
     return await readSingleJob(session, 'MATCH (j:ReloadJob {jobId: $jobId})', { jobId });
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Age in milliseconds of a job since its `startedAt`, computed server-side (`datetime().epochMillis -
+ * j.startedAt.epochMillis`) so it never depends on the client clock — and to avoid `Date.parse`-ing the
+ * 9-fractional-digit ISO string `startedAt` stringifies to. Drives the `/reload/status` staleness signal
+ * (#326). `null` when the job is missing or has no `startedAt`.
+ */
+export async function getReloadJobAgeMs(driver: Driver, jobId: string): Promise<number | null> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `MATCH (j:ReloadJob {jobId: $jobId})
+       RETURN CASE WHEN j.startedAt IS NULL THEN null
+                   ELSE datetime().epochMillis - j.startedAt.epochMillis END AS ageMs`,
+      { jobId },
+    );
+    return toNumberOrNull(result.records[0]?.get('ageMs'));
   } finally {
     await session.close();
   }

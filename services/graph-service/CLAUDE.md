@@ -192,16 +192,17 @@ Every `/api/v1/admin/*` route requires `Authorization: Bearer <ADMIN_TOKEN>`
 (`src/api/middleware/admin-auth.ts`) — a missing token yields `503 SERVICE_UNAVAILABLE`, a wrong one
 `401 UNAUTHORIZED`. `/health` and `/stats` are public.
 
-| Method | Path                                   | Description                                                                             |
-| ------ | -------------------------------------- | --------------------------------------------------------------------------------------- |
-| `POST` | `/api/v1/admin/ingest`                 | Trigger the first-5-stage ingestion (release load + 4 enrichments; in-memory job state) |
-| `GET`  | `/api/v1/admin/ingest/status`          | Last ingestion stats                                                                    |
-| `POST` | `/api/v1/admin/reload`                 | Orchestrated reload — every stage, DB-checkpointed & resumable (see below)              |
-| `GET`  | `/api/v1/admin/reload/status`          | Per-stage reload status/counts (DB-backed)                                              |
-| `POST` | `/api/v1/admin/reset?confirm=wipe-all` | Wipe the whole graph (`MATCH (n) DETACH DELETE n`); guarded by the `confirm` query      |
-| `POST` | `/api/v1/admin/lyrics/clear-genius`    | Clear Genius-sourced lyrics so they can be re-resolved                                  |
-| `GET`  | `/api/v1/health`                       | Service + Neo4j status (public)                                                         |
-| `GET`  | `/api/docs`                            | Swagger UI — **dev only**, not mounted in production (see OpenAPI / Swagger)            |
+| Method | Path                                   | Description                                                                                       |
+| ------ | -------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `POST` | `/api/v1/admin/ingest`                 | Trigger the first-5-stage ingestion (release load + 4 enrichments; in-memory job state)           |
+| `GET`  | `/api/v1/admin/ingest/status`          | Last ingestion stats                                                                              |
+| `POST` | `/api/v1/admin/reload`                 | Orchestrated reload — every stage, DB-checkpointed & resumable (see below)                        |
+| `GET`  | `/api/v1/admin/reload/status`          | Per-stage reload status/counts (DB-backed); a running job also carries `ageMs` + `stale` (#326)   |
+| `POST` | `/api/v1/admin/reload/abort`           | Force a stuck `running` reload job (+ its running stages) terminal — operator escape hatch (#326) |
+| `POST` | `/api/v1/admin/reset?confirm=wipe-all` | Wipe the whole graph (`MATCH (n) DETACH DELETE n`); guarded by the `confirm` query                |
+| `POST` | `/api/v1/admin/lyrics/clear-genius`    | Clear Genius-sourced lyrics so they can be re-resolved                                            |
+| `GET`  | `/api/v1/health`                       | Service + Neo4j status (public)                                                                   |
+| `GET`  | `/api/docs`                            | Swagger UI — **dev only**, not mounted in production (see OpenAPI / Swagger)                      |
 
 **Per-pipeline enrichment routes** are generated from the `PIPELINES` array in `admin.ts`. There are
 **12** pipelines — `lyrics`, `nationality`, `master-data`, `mb-release-events`, `track-musicbrainz`,
@@ -414,6 +415,26 @@ ranStages)` produces a structured per-metric pass/fail report reused by the gate
     interleave. (#177 was rescoped to deploy⇄reload and closed; #281 owned reload⇄enrich, #300 extended
     it to `/ingest` and the reset routes; #290 added the `/reset` DB-resumable guard + the rejected-
     reload `failed` recovery.)
+- **Stuck-job detection + abort (#326).** #290 left a tail: a job can be `running` in Neo4j with
+  **no live pod** on it (`isReloadActive()` false) — a cold-start resume skipped for missing creds,
+  or a crash whose `.catch` recovery never fired — and #323's guards then 409 every `/reload` +
+  `/reset` until a pod restart. Two complements close it without a restart:
+  - **Detect.** `GET /reload/status` adds `ageMs` (the job's age, computed **server-side** via
+    `getReloadJobAgeMs` = `datetime().epochMillis - j.startedAt.epochMillis`, never `Date.parse`-ing
+    the 9-fractional-digit `startedAt`) and `stale` — `true` for a `running` job older than
+    `RELOAD_STALE_AFTER_HOURS` (default 12) with **no live pod** (`!isReloadActive()`). `stale`
+    requires `!isActive`, so a legitimately-long live run is never flagged; a _freshly_ stuck job
+    (age below the threshold) is correctly not yet `stale` — `stale` is the discovery aid, not the
+    gate. The pure `reloadStaleness(job, isActive, ageMs, staleAfterMs)` helper in `admin.ts`.
+  - **Act.** `POST /reload/abort` → `abortReloadJob(jobId)` marks the job + any of its `running`
+    stages `failed` in one atomic Cypher (`count(DISTINCT j)` — the `OPTIONAL MATCH` over running
+    stages multiplies the job row). It 404s `NO_RELOAD_RUNNING` when nothing is resumable and 409s
+    `RELOAD_RUNNING` when a reload is **actively running on this pod** (the in-process scheduler
+    can't be safely interrupted — restart the pod to interrupt a live reload; it resumes from its
+    last completed stage via the cold-start path). Asymmetry vs `/reset`, which refuses on _either_
+    signal: abort refuses on the in-memory live signal and _acts_ on the DB-only stuck signal.
+    **Not** gated by `busyWith()` — it mutates only `ReloadJob`/`ReloadStage` checkpoint nodes,
+    never graph data. Pairs with `/reset`: abort the stuck job, then wipe.
 - **`ingestReleases`** (in `ingest.ts`) is the shared release fetch/MERGE loop used by both the
   legacy `runIngestion` and the reload's `releases` stage — one definition, no drift.
 
