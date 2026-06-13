@@ -3,6 +3,7 @@ import type { Driver, Session, Result, Record as Neo4jRecord } from 'neo4j-drive
 import {
   getReleasesByMusician,
   getReleasesByCredit,
+  getReleasesByInstrument,
   getReleasesByStudio,
   getReleasesByLabel,
   getReleasesByGenre,
@@ -179,6 +180,76 @@ describe('getReleasesByCredit', () => {
     const { session } = makeMockSession([makeResult([])]);
     const driver = makeMockDriver(session);
     await getReleasesByCredit(driver, 'Test', 'engineer');
+    expect(session.close).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getReleasesByInstrument
+// ---------------------------------------------------------------------------
+
+describe('getReleasesByInstrument', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns instrument credits with musician, displayRole and scope', async () => {
+    const rec = makeRecord({
+      ...sampleReleaseRecord,
+      musician: 'Ron Carter',
+      instrument: 'bass',
+      displayRole: 'Upright Bass',
+      scope: 'release',
+    });
+    const { session } = makeMockSession([makeResult([rec])]);
+    const driver = makeMockDriver(session);
+    const results = await getReleasesByInstrument(driver, 'bass');
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      discogsId: 13570466,
+      title: 'U.F.O.F.',
+      musician: 'Ron Carter',
+      instrument: 'bass',
+      displayRole: 'Upright Bass',
+      scope: 'release',
+    });
+  });
+
+  it('filters on the normalized instrument, lowercasing the param', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+    await getReleasesByInstrument(driver, 'Bass');
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('c.instrument = toLower($instrument)');
+    expect(params).toEqual({ instrument: 'Bass' });
+  });
+
+  it('defaults a missing musician name to an empty string', async () => {
+    const rec = makeRecord({
+      ...sampleReleaseRecord,
+      musician: null,
+      instrument: 'bass',
+      displayRole: null,
+      scope: null,
+    });
+    const { session } = makeMockSession([makeResult([rec])]);
+    const driver = makeMockDriver(session);
+    const results = await getReleasesByInstrument(driver, 'bass');
+    expect(results[0]!.musician).toBe('');
+    expect(results[0]!.displayRole).toBeNull();
+  });
+
+  it('returns empty array when no results', async () => {
+    const { session } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+    const results = await getReleasesByInstrument(driver, 'harp');
+    expect(results).toHaveLength(0);
+  });
+
+  it('closes the session', async () => {
+    const { session } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+    await getReleasesByInstrument(driver, 'bass');
     expect(session.close).toHaveBeenCalledOnce();
   });
 });

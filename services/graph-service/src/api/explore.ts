@@ -3,6 +3,7 @@ import { getDriver } from '../db/client.js';
 import {
   getReleasesByMusician,
   getReleasesByCredit,
+  getReleasesByInstrument,
   getReleasesByStudio,
   getReleasesByLabel,
   getReleasesByGenre,
@@ -17,6 +18,7 @@ import {
   getTracksByAudioFeatures,
   type ExploreRelease,
   type MusicianRelease,
+  type InstrumentCredit,
   type ConnectionNode,
   type SharedMusiciansResult,
   type InternationalTrack,
@@ -55,6 +57,23 @@ const musicianReleaseSchema = {
     thumbUrl: { type: 'string', nullable: true },
     instrument: { type: 'string', nullable: true },
     role: { type: 'string', nullable: true },
+  },
+} as const;
+
+const instrumentCreditSchema = {
+  type: 'object',
+  required: ['discogsId', 'title', 'musician'],
+  properties: {
+    discogsId: { type: 'integer' },
+    title: { type: 'string' },
+    artist: { type: 'string', nullable: true },
+    pressingYear: { type: 'integer', nullable: true },
+    format: { type: 'string', nullable: true },
+    thumbUrl: { type: 'string', nullable: true },
+    musician: { type: 'string' },
+    instrument: { type: 'string', nullable: true },
+    displayRole: { type: 'string', nullable: true },
+    scope: { type: 'string', nullable: true },
   },
 } as const;
 
@@ -214,6 +233,30 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request, reply): Promise<MusicianRelease[] | ErrorReply> => {
       const items = await getReleasesByCredit(getDriver(), request.params.name, 'engineer');
+      return reply.send(items);
+    },
+  );
+
+  // GET /api/v1/explore/instrument/:name
+  fastify.get<{ Params: NameParams; Reply: InstrumentCredit[] | ErrorReply }>(
+    '/api/v1/explore/instrument/:name',
+    {
+      schema: {
+        tags: ['explore'],
+        summary: 'Musicians who play this instrument and the releases they play it on',
+        params: {
+          type: 'object',
+          required: ['name'],
+          properties: { name: { type: 'string' } },
+        },
+        response: {
+          200: { type: 'array', items: instrumentCreditSchema },
+          400: errorResponseRef,
+        },
+      },
+    },
+    async (request, reply): Promise<InstrumentCredit[] | ErrorReply> => {
+      const items = await getReleasesByInstrument(getDriver(), request.params.name);
       return reply.send(items);
     },
   );
