@@ -42,7 +42,7 @@ export interface AcousticBrainzClientConfig {
   userAgent: string;
   /** Milliseconds to sleep after every successful request, to stay polite. */
   delayMs: number;
-  /** Minimum backoff on 429/503. Defaults to 2000ms. Set to 0 in tests to keep them fast. */
+  /** Minimum backoff on a retryable status. Defaults to 2000ms. Set to 0 in tests to keep them fast. */
   backoffBaseMs?: number;
   /** Per-request timeout in ms (#357). Falls back to the shared fetch default when omitted. */
   timeoutMs?: number;
@@ -116,7 +116,11 @@ export class AcousticBrainzClient {
       delayMs: config.delayMs,
       maxRetries: MAX_RETRIES,
       backoffBaseMs: config.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS,
-      retryStatuses: [429, 503],
+      // Retry transient server/gateway 5xx (500/502/504), not just 429/503, matching the LRCLIB
+      // client (#371): under a heavy concurrent reload a transient 5xx would otherwise drop the
+      // whole bulk batch (every fanned-out track counted failed + left unstamped), and these
+      // self-heal on retry. AcousticBrainz is frozen/read-only, so a 5xx is a blip, never real "gone".
+      retryStatuses: [429, 500, 502, 503, 504],
       ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
       ...(config.random !== undefined ? { random: config.random } : {}),
       ...(config.logger !== undefined ? { logger: config.logger } : {}),

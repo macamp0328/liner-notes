@@ -1033,6 +1033,13 @@ curl -s "$GRAPH_SERVICE_URL/api/v1/stats" | jq .data.enrichment
 
 > `tracksWithLyrics` is **LRCLIB-only (~70%) in prod by design** — `GENIUS_TOKEN` is intentionally absent from the prod secret (issue #258), so the Genius fallback self-disables and prod emits no Genius 403s. Genius was confirmed a hard IP block from the EC2 datacenter IP (issue #240); rather than dropping it, the ~87 genuine Genius lyrics LRCLIB misses (issue #241) are harvested out-of-band from a residential machine — see ["Harvest Genius lyrics locally"](#harvest-genius-lyrics-locally). The per-source split stays readable at `tracksWithLyrics.sources.genius` (issue #203); after a harvest it climbs above 0 even though prod itself never calls Genius (the rows persist; only `POST /admin/lyrics/clear-genius` removes them).
 
+**5. Post-reload lyrics top-up (required, issue [#372](https://github.com/macamp0328/liner-notes/issues/372)).** A single prod wipe-reload **structurally cannot** reach the ~78.9% steady-state lyrics coverage — `tracksWithLyrics` lands lower (the 2026-06-13 reload bottomed at 59.2%) until you run the residential harvest below. Two reasons:
+
+- **Genius rows are gone and prod can't refetch them.** The wipe deletes the out-of-band Genius lyrics (~6% / ~130 tracks), and prod is LRCLIB-only (Genius 403s the EC2 IP, #240/#258), so the reload's `lyrics` stage never re-fetches them.
+- **The heavy concurrent reload leaves a batch of transient LRCLIB misses.** Running `lyrics` alongside the other stages inflates the per-request failure rate from cross-stage DB/API contention (the 2026-06-13 reload logged `failed: 231` with the breaker never opening — individual 429/timeout, not an outage). These don't stamp `lyricsFetchedAt`, so they're recoverable, but the reload won't retry them within the run.
+
+After the reload reaches `complete`, run the residential **["Harvest Genius lyrics locally"](#harvest-genius-lyrics-locally)** pass (`pnpm lyrics:enrich:local`). It forces `ENRICHMENT_STALENESS_DAYS=0`, re-fires LRCLIB for the misses, and restores Genius from a non-blocked IP — the standalone re-run recovers the transient failures with zero contention (the 2026-06-13 top-up took lyrics 59.2% → 72.8% with `failed: 0`). If a reload shows an elevated lyrics `failed` count, set `RELOAD_LYRICS_CONCURRENCY` below `LYRICS_CONCURRENCY` (default 6) before the next one to throttle lyrics under the contention without slowing standalone runs.
+
 ---
 
 ## Harvest Genius lyrics locally

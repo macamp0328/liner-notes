@@ -465,7 +465,10 @@ resource lane (see "Scheduling (#176)"). Bounded concurrency IS the lyrics stage
 (there is no separate limiter), so `LYRICS_CONCURRENCY` doubles as the politeness knob toward LRCLIB.
 It composes with the stage-level `RELOAD_STAGE_CONCURRENCY` (intra-stage workers inside one stage
 slot). Do not enable it for a stage on a shared rate-limited client lane — concurrent items would
-bypass that client's per-call spacing.
+bypass that client's per-call spacing. Inside the orchestrated reload the lyrics stage instead uses
+`resolveReloadLyricsConcurrency()` → `RELOAD_LYRICS_CONCURRENCY` (falls back to `LYRICS_CONCURRENCY`
+when unset), a reload-only throttle (#372) for the contended path that leaves standalone
+`/lyrics/enrich` runs at the full `LYRICS_CONCURRENCY`.
 
 **Runs through the runner:** `lyrics`, `artist-profiles`, `master-data`, `mb-release-events`,
 `track-musicbrainz` (item = release, one stamping write per release), and `nationality` (two
