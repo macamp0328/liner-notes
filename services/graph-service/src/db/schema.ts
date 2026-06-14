@@ -27,6 +27,8 @@ const statements = [
   'CREATE FULLTEXT INDEX releaseArtistTrackSearch IF NOT EXISTS FOR (n:Release|Artist|Track) ON EACH [n.title, n.name]',
   'CREATE FULLTEXT INDEX lyricsSearch IF NOT EXISTS FOR (t:Track) ON EACH [t.lyrics]',
   'CREATE CONSTRAINT master_discogs_id IF NOT EXISTS FOR (m:Master) REQUIRE m.discogsId IS UNIQUE',
+  // issue #336: Work (composition) nodes are MBID-keyed; RECORDING_OF links a Track to its Work.
+  'CREATE CONSTRAINT work_mbid IF NOT EXISTS FOR (w:Work) REQUIRE w.mbid IS UNIQUE',
   'CREATE INDEX track_recording_mbid IF NOT EXISTS FOR (t:Track) ON (t.recordingMbid)',
   'CREATE INDEX track_isrc IF NOT EXISTS FOR (t:Track) ON (t.isrc)',
   'CREATE INDEX track_tempo IF NOT EXISTS FOR (t:Track) ON (t.tempo)',
@@ -54,6 +56,8 @@ const statements = [
   'CREATE INDEX track_lyrics_fetched_at IF NOT EXISTS FOR (t:Track) ON (t.lyricsFetchedAt)',
   // issue #332: label hierarchy enrichment marker (PARENT_LABEL).
   'CREATE INDEX label_hierarchy_fetched_at IF NOT EXISTS FOR (l:Label) ON (l.labelHierarchyFetchedAt)',
+  // issue #336: track-works enrichment marker (RECORDING_OF → Work).
+  'CREATE INDEX track_works_fetched_at IF NOT EXISTS FOR (t:Track) ON (t.worksFetchedAt)',
 
   // One-time cleanup: remove the superseded boolean markers. The `*FetchedAt` queries
   // never read them, so this is cosmetic — but it keeps the graph free of vestigial

@@ -23,6 +23,8 @@ import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
 import { resetMbReleaseEventsEnrichment } from '../db/mb-release-events-repository.js';
 import { enrichTrackMusicBrainz } from '../enrichment/track-musicbrainz.js';
 import { resetTrackMusicBrainzEnrichment } from '../db/track-musicbrainz-repository.js';
+import { enrichTrackWorks } from '../enrichment/track-works.js';
+import { resetTrackWorksEnrichment } from '../db/track-works-repository.js';
 import { buildAcousticBrainzClientFromEnv } from '../ingestion/acousticbrainz-client.js';
 import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
 import { resetTrackAcousticBrainzEnrichment } from '../db/track-acousticbrainz-repository.js';
@@ -358,6 +360,18 @@ const trackMusicBrainzSummarySchema = {
   },
 };
 
+const trackWorksSummarySchema = {
+  type: 'object',
+  properties: {
+    recordingsProcessed: { type: 'integer' },
+    recordingsSkipped: { type: 'integer' },
+    recordingsFailed: { type: 'integer' },
+    worksWritten: { type: 'integer' },
+    recordingOfEdges: { type: 'integer' },
+    durationMs: { type: 'integer' },
+  },
+};
+
 const artistGenresSummarySchema = {
   type: 'object',
   properties: {
@@ -584,6 +598,51 @@ const PIPELINES: PipelineEntry[] = [
       runningMessage:
         'MusicBrainz track enrichment is currently running — wait for it to finish before resetting',
       run: (driver) => resetTrackMusicBrainzEnrichment(driver),
+    },
+    state: makePipelineState(),
+  },
+  {
+    name: 'track-works',
+    statusLabel: 'MusicBrainz works enrichment',
+    runningMessage: 'MusicBrainz works enrichment already in progress',
+    enrichSummary: 'Link Track nodes to MusicBrainz Work (composition) nodes via RECORDING_OF',
+    enrichDescription:
+      'For each Track that carries a `recordingMbid` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), ' +
+      'resolves the MusicBrainz Work(s) the recording is a performance of and writes a `RECORDING_OF` ' +
+      'relationship to each `Work` node (MBID-keyed). Blocks until complete.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, ' +
+      'and only after track-musicbrainz enrichment has populated `recordingMbid`.**\n\n' +
+      'Separating the composition (Work) from the recording is what makes cover/version discovery ' +
+      'deterministic: two Tracks that are `RECORDING_OF` the same Work but are different recordings ' +
+      'are versions/covers, while the same recording on two releases is just a duplicate — the shared ' +
+      'Work MBID is the only signal, so there is no fuzzy/title matching. Each Work also captures its ' +
+      'writers (composer/lyricist/writer) as provenance-tagged MusicBrainz data.\n\n' +
+      'Re-selects a Track while it still has no Work (null `worksFetchedAt`) once its last attempt has ' +
+      'aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `worksFetchedAt` after each ' +
+      'attempt — so a recording MusicBrainz has no Work for is retried at most once per window. ' +
+      'Run `POST /api/v1/admin/track-works/reset` to force a full re-run.\n\n' +
+      'Requires `MUSICBRAINZ_USER_AGENT` env var.',
+    statusSummarySchema: trackWorksSummarySchema,
+    schemaHas503: true,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => {
+      const mbClient = buildMusicBrainzClientFromEnv(log);
+      if (!mbClient) return { ok: false, message: 'MUSICBRAINZ_USER_AGENT not configured' };
+      return {
+        ok: true,
+        run: async (driver) => ({ ...(await enrichTrackWorks(mbClient, driver, log)) }),
+      };
+    },
+    reset: {
+      summary: 'Reset MusicBrainz works enrichment for a full re-run',
+      description:
+        'Removes the `worksFetchedAt` marker from all Track nodes, deletes every `RECORDING_OF` ' +
+        'relationship, and deletes the orphaned `Work` nodes, causing the next ' +
+        '`POST /api/v1/admin/track-works/enrich` call to re-process every track from scratch.\n\n' +
+        'This endpoint is blocked while enrichment is running.',
+      runningMessage:
+        'MusicBrainz works enrichment is currently running — wait for it to finish before resetting',
+      run: (driver) => resetTrackWorksEnrichment(driver),
     },
     state: makePipelineState(),
   },

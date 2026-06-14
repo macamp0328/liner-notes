@@ -15,6 +15,7 @@ import { enrichGroupMembers } from '../enrichment/group-members.js';
 import { enrichPersonReconciliation } from '../enrichment/person-reconciliation.js';
 import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
 import { enrichTrackMusicBrainz } from '../enrichment/track-musicbrainz.js';
+import { enrichTrackWorks } from '../enrichment/track-works.js';
 import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
 import { enrichTrackDeezer } from '../enrichment/track-deezer.js';
 import { enrichNationality } from '../enrichment/artist-nationality.js';
@@ -35,6 +36,7 @@ export type ReloadStageName =
   | 'person-reconciliation'
   | 'mb-release-events'
   | 'track-musicbrainz'
+  | 'track-works'
   | 'track-acousticbrainz'
   | 'track-deezer'
   | 'nationality'
@@ -214,6 +216,20 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
       return {
         ...(await enrichTrackMusicBrainz(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)),
       };
+    },
+  },
+  {
+    // #336: link each Track to the MusicBrainz Work it records, via the recordingMbid that
+    // track-musicbrainz wrote (hence the dep). Holds `musicbrainz` (shared rate limiter) and
+    // `track` (its batched write touches ≥2 Track nodes per tx — same deadlock class as the other
+    // batched Track writers, so it serialises with them on the node-lock lane).
+    name: 'track-works',
+    deps: ['track-musicbrainz'],
+    resources: ['musicbrainz', 'track'],
+    sources: ['musicbrainz'],
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
+      if (!ctx.musicbrainz) return null;
+      return { ...(await enrichTrackWorks(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)) };
     },
   },
   {

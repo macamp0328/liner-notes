@@ -37,6 +37,24 @@ export interface MbRecordingMatch {
   isrc: string | null;
 }
 
+/**
+ * A MusicBrainz Work (composition) reached from a recording's `performance` relationship.
+ * The composition is the song as written; many recordings (covers, live takes, remasters)
+ * are performances of the same Work — that shared `mbid` is the ground truth for versions (#336).
+ */
+export interface MbWork {
+  mbid: string;
+  title: string;
+  type: string | null;
+}
+
+/** A writer of a MusicBrainz Work (composer / lyricist / writer), with their MB artist MBID. */
+export interface MbWorkWriter {
+  mbid: string;
+  name: string;
+  role: string;
+}
+
 export interface MusicBrainzClientConfig {
   userAgent: string;
   /** Milliseconds to sleep after every successful request. 1100ms keeps us safely under 1 req/sec. */
@@ -91,6 +109,24 @@ interface MbRecordingSearchResponse {
   }>;
 }
 
+interface MbRecordingWorkRelsResponse {
+  id: string;
+  relations?: Array<{
+    type: string;
+    'target-type'?: string;
+    work?: { id: string; title: string; type?: string | null };
+  }>;
+}
+
+interface MbWorkArtistRelsResponse {
+  id: string;
+  relations?: Array<{
+    type: string;
+    'target-type'?: string;
+    artist?: { id: string; name: string };
+  }>;
+}
+
 interface MbReleaseListResponse {
   'release-count': number;
   releases: Array<{
@@ -128,6 +164,8 @@ const MAX_RETRIES = 3;
 const DEFAULT_BACKOFF_BASE_MS = 2_000;
 /** Minimum MusicBrainz search score to accept a fallback recording match. */
 const MIN_RECORDING_SEARCH_SCORE = 90;
+/** Work artist-relation types we treat as authorship (#336). */
+const WORK_WRITER_ROLES = new Set(['composer', 'lyricist', 'writer']);
 
 /** Convert a MusicBrainz millisecond length to whole seconds; null for missing or non-positive values. */
 function msToSeconds(ms: number | null | undefined): number | null {
@@ -302,6 +340,63 @@ export class MusicBrainzClient {
       }
     }
     return tracks;
+  }
+
+  /**
+   * Resolve a recording MBID to the MusicBrainz Work(s) it is a performance of (#336).
+   * Uses `inc=work-rels`; reads `relations[]` where `type === 'performance'` (the embedded
+   * `work` object carries the composition's mbid/title/type). A recording can perform more
+   * than one work (medleys), so all are returned. Empty array when the recording has no work
+   * relationship, the breaker is open, or the recording 404s (treated as "no work" — a known
+   * recordingMbid that no longer resolves is not retried until the staleness window expires).
+   */
+  async getWorksByRecordingMbid(recordingMbid: string): Promise<MbWork[]> {
+    const endpoint = `${BASE_URL}/recording/${encodeURIComponent(recordingMbid)}?inc=work-rels&fmt=json`;
+
+    let response: MbRecordingWorkRelsResponse;
+    try {
+      response = await this.fetchWithBackoff<MbRecordingWorkRelsResponse>(endpoint);
+    } catch (err) {
+      if (err instanceof CircuitBreakerOpenError) return [];
+      if (err instanceof Error && err.message.includes('not found (404)')) return [];
+      throw err;
+    }
+
+    const works: MbWork[] = [];
+    for (const rel of response.relations ?? []) {
+      if (rel.type === 'performance' && rel.work?.id !== undefined) {
+        works.push({ mbid: rel.work.id, title: rel.work.title, type: rel.work.type ?? null });
+      }
+    }
+    return works;
+  }
+
+  /**
+   * Fetch the writers (composer / lyricist / writer) of a MusicBrainz Work (#336), each with
+   * their MB artist MBID. Uses `inc=artist-rels`; reads `relations[]` whose `type` is an
+   * authorship role. The MB artist MBID is retained so a future pass can reconcile these to our
+   * Discogs-keyed Musician nodes deterministically (there is no such mapping today). Empty array
+   * on no writers, an open breaker, or a 404.
+   */
+  async getWritersByWorkMbid(workMbid: string): Promise<MbWorkWriter[]> {
+    const endpoint = `${BASE_URL}/work/${encodeURIComponent(workMbid)}?inc=artist-rels&fmt=json`;
+
+    let response: MbWorkArtistRelsResponse;
+    try {
+      response = await this.fetchWithBackoff<MbWorkArtistRelsResponse>(endpoint);
+    } catch (err) {
+      if (err instanceof CircuitBreakerOpenError) return [];
+      if (err instanceof Error && err.message.includes('not found (404)')) return [];
+      throw err;
+    }
+
+    const writers: MbWorkWriter[] = [];
+    for (const rel of response.relations ?? []) {
+      if (WORK_WRITER_ROLES.has(rel.type) && rel.artist?.id !== undefined) {
+        writers.push({ mbid: rel.artist.id, name: rel.artist.name, role: rel.type });
+      }
+    }
+    return writers;
   }
 
   /**

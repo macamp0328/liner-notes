@@ -21,6 +21,7 @@ import { enrichGroupMembers } from '../../../src/enrichment/group-members.js';
 import { enrichPersonReconciliation } from '../../../src/enrichment/person-reconciliation.js';
 import { enrichMbReleaseEvents } from '../../../src/enrichment/mb-release-events.js';
 import { enrichTrackMusicBrainz } from '../../../src/enrichment/track-musicbrainz.js';
+import { enrichTrackWorks } from '../../../src/enrichment/track-works.js';
 import { enrichTrackAcousticBrainz } from '../../../src/enrichment/track-acousticbrainz.js';
 import { enrichTrackDeezer } from '../../../src/enrichment/track-deezer.js';
 import { enrichNationality } from '../../../src/enrichment/artist-nationality.js';
@@ -39,6 +40,7 @@ vi.mock('../../../src/enrichment/mb-release-events.js', () => ({ enrichMbRelease
 vi.mock('../../../src/enrichment/track-musicbrainz.js', () => ({
   enrichTrackMusicBrainz: vi.fn(),
 }));
+vi.mock('../../../src/enrichment/track-works.js', () => ({ enrichTrackWorks: vi.fn() }));
 vi.mock('../../../src/enrichment/track-acousticbrainz.js', () => ({
   enrichTrackAcousticBrainz: vi.fn(),
 }));
@@ -91,6 +93,7 @@ beforeEach(() => {
     enrichPersonReconciliation,
     enrichMbReleaseEvents,
     enrichTrackMusicBrainz,
+    enrichTrackWorks,
     enrichTrackAcousticBrainz,
     enrichTrackDeezer,
     enrichNationality,
@@ -124,6 +127,7 @@ describe('RELOAD_STAGES order', () => {
       'group-members',
       'person-reconciliation',
       'track-musicbrainz',
+      'track-works',
       'mb-release-events',
       'lyrics',
       'track-acousticbrainz',
@@ -193,13 +197,23 @@ describe('RELOAD_STAGES resource lanes', () => {
   });
 
   it('tags every MusicBrainz-client stage with the musicbrainz lane (shared rate limiter)', () => {
-    for (const name of ['track-musicbrainz', 'mb-release-events', 'nationality'] as const) {
+    for (const name of [
+      'track-musicbrainz',
+      'track-works',
+      'mb-release-events',
+      'nationality',
+    ] as const) {
       expect(stage(name).resources).toContain('musicbrainz');
     }
   });
 
   it('serialises the batched Track writers via the track lane, exempting per-node lyrics', () => {
-    for (const name of ['track-musicbrainz', 'track-acousticbrainz', 'track-deezer'] as const) {
+    for (const name of [
+      'track-musicbrainz',
+      'track-works',
+      'track-acousticbrainz',
+      'track-deezer',
+    ] as const) {
       expect(stage(name).resources).toContain('track');
     }
     // lyrics writes one Track per transaction → deadlock-immune → intentionally untagged.
@@ -302,6 +316,13 @@ describe('stage run() delegates to the right enrich function', () => {
     );
   });
 
+  it('track-works → enrichTrackWorks(musicbrainz, ..., onProgress)', async () => {
+    const ctx = makeCtx();
+    const onProgress = vi.fn();
+    await stage('track-works').run(ctx, onProgress);
+    expect(enrichTrackWorks).toHaveBeenCalledWith(ctx.musicbrainz, ctx.driver, ctx.log, onProgress);
+  });
+
   it('track-acousticbrainz → enrichTrackAcousticBrainz(acousticbrainz, ..., onProgress)', async () => {
     const ctx = makeCtx();
     const onProgress = vi.fn();
@@ -388,6 +409,11 @@ describe('stages skip (return null) when a required client is missing', () => {
 
   it('track-musicbrainz skips with no musicbrainz client', async () => {
     expect(await stage('track-musicbrainz').run(makeCtx({ musicbrainz: null }))).toBeNull();
+  });
+
+  it('track-works skips with no musicbrainz client', async () => {
+    expect(await stage('track-works').run(makeCtx({ musicbrainz: null }))).toBeNull();
+    expect(enrichTrackWorks).not.toHaveBeenCalled();
   });
 
   it('nationality skips with no musicbrainz client', async () => {
