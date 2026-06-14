@@ -24,13 +24,24 @@ describe('applySchema', () => {
     } as unknown as Driver;
   });
 
-  it('opens and closes a fresh session for each of the 48 statements', async () => {
+  it('opens and closes a fresh session for each of the 50 statements', async () => {
     await applySchema(driver);
-    expect(sessions).toHaveLength(48);
+    expect(sessions).toHaveLength(50);
     for (const s of sessions) {
       expect(s.run).toHaveBeenCalledTimes(1);
       expect(s.close).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it('creates the Work uniqueness constraint and worksFetchedAt index (issue #336)', async () => {
+    await applySchema(driver);
+    const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
+    expect(stmts.some((s) => s.includes('work_mbid') && s.includes('w.mbid IS UNIQUE'))).toBe(true);
+    expect(
+      stmts.some(
+        (s) => s.includes('CREATE INDEX track_works_fetched_at') && s.includes('worksFetchedAt'),
+      ),
+    ).toBe(true);
   });
 
   it('creates the musician discogsId and membersFetchedAt indexes (issue #330)', async () => {

@@ -142,6 +142,101 @@ export async function seedExploreEnrichment(driver: Driver): Promise<void> {
 }
 
 /**
+ * Seed Work (composition) fixtures (#336) for the track-works explore route. Call AFTER seedGraph().
+ * Self-contained: creates its own Release/Track/Work nodes (discogsIds ≥ 7050000) so it neither
+ * depends on nor perturbs the other explore assertions. Encodes the three acceptance cases:
+ *
+ *   - cover pair (work-cover-1):   two DISTINCT recordings on different releases → versions/covers.
+ *   - same-recording duplicate (work-dup-1): ONE recording (same recordingMbid) on two releases →
+ *     a duplicate, not a distinct version.
+ *   - title collision (work-collide-a / -b): two recordings with the SAME track title but DIFFERENT
+ *     Work MBIDs → must NOT be linked to each other.
+ */
+export async function seedWorks(driver: Driver): Promise<void> {
+  const rows = [
+    // cover pair → one Work, two distinct recordings
+    {
+      releaseDiscogsId: 7050001,
+      releaseTitle: 'Cover Album A',
+      pressingYear: 1990,
+      position: 'A1',
+      trackTitle: 'Shared Song',
+      recordingMbid: 'rec-cover-a',
+      workMbid: 'work-cover-1',
+      workTitle: 'Shared Song',
+    },
+    {
+      releaseDiscogsId: 7050002,
+      releaseTitle: 'Cover Album B',
+      pressingYear: 1995,
+      position: 'A1',
+      trackTitle: 'Shared Song (Live)',
+      recordingMbid: 'rec-cover-b',
+      workMbid: 'work-cover-1',
+      workTitle: 'Shared Song',
+    },
+    // same-recording duplicate → one Work, one recording reissued on two releases
+    {
+      releaseDiscogsId: 7050003,
+      releaseTitle: 'Original Album',
+      pressingYear: 1980,
+      position: 'A1',
+      trackTitle: 'Dup Song',
+      recordingMbid: 'rec-dup',
+      workMbid: 'work-dup-1',
+      workTitle: 'Dup Song',
+    },
+    {
+      releaseDiscogsId: 7050004,
+      releaseTitle: 'Greatest Hits',
+      pressingYear: 1999,
+      position: 'B2',
+      trackTitle: 'Dup Song',
+      recordingMbid: 'rec-dup',
+      workMbid: 'work-dup-1',
+      workTitle: 'Dup Song',
+    },
+    // title collision → two different Works sharing a track title
+    {
+      releaseDiscogsId: 7050005,
+      releaseTitle: 'Diddley LP',
+      pressingYear: 1956,
+      position: 'A1',
+      trackTitle: 'Who Do You Love',
+      recordingMbid: 'rec-collide-a',
+      workMbid: 'work-collide-a',
+      workTitle: 'Who Do You Love?',
+    },
+    {
+      releaseDiscogsId: 7050006,
+      releaseTitle: 'Other LP',
+      pressingYear: 1970,
+      position: 'A1',
+      trackTitle: 'Who Do You Love',
+      recordingMbid: 'rec-collide-b',
+      workMbid: 'work-collide-b',
+      workTitle: 'Who Do You Love',
+    },
+  ];
+  const session = driver.session();
+  try {
+    await session.run(
+      `UNWIND $rows AS row
+       MERGE (r:Release {discogsId: row.releaseDiscogsId})
+         SET r.title = row.releaseTitle, r.pressingYear = row.pressingYear
+       MERGE (t:Track {position: row.position, releaseDiscogsId: row.releaseDiscogsId})
+         SET t.title = row.trackTitle, t.recordingMbid = row.recordingMbid
+       MERGE (r)-[:HAS_TRACK]->(t)
+       MERGE (w:Work {mbid: row.workMbid}) SET w.title = row.workTitle, w.type = 'Song'
+       MERGE (t)-[rel:RECORDING_OF]->(w) SET rel.source = 'musicbrainz'`,
+      { rows },
+    );
+  } finally {
+    await session.close();
+  }
+}
+
+/**
  * Seed entity-resolution fixtures (#330) for the explore + reconciliation tests. Call AFTER
  * seedGraph(). All entities use discogsIds ≥ 900000 and distinct names so they don't perturb the
  * other explore assertions (which match by their own names / use `>=` bounds). Writes the same
