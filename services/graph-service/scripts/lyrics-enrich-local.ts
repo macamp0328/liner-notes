@@ -25,7 +25,8 @@
  *       that hid the real bad-path cause — #373).
  *
  *   pnpm lyrics:enrich:local
- *     — uses the default services/graph-service/.env.local, for a local target.
+ *     — uses the default services/graph-service/.env.local (the original operator env file;
+ *       still the prod graph — the script refuses a localhost target unless --allow-local).
  *
  *   Flags: --env <path> (env file; default services/graph-service/.env.local). --allow-local
  *   permits a localhost/loopback NEO4J_URI; without it the script refuses one as a likely wrong
