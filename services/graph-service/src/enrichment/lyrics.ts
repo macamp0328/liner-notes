@@ -87,15 +87,31 @@ export interface LyricsClients {
 const DEFAULT_CONCURRENCY = 6;
 const MAX_CONCURRENCY = 12;
 
+/** Clamp a worker count to `[1, MAX_CONCURRENCY]` so a fat-fingered env var can't hammer LRCLIB. */
+function clampConcurrency(value: number): number {
+  return Math.min(Math.max(value, 1), MAX_CONCURRENCY);
+}
+
 /**
  * Resolve `LYRICS_CONCURRENCY` (env) to a sane worker count. Bounded concurrency is the lyrics
  * stage's rate ceiling (#247) — it has no separate limiter. Non-numeric/unset → default; values
- * are clamped to `[1, MAX_CONCURRENCY]` so a fat-fingered env var can't hammer LRCLIB.
+ * are clamped to `[1, MAX_CONCURRENCY]`.
  */
 function resolveConcurrency(): number {
   const parsed = parseInt(process.env['LYRICS_CONCURRENCY'] ?? '', 10);
-  if (!Number.isFinite(parsed)) return DEFAULT_CONCURRENCY;
-  return Math.min(Math.max(parsed, 1), MAX_CONCURRENCY);
+  return Number.isFinite(parsed) ? clampConcurrency(parsed) : DEFAULT_CONCURRENCY;
+}
+
+/**
+ * Resolve the lyrics worker count for a run inside the orchestrated reload (#372). Prefers
+ * `RELOAD_LYRICS_CONCURRENCY` — a reload-only throttle for the heavy concurrent context, where
+ * cross-stage DB/API contention inflates the transient-failure rate — and falls back to the normal
+ * `resolveConcurrency()` (`LYRICS_CONCURRENCY` → default 6) when it is unset. Unset by default, so
+ * the reload's lyrics concurrency is unchanged until an operator dials it down.
+ */
+export function resolveReloadLyricsConcurrency(): number {
+  const parsed = parseInt(process.env['RELOAD_LYRICS_CONCURRENCY'] ?? '', 10);
+  return Number.isFinite(parsed) ? clampConcurrency(parsed) : resolveConcurrency();
 }
 
 /**
@@ -155,22 +171,24 @@ function gradeMatch(
  * track-acousticbrainz (that would chain it behind the ~2.5hr stage and defeat #176's
  * early-lane design); a `not-found` track stays re-eligible to be upgraded later.
  *
- * The stage runs N-way concurrent (`LYRICS_CONCURRENCY`, default 6) — safe because each lyrics
- * write is one Track per transaction (deadlock-immune; see the #176 scheduler notes). The
- * multi-source fallback lives inside `resolve`, so a single track is only ever counted `failed`
- * once (LRCLIB throwing short-circuits the Genius attempt); the per-item loop, isolation, and
- * stamp-on-attempt contract are owned by {@link runEnrichment}.
+ * The stage runs N-way concurrent (`LYRICS_CONCURRENCY`, default 6, or `opts.concurrency` when a
+ * caller overrides it — the orchestrated reload passes `RELOAD_LYRICS_CONCURRENCY`, #372) — safe
+ * because each lyrics write is one Track per transaction (deadlock-immune; see the #176 scheduler
+ * notes). The multi-source fallback lives inside `resolve`, so a single track is only ever counted
+ * `failed` once (LRCLIB throwing short-circuits the Genius attempt); the per-item loop, isolation,
+ * and stamp-on-attempt contract are owned by {@link runEnrichment}.
  */
 export async function enrichLyrics(
   driver: Driver,
   logger?: Logger,
   onProgress: ProgressReporter = NOOP_PROGRESS,
   clients?: LyricsClients,
+  opts?: { concurrency?: number },
 ): Promise<LyricsEnrichmentSummary> {
   const log: Logger = logger ?? console;
   const lrclib = clients?.lrclib ?? buildLrclibClientFromEnv(log);
   const genius = clients?.genius !== undefined ? clients.genius : buildGeniusClientFromEnv(log);
-  const concurrency = resolveConcurrency();
+  const concurrency = opts?.concurrency ?? resolveConcurrency();
   const confidenceThreshold = resolveConfidenceThreshold();
 
   const stage: EnrichmentStage<UnenrichedTrack, LyricsResolved> = {
