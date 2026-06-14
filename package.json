@@ -31,6 +31,7 @@
     "enrich:track-deezer": "scripts/admin/post.sh /api/v1/admin/track-deezer/enrich",
     "enrich:bootstrap": "pnpm enrich:mb-release-events && pnpm enrich:track-musicbrainz && ( pnpm enrich:track-acousticbrainz & p1=$!; pnpm enrich:track-deezer & p2=$!; wait $p1; s1=$?; wait $p2; s2=$?; [ $s1 -eq 0 ] && [ $s2 -eq 0 ] ) && pnpm enrich:nationality",
     "lyrics:enrich:local": "pnpm --filter graph-service exec tsx scripts/lyrics-enrich-local.ts",
+    "lyrics:enrich:prod": "pnpm --filter graph-service exec tsx scripts/lyrics-enrich-local.ts --env .env.prod.local",
     "status:lyrics": "scripts/admin/get.sh /api/v1/admin/lyrics/status",
     "status:master-data": "scripts/admin/get.sh /api/v1/admin/master-data/status",
     "status:nationality": "scripts/admin/get.sh /api/v1/admin/nationality/status",

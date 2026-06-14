@@ -74,6 +74,16 @@ spec:
             # caller spoofs the header and bypasses the limiter. See #287.
             - name: TRUST_CF_CONNECTING_IP
               value: 'true'
+            # Measured trial (#370): raise the reload scheduler's concurrency cap from
+            # the code default 2 → 3 so the untagged `lyrics` stage overlaps the serial
+            # Discogs ingest chain instead of waiting ~1h for a free slot. The third slot
+            # covers the three lane families that can run in parallel (Discogs chain /
+            # musicbrainz+track chain / untagged lyrics). NOTE: `nationality` holds the
+            # `discogs` lane, so it still runs as the reload tail after the Discogs chain
+            # finishes — concurrency alone won't move it earlier. Revert is a one-line
+            # change here. See services/graph-service/CLAUDE.md → "Scheduling (#176)".
+            - name: RELOAD_STAGE_CONCURRENCY
+              value: '3'
           readinessProbe:
             httpGet:
               path: /api/v1/health

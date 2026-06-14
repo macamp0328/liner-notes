@@ -14,14 +14,23 @@
  * setTrackLyrics(..., 'genius').
  *
  * USAGE
- *   pnpm --filter graph-service exec tsx scripts/lyrics-enrich-local.ts \
- *     --env /absolute/path/to/.env.prod.local
+ *   pnpm lyrics:enrich:prod
+ *     — the common case: defaults --env to services/graph-service/.env.prod.local.
  *
- *   (or `pnpm lyrics:enrich:local`, which uses the default services/graph-service/.env.local)
+ *   pnpm --filter graph-service exec tsx scripts/lyrics-enrich-local.ts --env <path>
+ *     — an explicit env file. NOTE: --env resolves relative to CWD, and under the filtered
+ *       `pnpm exec` the CWD is services/graph-service/, NOT the repo root — so prefer an ABSOLUTE
+ *       path. An explicitly-passed --env that doesn't resolve now hard-errors; it no longer soft-
+ *       falls back to process.env (which used to surface later as a confusing "Missing NEO4J_URI"
+ *       that hid the real bad-path cause — #373).
  *
- *   Flags: --env <path> (env file; default ../.env.local). --allow-local permits a
- *   localhost/loopback NEO4J_URI; without it the script refuses one as a likely wrong --env,
- *   since the harvest is meant for the prod graph.
+ *   pnpm lyrics:enrich:local
+ *     — uses the default services/graph-service/.env.local (the original operator env file;
+ *       still the prod graph — the script refuses a localhost target unless --allow-local).
+ *
+ *   Flags: --env <path> (env file; default services/graph-service/.env.local). --allow-local
+ *   permits a localhost/loopback NEO4J_URI; without it the script refuses one as a likely wrong
+ *   --env, since the harvest is meant for the prod graph.
  *
  * The --env file must hold the read-WRITE PROD creds plus GENIUS_TOKEN:
  *   NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, GENIUS_TOKEN   (optional GENIUS_USER_AGENT)
@@ -52,14 +61,29 @@ function argValue(flag: string): string | undefined {
 }
 
 function loadEnv(): void {
-  const defaultEnv = fileURLToPath(new URL('../.env.local', import.meta.url));
-  const envPath = argValue('--env') ?? defaultEnv;
+  const explicitEnv = argValue('--env');
+  const envPath = explicitEnv ?? fileURLToPath(new URL('../.env.local', import.meta.url));
   if (existsSync(envPath)) {
     process.loadEnvFile(envPath);
     console.log(`[lyrics-enrich-local] loaded env from ${envPath}`);
-  } else {
-    console.log(`[lyrics-enrich-local] no env file at ${envPath} — relying on process.env`);
+    return;
   }
+  // An explicitly-passed --env that doesn't resolve is almost always a wrong path — and because it
+  // resolves relative to CWD (services/graph-service/ under `pnpm --filter graph-service exec`, NOT
+  // the repo root), a repo-root-relative path silently misses. Hard-error here instead of soft-
+  // falling back to process.env, which only surfaced later as a confusing "Missing required env var
+  // NEO4J_URI" that hid the real cause (#373). Only an omitted --env falls back to process.env.
+  if (explicitEnv !== undefined) {
+    throw new Error(
+      `--env file not found: ${envPath} (resolved relative to CWD ${process.cwd()}). ` +
+        `Under \`pnpm --filter graph-service exec\` the CWD is services/graph-service/, not the repo ` +
+        `root — pass an absolute path, or use \`pnpm lyrics:enrich:prod\` for the standard ` +
+        `services/graph-service/.env.prod.local.`,
+    );
+  }
+  console.log(
+    `[lyrics-enrich-local] no --env given; no file at ${envPath} — relying on process.env`,
+  );
 }
 
 function requireEnv(name: string): string {
