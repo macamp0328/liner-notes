@@ -52,7 +52,7 @@ master_id
 - Configurable delay: `DISCOGS_REQUEST_DELAY_MS` (default 1000ms)
 - Exponential backoff on 429 responses
 - Log all rate limit hits
-- Expected ingestion time: ~10–15 min for 200 records
+- Expected ingestion time: ~15–17 min for ~200 records (release load alone; enrichment runs separately)
 
 ### Known Gap: Studio Data
 
@@ -508,7 +508,7 @@ Added in Task 4. Source files:
 
 3. **Studio filter uses numeric entity_type codes.** `extractStudios()` in `transforms.ts` checks `entity_type === "23"` (Recorded At) and `entity_type === "27"` (Mixed At). Do not change to `entity_type_name` — the name string is unreliable across Discogs entries.
 
-4. **Ingestion fires async without blocking `onReady`.** The pipeline takes ~4 min for 200 releases. Blocking `onReady` would delay the HTTP server from becoming ready and fail container liveness/readiness health checks. It is fired with `void runIngestion(...).then(...).catch(...)` intentionally.
+4. **Ingestion fires async without blocking `onReady`.** The release load takes ~15–17 min for ~200 releases (measured 2026-06-13: 196 releases at ~5s/release). Blocking `onReady` would delay the HTTP server from becoming ready and fail container liveness/readiness health checks. It is fired with `void runIngestion(...).then(...).catch(...)` intentionally.
 
 5. **`CREDITED_ON` scope convention.** Relationships from a `Musician` to a `Release` use `scope: "release"`; to a `Track` use `scope: "track"`. The scope does **not** need to be part of the MERGE key because the relationship endpoint type (Release vs Track) already makes them distinct — but it is stored as a property for query convenience. Future explore-by-musician queries depend on `scope` being present.
 
