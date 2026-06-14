@@ -283,6 +283,71 @@ export async function finishReloadJob(
   } finally {
     await session.close();
   }
+
+  // Keep-last-N cleanup of terminal jobs (#355). Best-effort and load-bearing in that order: the
+  // status SET above is already committed (its session closed), and a *propagating* prune failure
+  // would reach the /reload route's `.catch`, which re-`finishReloadJob`s this job as `failed` —
+  // corrupting a genuinely-`complete` job. So a prune hiccup must never fail a recorded-terminal
+  // job; we just skip cleanup this once (today's no-prune behaviour) and warn.
+  try {
+    await pruneTerminalReloadJobs(driver);
+  } catch (err) {
+    log?.warn(`[job-repository] pruneTerminalReloadJobs failed: ${String(err)}`);
+  }
+}
+
+/** How many terminal (complete/failed) ReloadJob records to retain after each finish (#355). */
+const DEFAULT_RELOAD_JOB_HISTORY_KEEP = 10;
+
+/**
+ * Resolve the keep-last-N history bound from `RELOAD_JOB_HISTORY_KEEP` (env) → default 10. All-digits
+ * or fall back to the default — a malformed value like `"10foo"` resolves to the default rather than
+ * `parseInt`-ing to its leading digits (matching `resolveStaleAfterMs` / `resolveConcurrency`). The
+ * `Math.max(1, …)` floor is **load-bearing, not cosmetic**: `pruneTerminalReloadJobs` orders terminal
+ * jobs by `startedAt DESC` and keeps the first N, and the just-finished job always has the newest
+ * `startedAt` of all terminal jobs (reloads are mutually exclusive — one at a time), so flooring at 1
+ * guarantees `finishReloadJob`'s own job survives the prune it triggers.
+ */
+export function resolveReloadJobHistoryKeep(): number {
+  const raw = process.env['RELOAD_JOB_HISTORY_KEEP']?.trim() ?? '';
+  return /^[0-9]+$/.test(raw) ? Math.max(1, Number(raw)) : DEFAULT_RELOAD_JOB_HISTORY_KEEP;
+}
+
+/**
+ * Delete every terminal (`complete`/`failed`) ReloadJob beyond the newest `keep`, plus its
+ * `ReloadStage` children (#355). Returns the number of jobs deleted.
+ *
+ * - The `status IN ['complete','failed']` filter is disjoint from `findResumableReloadJob`'s
+ *   `status:'running'` selection, so a `running`/resumable job (or, under
+ *   `RELOAD_STAGE_CONCURRENCY>1`, a crash's several `running` stages under a `running` job) is never
+ *   a prune candidate. `ReloadJobStatus` is exactly `running|complete|failed`, so the IN-list is
+ *   exhaustive of terminal states.
+ * - `OPTIONAL MATCH … DETACH DELETE j, s` removes the `HAS_STAGE` children too (a bare `DETACH DELETE
+ *   j` would orphan them); `DELETE null` for a stageless job is a no-op. `count(DISTINCT j)` undoes
+ *   the per-stage row fan-out the OPTIONAL MATCH introduces (cf. `abortReloadJob`).
+ * - `keep` is sent as `neo4j.int` — `SKIP` requires a non-negative integer and the driver would
+ *   otherwise send a JS number as a float. Floored at 1 to mirror `resolveReloadJobHistoryKeep`.
+ * - Ordering rides the `reload_job_started_at` index (see `db/schema.ts`).
+ */
+export async function pruneTerminalReloadJobs(
+  driver: Driver,
+  keep: number = resolveReloadJobHistoryKeep(),
+): Promise<number> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `MATCH (j:ReloadJob)
+       WHERE j.status IN ['complete', 'failed']
+       WITH j ORDER BY j.startedAt DESC SKIP $keep
+       OPTIONAL MATCH (j)-[:HAS_STAGE]->(s:ReloadStage)
+       DETACH DELETE j, s
+       RETURN count(DISTINCT j) AS deleted`,
+      { keep: neo4j.int(Math.max(1, Math.floor(keep))) },
+    );
+    return toNumberOrNull(result.records[0]?.get('deleted')) ?? 0;
+  } finally {
+    await session.close();
+  }
 }
 
 /**

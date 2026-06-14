@@ -1,9 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import type { Driver } from 'neo4j-driver';
-import { enrichLyrics, type LyricsClients } from '../../../src/enrichment/lyrics.js';
+import {
+  enrichLyrics,
+  resolveReloadLyricsConcurrency,
+  type LyricsClients,
+} from '../../../src/enrichment/lyrics.js';
 import { LrclibClient } from '../../../src/ingestion/lrclib-client.js';
 import { GeniusClient } from '../../../src/ingestion/genius-client.js';
 import { closedSnapshot } from '../../../src/ingestion/circuit-breaker.js';
+import { snapshotEnv } from '../../helpers/env.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks — factories run before module-level vi.mock() calls resolve.
@@ -94,6 +99,41 @@ const sampleTrack = {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+describe('resolveReloadLyricsConcurrency (#372)', () => {
+  const env = snapshotEnv(['LYRICS_CONCURRENCY', 'RELOAD_LYRICS_CONCURRENCY']);
+
+  beforeEach(() => env.clear());
+  afterEach(() => env.restore());
+
+  it('uses RELOAD_LYRICS_CONCURRENCY when set', () => {
+    process.env['RELOAD_LYRICS_CONCURRENCY'] = '3';
+    process.env['LYRICS_CONCURRENCY'] = '8';
+    expect(resolveReloadLyricsConcurrency()).toBe(3);
+  });
+
+  it('falls back to LYRICS_CONCURRENCY when the reload override is unset', () => {
+    process.env['LYRICS_CONCURRENCY'] = '4';
+    expect(resolveReloadLyricsConcurrency()).toBe(4);
+  });
+
+  it('falls back to the default of 6 when both are unset', () => {
+    expect(resolveReloadLyricsConcurrency()).toBe(6);
+  });
+
+  it('clamps the reload override to [1, 12]', () => {
+    process.env['RELOAD_LYRICS_CONCURRENCY'] = '0';
+    expect(resolveReloadLyricsConcurrency()).toBe(1);
+    process.env['RELOAD_LYRICS_CONCURRENCY'] = '99';
+    expect(resolveReloadLyricsConcurrency()).toBe(12);
+  });
+
+  it('falls through to LYRICS_CONCURRENCY on a non-numeric reload override', () => {
+    process.env['RELOAD_LYRICS_CONCURRENCY'] = 'abc';
+    process.env['LYRICS_CONCURRENCY'] = '2';
+    expect(resolveReloadLyricsConcurrency()).toBe(2);
+  });
+});
+
 describe('enrichLyrics', () => {
   let fetchSpy: MockInstance<typeof fetch>;
   const savedConcurrency = process.env['LYRICS_CONCURRENCY'];
@@ -174,6 +214,21 @@ describe('enrichLyrics', () => {
 
     const headers = (fetchSpy.mock.calls[0]?.[1] as RequestInit).headers as Record<string, string>;
     expect(headers['User-Agent']).toBe('liner-notes/test');
+  });
+
+  // An over-max opts.concurrency override (the reload's seam, #372) is clamped to [1, 12] like the
+  // env resolvers — it must not bypass the MAX_CONCURRENCY ceiling — and still enriches correctly.
+  it('honours and clamps an opts.concurrency override', async () => {
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+    fetchSpy.mockResolvedValueOnce(makeOkResponse(lrclibHit));
+
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(false), {
+      concurrency: 999,
+    });
+
+    expect(summary.enriched).toBe(1);
+    expect(summary.failed).toBe(0);
+    expect(mockSetTrackLyrics).toHaveBeenCalledOnce();
   });
 
   // -------------------------------------------------------------------------

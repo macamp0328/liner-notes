@@ -27,7 +27,10 @@ import { enrichTrackDeezer } from '../../../src/enrichment/track-deezer.js';
 import { enrichNationality } from '../../../src/enrichment/artist-nationality.js';
 
 vi.mock('../../../src/ingestion/ingest.js', () => ({ ingestReleases: vi.fn() }));
-vi.mock('../../../src/enrichment/lyrics.js', () => ({ enrichLyrics: vi.fn() }));
+vi.mock('../../../src/enrichment/lyrics.js', () => ({
+  enrichLyrics: vi.fn(),
+  resolveReloadLyricsConcurrency: vi.fn(() => 3),
+}));
 vi.mock('../../../src/enrichment/master-data.js', () => ({ enrichMasterData: vi.fn() }));
 vi.mock('../../../src/enrichment/artist-genres.js', () => ({ enrichArtistGenres: vi.fn() }));
 vi.mock('../../../src/enrichment/artist-profiles.js', () => ({ enrichArtistProfiles: vi.fn() }));
@@ -245,11 +248,14 @@ describe('stage run() delegates to the right enrich function', () => {
     expect(result).toEqual({ releasesProcessed: 3, releasesFailed: 1, releaseErrors: 1 });
   });
 
-  it('lyrics → enrichLyrics(driver, log, onProgress)', async () => {
+  it('lyrics → enrichLyrics(driver, log, onProgress) with the reload concurrency (#372)', async () => {
     const ctx = makeCtx();
     const onProgress = vi.fn();
     const result = await stage('lyrics').run(ctx, onProgress);
-    expect(enrichLyrics).toHaveBeenCalledWith(ctx.driver, ctx.log, onProgress);
+    // The reload passes RELOAD_LYRICS_CONCURRENCY (mocked to 3) via the opts override; no clients injected.
+    expect(enrichLyrics).toHaveBeenCalledWith(ctx.driver, ctx.log, onProgress, undefined, {
+      concurrency: 3,
+    });
     expect(result).toEqual(COUNTS);
   });
 

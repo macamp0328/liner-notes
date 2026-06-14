@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import type { Driver, Session, Record as Neo4jRecord } from 'neo4j-driver';
 import {
   createReloadJob,
@@ -11,7 +11,10 @@ import {
   getReloadJobAgeMs,
   getLatestReloadJob,
   findResumableReloadJob,
+  resolveReloadJobHistoryKeep,
+  pruneTerminalReloadJobs,
 } from '../../../src/db/job-repository.js';
+import { snapshotEnv } from '../../helpers/env.js';
 
 vi.mock('neo4j-driver', async (importOriginal) => {
   const actual = await importOriginal<typeof import('neo4j-driver')>();
@@ -49,6 +52,12 @@ function makeRecord(fields: Record<string, unknown>): Neo4jRecord {
 function makeNeo4jInt(n: number) {
   return { toNumber: () => n, low: n, high: 0 };
 }
+
+// The keep-last-N prune (#355) reads RELOAD_JOB_HISTORY_KEEP; clear it before every test so a value
+// set by one case never leaks into another, and restore the real environment when the file is done.
+const env = snapshotEnv(['RELOAD_JOB_HISTORY_KEEP']);
+beforeEach(() => env.clear());
+afterAll(() => env.restore());
 
 // ---------------------------------------------------------------------------
 // createReloadJob
@@ -160,6 +169,109 @@ describe('finishReloadJob', () => {
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(query).toContain('j.durationMs = datetime().epochMillis - j.startedAt.epochMillis');
     expect(params).toMatchObject({ jobId: 'job-1', status: 'complete' });
+  });
+
+  it('triggers a keep-last-N prune after writing the status (#355)', async () => {
+    const { session, runSpy } = makeMockSession();
+    await finishReloadJob(makeMockDriver(session), 'job-1', 'complete');
+
+    // Second run is the prune; it must follow the status SET, not replace it.
+    const pruneQuery = (runSpy.mock.calls[1] as [string])[0];
+    expect(pruneQuery).toContain('DETACH DELETE j, s');
+    expect(pruneQuery).toContain('count(DISTINCT j) AS deleted');
+  });
+
+  it('swallows a prune failure so a recorded-terminal job is never reverted, and warns', async () => {
+    const { session, runSpy } = makeMockSession();
+    runSpy.mockReset();
+    runSpy
+      // status SET matched a node (so warnIfUnmatched stays silent), then the prune throws
+      .mockResolvedValueOnce({ records: [makeRecord({ matched: makeNeo4jInt(1) })] })
+      .mockRejectedValueOnce(new Error('prune boom'));
+    const log = { warn: vi.fn() };
+
+    await expect(
+      finishReloadJob(makeMockDriver(session), 'job-1', 'complete', log),
+    ).resolves.toBeUndefined();
+    expect(log.warn).toHaveBeenCalledOnce();
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringContaining('pruneTerminalReloadJobs failed'),
+    );
+  });
+
+  it('swallows a prune failure even when no logger is passed', async () => {
+    const { session, runSpy } = makeMockSession();
+    runSpy.mockReset();
+    runSpy
+      .mockResolvedValueOnce({ records: [makeRecord({ matched: makeNeo4jInt(1) })] })
+      .mockRejectedValueOnce(new Error('prune boom'));
+
+    await expect(
+      finishReloadJob(makeMockDriver(session), 'job-1', 'failed'),
+    ).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveReloadJobHistoryKeep / pruneTerminalReloadJobs (#355): keep-last-N cleanup of terminal jobs
+// ---------------------------------------------------------------------------
+describe('resolveReloadJobHistoryKeep', () => {
+  it('parses an all-digits env value', () => {
+    process.env['RELOAD_JOB_HISTORY_KEEP'] = '25';
+    expect(resolveReloadJobHistoryKeep()).toBe(25);
+  });
+
+  it('falls back to the default (10) when unset or malformed', () => {
+    expect(resolveReloadJobHistoryKeep()).toBe(10); // cleared by beforeEach
+    process.env['RELOAD_JOB_HISTORY_KEEP'] = '10foo';
+    expect(resolveReloadJobHistoryKeep()).toBe(10);
+  });
+
+  it('floors a zero value at 1 so the just-finished job is never pruned', () => {
+    process.env['RELOAD_JOB_HISTORY_KEEP'] = '0';
+    expect(resolveReloadJobHistoryKeep()).toBe(1);
+  });
+});
+
+describe('pruneTerminalReloadJobs', () => {
+  const deletedRec = (n: number) => ({ records: [makeRecord({ deleted: makeNeo4jInt(n) })] });
+  const keepOf = (params: Record<string, unknown>): number =>
+    (params['keep'] as { toNumber(): number }).toNumber();
+
+  it('deletes terminal jobs beyond keep (with their stages) and returns the count', async () => {
+    const { session, runSpy } = makeMockSession(deletedRec(3));
+
+    const count = await pruneTerminalReloadJobs(makeMockDriver(session), 5);
+
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain("WHERE j.status IN ['complete', 'failed']");
+    expect(query).toContain('ORDER BY j.startedAt DESC SKIP $keep');
+    expect(query).toContain('OPTIONAL MATCH (j)-[:HAS_STAGE]->(s:ReloadStage)');
+    expect(query).toContain('DETACH DELETE j, s');
+    expect(query).toContain('count(DISTINCT j) AS deleted');
+    expect(keepOf(params)).toBe(5);
+    expect(count).toBe(3);
+    expect(session.close).toHaveBeenCalled();
+  });
+
+  it('returns 0 when no rows come back', async () => {
+    const { session } = makeMockSession({ records: [] });
+    expect(await pruneTerminalReloadJobs(makeMockDriver(session), 10)).toBe(0);
+  });
+
+  it('floors keep at 1 before sending it to SKIP', async () => {
+    const { session, runSpy } = makeMockSession(deletedRec(0));
+    await pruneTerminalReloadJobs(makeMockDriver(session), 0);
+    const params = (runSpy.mock.calls[0] as [string, Record<string, unknown>])[1];
+    expect(keepOf(params)).toBe(1);
+  });
+
+  it('defaults keep from RELOAD_JOB_HISTORY_KEEP when omitted', async () => {
+    process.env['RELOAD_JOB_HISTORY_KEEP'] = '4';
+    const { session, runSpy } = makeMockSession(deletedRec(0));
+    await pruneTerminalReloadJobs(makeMockDriver(session));
+    const params = (runSpy.mock.calls[0] as [string, Record<string, unknown>])[1];
+    expect(keepOf(params)).toBe(4);
   });
 });
 
