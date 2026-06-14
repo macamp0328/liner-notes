@@ -216,6 +216,21 @@ describe('enrichLyrics', () => {
     expect(headers['User-Agent']).toBe('liner-notes/test');
   });
 
+  // An over-max opts.concurrency override (the reload's seam, #372) is clamped to [1, 12] like the
+  // env resolvers — it must not bypass the MAX_CONCURRENCY ceiling — and still enriches correctly.
+  it('honours and clamps an opts.concurrency override', async () => {
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+    fetchSpy.mockResolvedValueOnce(makeOkResponse(lrclibHit));
+
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(false), {
+      concurrency: 999,
+    });
+
+    expect(summary.enriched).toBe(1);
+    expect(summary.failed).toBe(0);
+    expect(mockSetTrackLyrics).toHaveBeenCalledOnce();
+  });
+
   // -------------------------------------------------------------------------
   // Match-confidence gate (#248)
   // -------------------------------------------------------------------------

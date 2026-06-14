@@ -188,7 +188,10 @@ export async function enrichLyrics(
   const log: Logger = logger ?? console;
   const lrclib = clients?.lrclib ?? buildLrclibClientFromEnv(log);
   const genius = clients?.genius !== undefined ? clients.genius : buildGeniusClientFromEnv(log);
-  const concurrency = opts?.concurrency ?? resolveConcurrency();
+  // Clamp the caller-supplied override too, not just the env resolvers — the `[1, 12]` ceiling is
+  // the LRCLIB politeness budget, so an override must respect it regardless of who passes it.
+  const concurrency =
+    opts?.concurrency !== undefined ? clampConcurrency(opts.concurrency) : resolveConcurrency();
   const confidenceThreshold = resolveConfidenceThreshold();
 
   const stage: EnrichmentStage<UnenrichedTrack, LyricsResolved> = {
