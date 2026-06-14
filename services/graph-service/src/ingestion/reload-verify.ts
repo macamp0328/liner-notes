@@ -42,6 +42,9 @@ export const RELOAD_COVERAGE_THRESHOLDS: readonly CoverageThreshold[] = [
   { metric: 'tracksWithLyrics', stage: 'lyrics', minPct: 0 },
   { metric: 'tracksWithRecordingMbid', stage: 'track-musicbrainz', minPct: 50 },
   { metric: 'tracksWithIsrc', stage: 'track-musicbrainz', minPct: 40 },
+  // #336: MusicBrainz Work coverage is best-effort (not every recording has a work relationship),
+  // so gate for "populated" (silently-zero) only, like lyrics/tempo.
+  { metric: 'tracksWithWork', stage: 'track-works', minPct: 0 },
   { metric: 'tracksWithTempo', stage: 'track-acousticbrainz', minPct: 0 },
   { metric: 'tracksWithDeezerBpm', stage: 'track-deezer', minPct: 0 },
   // #330: reconciliation is deterministic + exhaustive (Artist.discogsId is unique), so after it

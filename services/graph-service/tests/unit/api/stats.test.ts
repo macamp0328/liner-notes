@@ -27,7 +27,7 @@ const sourcedNat = {
 };
 
 const STATS = {
-  counts: { releases: 10, artists: 20, tracks: 100, masters: 7, musicians: 40 },
+  counts: { releases: 10, artists: 20, tracks: 100, masters: 7, musicians: 40, works: 50 },
   enrichment: {
     releasesWithOriginalYear: { covered: 6, applicable: 8, pct: 75 },
     artistsWithProfile: { covered: 12, applicable: 16, pct: 75 },
@@ -56,6 +56,8 @@ const STATS = {
       total: 100,
     },
     tracksWithRecordingMbid: { covered: 70, applicable: 100, pct: 70 },
+    tracksWithWork: { covered: 42, applicable: 70, pct: 60 },
+    worksWithMultipleRecordings: 4,
     tracksWithIsrc: { covered: 60, applicable: 100, pct: 60 },
     tracksWithTempo: { covered: 35, applicable: 70, pct: 50 },
     tracksWithDeezerBpm: { covered: 30, applicable: 60, pct: 50 },

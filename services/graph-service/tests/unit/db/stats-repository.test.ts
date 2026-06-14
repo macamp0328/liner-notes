@@ -40,9 +40,12 @@ function makeDriver(byLabel: {
   // #330: optional so existing cases (which don't assert resolution stats) need no change.
   musician?: Record<string, unknown>;
   memberOf?: Record<string, unknown>;
+  // #336: optional so existing cases need no change.
+  work?: Record<string, unknown>;
 }): Driver {
   const musician = byLabel.musician ?? { total: int(0), groupsWithMembers: int(0) };
   const memberOf = byLabel.memberOf ?? { memberOfEdges: int(0) };
+  const work = byLabel.work ?? { total: int(0), multiRecording: int(0) };
   const run = vi.fn(async (cypher: string) => {
     let fields: Record<string, unknown>;
     if (cypher.includes('(p:Artist)')) fields = byLabel.natArtist;
@@ -53,6 +56,8 @@ function makeDriver(byLabel: {
     else if (cypher.includes('(m:Musician)')) fields = musician;
     else if (cypher.includes('(r:Release)')) fields = byLabel.release;
     else if (cypher.includes('(a:Artist)')) fields = byLabel.artist;
+    // #336: WORK_QUERY also references (t:Track), so it must be routed before the Track route.
+    else if (cypher.includes('(w:Work)')) fields = work;
     else if (cypher.includes('(t:Track)')) fields = byLabel.track;
     else fields = byLabel.master;
     return { records: [makeRecord(fields)] };
@@ -80,12 +85,14 @@ describe('getStats', () => {
         lyricsLrclibCovered: int(70),
         lyricsGeniusCovered: int(8),
         mbidCovered: int(70),
+        worksCovered: int(42),
         isrcCovered: int(60),
         tempoCovered: int(35),
         deezerCovered: int(30),
         deezerGainCovered: int(24),
       },
       master: { total: int(7), releaseEventsCovered: int(5) },
+      work: { total: int(50), multiRecording: int(4) },
       natArtist: nat(16, 12, 7, 4),
       natMusician: nat(50, 30, 10, 5),
       natProducer: nat(8, 4, 4, 0),
@@ -107,7 +114,12 @@ describe('getStats', () => {
       tracks: 100,
       masters: 7,
       musicians: 40,
+      works: 50,
     });
+    // #336 Work coverage: tracksWithWork over the recordingMbid-gated denominator (42/70),
+    // plus the raw count of cover/version groups (works with >1 distinct recording).
+    expect(stats.enrichment.tracksWithWork).toEqual({ covered: 42, applicable: 70, pct: 60 });
+    expect(stats.enrichment.worksWithMultipleRecordings).toBe(4);
     // #330 entity-resolution stats: reconciliation coverage + raw MEMBER_OF counts.
     expect(stats.enrichment.samePersonLinks).toEqual({ covered: 25, applicable: 25, pct: 100 });
     expect(stats.enrichment.memberOfEdges).toBe(9);
@@ -263,7 +275,14 @@ describe('getStats', () => {
 
     const stats = await getStats(driver);
 
-    expect(stats.counts).toEqual({ releases: 0, artists: 0, tracks: 0, masters: 0, musicians: 0 });
+    expect(stats.counts).toEqual({
+      releases: 0,
+      artists: 0,
+      tracks: 0,
+      masters: 0,
+      musicians: 0,
+      works: 0,
+    });
     expect(stats.enrichment.releasesWithOriginalYear.pct).toBeNull();
     expect(stats.enrichment.artistsWithGenres.pct).toBeNull();
     expect(stats.enrichment.tracksWithLyrics.pct).toBeNull();
