@@ -4,6 +4,7 @@ import {
   getReleasesByMusician,
   getReleasesByCredit,
   getReleasesByInstrument,
+  getRecordingsByWork,
   getReleasesByStudio,
   getReleasesByLabel,
   getReleasesByGenre,
@@ -19,6 +20,7 @@ import {
   type ExploreRelease,
   type MusicianRelease,
   type InstrumentCredit,
+  type WorkRecording,
   type ConnectionNode,
   type SharedMusiciansResult,
   type InternationalTrack,
@@ -74,6 +76,22 @@ const instrumentCreditSchema = {
     instrument: { type: 'string', nullable: true },
     displayRole: { type: 'string', nullable: true },
     scope: { type: 'string', nullable: true },
+  },
+} as const;
+
+const workRecordingSchema = {
+  type: 'object',
+  required: ['recordingMbid', 'trackTitle', 'discogsId', 'releaseTitle'],
+  properties: {
+    workTitle: { type: 'string' },
+    recordingMbid: { type: 'string' },
+    trackTitle: { type: 'string' },
+    position: { type: 'string', nullable: true },
+    discogsId: { type: 'integer' },
+    releaseTitle: { type: 'string' },
+    artist: { type: 'string', nullable: true },
+    year: { type: 'integer', nullable: true },
+    thumbUrl: { type: 'string', nullable: true },
   },
 } as const;
 
@@ -137,6 +155,10 @@ const sharedMusiciansResponseSchema = {
 
 interface NameParams {
   name: string;
+}
+
+interface MbidParams {
+  mbid: string;
 }
 
 interface DecadeParams {
@@ -267,6 +289,30 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request, reply): Promise<InstrumentCredit[] | ErrorReply> => {
       const items = await getReleasesByInstrument(getDriver(), request.params.name);
+      return reply.send(items);
+    },
+  );
+
+  // GET /api/v1/explore/work/:mbid — every recording of a Work I own (versions/covers, #336)
+  fastify.get<{ Params: MbidParams; Reply: WorkRecording[] | ErrorReply }>(
+    '/api/v1/explore/work/:mbid',
+    {
+      schema: {
+        tags: ['explore'],
+        summary: 'Every recording of this MusicBrainz Work in the collection (versions/covers)',
+        params: {
+          type: 'object',
+          required: ['mbid'],
+          properties: { mbid: { type: 'string' } },
+        },
+        response: {
+          200: { type: 'array', items: workRecordingSchema },
+          400: errorResponseRef,
+        },
+      },
+    },
+    async (request, reply): Promise<WorkRecording[] | ErrorReply> => {
+      const items = await getRecordingsByWork(getDriver(), request.params.mbid);
       return reply.send(items);
     },
   );
