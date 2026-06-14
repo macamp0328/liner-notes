@@ -593,7 +593,9 @@ const PIPELINES: PipelineEntry[] = [
         'enrichment depends on `isrc`, this reset also clears all AcousticBrainz fields ' +
         '(`acousticBrainzFetchedAt`, `tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, ' +
         '`dynamicComplexity`, `danceabilityEstimate`, `voiceInstrumental`) and all Deezer fields ' +
-        '(`deezerFetchedAt`, `deezerBpm`, `deezerGain`) from the same nodes.\n\n' +
+        '(`deezerFetchedAt`, `deezerBpm`, `deezerGain`) from the same nodes. It also clears ' +
+        'track-works (`worksFetchedAt`) and deletes every `Work` node with its `RECORDING_OF` ' +
+        'edges (#336), since those are derived from `recordingMbid` too.\n\n' +
         'This endpoint is blocked while enrichment is running.',
       runningMessage:
         'MusicBrainz track enrichment is currently running — wait for it to finish before resetting',

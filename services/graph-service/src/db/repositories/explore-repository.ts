@@ -273,7 +273,7 @@ export async function getRecordingsByWork(driver: Driver, mbid: string): Promise
              t.title AS trackTitle, t.position AS position,
              r.discogsId AS discogsId, r.title AS releaseTitle, a.name AS artist,
              coalesce(r.originalYear, r.pressingYear) AS year, r.thumbUrl AS thumbUrl
-      ORDER BY recordingMbid, year
+      ORDER BY recordingMbid, year, discogsId
       `,
       { mbid },
     );

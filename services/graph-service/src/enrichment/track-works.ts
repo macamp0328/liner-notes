@@ -46,7 +46,9 @@ export async function enrichTrackWorks(
   onProgress: ProgressReporter = NOOP_PROGRESS,
 ): Promise<TrackWorksEnrichmentSummary> {
   const log: Logger = logger ?? console;
-  let worksWritten = 0;
+  // Distinct Work MBIDs actually MERGEd this run — a Work shared across recordings (the cover
+  // case) is counted once, not once per recording.
+  const writtenWorkMbids = new Set<string>();
   let recordingOfEdges = 0;
   let candidateCount = 0;
 
@@ -69,7 +71,11 @@ export async function enrichTrackWorks(
         let writers = writerCache.get(work.mbid);
         if (writers === undefined) {
           writers = await mbClient.getWritersByWorkMbid(work.mbid);
-          writerCache.set(work.mbid, writers);
+          // Cache only a non-empty result. getWritersByWorkMbid returns [] when the circuit
+          // breaker is open (transient), so caching [] would poison every later recording of a
+          // shared Work for the rest of the run, permanently leaving it writer-less. A genuinely
+          // writer-less Work just re-fetches — cheap, since such Works are rare and usually appear once.
+          if (writers.length > 0) writerCache.set(work.mbid, writers);
         }
         resolved.push({ mbid: work.mbid, title: work.title, type: work.type, writers });
       }
@@ -77,7 +83,7 @@ export async function enrichTrackWorks(
     },
     async write(d, { trackElementIds }, resolved) {
       await mergeTrackWorks(d, trackElementIds, resolved.works);
-      worksWritten += resolved.works.length;
+      for (const w of resolved.works) writtenWorkMbids.add(w.mbid);
       recordingOfEdges += trackElementIds.length * resolved.works.length;
     },
     markAttempted: (d, { trackElementIds }) => setTrackWorksFetched(d, trackElementIds),
@@ -97,7 +103,7 @@ export async function enrichTrackWorks(
     recordingsProcessed: summary.enriched,
     recordingsSkipped: summary.skipped,
     recordingsFailed: summary.failed,
-    worksWritten,
+    worksWritten: writtenWorkMbids.size,
     recordingOfEdges,
     durationMs: summary.durationMs,
   };

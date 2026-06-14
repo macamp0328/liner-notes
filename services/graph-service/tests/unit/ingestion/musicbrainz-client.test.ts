@@ -650,8 +650,12 @@ describe('MusicBrainzClient', () => {
         makeOkResponse({
           id: 'rec-1',
           relations: [
-            { type: 'performance', work: { id: 'work-a', title: 'Part A' } },
-            { type: 'performance', work: { id: 'work-b', title: 'Part B', type: 'Song' } },
+            { type: 'performance', 'target-type': 'work', work: { id: 'work-a', title: 'Part A' } },
+            {
+              type: 'performance',
+              'target-type': 'work',
+              work: { id: 'work-b', title: 'Part B', type: 'Song' },
+            },
           ],
         }),
       );
@@ -671,6 +675,8 @@ describe('MusicBrainzClient', () => {
           relations: [
             { type: 'samples material', work: { id: 'work-x', title: 'X' } },
             { type: 'performance' },
+            // performance but target-type is not 'work' → ignored (#336 review, defense-in-depth)
+            { type: 'performance', 'target-type': 'recording', work: { id: 'work-y', title: 'Y' } },
           ],
         }),
       );

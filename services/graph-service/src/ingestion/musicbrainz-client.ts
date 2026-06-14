@@ -364,7 +364,11 @@ export class MusicBrainzClient {
 
     const works: MbWork[] = [];
     for (const rel of response.relations ?? []) {
-      if (rel.type === 'performance' && rel.work?.id !== undefined) {
+      if (
+        rel.type === 'performance' &&
+        rel['target-type'] === 'work' &&
+        rel.work?.id !== undefined
+      ) {
         works.push({ mbid: rel.work.id, title: rel.work.title, type: rel.work.type ?? null });
       }
     }

@@ -20,10 +20,16 @@ export interface WorkToMerge {
 }
 
 /**
- * Fetch every distinct `recordingMbid` that still has at least one Track without a resolved Work
- * (no `worksFetchedAt`, or aged past the staleness window — issue #89), grouped so one MusicBrainz
+ * Fetch every distinct `recordingMbid` whose Tracks still LACK a Work (no `RECORDING_OF` edge) and
+ * whose last attempt has aged past the staleness window (issue #89), grouped so one MusicBrainz
  * recording is looked up once and fanned out to every Track carrying it. The `recordingMbid IS NOT
  * NULL` gate is what makes this stage depend on `track-musicbrainz` having run first (#336).
+ *
+ * The `NOT EXISTS { (t)-[:RECORDING_OF]->(:Work) }` guard mirrors the sibling enrichments
+ * (`track-musicbrainz` gates on `recordingMbid IS NULL`; `mb-release-events` on `NOT EXISTS
+ * MB_RELEASED_IN`): an already-resolved Track is never re-fetched on each staleness window — only
+ * a still-Work-less one is — so the window doesn't trigger a full re-sweep of the resolved corpus.
+ * Forced re-fetch is the explicit `/track-works/reset` route, per the *FetchedAt contract.
  */
 export async function getTracksForWorksEnrichment(driver: Driver): Promise<RecordingForWorks[]> {
   const session = driver.session();
@@ -31,6 +37,7 @@ export async function getTracksForWorksEnrichment(driver: Driver): Promise<Recor
     const result = await session.run(
       `MATCH (t:Track)
        WHERE t.recordingMbid IS NOT NULL
+         AND NOT EXISTS { (t)-[:RECORDING_OF]->(:Work) }
          AND (t.worksFetchedAt IS NULL
               OR t.worksFetchedAt < datetime() - duration({ days: $stalenessDays }))
        RETURN t.recordingMbid AS recordingMbid, collect(elementId(t)) AS trackElementIds`,
@@ -68,9 +75,11 @@ export async function mergeTrackWorks(
   const session = driver.session();
   try {
     await session.run(
+      // coalesce so a later recording whose work payload omits title/type (type is optional in
+      // MusicBrainz) cannot null-clobber a value an earlier recording already populated (#336 review).
       `UNWIND $works AS work
        MERGE (w:Work {mbid: work.mbid})
-       SET w.title = work.title, w.type = work.type
+       SET w.title = coalesce(work.title, w.title), w.type = coalesce(work.type, w.type)
        FOREACH (_ IN CASE WHEN size(work.writerMbids) > 0 THEN [1] ELSE [] END |
          SET w.writers = work.writers,
              w.writerMbids = work.writerMbids,
@@ -122,23 +131,26 @@ export async function setTrackWorksFetched(
 }
 
 /**
- * Remove all track-works enrichment: clear `worksFetchedAt` markers, delete every RECORDING_OF
- * relationship, and delete the now-orphaned Work nodes. Returns the number of Tracks reset.
+ * Remove all track-works enrichment: clear `worksFetchedAt` markers and delete every Work node
+ * (which `DETACH DELETE` removes together with its RECORDING_OF edges). Runs both statements in one
+ * write transaction so a crash can't leave the graph half-reset (#336 review). Returns the number
+ * of Tracks reset.
  */
 export async function resetTrackWorksEnrichment(driver: Driver): Promise<number> {
   const session = driver.session();
   try {
-    const resetResult = await session.run(
-      `MATCH (t:Track) WHERE t.worksFetchedAt IS NOT NULL
-       REMOVE t.worksFetchedAt
-       RETURN count(t) AS reset`,
-    );
-    const reset = (resetResult.records[0]?.get('reset') as Neo4jInt | undefined)?.toNumber() ?? 0;
-
-    await session.run(`MATCH ()-[r:RECORDING_OF]->() DELETE r`);
-    await session.run(`MATCH (w:Work) DETACH DELETE w`);
-
-    return reset;
+    return await session.executeWrite(async (tx) => {
+      const resetResult = await tx.run(
+        `MATCH (t:Track) WHERE t.worksFetchedAt IS NOT NULL
+         REMOVE t.worksFetchedAt
+         RETURN count(t) AS reset`,
+      );
+      const reset = (resetResult.records[0]?.get('reset') as Neo4jInt | undefined)?.toNumber() ?? 0;
+      // DETACH DELETE removes each Work and its RECORDING_OF edges in one step — no separate
+      // relationship-delete pass, and nothing orphaned if the transaction is interrupted.
+      await tx.run(`MATCH (w:Work) DETACH DELETE w`);
+      return reset;
+    });
   } finally {
     await session.close();
   }

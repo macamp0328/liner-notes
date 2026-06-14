@@ -26,6 +26,9 @@ function makeMockSession(runResult: unknown = { records: [] }): {
   const runSpy = vi.fn().mockResolvedValue(runResult);
   const session = {
     run: runSpy,
+    // executeWrite runs its callback with a transaction whose run is the same spy, so reset
+    // statements issued inside the tx are observable on runSpy just like direct session.run calls.
+    executeWrite: vi.fn((fn: (tx: { run: typeof runSpy }) => unknown) => fn({ run: runSpy })),
     close: vi.fn().mockResolvedValue(undefined),
   } as unknown as Session;
   return { session, runSpy };
@@ -63,6 +66,8 @@ describe('getTracksForWorksEnrichment', () => {
 
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(query).toContain('t.recordingMbid IS NOT NULL');
+    // #336 review: an already-resolved Track (has a Work edge) must not be re-selected each window.
+    expect(query).toContain('NOT EXISTS { (t)-[:RECORDING_OF]->(:Work) }');
     expect(query).toContain('t.worksFetchedAt IS NULL');
     expect(query).toContain('duration({ days: $stalenessDays })');
     expect(query).toContain('collect(elementId(t)) AS trackElementIds');
@@ -176,19 +181,21 @@ describe('resetTrackWorksEnrichment', () => {
     const runSpy = vi
       .fn()
       .mockResolvedValueOnce({ records: [resetRecord] })
-      .mockResolvedValueOnce({ records: [] })
       .mockResolvedValueOnce({ records: [] });
     const session = {
       run: runSpy,
+      executeWrite: vi.fn((fn: (tx: { run: typeof runSpy }) => unknown) => fn({ run: runSpy })),
       close: vi.fn().mockResolvedValue(undefined),
     } as unknown as Session;
 
     const reset = await resetTrackWorksEnrichment(makeMockDriver(session));
 
     expect(reset).toBe(7);
-    expect(runSpy).toHaveBeenCalledTimes(3);
-    expect((runSpy.mock.calls[1] as [string])[0]).toContain('RECORDING_OF');
-    expect((runSpy.mock.calls[2] as [string])[0]).toContain('MATCH (w:Work) DETACH DELETE w');
+    // One transaction, two statements: clear markers, then DETACH DELETE Work (removes RECORDING_OF).
+    expect(session.executeWrite).toHaveBeenCalledOnce();
+    expect(runSpy).toHaveBeenCalledTimes(2);
+    expect((runSpy.mock.calls[0] as [string])[0]).toContain('REMOVE t.worksFetchedAt');
+    expect((runSpy.mock.calls[1] as [string])[0]).toContain('MATCH (w:Work) DETACH DELETE w');
     expect(session.close).toHaveBeenCalledOnce();
   });
 
@@ -197,10 +204,10 @@ describe('resetTrackWorksEnrichment', () => {
     const runSpy = vi
       .fn()
       .mockResolvedValueOnce({ records: [resetRecord] })
-      .mockResolvedValueOnce({ records: [] })
       .mockResolvedValueOnce({ records: [] });
     const session = {
       run: runSpy,
+      executeWrite: vi.fn((fn: (tx: { run: typeof runSpy }) => unknown) => fn({ run: runSpy })),
       close: vi.fn().mockResolvedValue(undefined),
     } as unknown as Session;
 

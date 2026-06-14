@@ -134,6 +134,27 @@ describe('enrichTrackWorks', () => {
     // writers for work-1 fetched once, reused for the second recording
     expect(client.getWritersByWorkMbid).toHaveBeenCalledTimes(1);
     expect(summary.recordingsProcessed).toBe(2);
+    // worksWritten counts the shared Work once, not once per recording (#336 review)
+    expect(summary.worksWritten).toBe(1);
+  });
+
+  it('does NOT cache an empty writer result — a breaker-open [] re-fetches on the next recording', async () => {
+    mockGetTracks.mockResolvedValue([
+      { recordingMbid: 'rec-1', trackElementIds: ['e1'] },
+      { recordingMbid: 'rec-2', trackElementIds: ['e2'] },
+    ]);
+    const writers: MbWorkWriter[] = [{ mbid: 'a-1', name: 'Bo Diddley', role: 'composer' }];
+    const client = makeMbClient(
+      async () => [WORK], // both recordings perform the same work
+      // first lookup returns [] (e.g. circuit-breaker open), then the breaker recovers
+      vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce(writers),
+    );
+
+    await enrichTrackWorks(client, fakeDriver, silentLogger);
+
+    // [] is not cached, so the second recording re-fetches and captures the recovered writers
+    expect(client.getWritersByWorkMbid).toHaveBeenCalledTimes(2);
+    expect(mockMergeWorks).toHaveBeenLastCalledWith(fakeDriver, ['e2'], [{ ...WORK, writers }]);
   });
 
   it('continues processing remaining recordings after a per-recording failure', async () => {
