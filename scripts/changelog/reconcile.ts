@@ -60,6 +60,20 @@ function rerenderPublishedReleases(
   const byNumber = recordsByNumber(records);
   for (const v of versions) {
     const slice = v.prNumbers.map((n) => byNumber.get(n)).filter((r): r is ChangelogRecord => !!r);
+    // Guard: never re-render a published body from an INCOMPLETE slice. If the store
+    // is missing records this version claims (e.g. an old baseline whose records were
+    // truncated out of changelog.jsonl), re-rendering would overwrite a correct frozen
+    // body with a shorter one — the same degraded-data→destructive-write failure the
+    // strict reads close on the input side. Skip loudly; `changelog:backfill` restores
+    // the missing records, after which the next reconcile re-renders cleanly.
+    if (slice.length < v.prNumbers.length) {
+      console.warn(
+        `  ⚠ ${v.tag}: store has ${slice.length}/${v.prNumbers.length} of its records — ` +
+          'skipping re-render to avoid truncating the published body. ' +
+          'Run `pnpm changelog:backfill` to restore the missing records.',
+      );
+      continue;
+    }
     const body =
       v.tier === 'baseline'
         ? renderBaseline(slice, { model: v.model })

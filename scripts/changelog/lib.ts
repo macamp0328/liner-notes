@@ -422,6 +422,41 @@ export function parseRecords(jsonl: string): ChangelogRecord[] {
   return out;
 }
 
+/**
+ * STRICT counterpart to `parseRecords`, for the **read side of a read-modify-write**.
+ * Where `parseRecords` silently drops unparseable/invalid lines (correct when the
+ * result only feeds a *render*), this THROWS on any non-blank line that fails to
+ * `JSON.parse` or validate — so a truncated `gh release download` (whose final line
+ * is cut mid-JSON) is a loud, retryable error instead of a smaller record set that a
+ * writer would then persist back, permanently dropping the missing PRs. Blank lines
+ * are still skipped; valid lines are normalised exactly like the tolerant parser.
+ */
+export function parseRecordsStrict(jsonl: string): ChangelogRecord[] {
+  const out: ChangelogRecord[] = [];
+  const lines = jsonl.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = (lines[i] ?? '').trim();
+    if (trimmed === '') continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      throw new Error(
+        `changelog.jsonl line ${i + 1} is not valid JSON — refusing to read (a truncated ` +
+          `download would otherwise be written back, dropping records). Retry the operation.`,
+      );
+    }
+    if (!isValidRecord(parsed)) {
+      throw new Error(
+        `changelog.jsonl line ${i + 1} is not a well-formed record — refusing to read so a ` +
+          `corrupt asset cannot be persisted back. Retry, or repair the asset.`,
+      );
+    }
+    out.push(normalizeRecord(parsed));
+  }
+  return out;
+}
+
 /** Serialise to JSONL, sorted by PR number ascending so the asset diff is stable. */
 export function serializeRecords(records: readonly ChangelogRecord[]): string {
   return records
@@ -487,6 +522,58 @@ export function parseVersions(json: string): VersionRecord[] {
   }
   if (!Array.isArray(parsed)) return [];
   return parsed.filter(isVersionRecord);
+}
+
+/**
+ * STRICT counterpart to `parseVersions`, for the **read side of a read-modify-write**.
+ * `versions.json` is the ONE place the frozen headline/narrative/tier/targetSha of a
+ * published release live — losing an entry is unrecoverable, so the read that feeds a
+ * write-back must never silently shrink. THROWS on non-JSON (truncated download), a
+ * non-array, or any malformed entry. A legitimately empty manifest (`[]`, e.g. before
+ * the first cut) parses cleanly and returns `[]` — only corruption throws.
+ */
+export function parseVersionsStrict(json: string): VersionRecord[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new Error(
+      'versions.json is not valid JSON — refusing to read (a truncated download would ' +
+        'otherwise be written back, dropping every published version). Retry the operation.',
+    );
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error('versions.json is not a JSON array — refusing to read a corrupt manifest.');
+  }
+  const valid = parsed.filter(isVersionRecord);
+  if (valid.length !== parsed.length) {
+    throw new Error(
+      `versions.json has ${parsed.length - valid.length} malformed version entr(ies) — refusing ` +
+        'to read so the manifest cannot be partially dropped on write-back. Repair the asset.',
+    );
+  }
+  return valid;
+}
+
+/**
+ * Insert or replace a version by `tag`, returning a NEW array — the version-manifest
+ * analog of `upsert`. The cut path uses this instead of `[...versions, new]` so a
+ * re-cut of the same tag is idempotent and, crucially, so the write can only ever
+ * GROW or replace-in-place — it can never drop an existing version (defence in depth
+ * behind the strict reads).
+ */
+export function upsertVersion(
+  versions: readonly VersionRecord[],
+  incoming: VersionRecord,
+): VersionRecord[] {
+  const next = versions.slice();
+  const idx = next.findIndex((v) => v.tag === incoming.tag);
+  if (idx >= 0) {
+    next[idx] = incoming;
+  } else {
+    next.push(incoming);
+  }
+  return next;
 }
 
 /** Serialise versions sorted by (date, tag) ascending, pretty-printed for a readable asset. */

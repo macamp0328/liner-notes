@@ -19,8 +19,8 @@ import { join } from 'node:path';
 import {
   type ChangelogRecord,
   type VersionRecord,
-  parseRecords,
-  parseVersions,
+  parseRecordsStrict,
+  parseVersionsStrict,
   renderUnreleased,
   serializeRecords,
   serializeVersions,
@@ -179,16 +179,60 @@ function downloadDraftAsset(assetName: string): string | null {
   }
 }
 
-/** Read the current record set from the changelog.jsonl asset. Empty if absent. */
-export function readStore(): ChangelogRecord[] {
-  const raw = downloadDraftAsset(ASSET_NAME);
-  return raw === null ? [] : parseRecords(raw);
+interface GhReleaseAssets {
+  assets?: Array<{ name?: string }>;
 }
 
-/** Read the version manifest from the versions.json asset. Empty if absent. */
+/**
+ * Asset names attached to the draft release, or `null` when the draft doesn't exist
+ * yet. This is how a reader tells "the asset was never uploaded" (a legitimate empty
+ * — first run) apart from "the asset exists but a download failed" (a transient blip
+ * that must NOT degrade to empty). The release-metadata list is authoritative and
+ * cheap; the per-pattern `release download` can't make that distinction on its own.
+ */
+function releaseAssetNames(): string[] | null {
+  const json = tryGh(['release', 'view', RELEASE_TAG, '--json', 'assets']);
+  if (json === null) return null;
+  try {
+    const parsed = JSON.parse(json) as GhReleaseAssets;
+    return (parsed.assets ?? []).map((a) => a.name ?? '').filter((n) => n !== '');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read + parse one store asset for a READ-MODIFY-WRITE caller. The contract that
+ * makes the writers safe: return `[]` ONLY when the asset is genuinely absent (no
+ * draft yet, or never uploaded); otherwise the asset's content round-trips, or we
+ * THROW. A `parse` failure (truncated/corrupt download) or a download that fails
+ * while the asset IS listed both raise — never silently shrink the in-memory copy
+ * that a writer would then persist back over the canonical asset. This is the fix
+ * for the class of corruption where a degraded read wiped versions.json / dropped
+ * changelog.jsonl records on the next write.
+ */
+function readAssetStrict<T>(assetName: string, parse: (raw: string) => T[]): T[] {
+  const names = releaseAssetNames();
+  if (names === null) return []; // draft release doesn't exist yet — genuinely empty
+  if (!names.includes(assetName)) return []; // asset never uploaded yet — genuinely empty
+  const raw = downloadDraftAsset(assetName);
+  if (raw === null) {
+    throw new Error(
+      `"${assetName}" is listed on the "${RELEASE_TAG}" release but could not be downloaded — ` +
+        'refusing to proceed: a write-back now would overwrite it with an empty/partial copy. Retry.',
+    );
+  }
+  return parse(raw); // strict parsers throw on a truncated/corrupt asset
+}
+
+/** Read the current record set from the changelog.jsonl asset. Empty only if genuinely absent. */
+export function readStore(): ChangelogRecord[] {
+  return readAssetStrict(ASSET_NAME, parseRecordsStrict);
+}
+
+/** Read the version manifest from the versions.json asset. Empty only if genuinely absent. */
 export function readVersions(): VersionRecord[] {
-  const raw = downloadDraftAsset(VERSIONS_ASSET_NAME);
-  return raw === null ? [] : parseVersions(raw);
+  return readAssetStrict(VERSIONS_ASSET_NAME, parseVersionsStrict);
 }
 
 /**
