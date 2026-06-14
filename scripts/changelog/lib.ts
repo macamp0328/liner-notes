@@ -399,27 +399,65 @@ export function normalizeRecord(record: ChangelogRecord): ChangelogRecord {
 }
 
 /**
- * Parse the JSONL store. Tolerant by design: skips blank lines, **unparseable
- * JSON**, and lines that don't validate as a record — so a truncated download or
- * a hand-edited asset degrades gracefully instead of throwing and breaking the
- * writers. Any PR dropped here is re-added on the next reconcile, so the store
- * self-corrects. Pure: no I/O, so the drop is silent (the reconciler is the
- * recovery path, not a log line here).
+ * On a malformed line/asset, parsing either `skip`s it (tolerant) or `throw`s
+ * (strict). The two modes back the two parser contracts below — see each export.
  */
-export function parseRecords(jsonl: string): ChangelogRecord[] {
+export type ParseMode = 'skip' | 'throw';
+
+/**
+ * Shared core for the JSONL store parser. `skip` mode silently drops blank lines,
+ * unparseable JSON, and lines that don't validate — for render-only / recovery
+ * callers. `throw` mode raises on any non-blank line that fails, naming the line —
+ * for the read side of a read-modify-write, where a silently-shorter result would
+ * be persisted back over the canonical asset (dropping PRs). Valid lines are always
+ * normalised. Pure: no I/O.
+ */
+function parseRecordsCore(jsonl: string, onBad: ParseMode): ChangelogRecord[] {
   const out: ChangelogRecord[] = [];
-  for (const line of jsonl.split('\n')) {
-    const trimmed = line.trim();
+  const lines = jsonl.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = (lines[i] ?? '').trim();
     if (trimmed === '') continue;
     let parsed: unknown;
     try {
       parsed = JSON.parse(trimmed);
     } catch {
-      continue; // corrupt/partial line — skip, don't throw
+      if (onBad === 'skip') continue; // corrupt/partial line — drop, don't throw
+      throw new Error(
+        `changelog.jsonl line ${i + 1} is not valid JSON — refusing to read (a truncated ` +
+          `download would otherwise be written back, dropping records). Retry the operation.`,
+      );
     }
-    if (isValidRecord(parsed)) out.push(normalizeRecord(parsed));
+    if (!isValidRecord(parsed)) {
+      if (onBad === 'skip') continue;
+      throw new Error(
+        `changelog.jsonl line ${i + 1} is not a well-formed record — refusing to read so a ` +
+          `corrupt asset cannot be persisted back. Retry, or repair the asset.`,
+      );
+    }
+    out.push(normalizeRecord(parsed));
   }
   return out;
+}
+
+/**
+ * TOLERANT JSONL parse: skips blank lines, unparseable JSON, and invalid records so a
+ * truncated download or hand-edited asset degrades gracefully. Used by the RECOVERY
+ * callers (reconcile/backfill) and render: a dropped record is re-added from source
+ * on the next pass, so the store self-corrects.
+ */
+export function parseRecords(jsonl: string): ChangelogRecord[] {
+  return parseRecordsCore(jsonl, 'skip');
+}
+
+/**
+ * STRICT JSONL parse: THROWS on any malformed line. Used by the read side of a
+ * read-modify-write (update/release) so a truncated `gh release download` is a loud,
+ * retryable error instead of a smaller record set that a writer would persist back,
+ * permanently dropping the missing PRs.
+ */
+export function parseRecordsStrict(jsonl: string): ChangelogRecord[] {
+  return parseRecordsCore(jsonl, 'throw');
 }
 
 /** Serialise to JSONL, sorted by PR number ascending so the asset diff is stable. */
@@ -473,20 +511,72 @@ export function isVersionRecord(value: unknown): value is VersionRecord {
 }
 
 /**
- * Parse the `versions.json` asset (a JSON array). Tolerant by design (like
- * `parseRecords`): unparseable JSON, a non-array, or a malformed entry degrades
- * to an empty/filtered result rather than throwing — the reconciler is the
- * recovery path.
+ * Shared core for the `versions.json` parser (a JSON array). `skip` mode degrades
+ * unparseable JSON / a non-array / a malformed entry to an empty-or-filtered result;
+ * `throw` mode raises instead. NOTE: unlike records, a version entry is NOT
+ * re-derivable (its headline/narrative/tier are frozen here and nowhere else), so
+ * even the recovery callers read versions with `throw` — a malformed entry must never
+ * be silently dropped and persisted back. A legitimately empty manifest (`[]`) parses
+ * cleanly to `[]` in both modes.
  */
-export function parseVersions(json: string): VersionRecord[] {
+function parseVersionsCore(json: string, onBad: ParseMode): VersionRecord[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
   } catch {
-    return [];
+    if (onBad === 'skip') return [];
+    throw new Error(
+      'versions.json is not valid JSON — refusing to read (a truncated download would ' +
+        'otherwise be written back, dropping every published version). Retry the operation.',
+    );
   }
-  if (!Array.isArray(parsed)) return [];
-  return parsed.filter(isVersionRecord);
+  if (!Array.isArray(parsed)) {
+    if (onBad === 'skip') return [];
+    throw new Error('versions.json is not a JSON array — refusing to read a corrupt manifest.');
+  }
+  const valid = parsed.filter(isVersionRecord);
+  if (onBad === 'throw' && valid.length !== parsed.length) {
+    throw new Error(
+      `versions.json has ${parsed.length - valid.length} malformed version entr(ies) — refusing ` +
+        'to read so the manifest cannot be partially dropped on write-back. Repair the asset.',
+    );
+  }
+  return valid;
+}
+
+/** TOLERANT manifest parse — kept for render/inspection; degrades rather than throwing. */
+export function parseVersions(json: string): VersionRecord[] {
+  return parseVersionsCore(json, 'skip');
+}
+
+/**
+ * STRICT manifest parse: THROWS on non-JSON, a non-array, or any malformed entry.
+ * `versions.json` is the only home of a release's frozen metadata, so every reader
+ * that may write back uses this — a dropped entry is permanent data loss.
+ */
+export function parseVersionsStrict(json: string): VersionRecord[] {
+  return parseVersionsCore(json, 'throw');
+}
+
+/**
+ * Insert or replace a version by `tag`, returning a NEW array — the version-manifest
+ * analog of `upsert`. The cut path uses this instead of `[...versions, new]` so a
+ * re-cut of the same tag is idempotent and, crucially, so the write can only ever
+ * GROW or replace-in-place — it can never drop an existing version (defence in depth
+ * behind the strict reads).
+ */
+export function upsertVersion(
+  versions: readonly VersionRecord[],
+  incoming: VersionRecord,
+): VersionRecord[] {
+  const next = versions.slice();
+  const idx = next.findIndex((v) => v.tag === incoming.tag);
+  if (idx >= 0) {
+    next[idx] = incoming;
+  } else {
+    next.push(incoming);
+  }
+  return next;
 }
 
 /** Serialise versions sorted by (date, tag) ascending, pretty-printed for a readable asset. */
