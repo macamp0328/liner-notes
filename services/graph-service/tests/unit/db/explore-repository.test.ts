@@ -4,6 +4,7 @@ import {
   getReleasesByMusician,
   getReleasesByCredit,
   getReleasesByInstrument,
+  getRecordingsByWork,
   getReleasesByStudio,
   getReleasesByLabel,
   getReleasesByGenre,
@@ -251,6 +252,52 @@ describe('getReleasesByInstrument', () => {
     const driver = makeMockDriver(session);
     await getReleasesByInstrument(driver, 'bass');
     expect(session.close).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getRecordingsByWork (#336)
+// ---------------------------------------------------------------------------
+
+describe('getRecordingsByWork', () => {
+  it('maps work recordings and passes the mbid through', async () => {
+    const rec = makeRecord({
+      workTitle: 'Who Do You Love?',
+      recordingMbid: 'rec-1',
+      trackTitle: 'Who Do You Love',
+      position: 'A1',
+      discogsId: makeNeo4jInt(7000001),
+      releaseTitle: 'La Bamba',
+      artist: 'Bo Diddley',
+      year: makeNeo4jInt(1987),
+      thumbUrl: null,
+    });
+    const { session, runSpy } = makeMockSession([makeResult([rec])]);
+
+    const out = await getRecordingsByWork(makeMockDriver(session), 'work-1');
+
+    expect(out).toEqual([
+      {
+        workTitle: 'Who Do You Love?',
+        recordingMbid: 'rec-1',
+        trackTitle: 'Who Do You Love',
+        position: 'A1',
+        discogsId: 7000001,
+        releaseTitle: 'La Bamba',
+        artist: 'Bo Diddley',
+        year: 1987,
+        thumbUrl: null,
+      },
+    ]);
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('RECORDING_OF');
+    expect(query).toContain('Work {mbid: $mbid}');
+    expect(params).toEqual({ mbid: 'work-1' });
+  });
+
+  it('returns an empty array for an unknown work', async () => {
+    const { session } = makeMockSession([makeResult([])]);
+    expect(await getRecordingsByWork(makeMockDriver(session), 'nope')).toEqual([]);
   });
 });
 

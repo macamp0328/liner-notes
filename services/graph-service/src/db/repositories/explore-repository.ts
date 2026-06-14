@@ -27,6 +27,23 @@ export interface InstrumentCredit extends ExploreRelease {
   scope: string | null;
 }
 
+/**
+ * One recording of a Work in the collection (#336). Rows sharing a `recordingMbid` are the same
+ * recording on multiple releases (a duplicate); distinct `recordingMbid` values under one Work are
+ * different recordings — the versions/covers.
+ */
+export interface WorkRecording {
+  workTitle: string;
+  recordingMbid: string;
+  trackTitle: string;
+  position: string | null;
+  discogsId: number;
+  releaseTitle: string;
+  artist: string | null;
+  year: number | null;
+  thumbUrl: string | null;
+}
+
 export interface ConnectionNode {
   type: string;
   discogsId: number | null;
@@ -225,6 +242,51 @@ export async function getReleasesByInstrument(
       instrument: toStr(rec.get('instrument')),
       displayRole: toStr(rec.get('displayRole')),
       scope: toStr(rec.get('scope')),
+    }));
+  } finally {
+    await session.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// getRecordingsByWork
+// ---------------------------------------------------------------------------
+
+/**
+ * Every recording of a Work in the collection — "every version of this song I own" (#336).
+ * Grouping is purely on the shared Work MBID (ground truth from MusicBrainz), so a title
+ * collision can never group two different compositions, and a genuine cover (a different
+ * recording of the same Work) is grouped even when titles differ. Each row carries its
+ * `recordingMbid` so the caller can tell distinct recordings (versions/covers) apart from the
+ * same recording reissued on another release (a duplicate). Returns an empty array for an
+ * unknown or unlinked Work MBID.
+ */
+export async function getRecordingsByWork(driver: Driver, mbid: string): Promise<WorkRecording[]> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `
+      MATCH (t:Track)-[:RECORDING_OF]->(w:Work {mbid: $mbid})
+      MATCH (r:Release)-[:HAS_TRACK]->(t)
+      OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
+      RETURN w.title AS workTitle, t.recordingMbid AS recordingMbid,
+             t.title AS trackTitle, t.position AS position,
+             r.discogsId AS discogsId, r.title AS releaseTitle, a.name AS artist,
+             coalesce(r.originalYear, r.pressingYear) AS year, r.thumbUrl AS thumbUrl
+      ORDER BY recordingMbid, year, discogsId
+      `,
+      { mbid },
+    );
+    return result.records.map((rec) => ({
+      workTitle: toStr(rec.get('workTitle')) ?? '',
+      recordingMbid: toStr(rec.get('recordingMbid')) ?? '',
+      trackTitle: toStr(rec.get('trackTitle')) ?? '',
+      position: toStr(rec.get('position')),
+      discogsId: toInt(rec.get('discogsId')) ?? 0,
+      releaseTitle: toStr(rec.get('releaseTitle')) ?? '',
+      artist: toStr(rec.get('artist')),
+      year: toInt(rec.get('year')),
+      thumbUrl: toStr(rec.get('thumbUrl')),
     }));
   } finally {
     await session.close();

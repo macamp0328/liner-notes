@@ -10,6 +10,7 @@ const mockVerifyConnectivity = vi.hoisted(() => vi.fn().mockResolvedValue(undefi
 const mockGetReleasesByMusician = vi.hoisted(() => vi.fn());
 const mockGetReleasesByCredit = vi.hoisted(() => vi.fn());
 const mockGetReleasesByInstrument = vi.hoisted(() => vi.fn());
+const mockGetRecordingsByWork = vi.hoisted(() => vi.fn());
 const mockGetReleasesByStudio = vi.hoisted(() => vi.fn());
 const mockGetReleasesByLabel = vi.hoisted(() => vi.fn());
 const mockGetReleasesByGenre = vi.hoisted(() => vi.fn());
@@ -46,6 +47,7 @@ vi.mock('../../../src/db/repositories/explore-repository.js', () => ({
   getReleasesByMusician: mockGetReleasesByMusician,
   getReleasesByCredit: mockGetReleasesByCredit,
   getReleasesByInstrument: mockGetReleasesByInstrument,
+  getRecordingsByWork: mockGetRecordingsByWork,
   getReleasesByStudio: mockGetReleasesByStudio,
   getReleasesByLabel: mockGetReleasesByLabel,
   getReleasesByGenre: mockGetReleasesByGenre,
@@ -190,6 +192,47 @@ describe('explore routes', () => {
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/explore/instrument/harp',
+      });
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.payload)).toEqual([]);
+    });
+  });
+
+  // GET /api/v1/explore/work/:mbid
+  describe('GET /api/v1/explore/work/:mbid', () => {
+    const sampleRecording = {
+      workTitle: 'Who Do You Love?',
+      recordingMbid: 'a32adae6-6229-4f8e-8f75-f065b8073c35',
+      trackTitle: 'Who Do You Love',
+      position: 'A1',
+      discogsId: 7000001,
+      releaseTitle: 'La Bamba',
+      artist: 'Bo Diddley',
+      year: 1987,
+      thumbUrl: null,
+    };
+
+    it('returns 200 with the work recordings and passes the mbid through', async () => {
+      mockGetRecordingsByWork.mockResolvedValue([sampleRecording]);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/work/4f19a475-4607-31cc-aba9-390f5a007352',
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as (typeof sampleRecording)[];
+      expect(body).toHaveLength(1);
+      expect(body[0]!.recordingMbid).toBe('a32adae6-6229-4f8e-8f75-f065b8073c35');
+      expect(mockGetRecordingsByWork).toHaveBeenCalledWith(
+        expect.anything(),
+        '4f19a475-4607-31cc-aba9-390f5a007352',
+      );
+    });
+
+    it('returns 200 with empty array for an unknown work', async () => {
+      mockGetRecordingsByWork.mockResolvedValue([]);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/work/unknown-mbid',
       });
       expect(response.statusCode).toBe(200);
       expect(JSON.parse(response.payload)).toEqual([]);

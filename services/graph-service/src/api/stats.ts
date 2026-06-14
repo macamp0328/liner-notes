@@ -93,13 +93,14 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
                 properties: {
                   counts: {
                     type: 'object',
-                    required: ['releases', 'artists', 'tracks', 'masters', 'musicians'],
+                    required: ['releases', 'artists', 'tracks', 'masters', 'musicians', 'works'],
                     properties: {
                       releases: { type: 'integer' },
                       artists: { type: 'integer' },
                       tracks: { type: 'integer' },
                       masters: { type: 'integer' },
                       musicians: { type: 'integer' },
+                      works: { type: 'integer' },
                     },
                   },
                   enrichment: {
@@ -116,6 +117,8 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
                       'tracksWithLyrics',
                       'lyricsFunnel',
                       'tracksWithRecordingMbid',
+                      'tracksWithWork',
+                      'worksWithMultipleRecordings',
                       'tracksWithIsrc',
                       'tracksWithTempo',
                       'tracksWithDeezerBpm',
@@ -137,6 +140,8 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
                       tracksWithLyrics: sourcedCoverageSchema,
                       lyricsFunnel: lyricsFunnelSchema,
                       tracksWithRecordingMbid: coverageSchema,
+                      tracksWithWork: coverageSchema,
+                      worksWithMultipleRecordings: { type: 'integer' },
                       tracksWithIsrc: coverageSchema,
                       tracksWithTempo: coverageSchema,
                       tracksWithDeezerBpm: coverageSchema,

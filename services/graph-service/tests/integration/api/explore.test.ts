@@ -6,6 +6,7 @@ import {
   clearGraph,
   seedExploreEnrichment,
   seedEntityResolution,
+  seedWorks,
 } from '../../fixtures/loader.js';
 import { getDriver } from '../../../src/db/client.js';
 
@@ -20,6 +21,7 @@ describe('explore routes', () => {
     await seedGraph(getDriver());
     await seedExploreEnrichment(getDriver());
     await seedEntityResolution(getDriver());
+    await seedWorks(getDriver());
   });
 
   afterAll(async () => {
@@ -113,6 +115,47 @@ describe('explore routes', () => {
 
     it('returns an empty array for an instrument nobody plays', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/v1/explore/instrument/harp' });
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.payload)).toEqual([]);
+    });
+  });
+
+  // #336: linking is purely on the shared Work MBID — these cases encode the acceptance criteria.
+  describe('GET /api/v1/explore/work/:mbid', () => {
+    type WorkRecordingBody = { recordingMbid: string; discogsId: number; trackTitle: string };
+
+    it('groups two distinct recordings of one Work as versions/covers', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/work/work-cover-1' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as WorkRecordingBody[];
+      expect(body).toHaveLength(2);
+      // two DISTINCT recordings → a real cover pair
+      expect(new Set(body.map((r) => r.recordingMbid))).toEqual(
+        new Set(['rec-cover-a', 'rec-cover-b']),
+      );
+    });
+
+    it('returns the same recording on two releases (a duplicate, not two versions)', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/work/work-dup-1' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as WorkRecordingBody[];
+      expect(body).toHaveLength(2);
+      // one DISTINCT recording across both releases → a duplicate, not a cover
+      expect(new Set(body.map((r) => r.recordingMbid))).toEqual(new Set(['rec-dup']));
+      expect(new Set(body.map((r) => r.discogsId))).toEqual(new Set([7050003, 7050004]));
+    });
+
+    it('does NOT link two same-titled recordings that are different Works', async () => {
+      const a = await app.inject({ method: 'GET', url: '/api/v1/explore/work/work-collide-a' });
+      const b = await app.inject({ method: 'GET', url: '/api/v1/explore/work/work-collide-b' });
+      const bodyA = JSON.parse(a.payload) as WorkRecordingBody[];
+      const bodyB = JSON.parse(b.payload) as WorkRecordingBody[];
+      expect(bodyA.map((r) => r.recordingMbid)).toEqual(['rec-collide-a']);
+      expect(bodyB.map((r) => r.recordingMbid)).toEqual(['rec-collide-b']);
+    });
+
+    it('returns an empty array for an unknown Work', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/work/__none__' });
       expect(res.statusCode).toBe(200);
       expect(JSON.parse(res.payload)).toEqual([]);
     });

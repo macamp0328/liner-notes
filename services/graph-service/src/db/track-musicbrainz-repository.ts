@@ -123,24 +123,31 @@ export async function setTrackMusicBrainzIds(
 
 /**
  * Remove all MusicBrainz enrichment from Track nodes and cascade to every downstream
- * enrichment that depends on it: AcousticBrainz (keyed by recordingMbid) and Deezer
- * (keyed by isrc). Clearing all three together ensures the next enrichment run
- * reprocesses from scratch without any stale markers or features.
+ * enrichment keyed off the identifiers it writes: AcousticBrainz (recordingMbid), Deezer
+ * (isrc), and track-works (recordingMbid → Work, #336). Clearing them together ensures the
+ * next enrichment run reprocesses from scratch without any stale markers, features, or — for
+ * track-works — RECORDING_OF edges pointing at a recordingMbid that no longer exists. Runs in
+ * one write transaction so the cascade can't be left half-applied.
  *
  * Returns the number of tracks reset.
  */
 export async function resetTrackMusicBrainzEnrichment(driver: Driver): Promise<number> {
   const session = driver.session();
   try {
-    const result = await session.run(
-      `MATCH (t:Track) WHERE t.musicBrainzFetchedAt IS NOT NULL
-       REMOVE t.musicBrainzFetchedAt, t.recordingMbid, t.isrc,
-              t.acousticBrainzFetchedAt, t.tempo, t.musicalKey, t.musicalScale,
-              t.loudnessDb, t.dynamicComplexity, t.danceabilityEstimate, t.voiceInstrumental,
-              t.deezerFetchedAt, t.deezerBpm, t.deezerGain
-       RETURN count(t) AS reset`,
-    );
-    return (result.records[0]?.get('reset') as Neo4jInt | undefined)?.toNumber() ?? 0;
+    return await session.executeWrite(async (tx) => {
+      const result = await tx.run(
+        `MATCH (t:Track) WHERE t.musicBrainzFetchedAt IS NOT NULL
+         REMOVE t.musicBrainzFetchedAt, t.recordingMbid, t.isrc, t.worksFetchedAt,
+                t.acousticBrainzFetchedAt, t.tempo, t.musicalKey, t.musicalScale,
+                t.loudnessDb, t.dynamicComplexity, t.danceabilityEstimate, t.voiceInstrumental,
+                t.deezerFetchedAt, t.deezerBpm, t.deezerGain
+         RETURN count(t) AS reset`,
+      );
+      // DETACH DELETE removes each Work together with its RECORDING_OF edges; recordingMbid is
+      // being cleared graph-wide, so every Work/edge derived from it is now stale.
+      await tx.run(`MATCH (w:Work) DETACH DELETE w`);
+      return (result.records[0]?.get('reset') as Neo4jInt | undefined)?.toNumber() ?? 0;
+    });
   } finally {
     await session.close();
   }

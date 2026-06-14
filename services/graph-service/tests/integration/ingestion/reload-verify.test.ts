@@ -35,6 +35,12 @@ async function seedCoverage(driver: Driver, opts: { originalYear: boolean }): Pr
            t.isrc = 'isrc-' + t.position,
            t.tempo = 120.0, t.deezerBpm = 120.0`,
     );
+    // #336: link the recordingMbid tracks to a Work so tracksWithWork (gated silently-zero) clears.
+    await session.run(
+      `MATCH (t:Track) WHERE t.recordingMbid IS NOT NULL
+       MERGE (w:Work {mbid: 'work-seed'})
+       MERGE (t)-[rel:RECORDING_OF]->(w) SET rel.source = 'musicbrainz'`,
+    );
     await session.run(`MATCH (a:Artist) WHERE a.discogsId IS NOT NULL SET a.profile = 'seeded'`);
   } finally {
     await session.close();

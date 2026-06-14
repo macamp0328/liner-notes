@@ -49,6 +49,7 @@ export interface StatsData {
     tracks: number;
     masters: number;
     musicians: number;
+    works: number;
   };
   enrichment: {
     releasesWithOriginalYear: CoverageMetric;
@@ -62,6 +63,11 @@ export interface StatsData {
     tracksWithLyrics: SourcedCoverageMetric;
     lyricsFunnel: LyricsFunnel;
     tracksWithRecordingMbid: CoverageMetric;
+    // Work coverage (#336). tracksWithWork IS gateable (covered/applicable over tracks that have a
+    // recordingMbid — the upstream gate); worksWithMultipleRecordings is a raw count of cover/version
+    // groups (no knowable denominator), so like memberOfEdges it is not a CoverageMetric.
+    tracksWithWork: CoverageMetric;
+    worksWithMultipleRecordings: number;
     tracksWithIsrc: CoverageMetric;
     tracksWithTempo: CoverageMetric;
     tracksWithDeezerBpm: CoverageMetric;
@@ -153,6 +159,7 @@ const TRACK_QUERY = `
     count(CASE WHEN t.lyrics IS NULL AND t.lyricsStatus = 'probable-instrumental' THEN 1 END) AS lyricsProbableInstrumental,
     count(CASE WHEN t.lyrics IS NULL AND t.lyricsStatus = 'low-confidence' THEN 1 END) AS lyricsLowConfidence,
     count(CASE WHEN t.recordingMbid IS NOT NULL THEN 1 END) AS mbidCovered,
+    count(CASE WHEN EXISTS { (t)-[:RECORDING_OF]->(:Work) } THEN 1 END) AS worksCovered,
     count(CASE WHEN t.isrc IS NOT NULL THEN 1 END) AS isrcCovered,
     count(CASE WHEN t.recordingMbid IS NOT NULL AND t.tempo IS NOT NULL THEN 1 END) AS tempoCovered,
     count(CASE WHEN t.isrc IS NOT NULL AND t.deezerBpm IS NOT NULL THEN 1 END) AS deezerCovered,
@@ -163,6 +170,15 @@ const MASTER_QUERY = `
   RETURN
     count(m) AS total,
     count(CASE WHEN EXISTS { (m)-[:MB_RELEASED_IN]->() } THEN 1 END) AS releaseEventsCovered`;
+
+// Work coverage (#336). One row per Work that has ≥1 RECORDING_OF, grouped to count distinct
+// recordings; the bare final aggregation returns one row of zeros on an empty graph (no Work
+// nodes → no rows into the grouping → count() over zero rows is 0). `multiRecording` counts Works
+// with >1 DISTINCT recordingMbid — the true cover/version groups, not the same recording reissued.
+const WORK_QUERY = `
+  MATCH (w:Work)<-[:RECORDING_OF]-(t:Track)
+  WITH w, count(DISTINCT t.recordingMbid) AS recs
+  RETURN count(w) AS total, count(CASE WHEN recs > 1 THEN 1 END) AS multiRecording`;
 
 // Entity-resolution (#330) per-Musician scan. samePersonApplicable = Musicians whose discogsId
 // matches an Artist (the reconciliation target set); samePersonCovered = those already linked via
@@ -248,6 +264,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
     artist,
     track,
     master,
+    work,
     natArtist,
     natMusician,
     natProducer,
@@ -259,6 +276,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
     runCounts(driver, ARTIST_QUERY),
     runCounts(driver, TRACK_QUERY),
     runCounts(driver, MASTER_QUERY),
+    runCounts(driver, WORK_QUERY),
     runCounts(driver, ARTIST_NATIONALITY_QUERY),
     runCounts(driver, MUSICIAN_NATIONALITY_QUERY),
     runCounts(driver, PRODUCER_NATIONALITY_QUERY),
@@ -307,6 +325,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       tracks: trackTotal,
       masters: n(master, 'total'),
       musicians: n(musician, 'total'),
+      works: n(work, 'total'),
     },
     enrichment: {
       releasesWithOriginalYear: coverage(n(release, 'oyCovered'), n(release, 'oyApplicable')),
@@ -332,6 +351,10 @@ export async function getStats(driver: Driver): Promise<StatsData> {
         total: trackTotal,
       },
       tracksWithRecordingMbid: coverage(mbidCovered, trackTotal),
+      // Applicable denominator is the upstream gate (a Work can only be resolved for a track that
+      // has a recordingMbid), mirroring tracksWithTempo.
+      tracksWithWork: coverage(n(track, 'worksCovered'), mbidCovered),
+      worksWithMultipleRecordings: n(work, 'multiRecording'),
       tracksWithIsrc: coverage(isrcCovered, trackTotal),
       // Applicable denominators are the upstream gates: tempo needs a recordingMbid,
       // deezerBpm/deezerGain need an isrc (both produced by track-musicbrainz enrichment).

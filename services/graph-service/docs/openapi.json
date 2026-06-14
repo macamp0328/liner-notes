@@ -916,7 +916,132 @@
       "post": {
         "summary": "Reset MusicBrainz track enrichment markers for a full re-run",
         "tags": ["admin"],
-        "description": "Removes MusicBrainz fields (`musicBrainzFetchedAt`, `recordingMbid`, `isrc`) from all Track nodes, causing the next `POST /api/v1/admin/track-musicbrainz/enrich` call to re-process every track from scratch.\n\n**Cascade:** because AcousticBrainz enrichment depends on `recordingMbid` and Deezer enrichment depends on `isrc`, this reset also clears all AcousticBrainz fields (`acousticBrainzFetchedAt`, `tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, `dynamicComplexity`, `danceabilityEstimate`, `voiceInstrumental`) and all Deezer fields (`deezerFetchedAt`, `deezerBpm`, `deezerGain`) from the same nodes.\n\nThis endpoint is blocked while enrichment is running.",
+        "description": "Removes MusicBrainz fields (`musicBrainzFetchedAt`, `recordingMbid`, `isrc`) from all Track nodes, causing the next `POST /api/v1/admin/track-musicbrainz/enrich` call to re-process every track from scratch.\n\n**Cascade:** because AcousticBrainz enrichment depends on `recordingMbid` and Deezer enrichment depends on `isrc`, this reset also clears all AcousticBrainz fields (`acousticBrainzFetchedAt`, `tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, `dynamicComplexity`, `danceabilityEstimate`, `voiceInstrumental`) and all Deezer fields (`deezerFetchedAt`, `deezerBpm`, `deezerGain`) from the same nodes. It also clears track-works (`worksFetchedAt`) and deletes every `Work` node with its `RECORDING_OF` edges (#336), since those are derived from `recordingMbid` too.\n\nThis endpoint is blocked while enrichment is running.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["reset"],
+                      "properties": {
+                        "reset": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-works/enrich": {
+      "post": {
+        "summary": "Link Track nodes to MusicBrainz Work (composition) nodes via RECORDING_OF",
+        "tags": ["admin"],
+        "description": "For each Track that carries a `recordingMbid` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), resolves the MusicBrainz Work(s) the recording is a performance of and writes a `RECORDING_OF` relationship to each `Work` node (MBID-keyed). Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, and only after track-musicbrainz enrichment has populated `recordingMbid`.**\n\nSeparating the composition (Work) from the recording is what makes cover/version discovery deterministic: two Tracks that are `RECORDING_OF` the same Work but are different recordings are versions/covers, while the same recording on two releases is just a duplicate — the shared Work MBID is the only signal, so there is no fuzzy/title matching. Each Work also captures its writers (composer/lyricist/writer) as provenance-tagged MusicBrainz data.\n\nRe-selects a Track while it still has no Work (null `worksFetchedAt`) once its last attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `worksFetchedAt` after each attempt — so a recording MusicBrainz has no Work for is retried at most once per window. Run `POST /api/v1/admin/track-works/reset` to force a full re-run.\n\nRequires `MUSICBRAINZ_USER_AGENT` env var.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["message", "statusUrl"],
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "statusUrl": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-works/reset": {
+      "post": {
+        "summary": "Reset MusicBrainz works enrichment for a full re-run",
+        "tags": ["admin"],
+        "description": "Removes the `worksFetchedAt` marker from all Track nodes, deletes every `RECORDING_OF` relationship, and deletes the orphaned `Work` nodes, causing the next `POST /api/v1/admin/track-works/enrich` call to re-process every track from scratch.\n\nThis endpoint is blocked while enrichment is running.",
         "security": [
           {
             "bearerAuth": []
@@ -2118,6 +2243,98 @@
                               "type": "integer"
                             },
                             "tracksUnmatched": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-works/status": {
+      "get": {
+        "summary": "Status of the most recent MusicBrainz works enrichment run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult",
+                        "lastError"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "recordingsProcessed": {
+                              "type": "integer"
+                            },
+                            "recordingsSkipped": {
+                              "type": "integer"
+                            },
+                            "recordingsFailed": {
+                              "type": "integer"
+                            },
+                            "worksWritten": {
+                              "type": "integer"
+                            },
+                            "recordingOfEdges": {
                               "type": "integer"
                             },
                             "durationMs": {
@@ -3929,6 +4146,81 @@
         }
       }
     },
+    "/api/v1/explore/work/{mbid}": {
+      "get": {
+        "summary": "Every recording of this MusicBrainz Work in the collection (versions/covers)",
+        "tags": ["explore"],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "mbid",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["recordingMbid", "trackTitle", "discogsId", "releaseTitle"],
+                    "properties": {
+                      "workTitle": {
+                        "type": "string"
+                      },
+                      "recordingMbid": {
+                        "type": "string"
+                      },
+                      "trackTitle": {
+                        "type": "string"
+                      },
+                      "position": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "discogsId": {
+                        "type": "integer"
+                      },
+                      "releaseTitle": {
+                        "type": "string"
+                      },
+                      "artist": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "year": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "thumbUrl": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/explore/studio/{name}": {
       "get": {
         "summary": "Releases recorded at this studio",
@@ -4945,7 +5237,14 @@
                       "properties": {
                         "counts": {
                           "type": "object",
-                          "required": ["releases", "artists", "tracks", "masters", "musicians"],
+                          "required": [
+                            "releases",
+                            "artists",
+                            "tracks",
+                            "masters",
+                            "musicians",
+                            "works"
+                          ],
                           "properties": {
                             "releases": {
                               "type": "integer"
@@ -4960,6 +5259,9 @@
                               "type": "integer"
                             },
                             "musicians": {
+                              "type": "integer"
+                            },
+                            "works": {
                               "type": "integer"
                             }
                           }
@@ -4978,6 +5280,8 @@
                             "tracksWithLyrics",
                             "lyricsFunnel",
                             "tracksWithRecordingMbid",
+                            "tracksWithWork",
+                            "worksWithMultipleRecordings",
                             "tracksWithIsrc",
                             "tracksWithTempo",
                             "tracksWithDeezerBpm",
@@ -5273,6 +5577,25 @@
                                   "nullable": true
                                 }
                               }
+                            },
+                            "tracksWithWork": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "worksWithMultipleRecordings": {
+                              "type": "integer"
                             },
                             "tracksWithIsrc": {
                               "type": "object",

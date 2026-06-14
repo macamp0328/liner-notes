@@ -25,7 +25,12 @@ const DONE_BEFORE_CRASH: string[] = STAGE_NAMES.slice(0, STAGE_NAMES.indexOf(CRA
 
 // Stages whose run() returns null (→ `skipped`) because the musicbrainz client is unset (see
 // beforeAll). One that actually runs settles `skipped`; one pre-marked complete stays `complete`.
-const MUSICBRAINZ_STAGES = new Set(['track-musicbrainz', 'mb-release-events', 'nationality']);
+const MUSICBRAINZ_STAGES = new Set([
+  'track-musicbrainz',
+  'track-works',
+  'mb-release-events',
+  'nationality',
+]);
 
 function expectedStatus(name: string): 'complete' | 'skipped' {
   if (DONE_BEFORE_CRASH.includes(name)) return 'complete';

@@ -620,6 +620,136 @@ describe('MusicBrainzClient', () => {
   });
 
   // -------------------------------------------------------------------------
+  // getWorksByRecordingMbid (#336)
+  // -------------------------------------------------------------------------
+  describe('getWorksByRecordingMbid', () => {
+    it('maps performance relations to works (mbid, title, type)', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            {
+              type: 'performance',
+              'target-type': 'work',
+              work: { id: 'work-1', title: 'Who Do You Love?', type: 'Song' },
+            },
+          ],
+        }),
+      );
+
+      const works = await client.getWorksByRecordingMbid('rec-1');
+
+      expect(works).toEqual([{ mbid: 'work-1', title: 'Who Do You Love?', type: 'Song' }]);
+      const url = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(url).toContain('/recording/rec-1');
+      expect(url).toContain('inc=work-rels');
+    });
+
+    it('returns every work for a medley (multiple performance relations)', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            { type: 'performance', 'target-type': 'work', work: { id: 'work-a', title: 'Part A' } },
+            {
+              type: 'performance',
+              'target-type': 'work',
+              work: { id: 'work-b', title: 'Part B', type: 'Song' },
+            },
+          ],
+        }),
+      );
+
+      const works = await client.getWorksByRecordingMbid('rec-1');
+
+      expect(works).toEqual([
+        { mbid: 'work-a', title: 'Part A', type: null },
+        { mbid: 'work-b', title: 'Part B', type: 'Song' },
+      ]);
+    });
+
+    it('ignores non-performance relations and relations without a work id', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            { type: 'samples material', work: { id: 'work-x', title: 'X' } },
+            { type: 'performance' },
+            // performance but target-type is not 'work' → ignored (#336 review, defense-in-depth)
+            { type: 'performance', 'target-type': 'recording', work: { id: 'work-y', title: 'Y' } },
+          ],
+        }),
+      );
+
+      expect(await client.getWorksByRecordingMbid('rec-1')).toEqual([]);
+    });
+
+    it('returns an empty array when the recording has no relations', async () => {
+      fetchSpy.mockResolvedValueOnce(makeOkResponse({ id: 'rec-1' }));
+      expect(await client.getWorksByRecordingMbid('rec-1')).toEqual([]);
+    });
+
+    it('returns an empty array on a 404 (recording no longer resolves)', async () => {
+      fetchSpy.mockResolvedValueOnce(makeErrorResponse(404, 'Not Found'));
+      expect(await client.getWorksByRecordingMbid('gone')).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getWritersByWorkMbid (#336)
+  // -------------------------------------------------------------------------
+  describe('getWritersByWorkMbid', () => {
+    it('maps composer/lyricist/writer relations to writers with their MB artist MBID', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'work-1',
+          relations: [
+            {
+              type: 'composer',
+              'target-type': 'artist',
+              artist: { id: 'a-1', name: 'Bo Diddley' },
+            },
+            {
+              type: 'lyricist',
+              'target-type': 'artist',
+              artist: { id: 'a-1', name: 'Bo Diddley' },
+            },
+          ],
+        }),
+      );
+
+      const writers = await client.getWritersByWorkMbid('work-1');
+
+      expect(writers).toEqual([
+        { mbid: 'a-1', name: 'Bo Diddley', role: 'composer' },
+        { mbid: 'a-1', name: 'Bo Diddley', role: 'lyricist' },
+      ]);
+      const url = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(url).toContain('/work/work-1');
+      expect(url).toContain('inc=artist-rels');
+    });
+
+    it('ignores non-authorship relations and relations without an artist id', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'work-1',
+          relations: [
+            { type: 'arranger', artist: { id: 'a-2', name: 'Arr' } },
+            { type: 'composer' },
+          ],
+        }),
+      );
+
+      expect(await client.getWritersByWorkMbid('work-1')).toEqual([]);
+    });
+
+    it('returns an empty array on a 404', async () => {
+      fetchSpy.mockResolvedValueOnce(makeErrorResponse(404, 'Not Found'));
+      expect(await client.getWritersByWorkMbid('gone')).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // searchRecording
   // -------------------------------------------------------------------------
   describe('searchRecording', () => {

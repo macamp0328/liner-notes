@@ -16,6 +16,8 @@ function makeMockSession(runResult: unknown = { records: [] }): {
   const runSpy = vi.fn().mockResolvedValue(runResult);
   const session = {
     run: runSpy,
+    // executeWrite runs its callback with a tx whose run is the same spy (reset now runs in a tx).
+    executeWrite: vi.fn((fn: (tx: { run: typeof runSpy }) => unknown) => fn({ run: runSpy })),
     close: vi.fn().mockResolvedValue(undefined),
   } as unknown as Session;
   return { session, runSpy };
@@ -146,16 +148,20 @@ describe('resetTrackMusicBrainzEnrichment', () => {
     vi.clearAllMocks();
   });
 
-  it('returns the number of tracks reset', async () => {
+  it('returns the number of tracks reset and cascades to track-works (#336)', async () => {
     const record = makeNeo4jRecord({ reset: int(42) });
     const { session, runSpy } = makeMockSession({ records: [record] } as unknown as Result);
 
     const reset = await resetTrackMusicBrainzEnrichment(makeMockDriver(session));
 
     expect(reset).toBe(42);
-    const [query] = runSpy.mock.calls[0] as [string];
-    expect(query).toContain('REMOVE t.musicBrainzFetchedAt, t.recordingMbid, t.isrc');
-    expect(query).toContain('t.acousticBrainzFetchedAt, t.tempo, t.musicalKey');
+    // One transaction: REMOVE the markers (incl. worksFetchedAt), then delete every Work node.
+    expect(session.executeWrite).toHaveBeenCalledOnce();
+    const [removeQuery] = runSpy.mock.calls[0] as [string];
+    expect(removeQuery).toContain('REMOVE t.musicBrainzFetchedAt, t.recordingMbid, t.isrc');
+    expect(removeQuery).toContain('t.worksFetchedAt');
+    expect(removeQuery).toContain('t.acousticBrainzFetchedAt, t.tempo, t.musicalKey');
+    expect((runSpy.mock.calls[1] as [string])[0]).toContain('MATCH (w:Work) DETACH DELETE w');
   });
 
   it('returns 0 when the query yields no records', async () => {
