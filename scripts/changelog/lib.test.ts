@@ -20,7 +20,9 @@ import {
   parseCalver,
   parsePrNumber,
   parseRecords,
+  parseRecordsStrict,
   parseVersions,
+  parseVersionsStrict,
   preserveVersion,
   previousVersion,
   recordsByNumber,
@@ -35,6 +37,7 @@ import {
   tierSignals,
   unreleasedRecords,
   upsert,
+  upsertVersion,
 } from './lib.js';
 
 function rec(overrides: Partial<ChangelogRecord> & { number: number }): ChangelogRecord {
@@ -162,6 +165,71 @@ test('parseRecords: back-compat — a legacy record with no `version` loads as n
   const parsed = parseRecords(legacy);
   assert.equal(parsed.length, 1, 'legacy record is not silently dropped');
   assert.equal(parsed[0]?.version, null, 'version defaults to null');
+});
+
+test('parseRecordsStrict: round-trips clean JSONL and normalises a legacy record', () => {
+  // An empty store is written as serializeRecords([]) ('') + '\n' = '\n' — must parse
+  // to [] (blank lines skipped), NOT throw, or every first-run/empty read would fail.
+  assert.deepEqual(parseRecordsStrict(''), []);
+  assert.deepEqual(parseRecordsStrict('\n'), []);
+  const good = serializeRecords([rec({ number: 7 }), rec({ number: 8 })]);
+  const parsed = parseRecordsStrict(`\n${good}\n`); // leading/trailing blanks are fine
+  assert.equal(parsed.length, 2);
+  // legacy record (no `version` key) is normalised, not rejected
+  const legacy = JSON.stringify({
+    number: 9,
+    title: 't',
+    url: 'u',
+    author: 'a',
+    mergedAt: '2026-06-10T12:00:00Z',
+    category: 'Changed',
+    summary: 's',
+    impact: 'developer',
+    breaking: false,
+    summarySource: 'claude',
+  });
+  assert.equal(parseRecordsStrict(legacy)[0]?.version, null);
+});
+
+test('parseRecordsStrict: THROWS on a truncated/corrupt line (never silently shrinks)', () => {
+  const good = JSON.stringify(rec({ number: 7 }));
+  // A truncated download cuts the final line mid-JSON — the tolerant parser drops it,
+  // but the write-back reader must refuse rather than persist a smaller store.
+  assert.throws(() => parseRecordsStrict(`${good}\n{"number":8,"summary":"trunca`), /line 2/);
+  // a structurally-valid JSON object that isn't a record also throws
+  assert.throws(() => parseRecordsStrict(`${good}\n{"number":8}`), /well-formed record/);
+});
+
+test('parseVersionsStrict: parses a valid manifest and a legitimately empty one', () => {
+  const v = vrec({ tag: 'v2026.06.11' });
+  assert.deepEqual(parseVersionsStrict(serializeVersions([v])), [v]);
+  assert.deepEqual(parseVersionsStrict('[]'), []); // empty manifest is legitimate, not corruption
+});
+
+test('parseVersionsStrict: THROWS on non-JSON, a non-array, or a malformed entry', () => {
+  assert.throws(() => parseVersionsStrict('[{"tag":"v1"'), /not valid JSON/); // truncated
+  assert.throws(() => parseVersionsStrict('{"tag":"v1"}'), /not a JSON array/);
+  // one good + one malformed entry must throw — never drop the malformed one and write back
+  const ok = vrec({ tag: 'v2026.06.11' });
+  assert.throws(
+    () => parseVersionsStrict(JSON.stringify([ok, { tag: 'v2', date: 'nope' }])),
+    /malformed version/,
+  );
+});
+
+test('upsertVersion: replaces same tag in place, appends a new tag, never drops (pure)', () => {
+  const a = vrec({ tag: 'v2026.06.11', headline: 'first' });
+  const b = vrec({ tag: 'v2026.06.12', headline: 'second' });
+  const versions = [a, b];
+  // replace-in-place by tag (idempotent re-cut)
+  const replaced = upsertVersion(versions, vrec({ tag: 'v2026.06.11', headline: 'rewritten' }));
+  assert.equal(replaced.length, 2);
+  assert.equal(replaced.find((v) => v.tag === 'v2026.06.11')?.headline, 'rewritten');
+  assert.equal(replaced.find((v) => v.tag === 'v2026.06.12')?.headline, 'second', 'never dropped');
+  // append a brand-new tag; original array untouched
+  const appended = upsertVersion(versions, vrec({ tag: 'v2026.06.13' }));
+  assert.equal(appended.length, 3);
+  assert.equal(versions.length, 2, 'input not mutated');
 });
 
 test('serialize -> parse round-trips the version stamp', () => {

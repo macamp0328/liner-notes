@@ -51,6 +51,7 @@ import {
   stampVersion,
   unreleasedRecords,
   upsert,
+  upsertVersion,
 } from './lib.js';
 
 const BASELINE_TAG = 'v0.1.0';
@@ -162,7 +163,9 @@ async function runCut(): Promise<void> {
   }
 
   const stamped = stampVersion(records, cut.versionRecord.prNumbers, tag);
-  writeDraft(stamped, [...versions, cut.versionRecord], { model: disclosureModel() });
+  // upsertVersion (not [...versions, …]): idempotent on a same-tag re-cut and, behind
+  // the strict reads, structurally incapable of dropping an existing version.
+  writeDraft(stamped, upsertVersion(versions, cut.versionRecord), { model: disclosureModel() });
 
   console.log(`\nPublished ${cut.title} (${cut.versionRecord.prNumbers.length} PRs).`);
   writeStepSummary([

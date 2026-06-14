@@ -17,7 +17,7 @@ import { disclosureModel, hasApiKey, summarizeBatch } from './claude.js';
 import {
   getPrInput,
   listAllMergedPrNumbers,
-  readStore,
+  readStoreTolerant,
   readVersions,
   writeDraft,
 } from './store.js';
@@ -40,7 +40,9 @@ async function main(): Promise<void> {
   const key = hasApiKey();
 
   const all = listAllMergedPrNumbers();
-  const store = readStore();
+  // Tolerant read: backfill rebuilds the store from source, so a persisted corrupt
+  // line is dropped and re-summarised rather than wedging the seed/repair path.
+  const store = readStoreTolerant();
   const versions = readVersions();
   const have = recordsByNumber(store);
   const targets = all.filter((n) => needsSummary(have.get(n), { refresh, hasKey: key }));
