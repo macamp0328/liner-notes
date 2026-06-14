@@ -327,7 +327,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     }
 
     // Auto-trigger ingestion when the graph is empty (first run).
-    // Fire-and-forget: do NOT await — ingestion takes ~4 min for 200 releases
+    // Fire-and-forget: do NOT await — ingestion takes ~15–17 min for ~200 releases
     // and must not block onReady (which would delay the health endpoint and
     // cause container health checks to fail during startup).
     const empty = !(await hasReleases(driver));
