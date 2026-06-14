@@ -454,11 +454,30 @@ ranStages)` produces a structured per-metric pass/fail report reused by the gate
 
 `src/enrichment/run.ts` owns the per-item enrichment loop invariants — staleness-windowed
 candidate selection (delegated to each repo's query), per-item failure isolation, the
-stamp-on-attempt contract (data → `write`+stamp/`enriched`; `null` → `markAttempted`+stamp/
-`skipped`; throw → no stamp/`failed`, retried next run), progress reporting (`onProgress` + a
-`Progress: i/total` info line every `progressEveryItems`, default 25; the slow ~1 item/s
-stages declare 10), and summary aggregation. Each pipeline is a thin `EnrichmentStage`
-declaring only what varies.
+stamp-on-attempt contract, progress reporting (`onProgress` + a `Progress: i/total` info line
+every `progressEveryItems`, default 25; the slow ~1 item/s stages declare 10), and summary
+aggregation. Each pipeline is a thin `EnrichmentStage` declaring only what varies.
+
+**The four-outcome `resolve()` contract (#89, #367).** `resolve()` returns one of four things,
+and the runner maps each to a write and a counter:
+
+- **data** → `write` persists it + stamps `*FetchedAt`, counted `enriched`.
+- **`null`** (queried, no data, but it could appear later) → `markAttempted` stamps `*FetchedAt`,
+  counted `skipped` — re-checked at most once per staleness window (**throttled-recheck**).
+- **`TERMINAL_EMPTY`** (queried, definitively & permanently no data) → `markTerminal` writes a
+  **permanent marker** so the candidate query excludes it for good, counted `exhausted`
+  (**terminal-empty**, #367).
+- **throws** (transient) → no stamp, counted `failed`, retried next run. The loop never aborts
+  siblings.
+
+`markAttempted`/`markTerminal` are both **optional** — a stage declares only the outcomes its
+`resolve` produces (e.g. `group-members` omits `markAttempted` because a no-members result is
+always terminal). Returning an outcome whose handler is absent **throws into `failed`** (loud,
+isolated) rather than silently degrading terminal→throttle. Terminal is **opt-in per value,
+throttle-only is the default**; the candidate query excludes the marker with a null-safe boolean
+`<marker> IS NULL` gate. `lyrics` keeps its richer `lyricsStatus` enum (it is a superset of the
+generic mechanism — see ADR 0001); `group-members` is the canonical generic consumer. Full
+rationale + per-source audit in [ADR 0003](../../docs/adr/0003-enrichment-terminal-vs-throttle.md).
 
 **Per-item concurrency (#247).** `runEnrichment` takes an optional `concurrency` (default `1` →
 strictly serial, byte-for-byte the original loop) that bounds how many items process at once via a
@@ -667,7 +686,7 @@ Route handler → Repository (Cypher) → Neo4j driver
 - **Lyrics resolution is a five-state, confidence-gated model (issues #246, #248).** `lyricsStatus ∈ {resolved, instrumental, probable-instrumental, low-confidence, not-found}` distinguishes "no lyrics exist" from "we missed them" from "we found the wrong song". `instrumental` (LRCLIB's authoritative flag) and `probable-instrumental` (the AcousticBrainz `voiceInstrumental` signal we already store) are **terminal** — excluded from the candidate query and short-circuited before any Genius call, killing the wasted-call/403-spam loop. `not-found` and `low-confidence` stay candidates, throttled per staleness window. `probable-instrumental` depends on `track-acousticbrainz` having run first, which finishes after `lyrics` in a fresh reload — so it mostly classifies on a later staleness re-run (lyrics is deliberately not made a dep of that ~2.5hr stage). `/stats` reports coverage over the non-instrumental denominator plus a `lyricsFunnel`; coverage keys on `lyrics IS NOT NULL` so tracks enriched before the field existed still count.
   - **Match confidence (#248).** Before a candidate's lyrics are stored, `enrichLyrics` scores the match with `scoreLyricsMatch` (`src/enrichment/match-confidence.ts`, the shared Sørensen–Dice title/artist similarity + duration tolerance also used by the MusicBrainz matcher): `confidence = min(titleSim, artistSim) × (duration disagrees ? 0.5 : 1)`, where an absent axis or unknown duration scores 1.0 (absence is not evidence against — this keeps Genius, which never carries a duration, viable). A match at or above `LYRICS_CONFIDENCE_THRESHOLD` (env, default **0.85**, fails safe to the default on garbage/out-of-range) is stored `resolved` with `lyricsConfidence` + `lyricsMatchedTitle`/`lyricsMatchedArtist` provenance; below it is stamped `low-confidence` (the lyric **text is dropped**, `lyrics` stays NULL so honest coverage and the fulltext index stay clean) with the score + provenance recorded so the doubt is visible and auditable. This is the gate that prevents the #31 wrong-song corruption class (artist matched, wrong song) and the live/remix-with-different-lyrics class (duration mismatch). The `GeniusClient` additionally pre-filters obvious title mismatches before the page scrape (a strict subset of this gate). `low-confidence` is **non-terminal** — a better catalog match or a retuned threshold can upgrade it later — and stays in the honest coverage denominator. Cross-source LRCLIB↔Genius agreement (the issue's signal #3) is a deliberate follow-up: the short-circuit flow never fetches both for one track.
   - Full rationale in [`docs/adr/0001-lyrics-resolution-strategy.md`](../../docs/adr/0001-lyrics-resolution-strategy.md).
-- **Enrichment markers are `*FetchedAt` timestamps, not booleans (issue #89).** Every external-source enrichment stamps `<source>FetchedAt = datetime()` after each attempt. The candidate query selects a node only when it **still lacks the data** (e.g. `recordingMbid IS NULL`, `NOT EXISTS { (a)-[:ORIGIN_COUNTRY]->() }`, `lyrics IS NULL`) **and** its last attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30). So a node a source had no data for is retried at most once per window — picking up newly-added coverage or a fixed client without a full re-ingest — while already-enriched nodes are never re-fetched automatically. Transient errors don't stamp (they retry next run); the `/admin/<x>/reset` routes still force a full re-fetch. The marker is set server-side via `datetime()`, so there is no client-clock dependency. Helper: `src/enrichment/staleness.ts`.
+- **Enrichment markers are `*FetchedAt` timestamps, not booleans (issue #89).** Every external-source enrichment stamps `<source>FetchedAt = datetime()` after each attempt. The candidate query selects a node only when it **still lacks the data** (e.g. `recordingMbid IS NULL`, `NOT EXISTS { (a)-[:ORIGIN_COUNTRY]->() }`, `lyrics IS NULL`) **and** its last attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30). So a node a source had no data for is retried at most once per window — picking up newly-added coverage or a fixed client without a full re-ingest — while already-enriched nodes are never re-fetched automatically. Transient errors don't stamp (they retry next run); the `/admin/<x>/reset` routes still force a full re-fetch. The marker is set server-side via `datetime()`, so there is no client-clock dependency. Helper: `src/enrichment/staleness.ts`. This `*FetchedAt` throttle is the **throttled-recheck** half of the two-state model; the **terminal-empty** half (a permanent marker so a never-fillable absence — instrumental, confirmed non-group — is excluded for good, counted `exhausted` not `skipped`) is the `TERMINAL_EMPTY` runner outcome (#367, [ADR 0003](../../docs/adr/0003-enrichment-terminal-vs-throttle.md)). Terminal is opt-in per source; today `lyrics` (`lyricsStatus` enum) and `group-members` (`notAGroup`) use it, the rest are throttle-only.
 - **No time signature from AcousticBrainz.** AcousticBrainz low-level rhythm descriptors do not expose a reliable categorical time signature. The `t.tempo` / `t.musicalKey` / `t.musicalScale` fields are trustworthy; a `time_signature` integer equivalent to Spotify's is not available without self-hosted Essentia analysis on the actual audio files.
 - **AcousticBrainz audio features are estimates, not Spotify values.** `danceabilityEstimate` and `voiceInstrumental` are AcousticBrainz high-level classifier outputs — a different model trained on different data from Echo Nest/Spotify. They are labelled `...Estimate` deliberately and must never be presented as equivalent to Spotify features.
 - **Deezer is an independent, ISRC-keyed audio-feature source.** `deezerBpm` and `deezerGain` (a loudness figure) are stored under `deezer*` property names rather than overwriting `tempo`/`loudnessDb`, so the source stays traceable and the two BPM figures can be compared. Deezer is an admin-route enrichment (not part of `runIngestion`) that depends on `isrc` being populated first by `track-musicbrainz` enrichment. Deezer returns `0` for unknown values — these are coerced to null before storing. `deezerGain` is a ReplayGain-style loudness figure; it is not the same metric as `loudnessDb`.
