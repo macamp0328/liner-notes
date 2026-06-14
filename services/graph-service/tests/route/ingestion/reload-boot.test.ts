@@ -45,6 +45,7 @@ const completeSummary: IngestionSummary = {
   lyricsEnrichment: {
     enriched: 0,
     skipped: 0,
+    exhausted: 0,
     failed: 0,
     durationMs: 0,
     geniusFatalCount: 0,
@@ -52,7 +53,7 @@ const completeSummary: IngestionSummary = {
     lrclibFatalCount: 0,
     lrclibBreakerOpen: 0,
   },
-  masterDataEnrichment: { enriched: 0, skipped: 0, failed: 0, durationMs: 0 },
+  masterDataEnrichment: { enriched: 0, skipped: 0, exhausted: 0, failed: 0, durationMs: 0 },
   artistGenresEnrichment: {
     genresEnriched: 0,
     stylesEnriched: 0,
@@ -60,7 +61,7 @@ const completeSummary: IngestionSummary = {
     failed: 0,
     durationMs: 0,
   },
-  artistProfilesEnrichment: { enriched: 0, skipped: 0, failed: 0, durationMs: 0 },
+  artistProfilesEnrichment: { enriched: 0, skipped: 0, exhausted: 0, failed: 0, durationMs: 0 },
 };
 
 const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 50));

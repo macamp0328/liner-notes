@@ -5,28 +5,48 @@ import { getShutdownSignal } from '../lifecycle/shutdown.js';
 
 /**
  * The shared summary every per-item enrichment run returns. Stages that track extra
- * source-specific counters layer them on at their own boundary; these four are the
- * invariant the runner owns.
+ * source-specific counters layer them on at their own boundary; these five are the
+ * invariant the runner owns. `skipped` and `exhausted` are both "queried, no data" — the
+ * difference is whether it can change: `skipped` is throttled (re-checked next window),
+ * `exhausted` is terminal (a permanent marker is written, never re-checked). See #367.
  */
 export interface EnrichmentSummary {
   enriched: number;
+  /** Queried, no data, but it could appear later → throttled, re-checked next staleness window. */
   skipped: number;
+  /** Queried, definitively & permanently no data → a terminal marker is written, never re-checked. */
+  exhausted: number;
   failed: number;
   durationMs: number;
 }
 
 /**
+ * The third `resolve` outcome (issue #367): "queried, definitively & PERMANENTLY no data".
+ * Distinct from `null` (empty-for-now, throttled) — a unique `Symbol`, so it can never collide
+ * with a stage's `TResolved` payload (which may itself be an object/union). A stage returning
+ * this MUST declare `markTerminal`; the runner throws otherwise (a silent fallback to the
+ * throttle stamp would re-query permanent data forever — the #240-class waste this prevents).
+ */
+export const TERMINAL_EMPTY: unique symbol = Symbol('terminal-empty');
+
+/**
  * A per-item enrichment stage. The stage declares only what varies — candidate
- * selection, the external lookup, and the two writes — while {@link runEnrichment}
+ * selection, the external lookup, and the writes — while {@link runEnrichment}
  * owns the loop invariants: per-item failure isolation, the stamp-on-attempt contract,
  * progress reporting, and summary aggregation (issue #222).
  *
- * The stamp-on-attempt contract the runner enforces (issue #89):
+ * The stamp-on-attempt contract the runner enforces (issues #89, #367):
  * - `resolve` returns data → `write` persists + stamps `*FetchedAt`, counted `enriched`.
- * - `resolve` returns `null` (queried, definitively no data) → `markAttempted` stamps so a
- *   known-empty source is retried at most once per staleness window, counted `skipped`.
+ * - `resolve` returns `null` (queried, no data, but it could appear later) → `markAttempted`
+ *   stamps `*FetchedAt` so the source is retried at most once per staleness window, counted `skipped`.
+ * - `resolve` returns {@link TERMINAL_EMPTY} (queried, definitively & permanently no data) →
+ *   `markTerminal` writes a permanent marker so the item is never re-checked, counted `exhausted`.
  * - `resolve`/`write` throws (transient) → no stamp, counted `failed`, retried next run.
  *   The loop never aborts siblings.
+ *
+ * `markAttempted`/`markTerminal` are both optional — a stage declares only the outcomes its
+ * `resolve` actually produces. Returning an outcome whose handler is absent is a contract bug,
+ * so the runner throws it into the per-item `failed` path (loud, isolated) rather than degrading.
  *
  * Three pipelines deliberately stay OFF this contract (see their headers): `track-deezer`
  * and `track-acousticbrainz` (batch-scoped fetch/write/failure semantics) and
@@ -37,16 +57,27 @@ export interface EnrichmentStage<TItem, TResolved> {
   /** Owns the staleness predicate — selects items still missing data and aged past the window. */
   selectCandidates(driver: Driver): Promise<TItem[]>;
   /**
-   * Look the item up against the external source(s). Returns the resolved data, or `null`
-   * for "queried successfully, no data". A multi-source fallback lives inside `resolve` —
-   * it is a stage-internal concern. `resolve` THROWS on transient failure (it never swallows
-   * one and returns `null`), so the runner counts it as `failed` rather than `skipped`.
+   * Look the item up against the external source(s). Returns the resolved data; `null` for
+   * "queried, no data, but it could appear later" (throttled); or {@link TERMINAL_EMPTY} for
+   * "queried, definitively & permanently no data" (terminal). A multi-source fallback lives
+   * inside `resolve` — it is a stage-internal concern. `resolve` THROWS on transient failure (it
+   * never swallows one and returns `null`), so the runner counts it as `failed` rather than `skipped`.
    */
-  resolve(item: TItem): Promise<TResolved | null>;
+  resolve(item: TItem): Promise<TResolved | null | typeof TERMINAL_EMPTY>;
   /** Persist the resolved data and stamp `*FetchedAt`. Reached only when `resolve` returned data. */
   write(driver: Driver, item: TItem, resolved: TResolved): Promise<void>;
-  /** Stamp `*FetchedAt` without writing data. Reached only when `resolve` returned `null`. */
-  markAttempted(driver: Driver, item: TItem): Promise<void>;
+  /**
+   * Stamp `*FetchedAt` without writing data. Reached only when `resolve` returned `null`.
+   * Optional — omit it on a stage whose `resolve` never returns `null` (e.g. one that only ever
+   * resolves data or {@link TERMINAL_EMPTY}); the runner throws if a `null` arrives without it.
+   */
+  markAttempted?(driver: Driver, item: TItem): Promise<void>;
+  /**
+   * Write a PERMANENT terminal marker (plus the `*FetchedAt` stamp) so the candidate query
+   * excludes the item for good. Reached only when `resolve` returned {@link TERMINAL_EMPTY}.
+   * Required whenever `resolve` can return {@link TERMINAL_EMPTY}; the runner throws otherwise.
+   */
+  markTerminal?(driver: Driver, item: TItem): Promise<void>;
   /**
    * Optional: a thrown error this stage deems expected → logged at `warn` instead of
    * `error`, keeping it below the prod error alarm threshold (e.g. Genius's Cloudflare 403,
@@ -104,6 +135,7 @@ export async function runEnrichment<TItem, TResolved>(
   const startTime = Date.now();
   let enriched = 0;
   let skipped = 0;
+  let exhausted = 0;
   let failed = 0;
   let completed = 0;
 
@@ -115,7 +147,7 @@ export async function runEnrichment<TItem, TResolved>(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.error(`[${stage.name}] Failed to select candidates: ${msg}`);
-    return { enriched: 0, skipped: 0, failed: 1, durationMs: Date.now() - startTime };
+    return { enriched: 0, skipped: 0, exhausted: 0, failed: 1, durationMs: Date.now() - startTime };
   }
 
   const total = items.length;
@@ -135,7 +167,18 @@ export async function runEnrichment<TItem, TResolved>(
   const handleItem = async (item: TItem): Promise<void> => {
     try {
       const resolved = await stage.resolve(item);
-      if (resolved === null) {
+      if (resolved === TERMINAL_EMPTY) {
+        if (stage.markTerminal === undefined) {
+          throw new Error(
+            'resolve() returned TERMINAL_EMPTY but the stage declares no markTerminal',
+          );
+        }
+        await stage.markTerminal(driver, item);
+        exhausted++;
+      } else if (resolved === null) {
+        if (stage.markAttempted === undefined) {
+          throw new Error('resolve() returned null but the stage declares no markAttempted');
+        }
         await stage.markAttempted(driver, item);
         skipped++;
       } else {
@@ -158,7 +201,7 @@ export async function runEnrichment<TItem, TResolved>(
     completed++;
     if (completed % progressEvery === 0) {
       log.info(
-        `[${stage.name}] Progress: ${completed}/${total} — enriched=${enriched}, skipped=${skipped}, failed=${failed}`,
+        `[${stage.name}] Progress: ${completed}/${total} — enriched=${enriched}, skipped=${skipped}, exhausted=${exhausted}, failed=${failed}`,
       );
       onProgress(completed, total);
     }
@@ -188,14 +231,14 @@ export async function runEnrichment<TItem, TResolved>(
     // downstream live progress / shutdown logs would mislead operators (#291).
     onProgress(completed, total);
     log.info(
-      `[${stage.name}] Aborted at ${completed}/${total} — enriched=${enriched}, skipped=${skipped}, failed=${failed}, duration=${durationMs}ms`,
+      `[${stage.name}] Aborted at ${completed}/${total} — enriched=${enriched}, skipped=${skipped}, exhausted=${exhausted}, failed=${failed}, duration=${durationMs}ms`,
     );
   } else {
     onProgress(total, total);
     log.info(
-      `[${stage.name}] Enrichment complete: enriched=${enriched}, skipped=${skipped}, failed=${failed}, duration=${durationMs}ms`,
+      `[${stage.name}] Enrichment complete: enriched=${enriched}, skipped=${skipped}, exhausted=${exhausted}, failed=${failed}, duration=${durationMs}ms`,
     );
   }
 
-  return { enriched, skipped, failed, durationMs };
+  return { enriched, skipped, exhausted, failed, durationMs };
 }

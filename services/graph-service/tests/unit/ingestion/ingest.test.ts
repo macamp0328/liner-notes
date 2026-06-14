@@ -66,6 +66,7 @@ describe('runIngestion', () => {
   const EMPTY_LYRICS = {
     enriched: 0,
     skipped: 0,
+    exhausted: 0,
     failed: 0,
     durationMs: 0,
     geniusFatalCount: 0,
@@ -106,6 +107,7 @@ describe('runIngestion', () => {
     expect(summary.masterDataEnrichment).toEqual({
       enriched: 0,
       skipped: 0,
+      exhausted: 0,
       failed: 0,
       durationMs: 0,
     });
@@ -128,6 +130,7 @@ describe('runIngestion', () => {
     expect(summary.lyricsEnrichment).toEqual({
       enriched: 0,
       skipped: 0,
+      exhausted: 0,
       failed: 0,
       durationMs: 0,
       geniusFatalCount: 0,
