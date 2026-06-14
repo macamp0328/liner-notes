@@ -335,8 +335,13 @@ ranStages)` produces a structured per-metric pass/fail report reused by the gate
 **Semantics:**
 
 - **Scheduling (#176).** Stages run with **bounded concurrency** (`RELOAD_STAGE_CONCURRENCY`, env;
-  default 2, clamped to `[1, stage count]`; `1` = legacy strictly-sequential). Two ordering rules
-  govern the schedule, both data on `StageDescriptor`:
+  code default 2, clamped to `[1, stage count]`; `1` = legacy strictly-sequential). **Prod overrides
+  this to 3 via the k8s deployment manifest (#370)** so the untagged `lyrics` stage overlaps the
+  serial Discogs chain instead of waiting ~1h for a slot; the code default stays 2 (conservative for
+  forks/local on weaker hardware). Caveat: raising concurrency does **not** move `nationality`
+  earlier — it holds the `discogs` lane (see `resources` below), so it can't start until the whole
+  Discogs chain releases that lane and therefore stays the reload tail regardless of the cap. Two
+  ordering rules govern the schedule, both data on `StageDescriptor`:
   - **`deps`** — a stage starts only once every dep has reached a terminal state (complete/skipped/
     failed; an ordering edge, not a success gate). Load-bearing edges: every enrichment deps
     `releases`; `mb-release-events` deps `master-data` (it `MATCH`es the Master nodes only
