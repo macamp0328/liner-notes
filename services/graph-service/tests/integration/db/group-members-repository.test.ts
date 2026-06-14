@@ -6,7 +6,7 @@ import { getDriver } from '../../../src/db/client.js';
 import {
   getGroupCandidates,
   setGroupMembers,
-  stampMembersFetched,
+  markNotAGroup,
   resetGroupMembers,
 } from '../../../src/db/group-members-repository.js';
 
@@ -135,17 +135,17 @@ describe('group-members repository (#330, integration)', () => {
     ).toBe(false);
   });
 
-  it('stampMembersFetched throttles a non-group musician out of the candidate set', async () => {
-    await stampMembersFetched(getDriver(), MEMBER);
+  it('markNotAGroup excludes a confirmed non-group musician from the candidate set', async () => {
+    await markNotAGroup(getDriver(), MEMBER);
     expect(await candidateIds()).toEqual([GROUP]);
   });
 
   it('permanently skips a confirmed non-group while a known group re-checks once stale', async () => {
     await withStalenessDays('0', async () => {
       // GROUP is a real group (one collected member → one MEMBER_OF edge, notAGroup left unset);
-      // MEMBER is confirmed a person (Discogs returned no members[] → stampMembersFetched).
+      // MEMBER is confirmed a person (Discogs returned no members[] → markNotAGroup).
       await setGroupMembers(getDriver(), GROUP, [{ id: MEMBER, active: true }]);
-      await stampMembersFetched(getDriver(), MEMBER);
+      await markNotAGroup(getDriver(), MEMBER);
       // Both are members-fetched and now stale, yet only the group re-checks for lineup changes:
       // the non-group is excluded by its permanent notAGroup marker, NOT by the staleness throttle.
       expect(await candidateIds()).toEqual([GROUP]);
@@ -160,7 +160,7 @@ describe('group-members repository (#330, integration)', () => {
       // GROUP is a group whose only member is uncollected → fetched + stamped, but 0 edges written
       // and notAGroup left unset (it IS a group). MEMBER is a confirmed non-group.
       await setGroupMembers(getDriver(), GROUP, [{ id: UNCOLLECTED, active: true }]);
-      await stampMembersFetched(getDriver(), MEMBER);
+      await markNotAGroup(getDriver(), MEMBER);
       // The edge-less group stays a candidate (notAGroup unset → re-checks, so MEMBER_OF backfills
       // when its members are later collected); the non-group is gone for good.
       expect(await candidateIds()).toEqual([GROUP]);
@@ -173,7 +173,7 @@ describe('group-members repository (#330, integration)', () => {
   it('resetGroupMembers deletes MEMBER_OF edges and clears BOTH markers (incl. notAGroup)', async () => {
     // GROUP gets an edge + membersFetchedAt; MEMBER is a confirmed non-group (notAGroup = true).
     await setGroupMembers(getDriver(), GROUP, [{ id: MEMBER, active: true }]);
-    await stampMembersFetched(getDriver(), MEMBER);
+    await markNotAGroup(getDriver(), MEMBER);
     expect(
       await bool(`MATCH (m:Musician {discogsId: ${MEMBER}}) RETURN m.notAGroup = true AS v`),
     ).toBe(true);

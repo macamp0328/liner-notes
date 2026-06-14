@@ -3,16 +3,21 @@ import type { DiscogsClient, Logger } from '../ingestion/discogs-client.js';
 import {
   getGroupCandidates,
   setGroupMembers,
-  stampMembersFetched,
+  markNotAGroup,
   type GroupCandidate,
   type GroupMember,
 } from '../db/group-members-repository.js';
-import { runEnrichment, type EnrichmentStage, type EnrichmentSummary } from './run.js';
+import {
+  runEnrichment,
+  TERMINAL_EMPTY,
+  type EnrichmentStage,
+  type EnrichmentSummary,
+} from './run.js';
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 
 export type GroupMembersEnrichmentSummary = EnrichmentSummary;
 
-/** Roster resolved from a Discogs group profile; null when the entity has no members (not a group). */
+/** Roster resolved from a Discogs group profile; TERMINAL_EMPTY when the entity has no members (not a group). */
 type ResolvedMembers = { members: GroupMember[] };
 
 /**
@@ -23,9 +28,11 @@ type ResolvedMembers = { members: GroupMember[] };
  * "Muscle Shoals Rhythm Section") are Musician-only credit nodes with no Artist node, so the
  * members source cannot be gated on the group being an Artist — it is fetched per Musician here.
  *
- * Group-ness is not knowable without the fetch, so non-groups are stamped (`membersFetchedAt`) and
- * counted `skipped`, re-checked at most once per window. Member linking is MATCH-only — members not
- * credited anywhere are skipped, never created. Per-fetch errors are caught and counted.
+ * Group-ness is immutable, so a no-members result is TERMINAL, not throttled: `resolve` returns
+ * `TERMINAL_EMPTY`, `markNotAGroup` writes the permanent `notAGroup` marker, and the runner counts
+ * it `exhausted` (#367) — the node is never re-fetched. There is no throttled-recheck path here, so
+ * the stage declares `markTerminal` and omits `markAttempted`. Member linking is MATCH-only —
+ * members not credited anywhere are skipped, never created. Per-fetch errors are caught and counted.
  */
 export async function enrichGroupMembers(
   client: DiscogsClient,
@@ -44,15 +51,17 @@ export async function enrichGroupMembers(
       const members: GroupMember[] = (profile.members ?? [])
         .filter((m) => m.id !== 0)
         .map((m) => ({ id: m.id, active: m.active }));
-      // Non-null whenever Discogs lists ANY member, so `enriched` counts groups-with-members-listed,
-      // NOT MEMBER_OF edges actually written — a group whose members are all uncollected (MATCH-only
-      // writes 0 edges) still counts enriched. The authoritative linkage yield is
-      // /stats.memberOfEdges / groupsWithMembers; watch those after the first prod run (#330 review).
-      return members.length === 0 ? null : { members };
+      // Resolves data whenever Discogs lists ANY member, so `enriched` counts
+      // groups-with-members-listed, NOT MEMBER_OF edges actually written — a group whose members are
+      // all uncollected (MATCH-only writes 0 edges) still counts enriched. The authoritative linkage
+      // yield is /stats.memberOfEdges / groupsWithMembers; watch those after the first prod run
+      // (#330 review). No members → TERMINAL_EMPTY: group-ness is immutable, so this is permanent.
+      return members.length === 0 ? TERMINAL_EMPTY : { members };
     },
     write: (d, candidate, resolved) => setGroupMembers(d, candidate.discogsId, resolved.members),
-    // Stamps membersFetchedAt with no edges, throttling re-checks of non-group musicians.
-    markAttempted: (d, candidate) => stampMembersFetched(d, candidate.discogsId),
+    // Writes the permanent notAGroup marker (+ membersFetchedAt) so the non-group is never
+    // re-fetched. No markAttempted: a no-members result is always terminal, never throttled.
+    markTerminal: (d, candidate) => markNotAGroup(d, candidate.discogsId),
     describeItem: (candidate) => `group ${candidate.discogsId}`,
   };
 

@@ -24,16 +24,19 @@ export interface GroupMember {
  *   2. **Known group, gone stale** — a node Discogs DID return members[] for (so `notAGroup` was
  *      never set) whose last check has aged past the staleness window, re-checked for lineup changes.
  *
- * Confirmed non-groups never re-qualify: when Discogs returns no members[], `stampMembersFetched`
+ * Confirmed non-groups never re-qualify: when Discogs returns no members[], `markNotAGroup`
  * sets a permanent `notAGroup = true` marker (group-ness is immutable — a person never becomes a
  * group), so the ~2.9k non-groups are checked exactly ONCE instead of re-confirmed every window
  * (~49 min of Discogs calls saved per sweep). A group whose members are all uncollected keeps
  * `notAGroup` unset (it IS a group, just edge-less for now), so it stays in the staleness re-check
  * and backfills MEMBER_OF edges as those members are later collected.
  *
- * This terminal-skip (`notAGroup`) vs. throttled-recheck (`membersFetchedAt`) split is the same
- * two-state shape `lyrics` uses (`instrumental`/`probable-instrumental` vs `lyricsFetchedAt`);
- * generalising it across every enrichment source is tracked in #367.
+ * This terminal (`notAGroup`) vs. throttled-recheck (`membersFetchedAt`) split is the canonical
+ * consumer of the shared two-state enrichment mechanism (#367): `resolve` returns `TERMINAL_EMPTY`
+ * for a non-group and the runner counts it `exhausted`, the same shape `lyrics` expresses with its
+ * `instrumental`/`probable-instrumental` enum. There is no throttled-recheck (`null`) path here —
+ * a no-members result is always terminal — so the stage declares `markTerminal` and omits
+ * `markAttempted`.
  */
 export async function getGroupCandidates(driver: Driver): Promise<GroupCandidate[]> {
   const session = driver.session();
@@ -98,13 +101,14 @@ export async function setGroupMembers(
 }
 
 /**
- * Stamp a Musician that Discogs returned no members[] for. Sets BOTH the staleness marker
- * `membersFetchedAt` AND the permanent `notAGroup = true` flag: this is the markAttempted path,
- * reached only when `resolve` returned null, so the node is a person, not a group. `notAGroup`
- * drops it out of `getGroupCandidates` for good (group-ness is immutable), turning the ~2.9k
- * non-groups from a per-window re-confirm into a one-time check. No MEMBER_OF edges are written.
+ * Mark a Musician that Discogs returned no members[] for as a confirmed non-group. Sets BOTH the
+ * staleness marker `membersFetchedAt` AND the permanent `notAGroup = true` flag: this is the
+ * `markTerminal` path (#367), reached only when `resolve` returned `TERMINAL_EMPTY`, so the node is
+ * a person, not a group. `notAGroup` drops it out of `getGroupCandidates` for good (group-ness is
+ * immutable), turning the ~2.9k non-groups from a per-window re-confirm into a one-time check. No
+ * MEMBER_OF edges are written.
  */
-export async function stampMembersFetched(driver: Driver, discogsId: number): Promise<void> {
+export async function markNotAGroup(driver: Driver, discogsId: number): Promise<void> {
   const session = driver.session();
   try {
     await session.run(
