@@ -6,7 +6,7 @@ import type { DeezerClient } from './deezer-client.js';
 import type { WikidataClient } from './wikidata-client.js';
 import type { BreakerSource, CircuitBreakerSnapshot } from './circuit-breaker.js';
 import { ingestReleases } from './ingest.js';
-import { enrichLyrics } from '../enrichment/lyrics.js';
+import { enrichLyrics, resolveReloadLyricsConcurrency } from '../enrichment/lyrics.js';
 import { enrichMasterData } from '../enrichment/master-data.js';
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
 import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
@@ -230,7 +230,13 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     name: 'lyrics',
     deps: ['releases'],
     resources: [],
-    run: async (ctx, onProgress) => ({ ...(await enrichLyrics(ctx.driver, ctx.log, onProgress)) }),
+    // Pass the reload-scoped concurrency (#372): `RELOAD_LYRICS_CONCURRENCY` lets an operator throttle
+    // lyrics under the heavy concurrent reload without affecting standalone runs; unset → LYRICS_CONCURRENCY.
+    run: async (ctx, onProgress) => ({
+      ...(await enrichLyrics(ctx.driver, ctx.log, onProgress, undefined, {
+        concurrency: resolveReloadLyricsConcurrency(),
+      })),
+    }),
   },
   {
     name: 'track-acousticbrainz',

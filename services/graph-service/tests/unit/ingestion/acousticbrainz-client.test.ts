@@ -234,15 +234,39 @@ describe('AcousticBrainzClient', () => {
     vi.useRealTimers();
   });
 
-  it('throws on non-ok status other than 429/503', async () => {
-    fetchSpy.mockResolvedValue(makeErrorResponse(500, 'Internal Server Error'));
-    await expect(client.getFeatures([MBID_A])).rejects.toThrow(/500/);
+  it('throws immediately on a non-retryable non-ok status (e.g. 400)', async () => {
+    fetchSpy.mockResolvedValue(makeErrorResponse(400, 'Bad Request'));
+    await expect(client.getFeatures([MBID_A])).rejects.toThrow(/400/);
+    // A non-retryable status is returned as-is on the first attempt — no backoff loop.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   it('throws after exhausting max retries on repeated 429', async () => {
     fetchSpy.mockResolvedValue(makeErrorResponse(429, 'Too Many Requests'));
     await expect(client.getFeatures([MBID_A])).rejects.toThrow(/exceeded max retries/);
     // All MAX_RETRIES + 1 fetches still happen; the final attempt throws without sleeping.
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
+  // ── transient 5xx retry (#371) ──────────────────────────────────────────────
+
+  it.each([500, 502, 504])(
+    'retries on a transient %i and succeeds after backoff',
+    async (status) => {
+      fetchSpy
+        .mockResolvedValueOnce(makeErrorResponse(status, 'Server Error'))
+        .mockResolvedValueOnce(makeOkResponse(bulkLow(MBID_A)))
+        .mockResolvedValueOnce(makeOkResponse(bulkHigh(MBID_A)));
+
+      const result = await client.getFeatures([MBID_A]);
+      expect(result.has(MBID_A)).toBe(true);
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it('throws after exhausting max retries on repeated 502', async () => {
+    fetchSpy.mockResolvedValue(makeErrorResponse(502, 'Bad Gateway'));
+    await expect(client.getFeatures([MBID_A])).rejects.toThrow(/exceeded max retries/);
     expect(fetchSpy).toHaveBeenCalledTimes(4);
   });
 
