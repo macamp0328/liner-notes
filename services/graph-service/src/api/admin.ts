@@ -317,11 +317,15 @@ interface PipelineEntry {
 }
 
 // Status (`lastResult`) summary shapes — no `required`, matching the original status routes.
+// `exhausted` (#367) is the terminal-empty counter; without it here, response serialization would
+// strip it from /admin/<stage>/status (it surfaces in /admin/reload/status for free, since that
+// route's `counts` schema allows additional numeric properties).
 const standardSummarySchema = {
   type: 'object',
   properties: {
     enriched: { type: 'integer' },
     skipped: { type: 'integer' },
+    exhausted: { type: 'integer' },
     failed: { type: 'integer' },
     durationMs: { type: 'integer' },
   },

@@ -1869,6 +1869,9 @@
                             "skipped": {
                               "type": "integer"
                             },
+                            "exhausted": {
+                              "type": "integer"
+                            },
                             "failed": {
                               "type": "integer"
                             },
@@ -2059,6 +2062,9 @@
                               "type": "integer"
                             },
                             "skipped": {
+                              "type": "integer"
+                            },
+                            "exhausted": {
                               "type": "integer"
                             },
                             "failed": {
@@ -2592,6 +2598,9 @@
                             "skipped": {
                               "type": "integer"
                             },
+                            "exhausted": {
+                              "type": "integer"
+                            },
                             "failed": {
                               "type": "integer"
                             },
@@ -2767,6 +2776,9 @@
                             "skipped": {
                               "type": "integer"
                             },
+                            "exhausted": {
+                              "type": "integer"
+                            },
                             "failed": {
                               "type": "integer"
                             },
@@ -2851,6 +2863,9 @@
                               "type": "integer"
                             },
                             "skipped": {
+                              "type": "integer"
+                            },
+                            "exhausted": {
                               "type": "integer"
                             },
                             "failed": {
