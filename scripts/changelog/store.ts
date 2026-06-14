@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import {
   type ChangelogRecord,
   type VersionRecord,
+  parseRecords,
   parseRecordsStrict,
   parseVersionsStrict,
   renderUnreleased,
@@ -157,82 +158,122 @@ function releaseExists(): boolean {
   return tryGh(['release', 'view', RELEASE_TAG, '--json', 'tagName']) !== null;
 }
 
-/** Download one asset off the draft release into a fresh temp dir. Null if absent. */
-function downloadDraftAsset(assetName: string): string | null {
-  if (!releaseExists()) return null;
+interface GhReleaseAssets {
+  assets?: Array<{ name?: string }>;
+}
+
+/** stderr text off a thrown execFileSync error (utf8 string or Buffer). */
+function ghStderr(err: unknown): string {
+  const e = err as { stderr?: string | Buffer };
+  return e.stderr ? e.stderr.toString() : '';
+}
+
+/**
+ * Classify a failed `gh release view`: a genuine "release not found" (the draft is
+ * absent — a legitimate empty) vs ANY other failure (network / 5xx / rate-limit /
+ * auth), which must NOT be mistaken for absence and silently degrade a read to empty.
+ * Pure + exported so the bug-prone classification is unit-tested without invoking gh.
+ * gh prints exactly `release not found` (exit 1) for a missing release.
+ */
+export function isReleaseNotFound(stderr: string): boolean {
+  return /release not found|HTTP 404/i.test(stderr);
+}
+
+/**
+ * `gh release view <RELEASE_TAG> --json <fields>` → the JSON string, or `null` ONLY
+ * when gh reports the release genuinely doesn't exist. Any OTHER gh failure THROWS —
+ * the load-bearing distinction that stops a transient blip being read as "absent" and
+ * wiping the canonical assets on the next write-back. (The previous code used the
+ * error-swallowing `tryGh` here, so a transient view failure looked identical to
+ * absence — the hole this closes.)
+ */
+function viewReleaseJson(fields: string): string | null {
+  try {
+    return gh(['release', 'view', RELEASE_TAG, '--json', fields]);
+  } catch (err) {
+    if (isReleaseNotFound(ghStderr(err))) return null;
+    throw new Error(
+      `gh release view ${RELEASE_TAG} failed and it is NOT "release not found" — treating as a ` +
+        'transient error, not absence (refusing to risk a write-back over an empty read). Retry. ' +
+        `Details: ${ghStderr(err) || (err as Error).message}`,
+    );
+  }
+}
+
+/**
+ * Asset names attached to the draft release, or `null` when the draft genuinely
+ * doesn't exist. Lets a reader tell "asset never uploaded" (legitimate empty) from a
+ * transient failure (which `viewReleaseJson` raises). A JSON.parse failure here is gh
+ * returning success with garbage — real corruption, so it throws, not swallowed.
+ */
+function releaseAssetNames(): string[] | null {
+  const json = viewReleaseJson('assets');
+  if (json === null) return null; // release genuinely absent
+  const parsed = JSON.parse(json) as GhReleaseAssets;
+  return (parsed.assets ?? []).map((a) => a.name ?? '').filter((n) => n !== '');
+}
+
+/**
+ * Download one LISTED asset into a fresh temp dir and return its contents. Throws
+ * (via gh) on a download failure: the caller has already confirmed the asset exists,
+ * so a failure here is transient — it must be loud, never an empty read.
+ */
+function downloadAsset(assetName: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'changelog-'));
   try {
-    const ok = tryGh([
-      'release',
-      'download',
-      RELEASE_TAG,
-      '--pattern',
-      assetName,
-      '--dir',
-      dir,
-      '--clobber',
-    ]);
-    if (ok === null) return null; // release exists but has no such asset yet
+    gh(['release', 'download', RELEASE_TAG, '--pattern', assetName, '--dir', dir, '--clobber']);
     return readFileSync(join(dir, assetName), 'utf8');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
-interface GhReleaseAssets {
-  assets?: Array<{ name?: string }>;
-}
-
 /**
- * Asset names attached to the draft release, or `null` when the draft doesn't exist
- * yet. This is how a reader tells "the asset was never uploaded" (a legitimate empty
- * — first run) apart from "the asset exists but a download failed" (a transient blip
- * that must NOT degrade to empty). The release-metadata list is authoritative and
- * cheap; the per-pattern `release download` can't make that distinction on its own.
+ * Raw text of one store asset for a read-modify-write caller, or `null` if it is
+ * GENUINELY absent (no draft yet, or never uploaded). Throws on any transient gh
+ * failure (view or download) — never degrades to empty, the corruption class this
+ * module guards against. Parse strictness (drop vs throw on a corrupt line) is the
+ * caller's choice, applied to the returned text.
  */
-function releaseAssetNames(): string[] | null {
-  const json = tryGh(['release', 'view', RELEASE_TAG, '--json', 'assets']);
-  if (json === null) return null;
-  try {
-    const parsed = JSON.parse(json) as GhReleaseAssets;
-    return (parsed.assets ?? []).map((a) => a.name ?? '').filter((n) => n !== '');
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Read + parse one store asset for a READ-MODIFY-WRITE caller. The contract that
- * makes the writers safe: return `[]` ONLY when the asset is genuinely absent (no
- * draft yet, or never uploaded); otherwise the asset's content round-trips, or we
- * THROW. A `parse` failure (truncated/corrupt download) or a download that fails
- * while the asset IS listed both raise — never silently shrink the in-memory copy
- * that a writer would then persist back over the canonical asset. This is the fix
- * for the class of corruption where a degraded read wiped versions.json / dropped
- * changelog.jsonl records on the next write.
- */
-function readAssetStrict<T>(assetName: string, parse: (raw: string) => T[]): T[] {
+function fetchAsset(assetName: string): string | null {
   const names = releaseAssetNames();
-  if (names === null) return []; // draft release doesn't exist yet — genuinely empty
-  if (!names.includes(assetName)) return []; // asset never uploaded yet — genuinely empty
-  const raw = downloadDraftAsset(assetName);
-  if (raw === null) {
-    throw new Error(
-      `"${assetName}" is listed on the "${RELEASE_TAG}" release but could not be downloaded — ` +
-        'refusing to proceed: a write-back now would overwrite it with an empty/partial copy. Retry.',
-    );
-  }
-  return parse(raw); // strict parsers throw on a truncated/corrupt asset
+  if (names === null) return null; // draft release doesn't exist yet
+  if (!names.includes(assetName)) return null; // asset never uploaded yet
+  return downloadAsset(assetName);
 }
 
-/** Read the current record set from the changelog.jsonl asset. Empty only if genuinely absent. */
+/**
+ * STRICT read of the record set — for the read side of a read-modify-write
+ * (update/release). A truncated/corrupt asset throws rather than yielding a smaller
+ * set a writer would persist back. Empty only if the asset is genuinely absent.
+ */
 export function readStore(): ChangelogRecord[] {
-  return readAssetStrict(ASSET_NAME, parseRecordsStrict);
+  const raw = fetchAsset(ASSET_NAME);
+  return raw === null ? [] : parseRecordsStrict(raw);
 }
 
-/** Read the version manifest from the versions.json asset. Empty only if genuinely absent. */
+/**
+ * TOLERANT read of the record set — for the RECOVERY callers (reconcile/backfill).
+ * A persisted corrupt line is DROPPED so the recovery path can still run and re-add
+ * it from the source-of-truth PRs, instead of throwing on the very corruption it
+ * exists to repair. Transient gh failures still throw (via `fetchAsset`); only bad
+ * bytes already on the asset are tolerated. Records are re-derivable — versions are
+ * not, which is why there is no tolerant `readVersions`.
+ */
+export function readStoreTolerant(): ChangelogRecord[] {
+  const raw = fetchAsset(ASSET_NAME);
+  return raw === null ? [] : parseRecords(raw);
+}
+
+/**
+ * Read the version manifest — ALWAYS strict. A VersionRecord's frozen
+ * headline/narrative/tier/targetSha lives nowhere else, so a malformed entry must
+ * never be silently dropped and persisted back (no tolerant variant, by design).
+ * Empty only if genuinely absent.
+ */
 export function readVersions(): VersionRecord[] {
-  return readAssetStrict(VERSIONS_ASSET_NAME, parseVersionsStrict);
+  const raw = fetchAsset(VERSIONS_ASSET_NAME);
+  return raw === null ? [] : parseVersionsStrict(raw);
 }
 
 /**

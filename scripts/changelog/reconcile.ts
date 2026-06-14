@@ -19,7 +19,7 @@ import { disclosureModel, hasApiKey, summarize } from './claude.js';
 import {
   getPrInput,
   listMergedPrNumbers,
-  readStore,
+  readStoreTolerant,
   readVersions,
   writeDraft,
   writeVersionRelease,
@@ -105,7 +105,10 @@ async function main(): Promise<void> {
   const key = hasApiKey();
 
   const candidates = listMergedPrNumbers(since);
-  const store = readStore();
+  // Tolerant read: this IS the recovery path, so a persisted corrupt record line is
+  // dropped (then re-summarised below from the source PR) rather than throwing. The
+  // manifest is read strictly — a version entry isn't re-derivable.
+  const store = readStoreTolerant();
   const versions = readVersions();
   const have = recordsByNumber(store);
   const todo = candidates

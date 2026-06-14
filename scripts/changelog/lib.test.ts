@@ -168,6 +168,10 @@ test('parseRecords: back-compat — a legacy record with no `version` loads as n
 });
 
 test('parseRecordsStrict: round-trips clean JSONL and normalises a legacy record', () => {
+  // An empty store is written as serializeRecords([]) ('') + '\n' = '\n' — must parse
+  // to [] (blank lines skipped), NOT throw, or every first-run/empty read would fail.
+  assert.deepEqual(parseRecordsStrict(''), []);
+  assert.deepEqual(parseRecordsStrict('\n'), []);
   const good = serializeRecords([rec({ number: 7 }), rec({ number: 8 })]);
   const parsed = parseRecordsStrict(`\n${good}\n`); // leading/trailing blanks are fine
   assert.equal(parsed.length, 2);
