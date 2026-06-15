@@ -56,6 +56,11 @@ export interface StatsData {
     artistsWithProfile: CoverageMetric;
     artistsWithGenres: CoverageMetric;
     artistsWithStyles: CoverageMetric;
+    // Wikidata enrichment coverage (#341), all over the real-artist (profApplicable) denominator.
+    artistsWithWikidataId: CoverageMetric;
+    artistsWithBirthDate: CoverageMetric;
+    artistsWithImage: CoverageMetric;
+    artistsWithAwards: CoverageMetric;
     artistsWithNationality: SourcedCoverageMetric;
     musiciansWithNationality: SourcedCoverageMetric;
     producersWithNationality: SourcedCoverageMetric;
@@ -143,7 +148,12 @@ const ARTIST_QUERY = `
     count(CASE WHEN genreApp THEN 1 END) AS genresApplicable,
     count(CASE WHEN genreApp AND a.genres IS NOT NULL AND size(a.genres) > 0 THEN 1 END) AS genresCovered,
     count(CASE WHEN styleApp THEN 1 END) AS stylesApplicable,
-    count(CASE WHEN styleApp AND a.styles IS NOT NULL AND size(a.styles) > 0 THEN 1 END) AS stylesCovered`;
+    count(CASE WHEN styleApp AND a.styles IS NOT NULL AND size(a.styles) > 0 THEN 1 END) AS stylesCovered,
+    // #341 Wikidata enrichment coverage, over the same real-artist denominator (profApplicable).
+    count(CASE WHEN applicable AND a.wikidataQid IS NOT NULL THEN 1 END) AS wikidataQidCovered,
+    count(CASE WHEN applicable AND a.bornYear IS NOT NULL THEN 1 END) AS bornYearCovered,
+    count(CASE WHEN applicable AND a.imageUrl IS NOT NULL THEN 1 END) AS imageCovered,
+    count(CASE WHEN applicable AND a.awards IS NOT NULL AND size(a.awards) > 0 THEN 1 END) AS awardsCovered`;
 
 const TRACK_QUERY = `
   MATCH (t:Track)
@@ -332,6 +342,10 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       artistsWithProfile: coverage(n(artist, 'profCovered'), n(artist, 'profApplicable')),
       artistsWithGenres: coverage(n(artist, 'genresCovered'), n(artist, 'genresApplicable')),
       artistsWithStyles: coverage(n(artist, 'stylesCovered'), n(artist, 'stylesApplicable')),
+      artistsWithWikidataId: coverage(n(artist, 'wikidataQidCovered'), n(artist, 'profApplicable')),
+      artistsWithBirthDate: coverage(n(artist, 'bornYearCovered'), n(artist, 'profApplicable')),
+      artistsWithImage: coverage(n(artist, 'imageCovered'), n(artist, 'profApplicable')),
+      artistsWithAwards: coverage(n(artist, 'awardsCovered'), n(artist, 'profApplicable')),
       artistsWithNationality: nationality(natArtist),
       musiciansWithNationality: nationality(natMusician),
       producersWithNationality: nationality(natProducer),

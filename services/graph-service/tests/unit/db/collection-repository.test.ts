@@ -366,6 +366,39 @@ describe('getArtistById', () => {
     expect(artist?.releases).toHaveLength(1);
     expect(artist?.releases[0]?.discogsId).toBe(13570466);
     expect(artist?.credits).toEqual([]);
+    // Wikidata fields absent on the node default to null / [] (#341).
+    expect(artist?.wikidataQid).toBeNull();
+    expect(artist?.awards).toEqual([]);
+  });
+
+  it('surfaces Wikidata biographical fields when present (#341)', async () => {
+    const artistRecord = makeRecord({
+      discogsId: makeNeo4jInt(470470),
+      name: 'Paul Simon',
+      realName: null,
+      profile: null,
+      wikidataQid: 'Q1299',
+      bornYear: makeNeo4jInt(1941),
+      bornDate: '1941-10-13',
+      diedYear: null,
+      diedDate: null,
+      imageUrl: 'http://commons.wikimedia.org/wiki/Special:FilePath/Paul.jpg',
+      awards: ['Grammy Award', 'Mercury Prize'],
+      releases: [],
+    });
+
+    const { session } = makeMockSession([makeResult([artistRecord]), makeResult([])]);
+    const artist = await getArtistById(makeMockDriver(session), 470470);
+
+    expect(artist).toMatchObject({
+      wikidataQid: 'Q1299',
+      bornYear: 1941,
+      bornDate: '1941-10-13',
+      diedYear: null,
+      diedDate: null,
+      imageUrl: 'http://commons.wikimedia.org/wiki/Special:FilePath/Paul.jpg',
+      awards: ['Grammy Award', 'Mercury Prize'],
+    });
   });
 
   it('returns artist with credits when SAME_PERSON_AS links exist', async () => {
