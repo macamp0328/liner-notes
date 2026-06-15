@@ -21,6 +21,7 @@ import { enrichTrackDeezer } from '../enrichment/track-deezer.js';
 import { enrichNationality } from '../enrichment/artist-nationality.js';
 import { enrichArtistMusicbrainzIds } from '../enrichment/artist-musicbrainz-id.js';
 import { enrichSongwriterReconciliation } from '../enrichment/songwriter-reconciliation.js';
+import { enrichArtistWikidata } from '../enrichment/artist-wikidata.js';
 import type { ProgressReporter } from '../enrichment/progress.js';
 
 /**
@@ -44,6 +45,7 @@ export type ReloadStageName =
   | 'mb-artist-id'
   | 'nationality'
   | 'songwriter-reconciliation'
+  | 'artist-wikidata'
   | 'verify';
 
 /**
@@ -66,10 +68,11 @@ export interface ReloadContext {
  * A rate-limited / contention lane a stage holds while running. Two stages sharing any resource
  * never run concurrently (see `scheduleStages`). Tags fall into two kinds:
  *
- * - `discogs` / `musicbrainz` — the shared HTTP client's rate limiter. The Discogs/MusicBrainz
- *   clients are built once and shared via `ctx`, and their limiters have no shared queue, so two
- *   concurrent stages on one client would double the request rate. Every stage that touches a
- *   client carries its tag.
+ * - `discogs` / `musicbrainz` / `wikidata` — the shared HTTP client's rate limiter. Each client is
+ *   built once and shared via `ctx`, and their limiters have no shared queue, so two concurrent
+ *   stages on one client would double the request rate. Every stage that touches a client carries
+ *   its tag — `nationality` and `artist-wikidata` both drive the one `ctx.wikidata` client, so both
+ *   carry `wikidata` and never overlap.
  * - `track` — a Neo4j node-lock lane for **batched** Track writers. A deadlock needs two
  *   transactions that each hold-and-wait on ≥2 nodes, so it is only possible between two *batched*
  *   writers of the same label. The three batched Track writers (`track-musicbrainz`,
@@ -81,7 +84,7 @@ export interface ReloadContext {
  *   Artist writer (`artist-profiles`/`nationality` write one Artist per tx), so no Artist-axis
  *   deadlock is possible.
  */
-export type ReloadResource = 'discogs' | 'musicbrainz' | 'track';
+export type ReloadResource = 'discogs' | 'musicbrainz' | 'wikidata' | 'track';
 
 export interface StageDescriptor {
   name: ReloadStageName;
@@ -298,9 +301,11 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     // #380: deps mb-artist-id so the musicbrainzId is populated first — resolveCountry then reuses
     // it (getCountryByMbid) and skips its own `/url` lookup. Both already share the `musicbrainz`
     // lane (never overlap); the dep only pins the order so the reuse actually kicks in.
+    // #341: also holds the `wikidata` lane — it drives the one shared `ctx.wikidata` client, which
+    // the `artist-wikidata` stage also uses, so the lane serialises that limiter across both.
     name: 'nationality',
     deps: ['releases', 'mb-artist-id'],
-    resources: ['discogs', 'musicbrainz'],
+    resources: ['discogs', 'musicbrainz', 'wikidata'],
     sources: ['musicbrainz', 'wikidata', 'discogs'],
     run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.musicbrainz) return null;
@@ -317,16 +322,45 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     },
   },
   {
+    // #341: resolve each Artist's Wikidata QID (P1953 join, Wikipedia-URL fallback) and harvest
+    // lifespan (P569/P570), image (P18), and awards (P166). Holds `wikidata` (shared rate limiter,
+    // serialised with `nationality`) and `discogs` (the fallback's profile fetch — the primary
+    // P1953 join uses the discogsId already on the node, so it needs no Discogs call). Writes one
+    // Artist per tx, so no `track`-style node-lock lane is needed.
+    name: 'artist-wikidata',
+    deps: ['releases'],
+    resources: ['wikidata', 'discogs'],
+    sources: ['wikidata', 'discogs'],
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
+      if (!ctx.wikidata) return null;
+      return {
+        ...(await enrichArtistWikidata(
+          ctx.wikidata,
+          ctx.discogs ?? undefined,
+          ctx.driver,
+          ctx.log,
+          onProgress,
+        )),
+      };
+    },
+  },
+  {
     // #380: promote each Work's captured writerMbids to (:Artist|:Musician)-[:WROTE]->(:Work) edges
     // by joining on the musicbrainzId from mb-artist-id. Pure Cypher, no MB calls. Like
     // person-reconciliation it is a dual-axis writer (its two single-label MERGEs lock Artist then
     // Musician, plus Work), so it must not overlap any node writer: deps it after the two batched
     // single-axis writers (transitively via person-reconciliation, which already deps artist-genres
-    // + group-members) AND after nationality (per-node Artist/Musician writer). track-works + mb-
-    // artist-id supply the data it reads. Pure-Cypher + fast, so running just before verify is free;
-    // resources [] — ordering via deps handles exclusion, matching person-reconciliation.
+    // + group-members) AND after the per-node Artist writers nationality + artist-wikidata. track-
+    // works + mb-artist-id supply the data it reads. Pure-Cypher + fast, so running just before
+    // verify is free; resources [] — ordering via deps handles exclusion, matching person-reconciliation.
     name: 'songwriter-reconciliation',
-    deps: ['track-works', 'mb-artist-id', 'person-reconciliation', 'nationality'],
+    deps: [
+      'track-works',
+      'mb-artist-id',
+      'person-reconciliation',
+      'nationality',
+      'artist-wikidata',
+    ],
     resources: [],
     run: async (ctx) => ({ ...(await enrichSongwriterReconciliation(ctx.driver, ctx.log)) }),
   },

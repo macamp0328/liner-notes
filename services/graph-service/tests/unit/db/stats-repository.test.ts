@@ -83,6 +83,11 @@ describe('getStats', () => {
         genresCovered: int(18),
         stylesApplicable: int(15),
         stylesCovered: int(9),
+        // #341 Wikidata coverage, all over the profApplicable (16) denominator.
+        wikidataQidCovered: int(10),
+        bornYearCovered: int(8),
+        imageCovered: int(5),
+        awardsCovered: int(2),
       },
       track: {
         total: int(100),
@@ -150,6 +155,16 @@ describe('getStats', () => {
     // genres/styles gated by the artist's release→genre/style path
     expect(stats.enrichment.artistsWithGenres).toEqual({ covered: 18, applicable: 18, pct: 100 });
     expect(stats.enrichment.artistsWithStyles).toEqual({ covered: 9, applicable: 15, pct: 60 });
+
+    // #341 Wikidata coverage, all over the real-artist (profApplicable=16) denominator
+    expect(stats.enrichment.artistsWithWikidataId).toEqual({
+      covered: 10,
+      applicable: 16,
+      pct: 62.5,
+    });
+    expect(stats.enrichment.artistsWithBirthDate).toEqual({ covered: 8, applicable: 16, pct: 50 });
+    expect(stats.enrichment.artistsWithImage).toEqual({ covered: 5, applicable: 16, pct: 31.3 });
+    expect(stats.enrichment.artistsWithAwards).toEqual({ covered: 2, applicable: 16, pct: 12.5 });
 
     // lyrics split by source; untagged absorbs covered − (lrclib + genius) = 2
     expect(stats.enrichment.tracksWithLyrics).toEqual({

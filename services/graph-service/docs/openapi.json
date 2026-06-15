@@ -2000,6 +2000,131 @@
         }
       }
     },
+    "/api/v1/admin/artist-wikidata/enrich": {
+      "post": {
+        "summary": "Enrich Artist nodes with Wikidata biographical data (QID, lifespan, image, awards)",
+        "tags": ["admin"],
+        "description": "Resolves each Artist node to its Wikidata item and harvests structured biographical data: `wikidataQid`, lifespan (`bornYear`/`bornDate`, `diedYear`/`diedDate`), `imageUrl`, and `awards`. Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest`** — run it standalone, or rely on the orchestrated reload (`POST /api/v1/admin/reload`), which includes it.\n\n**Join (deterministic, no name matching):**\n1. Wikidata property P1953 (Discogs artist ID) → the QID, via SPARQL. Needs no Discogs call (the Discogs ID is already on the node).\n2. Fallback: fetches the Discogs artist page, extracts any English Wikipedia URLs from `urls[]`, and resolves the Wikidata item via `schema:about`. Requires `DISCOGS_TOKEN`.\n\nSelects Artist nodes that still have no `wikidataQid` and whose last attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `wikidataFetchedAt` after each attempt — so an artist Wikidata does not (yet) know is retried at most once per window while resolved artists are skipped. Run `POST /api/v1/admin/artist-wikidata/reset` to force a full re-run.\n\nRequires `MUSICBRAINZ_USER_AGENT` (or `DISCOGS_USER_AGENT`) env var for the Wikidata client.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["message", "statusUrl"],
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "statusUrl": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/artist-wikidata/reset": {
+      "post": {
+        "summary": "Reset artist Wikidata enrichment markers for a full re-run",
+        "tags": ["admin"],
+        "description": "Removes the `wikidataFetchedAt` marker and every Wikidata-sourced property (`wikidataQid`, `bornYear`/`bornDate`, `diedYear`/`diedDate`, `imageUrl`, `awards`) from all Artist nodes, causing the next `POST /api/v1/admin/artist-wikidata/enrich` call to re-resolve every node from scratch.\n\nThis endpoint is blocked while `POST /api/v1/admin/artist-wikidata/enrich` is running.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["reset"],
+                      "properties": {
+                        "reset": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/lyrics/status": {
       "get": {
         "summary": "Status of the most recent lyrics enrichment run",
@@ -3340,6 +3465,95 @@
         }
       }
     },
+    "/api/v1/admin/artist-wikidata/status": {
+      "get": {
+        "summary": "Status of the most recent artist Wikidata enrichment run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult",
+                        "lastError"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "enriched": {
+                              "type": "integer"
+                            },
+                            "skipped": {
+                              "type": "integer"
+                            },
+                            "exhausted": {
+                              "type": "integer"
+                            },
+                            "failed": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/reload": {
       "post": {
         "summary": "Trigger the orchestrated reload (ingest + every enrichment) with resume",
@@ -4033,6 +4247,36 @@
                         "profile": {
                           "type": "string",
                           "nullable": true
+                        },
+                        "wikidataQid": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "bornYear": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "bornDate": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "diedYear": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "diedDate": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "imageUrl": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "awards": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
                         },
                         "releases": {
                           "type": "array",
@@ -5735,6 +5979,10 @@
                             "artistsWithProfile",
                             "artistsWithGenres",
                             "artistsWithStyles",
+                            "artistsWithWikidataId",
+                            "artistsWithBirthDate",
+                            "artistsWithImage",
+                            "artistsWithAwards",
                             "artistsWithNationality",
                             "musiciansWithNationality",
                             "producersWithNationality",
@@ -5803,6 +6051,70 @@
                               }
                             },
                             "artistsWithStyles": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "artistsWithWikidataId": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "artistsWithBirthDate": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "artistsWithImage": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "artistsWithAwards": {
                               "type": "object",
                               "required": ["covered", "applicable", "pct"],
                               "properties": {

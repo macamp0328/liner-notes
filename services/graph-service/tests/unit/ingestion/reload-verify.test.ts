@@ -40,6 +40,7 @@ const ALL_STAGES: ReloadStageName[] = [
   'track-deezer',
   'mb-artist-id',
   'nationality',
+  'artist-wikidata',
   'songwriter-reconciliation',
   'verify',
 ];
@@ -54,6 +55,11 @@ function makeStats(
     artistsWithProfile: cov(85, 100),
     artistsWithGenres: cov(90, 100),
     artistsWithStyles: cov(90, 100),
+    // #341: all four Wikidata metrics are ungated (surfaced in /stats only, like nationality).
+    artistsWithWikidataId: cov(40, 100),
+    artistsWithBirthDate: cov(35, 100),
+    artistsWithImage: cov(10, 100),
+    artistsWithAwards: cov(5, 100),
     artistsWithNationality: sourcedCov(50, 100),
     musiciansWithNationality: sourcedCov(50, 100),
     producersWithNationality: sourcedCov(50, 100),
