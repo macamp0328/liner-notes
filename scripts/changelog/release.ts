@@ -1,9 +1,9 @@
 #!/usr/bin/env tsx
 // Cut a PUBLISHED, tagged CalVer release from everything currently Unreleased.
-// A DELIBERATE, batched action: run it when you've shipped a batch and want to
-// declare it released. Driven by changelog-release.yml's workflow_dispatch (or
-// run locally). It sweeps every record with `version === null`, assigns a
-// `vYYYY.MM.DD` tag at HEAD_SHA (default: current main HEAD), writes a real
+// Driven by changelog-release.yml: AUTOMATICALLY on every successful Deploy
+// (workflow_run → HEAD_SHA = the deployed commit), with workflow_dispatch / a local
+// run as the manual fallback. It sweeps every record with `version === null`, assigns
+// a `vYYYY.MM.DD` tag at HEAD_SHA (default: current main HEAD), writes a real
 // (non-draft) GitHub Release whose richness ramps with the release's importance
 // tier, then stamps those records and records the version in versions.json.
 //
@@ -88,9 +88,9 @@ function writeStepSummary(lines: string[]): void {
 // ── The cut ───────────────────────────────────────────────────────────────────
 
 async function runCut(): Promise<void> {
-  // The tag's git target — the commit this version points at. A deliberate cut
-  // (workflow_dispatch / local) defaults to current main HEAD; pass HEAD_SHA to
-  // pin an explicit deployed commit. Mirrors runBaseline's target resolution.
+  // The tag's git target — the commit this version points at. The auto path passes
+  // HEAD_SHA = the deployed commit; a manual cut with no HEAD_SHA defaults to current
+  // main HEAD. Mirrors runBaseline's target resolution.
   const headSha = process.env['HEAD_SHA']?.trim() || defaultBranchSha();
   const dryRun = isDryRun();
   const key = hasApiKey();
