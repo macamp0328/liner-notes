@@ -46,7 +46,10 @@ test('validateDocument: a freshly generated document validates clean', () => {
 
 test('validateDocument: catches a re-armed reset (confirm no longer disabled)', () => {
   // The confirm param is the only disabled:true in this minimal collection.
-  const tampered = build().replace('disabled: true', 'disabled: false');
+  const clean = build();
+  const tampered = clean.replace('disabled: true', 'disabled: false');
+  // Guard against a silent no-op replace (which would make this a false green).
+  assert.notEqual(tampered, clean, 'tamper missed: no `disabled: true` to flip');
   const failures = validateDocument(tampered, spec(), PROD);
   assert.ok(
     failures.some((f) => f.includes("POST /api/v1/admin/reset must ship 'confirm=wipe-all'")),
@@ -56,10 +59,13 @@ test('validateDocument: catches a re-armed reset (confirm no longer disabled)', 
 
 test('validateDocument: catches duplicate meta.id values', () => {
   // Collide two request ids by giving the health request the reset request's id.
-  const tampered = build().replace(
+  const clean = build();
+  const tampered = clean.replace(
     requestId('GET', '/api/v1/health'),
     requestId('POST', '/api/v1/admin/reset'),
   );
+  // Guard against a silent no-op replace (which would make this a false green).
+  assert.notEqual(tampered, clean, 'tamper missed: health request id not found');
   const failures = validateDocument(tampered, spec(), PROD);
   assert.ok(
     failures.some((f) => f.includes('meta.id values are not unique')),
