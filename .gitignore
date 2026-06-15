@@ -30,9 +30,12 @@ pnpm-debug.log*
 
 # Terraform
 .terraform/
+.terraform.d/
 *.tfstate
 *.tfstate.backup
-.terraform.lock.hcl
+# .terraform.lock.hcl is intentionally COMMITTED (not ignored): it pins provider
+# versions + checksums for deterministic, supply-chain-safe `terraform init`, and
+# is the cache key for the CI provider cache. See infra/terraform/.terraform.lock.hcl.
 tfplan
 # Real tfvars may carry IP allowlists / SSH key names — keep them local.
 # The committed terraform.tfvars.example documents the available knobs.
