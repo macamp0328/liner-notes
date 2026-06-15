@@ -53,6 +53,9 @@ export const RELOAD_COVERAGE_THRESHOLDS: readonly CoverageThreshold[] = [
   // verify runs strictly last and no stage creates Musicians after reconciliation, so it's a clean
   // post-condition: any missing late-Artist link → covered<applicable → reload failed.
   { metric: 'samePersonLinks', stage: 'person-reconciliation', minPct: 100 },
+  // #341: Wikidata coverage is best-effort (not every artist is in Wikidata), so gate the QID join
+  // for "populated" (silently-zero) only — catches a stage that ran but wrote nothing, no floor.
+  { metric: 'artistsWithWikidataId', stage: 'artist-wikidata', minPct: 0 },
 ];
 
 /** Why a metric passed or failed — drives the human-readable failure summary. */

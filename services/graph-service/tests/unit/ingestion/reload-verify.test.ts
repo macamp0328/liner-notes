@@ -39,6 +39,7 @@ const ALL_STAGES: ReloadStageName[] = [
   'track-acousticbrainz',
   'track-deezer',
   'nationality',
+  'artist-wikidata',
   'verify',
 ];
 const ALL_RAN = new Set<ReloadStageName>(ALL_STAGES);
@@ -52,6 +53,11 @@ function makeStats(
     artistsWithProfile: cov(85, 100),
     artistsWithGenres: cov(90, 100),
     artistsWithStyles: cov(90, 100),
+    // #341: artistsWithWikidataId is gated (minPct:0 silently-zero); the other three are ungated.
+    artistsWithWikidataId: cov(40, 100),
+    artistsWithBirthDate: cov(35, 100),
+    artistsWithImage: cov(10, 100),
+    artistsWithAwards: cov(5, 100),
     artistsWithNationality: sourcedCov(50, 100),
     musiciansWithNationality: sourcedCov(50, 100),
     producersWithNationality: sourcedCov(50, 100),

@@ -24,9 +24,9 @@ describe('applySchema', () => {
     } as unknown as Driver;
   });
 
-  it('opens and closes a fresh session for each of the 50 statements', async () => {
+  it('opens and closes a fresh session for each of the 51 statements', async () => {
     await applySchema(driver);
-    expect(sessions).toHaveLength(50);
+    expect(sessions).toHaveLength(51);
     for (const s of sessions) {
       expect(s.run).toHaveBeenCalledTimes(1);
       expect(s.close).toHaveBeenCalledTimes(1);
