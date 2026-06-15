@@ -310,13 +310,21 @@ export async function seedInfluences(driver: Driver): Promise<void> {
        MERGE (gamma:Artist {discogsId: 970003})
          SET gamma.name = 'Influence Gamma', gamma.wikidataQid = 'Q-inf-gamma',
              gamma.influencedByQids = []
-       // Two distinct artists sharing a name — the route must union both nodes' edges.
+       // Two distinct artists sharing a name — the route must union both nodes' edges. They point at
+       // their own dedicated targets (delta/epsilon) so they don't perturb the alpha/beta/gamma
+       // assertions above.
+       MERGE (delta:Artist {discogsId: 970006})
+         SET delta.name = 'Influence Delta', delta.wikidataQid = 'Q-inf-delta',
+             delta.influencedByQids = []
+       MERGE (epsilon:Artist {discogsId: 970007})
+         SET epsilon.name = 'Influence Epsilon', epsilon.wikidataQid = 'Q-inf-epsilon',
+             epsilon.influencedByQids = []
        MERGE (dup1:Artist {discogsId: 970004})
          SET dup1.name = 'Influence Dup', dup1.wikidataQid = 'Q-inf-dup1',
-             dup1.influencedByQids = ['Q-inf-alpha']
+             dup1.influencedByQids = ['Q-inf-delta']
        MERGE (dup2:Artist {discogsId: 970005})
          SET dup2.name = 'Influence Dup', dup2.wikidataQid = 'Q-inf-dup2',
-             dup2.influencedByQids = ['Q-inf-gamma']`,
+             dup2.influencedByQids = ['Q-inf-epsilon']`,
     );
   } finally {
     await session.close();

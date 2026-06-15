@@ -274,9 +274,9 @@ describe('explore routes', () => {
       });
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload) as InfluencesBody;
-      // dup1 was influenced by Alpha, dup2 by Gamma — both nodes' edges must appear, not just one.
+      // dup1 was influenced by Delta, dup2 by Epsilon — both nodes' edges must appear, not just one.
       const names = body.influencedBy.map((x) => x.name).sort();
-      expect(names).toEqual(['Influence Alpha', 'Influence Gamma']);
+      expect(names).toEqual(['Influence Delta', 'Influence Epsilon']);
     });
   });
 
