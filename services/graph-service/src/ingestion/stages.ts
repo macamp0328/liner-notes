@@ -293,8 +293,11 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     },
   },
   {
+    // #380: deps mb-artist-id so the musicbrainzId is populated first — resolveCountry then reuses
+    // it (getCountryByMbid) and skips its own `/url` lookup. Both already share the `musicbrainz`
+    // lane (never overlap); the dep only pins the order so the reuse actually kicks in.
     name: 'nationality',
-    deps: ['releases'],
+    deps: ['releases', 'mb-artist-id'],
     resources: ['discogs', 'musicbrainz'],
     sources: ['musicbrainz', 'wikidata', 'discogs'],
     run: async (ctx, onProgress): Promise<Record<string, number> | null> => {

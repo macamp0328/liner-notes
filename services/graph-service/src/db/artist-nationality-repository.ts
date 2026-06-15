@@ -16,11 +16,15 @@ export type NationalitySource = 'musicbrainz' | 'wikidata';
 export interface UnenrichedArtist {
   discogsId: number;
   name: string;
+  /** MB artist MBID resolved by the mb-artist-id pass (#380); null when unresolved. */
+  musicbrainzId: string | null;
 }
 
 export interface UnenrichedMusician {
   discogsId: number | null;
   name: string;
+  /** MB artist MBID resolved by the mb-artist-id pass (#380); null when unresolved. */
+  musicbrainzId: string | null;
 }
 
 /**
@@ -44,12 +48,13 @@ export async function getUnenrichedArtistsForNationality(
          AND NOT a.discogsId IN [194, 355]
          AND (a.nationalityFetchedAt IS NULL
               OR a.nationalityFetchedAt < datetime() - duration({ days: $stalenessDays }))
-       RETURN a.discogsId AS discogsId, a.name AS name`,
+       RETURN a.discogsId AS discogsId, a.name AS name, a.musicbrainzId AS musicbrainzId`,
       { stalenessDays: neo4j.int(getStalenessDays()) },
     );
     return result.records.map((r) => ({
       discogsId: (r.get('discogsId') as Neo4jInt).toNumber(),
       name: r.get('name') as string,
+      musicbrainzId: (r.get('musicbrainzId') as string | null) ?? null,
     }));
   } finally {
     await session.close();
@@ -70,12 +75,13 @@ export async function getUnenrichedMusiciansForNationality(
        WHERE NOT EXISTS { (m)-[:ORIGIN_COUNTRY]->() }
          AND (m.nationalityFetchedAt IS NULL
               OR m.nationalityFetchedAt < datetime() - duration({ days: $stalenessDays }))
-       RETURN m.discogsId AS discogsId, m.name AS name`,
+       RETURN m.discogsId AS discogsId, m.name AS name, m.musicbrainzId AS musicbrainzId`,
       { stalenessDays: neo4j.int(getStalenessDays()) },
     );
     return result.records.map((r) => ({
       discogsId: (r.get('discogsId') as Neo4jInt | null)?.toNumber() ?? null,
       name: r.get('name') as string,
+      musicbrainzId: (r.get('musicbrainzId') as string | null) ?? null,
     }));
   } finally {
     await session.close();
@@ -135,7 +141,7 @@ export async function setArtistNationality(
  */
 export async function setMusicianNationality(
   driver: Driver,
-  musician: UnenrichedMusician,
+  musician: Pick<UnenrichedMusician, 'discogsId' | 'name'>,
   countryCode: string | null,
   source: NationalitySource | null,
 ): Promise<void> {
