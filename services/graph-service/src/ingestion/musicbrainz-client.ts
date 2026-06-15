@@ -439,11 +439,13 @@ export class MusicBrainzClient {
   }
 
   /**
-   * Look up an artist by Discogs ID and return their ISO 3166-1 alpha-2 country code.
-   * Uses a two-step lookup: Discogs URL → MBID → artist country.
-   * Returns null when the artist is not in MusicBrainz or has no country set.
+   * Resolve a Discogs artist ID to its MusicBrainz artist MBID via the Discogs-URL relation
+   * (`/ws/2/url?...&inc=artist-rels`). Returns null when MusicBrainz has no Discogs link for the
+   * artist (or on a transient/breaker failure). This is the identity-mapping half that #380 stores
+   * as `Artist.musicbrainzId` / `Musician.musicbrainzId` so writer MBIDs can be promoted to WROTE
+   * edges deterministically — and that `getCountryByDiscogsId` reuses below.
    */
-  async getCountryByDiscogsId(discogsId: number): Promise<string | null> {
+  async resolveArtistMbidByDiscogsId(discogsId: number): Promise<string | null> {
     const urlResource = `https://www.discogs.com/artist/${discogsId}`;
     const urlEndpoint = `${BASE_URL}/url?resource=${encodeURIComponent(urlResource)}&inc=artist-rels&fmt=json`;
 
@@ -457,9 +459,17 @@ export class MusicBrainzClient {
     const relation = urlResponse.relations.find(
       (r) => r.type === 'discogs' && r.direction === 'backward' && r.artist?.id !== undefined,
     );
-    const mbid = relation?.artist?.id;
-    if (!mbid) return null;
+    return relation?.artist?.id ?? null;
+  }
 
+  /**
+   * Look up an artist by Discogs ID and return their ISO 3166-1 alpha-2 country code.
+   * Uses a two-step lookup: Discogs URL → MBID → artist country.
+   * Returns null when the artist is not in MusicBrainz or has no country set.
+   */
+  async getCountryByDiscogsId(discogsId: number): Promise<string | null> {
+    const mbid = await this.resolveArtistMbidByDiscogsId(discogsId);
+    if (!mbid) return null;
     return this.getCountryByMbid(mbid);
   }
 
@@ -483,7 +493,12 @@ export class MusicBrainzClient {
     return topResult.country?.trim() || null;
   }
 
-  private async getCountryByMbid(mbid: string): Promise<string | null> {
+  /**
+   * Fetch an artist's ISO 3166-1 alpha-2 country code by MusicBrainz artist MBID. Public so
+   * nationality enrichment can reuse a `musicbrainzId` already resolved by the `mb-artist-id` pass
+   * (#380) and skip the `/url` lookup — net-zero MusicBrainz calls across the two stages.
+   */
+  async getCountryByMbid(mbid: string): Promise<string | null> {
     const artistEndpoint = `${BASE_URL}/artist/${encodeURIComponent(mbid)}?fmt=json`;
 
     let response: MbArtistResponse;

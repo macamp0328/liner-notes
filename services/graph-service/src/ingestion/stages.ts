@@ -19,6 +19,7 @@ import { enrichTrackWorks } from '../enrichment/track-works.js';
 import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
 import { enrichTrackDeezer } from '../enrichment/track-deezer.js';
 import { enrichNationality } from '../enrichment/artist-nationality.js';
+import { enrichArtistMusicbrainzIds } from '../enrichment/artist-musicbrainz-id.js';
 import type { ProgressReporter } from '../enrichment/progress.js';
 
 /**
@@ -39,6 +40,7 @@ export type ReloadStageName =
   | 'track-works'
   | 'track-acousticbrainz'
   | 'track-deezer'
+  | 'mb-artist-id'
   | 'nationality'
   | 'verify';
 
@@ -271,6 +273,24 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     run: async (ctx, onProgress) => ({
       ...(await enrichTrackDeezer(ctx.deezer, ctx.driver, ctx.log, onProgress)),
     }),
+  },
+  {
+    // #380: resolve each Artist/Musician's MusicBrainz artist MBID (via the Discogs-URL relation)
+    // and store it as `musicbrainzId` — the deterministic identity mapping the
+    // `songwriter-reconciliation` pass joins on to promote Work writers to WROTE edges. Holds the
+    // `musicbrainz` rate-limiter lane. Ordered before `nationality` (which deps it) so nationality
+    // reuses the stored MBID and skips its own `/url` lookup — net-zero MB calls across the two for
+    // resolvable nodes (mb-artist-id does the `/url`, nationality the `/artist`).
+    name: 'mb-artist-id',
+    deps: ['releases'],
+    resources: ['musicbrainz'],
+    sources: ['musicbrainz'],
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
+      if (!ctx.musicbrainz) return null;
+      return {
+        ...(await enrichArtistMusicbrainzIds(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)),
+      };
+    },
   },
   {
     name: 'nationality',

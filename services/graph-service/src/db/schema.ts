@@ -48,6 +48,13 @@ const statements = [
   'DROP INDEX track_deezer_fetched IF EXISTS',
   'CREATE INDEX artist_nationality_fetched_at IF NOT EXISTS FOR (a:Artist) ON (a.nationalityFetchedAt)',
   'CREATE INDEX musician_nationality_fetched_at IF NOT EXISTS FOR (m:Musician) ON (m.nationalityFetchedAt)',
+  // issue #380: Discogs↔MusicBrainz-artist identity mapping. musicbrainzId backs the WROTE
+  // reconciliation join (Work.writerMbids → person node); the *FetchedAt marker backs the
+  // staleness-gated mb-artist-id candidate scan.
+  'CREATE INDEX artist_musicbrainz_id IF NOT EXISTS FOR (a:Artist) ON (a.musicbrainzId)',
+  'CREATE INDEX musician_musicbrainz_id IF NOT EXISTS FOR (m:Musician) ON (m.musicbrainzId)',
+  'CREATE INDEX artist_mb_id_fetched_at IF NOT EXISTS FOR (a:Artist) ON (a.musicbrainzIdFetchedAt)',
+  'CREATE INDEX musician_mb_id_fetched_at IF NOT EXISTS FOR (m:Musician) ON (m.musicbrainzIdFetchedAt)',
   'CREATE INDEX release_master_fetched_at IF NOT EXISTS FOR (r:Release) ON (r.masterFetchedAt)',
   'CREATE INDEX master_mb_release_events_fetched_at IF NOT EXISTS FOR (m:Master) ON (m.mbReleaseEventsFetchedAt)',
   'CREATE INDEX track_musicbrainz_fetched_at IF NOT EXISTS FOR (t:Track) ON (t.musicBrainzFetchedAt)',

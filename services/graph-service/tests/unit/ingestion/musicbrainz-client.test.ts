@@ -185,6 +185,58 @@ describe('MusicBrainzClient', () => {
   });
 
   // -------------------------------------------------------------------------
+  // resolveArtistMbidByDiscogsId (#380)
+  // -------------------------------------------------------------------------
+  describe('resolveArtistMbidByDiscogsId', () => {
+    it('returns the MB artist MBID from the Discogs-URL relation (single call)', async () => {
+      fetchSpy.mockResolvedValueOnce(makeOkResponse(mbUrlResponse('artist-mbid-1')));
+
+      const result = await client.resolveArtistMbidByDiscogsId(42);
+
+      expect(result).toBe('artist-mbid-1');
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const urlCall = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(urlCall).toContain('/url');
+      expect(urlCall).toContain(encodeURIComponent('https://www.discogs.com/artist/42'));
+      expect(urlCall).toContain('inc=artist-rels');
+    });
+
+    it('returns null when there is no Discogs artist relation', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({ id: 'url-uuid', resource: '...', relations: [] }),
+      );
+      const result = await client.resolveArtistMbidByDiscogsId(1);
+      expect(result).toBeNull();
+    });
+
+    it('returns null (does not throw) when the lookup fails', async () => {
+      fetchSpy.mockResolvedValueOnce(makeErrorResponse(404, 'Not Found'));
+      expect(await client.resolveArtistMbidByDiscogsId(99)).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getCountryByMbid (#380 — public so nationality can reuse a stored MBID)
+  // -------------------------------------------------------------------------
+  describe('getCountryByMbid', () => {
+    it('fetches the country directly by MBID, skipping the /url lookup', async () => {
+      fetchSpy.mockResolvedValueOnce(makeOkResponse(mbArtistResponse('GB')));
+
+      const result = await client.getCountryByMbid('artist-mbid-1');
+
+      expect(result).toBe('GB');
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const artistCall = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(artistCall).toContain('/artist/artist-mbid-1');
+    });
+
+    it('returns null when the artist has no country', async () => {
+      fetchSpy.mockResolvedValueOnce(makeOkResponse(mbArtistResponse(undefined)));
+      expect(await client.getCountryByMbid('mbid')).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // getCountryByName
   // -------------------------------------------------------------------------
   describe('getCountryByName', () => {
