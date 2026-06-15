@@ -11,6 +11,7 @@ const mockGetReleasesByMusician = vi.hoisted(() => vi.fn());
 const mockGetReleasesByCredit = vi.hoisted(() => vi.fn());
 const mockGetReleasesByInstrument = vi.hoisted(() => vi.fn());
 const mockGetRecordingsByWork = vi.hoisted(() => vi.fn());
+const mockGetWorksBySongwriter = vi.hoisted(() => vi.fn());
 const mockGetReleasesByStudio = vi.hoisted(() => vi.fn());
 const mockGetReleasesByLabel = vi.hoisted(() => vi.fn());
 const mockGetReleasesByGenre = vi.hoisted(() => vi.fn());
@@ -48,6 +49,7 @@ vi.mock('../../../src/db/repositories/explore-repository.js', () => ({
   getReleasesByCredit: mockGetReleasesByCredit,
   getReleasesByInstrument: mockGetReleasesByInstrument,
   getRecordingsByWork: mockGetRecordingsByWork,
+  getWorksBySongwriter: mockGetWorksBySongwriter,
   getReleasesByStudio: mockGetReleasesByStudio,
   getReleasesByLabel: mockGetReleasesByLabel,
   getReleasesByGenre: mockGetReleasesByGenre,
@@ -233,6 +235,46 @@ describe('explore routes', () => {
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/explore/work/unknown-mbid',
+      });
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.payload)).toEqual([]);
+    });
+  });
+
+  // GET /api/v1/explore/songwriter/:name (#380)
+  describe('GET /api/v1/explore/songwriter/:name', () => {
+    const sampleSongwriterWork = {
+      workMbid: 'work-songwriter-1',
+      workTitle: 'A Written Song',
+      roles: ['composer', 'lyricist'],
+      recordingMbid: 'rec-songwriter-1',
+      trackTitle: 'A Written Song',
+      position: 'A1',
+      discogsId: 7060001,
+      releaseTitle: 'Songwriter LP',
+      artist: 'Some Performer',
+      year: 1972,
+      thumbUrl: null,
+    };
+
+    it('returns 200 with the works written by the person and passes the name through', async () => {
+      mockGetWorksBySongwriter.mockResolvedValue([sampleSongwriterWork]);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/songwriter/Bo%20Diddley',
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as (typeof sampleSongwriterWork)[];
+      expect(body).toHaveLength(1);
+      expect(body[0]!.roles).toEqual(['composer', 'lyricist']);
+      expect(mockGetWorksBySongwriter).toHaveBeenCalledWith(expect.anything(), 'Bo Diddley');
+    });
+
+    it('returns 200 with empty array for a name with no WROTE edges', async () => {
+      mockGetWorksBySongwriter.mockResolvedValue([]);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/songwriter/__nobody__',
       });
       expect(response.statusCode).toBe(200);
       expect(JSON.parse(response.payload)).toEqual([]);

@@ -5,6 +5,7 @@ import {
   getReleasesByCredit,
   getReleasesByInstrument,
   getRecordingsByWork,
+  getWorksBySongwriter,
   getReleasesByStudio,
   getReleasesByLabel,
   getReleasesByGenre,
@@ -21,6 +22,7 @@ import {
   type MusicianRelease,
   type InstrumentCredit,
   type WorkRecording,
+  type SongwriterWork,
   type ConnectionNode,
   type SharedMusiciansResult,
   type InternationalTrack,
@@ -84,6 +86,24 @@ const workRecordingSchema = {
   required: ['recordingMbid', 'trackTitle', 'discogsId', 'releaseTitle'],
   properties: {
     workTitle: { type: 'string' },
+    recordingMbid: { type: 'string' },
+    trackTitle: { type: 'string' },
+    position: { type: 'string', nullable: true },
+    discogsId: { type: 'integer' },
+    releaseTitle: { type: 'string' },
+    artist: { type: 'string', nullable: true },
+    year: { type: 'integer', nullable: true },
+    thumbUrl: { type: 'string', nullable: true },
+  },
+} as const;
+
+const songwriterWorkSchema = {
+  type: 'object',
+  required: ['workMbid', 'workTitle', 'recordingMbid', 'trackTitle', 'discogsId', 'releaseTitle'],
+  properties: {
+    workMbid: { type: 'string' },
+    workTitle: { type: 'string' },
+    roles: { type: 'array', items: { type: 'string' } },
     recordingMbid: { type: 'string' },
     trackTitle: { type: 'string' },
     position: { type: 'string', nullable: true },
@@ -313,6 +333,30 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request, reply): Promise<WorkRecording[] | ErrorReply> => {
       const items = await getRecordingsByWork(getDriver(), request.params.mbid);
+      return reply.send(items);
+    },
+  );
+
+  // GET /api/v1/explore/songwriter/:name — every composition this person wrote that I own (#380)
+  fastify.get<{ Params: NameParams; Reply: SongwriterWork[] | ErrorReply }>(
+    '/api/v1/explore/songwriter/:name',
+    {
+      schema: {
+        tags: ['explore'],
+        summary: 'Compositions written by this person and the recordings of them in the collection',
+        params: {
+          type: 'object',
+          required: ['name'],
+          properties: { name: { type: 'string' } },
+        },
+        response: {
+          200: { type: 'array', items: songwriterWorkSchema },
+          400: errorResponseRef,
+        },
+      },
+    },
+    async (request, reply): Promise<SongwriterWork[] | ErrorReply> => {
+      const items = await getWorksBySongwriter(getDriver(), request.params.name);
       return reply.send(items);
     },
   );

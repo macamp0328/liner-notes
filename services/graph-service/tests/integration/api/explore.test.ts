@@ -7,6 +7,7 @@ import {
   seedExploreEnrichment,
   seedEntityResolution,
   seedWorks,
+  seedSongwriters,
 } from '../../fixtures/loader.js';
 import { getDriver } from '../../../src/db/client.js';
 
@@ -22,6 +23,7 @@ describe('explore routes', () => {
     await seedExploreEnrichment(getDriver());
     await seedEntityResolution(getDriver());
     await seedWorks(getDriver());
+    await seedSongwriters(getDriver());
   });
 
   afterAll(async () => {
@@ -156,6 +158,39 @@ describe('explore routes', () => {
 
     it('returns an empty array for an unknown Work', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/v1/explore/work/__none__' });
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.payload)).toEqual([]);
+    });
+  });
+
+  // #380: WROTE edges joined deterministically on musicbrainzId, surfaced by composer name.
+  describe('GET /api/v1/explore/songwriter/:name', () => {
+    type SongwriterBody = { workMbid: string; workTitle: string; roles: string[] };
+
+    it('returns the compositions a person wrote, with the recording and roles', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/songwriter/Test%20Songwriter',
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as SongwriterBody[];
+      // One row (the SAME_PERSON_AS Artist/Musician pair is DISTINCT-collapsed).
+      expect(body).toHaveLength(1);
+      expect(body[0]?.workMbid).toBe('work-songwriter-1');
+      expect(body[0]?.roles).toEqual(['composer']);
+    });
+
+    it('matches case-insensitively', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/songwriter/test%20songwriter',
+      });
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.payload)).toHaveLength(1);
+    });
+
+    it('returns an empty array for a name with no WROTE edges', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/songwriter/__nobody__' });
       expect(res.statusCode).toBe(200);
       expect(JSON.parse(res.payload)).toEqual([]);
     });
