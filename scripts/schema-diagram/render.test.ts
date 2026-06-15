@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { SchemaSnapshot } from './snapshot.js';
 import {
+  buildPageHtml,
   buildSchemaMarkdown,
   inlineIntoMarkdown,
   renderErDiagram,
@@ -74,4 +75,15 @@ test('buildSchemaMarkdown inlines both diagrams and the drift line', () => {
 test('renderers are deterministic across calls', () => {
   assert.equal(renderErDiagram(snapshot), renderErDiagram(snapshot));
   assert.equal(renderGraphDiagram(snapshot), renderGraphDiagram(snapshot));
+});
+
+test('buildPageHtml substitutes all placeholders (and is $-safe)', () => {
+  const template =
+    '<a>{{GRAPH_DIAGRAM}}</a><b>{{ER_DIAGRAM}}</b><c>{{LAST_UPDATED}}</c><d>{{DRIFT_STATUS}}</d>';
+  const html = buildPageHtml(template, 'ER$&BODY', 'GRAPH', {
+    lastUpdated: '2026-06-15',
+    driftStatus: 'in sync',
+  });
+  assert.equal(html, '<a>GRAPH</a><b>ER$&BODY</b><c>2026-06-15</c><d>in sync</d>');
+  assert.ok(!html.includes('{{'), 'no placeholder left unfilled');
 });

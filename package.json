@@ -24,6 +24,7 @@
     "changelog:test": "tsx --test scripts/changelog/*.test.ts",
     "insomnia:generate": "pnpm --filter graph-service docs:generate && tsx scripts/insomnia/generate.ts && prettier --write services/graph-service/docs/insomnia.collection.yaml",
     "schema:diagram": "tsx scripts/schema-diagram/generate.ts",
+    "schema:page": "tsx scripts/schema-diagram/build-page.ts",
     "enrich:lyrics": "scripts/admin/post.sh /api/v1/admin/lyrics/enrich",
     "enrich:master-data": "scripts/admin/post.sh /api/v1/admin/master-data/enrich",
     "enrich:nationality": "scripts/admin/post.sh /api/v1/admin/nationality/enrich",

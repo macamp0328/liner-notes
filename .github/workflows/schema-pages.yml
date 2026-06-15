@@ -1,0 +1,53 @@
+name: Schema Pages
+
+# Publishes the committed data-model diagrams to GitHub Pages (ADR 0004). Builds
+# a static page from the COMMITTED .mmd artifacts — DB-free, no AWS/secrets — so
+# the live page reflects MERGED (accepted) state, consistent with the PR-review
+# model. Fires when the schema-diagram refresh PR merges to main.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/graph-service/docs/schema/**'
+      - 'scripts/schema-diagram/page-template.html'
+      - 'scripts/schema-diagram/build-page.ts'
+      - '.github/workflows/schema-pages.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build + deploy schema page
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build static page from committed artifacts
+        run: SCHEMA_PAGE_DATE="$(date -u +%Y-%m-%d) (${GITHUB_SHA:0:7})" pnpm schema:page
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4

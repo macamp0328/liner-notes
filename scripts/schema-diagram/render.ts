@@ -105,3 +105,20 @@ export function buildSchemaMarkdown(erBody: string, graphBody: string, driftLine
   md = inlineIntoMarkdown('graph', graphBody, md);
   return md;
 }
+
+/** Fill the committed GitHub Pages template with the diagram bodies + metadata.
+ *  Pure: the build-page entry reads the committed `.mmd`/`page-template.html` and
+ *  writes `_site/index.html` (uploaded as a Pages artifact, never committed).
+ *  Function replacements avoid `$`-sequence interpretation in the bodies. */
+export function buildPageHtml(
+  template: string,
+  erBody: string,
+  graphBody: string,
+  meta: { lastUpdated: string; driftStatus: string },
+): string {
+  return template
+    .replace('{{GRAPH_DIAGRAM}}', () => graphBody)
+    .replace('{{ER_DIAGRAM}}', () => erBody)
+    .replace('{{LAST_UPDATED}}', () => meta.lastUpdated)
+    .replace('{{DRIFT_STATUS}}', () => meta.driftStatus);
+}
