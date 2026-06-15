@@ -100,6 +100,14 @@ export interface ArtistFull {
   name: string;
   realName: string | null;
   profile: string | null;
+  // Wikidata-sourced biographical data (#341); null until the artist-wikidata enrichment resolves it.
+  wikidataQid: string | null;
+  bornYear: number | null;
+  bornDate: string | null;
+  diedYear: number | null;
+  diedDate: string | null;
+  imageUrl: string | null;
+  awards: string[];
   releases: ArtistRelease[];
   credits: ArtistCredit[];
 }
@@ -363,6 +371,8 @@ export async function getArtistById(driver: Driver, discogsId: number): Promise<
 OPTIONAL MATCH (r:Release)-[rb:RELEASED_BY]->(a)
 RETURN a.discogsId AS discogsId, a.name AS name,
        a.realName AS realName, a.profile AS profile,
+       a.wikidataQid AS wikidataQid, a.bornYear AS bornYear, a.bornDate AS bornDate,
+       a.diedYear AS diedYear, a.diedDate AS diedDate, a.imageUrl AS imageUrl, a.awards AS awards,
   collect(DISTINCT {discogsId: r.discogsId, title: r.title, pressingYear: r.pressingYear,
     format: r.format, thumbUrl: r.thumbUrl, role: rb.role}) AS releases`,
       { discogsId: neo4j.int(discogsId) },
@@ -417,6 +427,14 @@ RETURN release.discogsId AS releaseDiscogsId, release.title AS releaseTitle,
       name: toStr(rec.get('name') as unknown) ?? '',
       realName: toStr(rec.get('realName') as unknown),
       profile: toStr(rec.get('profile') as unknown),
+      wikidataQid: toStr(rec.get('wikidataQid') as unknown),
+      bornYear: toInt(rec.get('bornYear') as unknown),
+      bornDate: toStr(rec.get('bornDate') as unknown),
+      diedYear: toInt(rec.get('diedYear') as unknown),
+      diedDate: toStr(rec.get('diedDate') as unknown),
+      imageUrl: toStr(rec.get('imageUrl') as unknown),
+      // awards is stored as a Neo4j list (possibly empty); null only when never enriched.
+      awards: (rec.get('awards') as string[] | null) ?? [],
       releases,
       credits,
     };

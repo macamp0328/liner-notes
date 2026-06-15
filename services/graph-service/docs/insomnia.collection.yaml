@@ -346,10 +346,33 @@ collection:
               sortKey: 100
             url: '{{ _.base_url }}/api/v1/admin/person-reconciliation/status'
             method: GET
+      - name: artist-wikidata
+        meta:
+          id: fld_3ba8b93c32fb71336b9382394c58f8a6
+          sortKey: 1500
+        children:
+          - name: Enrich Artist nodes with Wikidata biographical data (QID, lifespan, image, awards)
+            meta:
+              id: req_709c368de48800a8549b27939d0d2e12
+              sortKey: 0
+            url: '{{ _.base_url }}/api/v1/admin/artist-wikidata/enrich'
+            method: POST
+          - name: Reset artist Wikidata enrichment markers for a full re-run
+            meta:
+              id: req_b762315ea4d78cad418b33bb83106853
+              sortKey: 100
+            url: '{{ _.base_url }}/api/v1/admin/artist-wikidata/reset'
+            method: POST
+          - name: Status of the most recent artist Wikidata enrichment run
+            meta:
+              id: req_b1f8debeb971184908d1322893867d79
+              sortKey: 200
+            url: '{{ _.base_url }}/api/v1/admin/artist-wikidata/status'
+            method: GET
       - name: reload
         meta:
           id: fld_5808d8d0499fb9db11f9d9870b1ff194
-          sortKey: 1500
+          sortKey: 1600
         children:
           - name: Trigger the orchestrated reload (ingest + every enrichment) with resume
             meta:

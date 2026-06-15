@@ -2,8 +2,40 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 import {
   WikidataClient,
   buildWikidataClientFromEnv,
+  parseArtistWikidataRow,
 } from '../../../src/ingestion/wikidata-client.js';
 import { snapshotEnv } from '../../helpers/env.js';
+
+type ArtistRowFields = {
+  qid?: string;
+  birth?: string;
+  birthPrecision?: string;
+  death?: string;
+  deathPrecision?: string;
+  image?: string;
+  awards?: string;
+};
+
+function makeArtistRow(fields: ArtistRowFields): Record<string, { type: string; value: string }> {
+  const row: Record<string, { type: string; value: string }> = {
+    item: { type: 'uri', value: `http://www.wikidata.org/entity/${fields.qid ?? 'Q1'}` },
+  };
+  if (fields.birth) row['birth'] = { type: 'literal', value: fields.birth };
+  if (fields.birthPrecision)
+    row['birthPrecision'] = { type: 'literal', value: fields.birthPrecision };
+  if (fields.death) row['death'] = { type: 'literal', value: fields.death };
+  if (fields.deathPrecision)
+    row['deathPrecision'] = { type: 'literal', value: fields.deathPrecision };
+  if (fields.image) row['image'] = { type: 'uri', value: fields.image };
+  // GROUP_CONCAT always binds ?awards, even to an empty string.
+  row['awards'] = { type: 'literal', value: fields.awards ?? '' };
+  return row;
+}
+
+// Empty `fields` (no qid) models "Discogs ID not in Wikidata" → zero bindings.
+function makeArtistDataResponse(fields?: ArtistRowFields): unknown {
+  return { results: { bindings: fields ? [makeArtistRow(fields)] : [] } };
+}
 
 function makeSparqlResponse(countryCode?: string): unknown {
   return {
@@ -354,6 +386,120 @@ describe('WikidataClient', () => {
       // is encodeURIComponent'd — so '%' becomes '%25', leaving 'Bj%25C3%25B6rk' in the fetch URL.
       const rawUrl = fetchSpy.mock.calls[0]?.[0] as string;
       expect(rawUrl).toContain('Bj%25C3%25B6rk');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // getArtistDataByDiscogsId / getArtistDataByWikipediaUrl (#341)
+  // ---------------------------------------------------------------------------
+
+  describe('getArtistDataByDiscogsId', () => {
+    it('resolves the full bundle at day precision', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse(
+          makeArtistDataResponse({
+            qid: 'Q1299',
+            birth: '1941-10-13T00:00:00Z',
+            birthPrecision: '11',
+            image: 'http://commons.wikimedia.org/wiki/Special:FilePath/Paul%20Simon.jpg',
+            awards: 'Grammy Award||Mercury Prize',
+          }),
+        ),
+      );
+
+      const result = await client.getArtistDataByDiscogsId(470470);
+
+      expect(result).toEqual({
+        qid: 'Q1299',
+        bornYear: 1941,
+        bornDate: '1941-10-13',
+        diedYear: null,
+        diedDate: null,
+        imageUrl: 'http://commons.wikimedia.org/wiki/Special:FilePath/Paul%20Simon.jpg',
+        awards: ['Grammy Award', 'Mercury Prize'],
+      });
+      const url = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(url).toContain('query.wikidata.org/sparql');
+      expect(url).toContain('470470');
+      const decoded = decodeURIComponent(url);
+      expect(decoded).toContain('wdt:P1953');
+      // Awards-truncation guard: ?image is SAMPLE'd and NOT a GROUP BY key — otherwise an item with
+      // multiple P18 images fans out into one row per image and LIMIT 1 truncates the GROUP_CONCAT
+      // awards (and picks an arbitrary image). GROUP BY must contain only ?item + the date columns.
+      expect(decoded).toContain('(SAMPLE(?img) AS ?image)');
+      expect(decoded).toMatch(
+        /GROUP BY \?item \?birth \?birthPrecision \?death \?deathPrecision\s/,
+      );
+      expect(decoded).not.toMatch(/GROUP BY[^}]*\?image/);
+    });
+
+    it('keeps the year but drops the date at year precision (Jan-1 truncation)', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse(
+          makeArtistDataResponse({
+            qid: 'Q42',
+            birth: '1948-01-01T00:00:00Z',
+            birthPrecision: '9',
+            death: '2001-05-11T00:00:00Z',
+            deathPrecision: '11',
+          }),
+        ),
+      );
+
+      const result = await client.getArtistDataByDiscogsId(1);
+
+      expect(result?.bornYear).toBe(1948);
+      expect(result?.bornDate).toBeNull();
+      expect(result?.diedYear).toBe(2001);
+      expect(result?.diedDate).toBe('2001-05-11');
+      expect(result?.awards).toEqual([]);
+    });
+
+    it('returns null when the Discogs ID is not in Wikidata (no bindings)', async () => {
+      fetchSpy.mockResolvedValueOnce(makeOkResponse(makeArtistDataResponse()));
+      expect(await client.getArtistDataByDiscogsId(999)).toBeNull();
+    });
+
+    it('soft-skips to null on a network error', async () => {
+      fetchSpy.mockRejectedValueOnce(new Error('boom'));
+      expect(await client.getArtistDataByDiscogsId(1)).toBeNull();
+    });
+  });
+
+  describe('getArtistDataByWikipediaUrl', () => {
+    it('resolves a bundle from an English Wikipedia URL', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse(makeArtistDataResponse({ qid: 'Q1299', awards: 'Grammy Award' })),
+      );
+
+      const result = await client.getArtistDataByWikipediaUrl(
+        'https://en.wikipedia.org/wiki/Paul_Simon',
+      );
+
+      expect(result?.qid).toBe('Q1299');
+      expect(result?.awards).toEqual(['Grammy Award']);
+      const url = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(decodeURIComponent(url)).toContain('schema:about');
+      expect(url).toContain('Paul_Simon');
+    });
+
+    it('returns null for a non-English Wikipedia URL without a network call', async () => {
+      const result = await client.getArtistDataByWikipediaUrl(
+        'https://fr.wikipedia.org/wiki/Paul_Simon',
+      );
+      expect(result).toBeNull();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('parseArtistWikidataRow', () => {
+    it('returns null when the row carries no resolvable QID', () => {
+      expect(parseArtistWikidataRow({ awards: { type: 'literal', value: '' } })).toBeNull();
+    });
+
+    it('coerces an empty awards concat to []', () => {
+      const result = parseArtistWikidataRow(makeArtistRow({ qid: 'Q5', awards: '' }));
+      expect(result?.awards).toEqual([]);
     });
   });
 });

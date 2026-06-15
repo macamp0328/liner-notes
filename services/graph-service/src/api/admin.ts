@@ -33,6 +33,8 @@ import { enrichTrackDeezer } from '../enrichment/track-deezer.js';
 import { resetTrackDeezerEnrichment } from '../db/track-deezer-repository.js';
 import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
 import { resetArtistProfilesEnrichment } from '../db/artist-profiles-repository.js';
+import { enrichArtistWikidata } from '../enrichment/artist-wikidata.js';
+import { resetArtistWikidataEnrichment } from '../db/artist-wikidata-repository.js';
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
 import { enrichLabelHierarchy } from '../enrichment/label-hierarchy.js';
 import { resetLabelHierarchyEnrichment } from '../db/label-hierarchy-repository.js';
@@ -908,6 +910,56 @@ const PIPELINES: PipelineEntry[] = [
       ok: true,
       run: async (driver) => ({ ...(await enrichPersonReconciliation(driver, log)) }),
     }),
+    state: makePipelineState(),
+  },
+  {
+    name: 'artist-wikidata',
+    statusLabel: 'artist Wikidata enrichment',
+    runningMessage: 'Artist Wikidata enrichment already in progress',
+    enrichSummary:
+      'Enrich Artist nodes with Wikidata biographical data (QID, lifespan, image, awards)',
+    enrichDescription:
+      'Resolves each Artist node to its Wikidata item and harvests structured biographical data: ' +
+      '`wikidataQid`, lifespan (`bornYear`/`bornDate`, `diedYear`/`diedDate`), `imageUrl`, and ' +
+      '`awards`. Blocks until complete.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest`** — run it standalone, or rely on the ' +
+      'orchestrated reload (`POST /api/v1/admin/reload`), which includes it.\n\n' +
+      '**Join (deterministic, no name matching):**\n' +
+      '1. Wikidata property P1953 (Discogs artist ID) → the QID, via SPARQL. Needs no Discogs call ' +
+      '(the Discogs ID is already on the node).\n' +
+      '2. Fallback: fetches the Discogs artist page, extracts any English Wikipedia URLs from ' +
+      '`urls[]`, and resolves the Wikidata item via `schema:about`. Requires `DISCOGS_TOKEN`.\n\n' +
+      'Selects Artist nodes that still have no `wikidataQid` and whose last attempt has aged past ' +
+      '`ENRICHMENT_STALENESS_DAYS` (default 30), stamping `wikidataFetchedAt` after each attempt — ' +
+      'so an artist Wikidata does not (yet) know is retried at most once per window while resolved ' +
+      'artists are skipped. Run `POST /api/v1/admin/artist-wikidata/reset` to force a full re-run.\n\n' +
+      'Requires `MUSICBRAINZ_USER_AGENT` (or `DISCOGS_USER_AGENT`) env var for the Wikidata client.',
+    statusSummarySchema: standardSummarySchema,
+    schemaHas503: true,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => {
+      const wdClient = buildWikidataClientFromEnv(log);
+      if (!wdClient) return { ok: false, message: 'MUSICBRAINZ_USER_AGENT not configured' };
+      const discogsClient = buildDiscogsClientFromEnv(log);
+      return {
+        ok: true,
+        run: async (driver) => ({
+          ...(await enrichArtistWikidata(wdClient, discogsClient ?? undefined, driver, log)),
+        }),
+      };
+    },
+    reset: {
+      summary: 'Reset artist Wikidata enrichment markers for a full re-run',
+      description:
+        'Removes the `wikidataFetchedAt` marker and every Wikidata-sourced property (`wikidataQid`, ' +
+        '`bornYear`/`bornDate`, `diedYear`/`diedDate`, `imageUrl`, `awards`) from all Artist nodes, ' +
+        'causing the next `POST /api/v1/admin/artist-wikidata/enrich` call to re-resolve every node ' +
+        'from scratch.\n\n' +
+        'This endpoint is blocked while `POST /api/v1/admin/artist-wikidata/enrich` is running.',
+      runningMessage:
+        'Artist Wikidata enrichment is currently running — wait for it to finish before resetting',
+      run: (driver) => resetArtistWikidataEnrichment(driver),
+    },
     state: makePipelineState(),
   },
 ];

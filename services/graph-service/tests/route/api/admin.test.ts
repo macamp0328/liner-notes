@@ -142,6 +142,16 @@ vi.mock('../../../src/enrichment/artist-nationality.js', () => ({
   enrichNationality: mockEnrichNationality,
 }));
 
+const mockEnrichArtistWikidata = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/enrichment/artist-wikidata.js', () => ({
+  enrichArtistWikidata: mockEnrichArtistWikidata,
+}));
+
+const mockResetArtistWikidataEnrichment = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/db/artist-wikidata-repository.js', () => ({
+  resetArtistWikidataEnrichment: mockResetArtistWikidataEnrichment,
+}));
+
 // job-state is mocked so integration tests don't share singleton state
 const mockGetJobState = vi.hoisted(() => vi.fn());
 const mockStartJob = vi.hoisted(() => vi.fn().mockReturnValue('test-job-id'));
@@ -288,6 +298,14 @@ describe('Admin API', () => {
       durationMs: 300,
     });
     mockEnrichNationality.mockResolvedValue(nationalitySummary);
+    mockEnrichArtistWikidata.mockResolvedValue({
+      enriched: 9,
+      skipped: 4,
+      exhausted: 0,
+      failed: 0,
+      durationMs: 7000,
+    });
+    mockResetArtistWikidataEnrichment.mockResolvedValue(18);
     mockEnrichGroupMembers.mockResolvedValue({
       enriched: 6,
       skipped: 30,
@@ -760,6 +778,78 @@ describe('Admin API', () => {
         url: '/api/v1/admin/nationality/status',
       });
       expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── POST /artist-wikidata/enrich + status + reset (#341) ──────────────────
+  describe('POST /api/v1/admin/artist-wikidata/enrich', () => {
+    it('returns 202 and starts the run in the background', async () => {
+      process.env['MUSICBRAINZ_USER_AGENT'] = 'liner-notes/test (test@example.com)';
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/artist-wikidata/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+
+      expect(response.statusCode).toBe(202);
+      const body = JSON.parse(response.payload) as { data: { statusUrl: string } };
+      expect(body.data.statusUrl).toBe('/api/v1/admin/artist-wikidata/status');
+      await flushBackground();
+      expect(mockEnrichArtistWikidata).toHaveBeenCalled();
+    });
+
+    it('surfaces the summary (incl. exhausted) on /status after a run', async () => {
+      process.env['MUSICBRAINZ_USER_AGENT'] = 'liner-notes/test (test@example.com)';
+      const accepted = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/artist-wikidata/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(accepted.statusCode).toBe(202);
+      await flushBackground();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/artist-wikidata/status',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as {
+        data: { running: boolean; lastResult: Record<string, number> | null };
+      };
+      expect(body.data.running).toBe(false);
+      expect(body.data.lastResult).toEqual({
+        enriched: 9,
+        skipped: 4,
+        exhausted: 0,
+        failed: 0,
+        durationMs: 7000,
+      });
+    });
+
+    it('returns 503 when no Wikidata user-agent env var is configured', async () => {
+      delete process.env['MUSICBRAINZ_USER_AGENT'];
+      delete process.env['DISCOGS_USER_AGENT'];
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/artist-wikidata/enrich',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(503);
+    });
+  });
+
+  describe('POST /api/v1/admin/artist-wikidata/reset', () => {
+    it('resets the markers and returns the count', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/artist-wikidata/reset',
+        headers: { authorization: `Bearer ${VALID_TOKEN}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as { data: { reset: number } };
+      expect(body.data.reset).toBe(18);
+      expect(mockResetArtistWikidataEnrichment).toHaveBeenCalled();
     });
   });
 

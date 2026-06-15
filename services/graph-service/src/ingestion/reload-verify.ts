@@ -34,7 +34,11 @@ export interface CoverageThreshold {
  * are best-effort external sources — gated for "populated" (silently-zero) only.
  *
  * Deliberately omitted: genres, styles, nationality, releaseEvents,
- * deezerGain. They are not in #178's scope; add a row here to start gating one.
+ * deezerGain, and Wikidata bio (#341). They are not in #178's scope; add a row here to start
+ * gating one. Wikidata bio is intentionally ungated like nationality: it is a best-effort external
+ * source that can legitimately resolve zero (transient outage, an obscure collection), so a
+ * silently-zero floor would false-fail an otherwise healthy reload. Coverage is a known number on
+ * `/stats`, not a gate.
  */
 export const RELOAD_COVERAGE_THRESHOLDS: readonly CoverageThreshold[] = [
   { metric: 'releasesWithOriginalYear', stage: 'master-data', minPct: 90 },

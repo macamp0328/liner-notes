@@ -106,6 +106,13 @@ const sampleArtistFull: ArtistFull = {
   name: 'Big Thief',
   realName: null,
   profile: 'American indie rock band',
+  wikidataQid: 'Q5009441',
+  bornYear: null,
+  bornDate: null,
+  diedYear: null,
+  diedDate: null,
+  imageUrl: null,
+  awards: [],
   releases: [
     {
       discogsId: 13570466,

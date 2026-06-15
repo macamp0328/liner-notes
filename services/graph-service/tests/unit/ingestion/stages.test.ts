@@ -25,6 +25,7 @@ import { enrichTrackWorks } from '../../../src/enrichment/track-works.js';
 import { enrichTrackAcousticBrainz } from '../../../src/enrichment/track-acousticbrainz.js';
 import { enrichTrackDeezer } from '../../../src/enrichment/track-deezer.js';
 import { enrichNationality } from '../../../src/enrichment/artist-nationality.js';
+import { enrichArtistWikidata } from '../../../src/enrichment/artist-wikidata.js';
 
 vi.mock('../../../src/ingestion/ingest.js', () => ({ ingestReleases: vi.fn() }));
 vi.mock('../../../src/enrichment/lyrics.js', () => ({
@@ -49,6 +50,7 @@ vi.mock('../../../src/enrichment/track-acousticbrainz.js', () => ({
 }));
 vi.mock('../../../src/enrichment/track-deezer.js', () => ({ enrichTrackDeezer: vi.fn() }));
 vi.mock('../../../src/enrichment/artist-nationality.js', () => ({ enrichNationality: vi.fn() }));
+vi.mock('../../../src/enrichment/artist-wikidata.js', () => ({ enrichArtistWikidata: vi.fn() }));
 
 const COUNTS = { enriched: 5, skipped: 1, failed: 0, durationMs: 10 };
 
@@ -100,6 +102,7 @@ beforeEach(() => {
     enrichTrackAcousticBrainz,
     enrichTrackDeezer,
     enrichNationality,
+    enrichArtistWikidata,
   ]) {
     vi.mocked(fn).mockResolvedValue(COUNTS as never);
   }
@@ -136,6 +139,7 @@ describe('RELOAD_STAGES order', () => {
       'track-acousticbrainz',
       'track-deezer',
       'nationality',
+      'artist-wikidata',
       'verify',
     ]);
   });
@@ -194,8 +198,16 @@ describe('RELOAD_STAGES resource lanes', () => {
       'label-hierarchy',
       'group-members',
       'nationality',
+      'artist-wikidata',
     ] as const) {
       expect(stage(name).resources).toContain('discogs');
+    }
+  });
+
+  it('serialises the two Wikidata-client stages via the wikidata lane (#341)', () => {
+    // nationality and artist-wikidata both drive the one shared ctx.wikidata client.
+    for (const name of ['nationality', 'artist-wikidata'] as const) {
+      expect(stage(name).resources).toContain('wikidata');
     }
   });
 
@@ -376,6 +388,32 @@ describe('stage run() delegates to the right enrich function', () => {
     );
   });
 
+  it('artist-wikidata → enrichArtistWikidata(wikidata, discogs, ..., onProgress)', async () => {
+    const ctx = makeCtx();
+    const onProgress = vi.fn();
+    await stage('artist-wikidata').run(ctx, onProgress);
+    expect(enrichArtistWikidata).toHaveBeenCalledWith(
+      ctx.wikidata,
+      ctx.discogs,
+      ctx.driver,
+      ctx.log,
+      onProgress,
+    );
+  });
+
+  it('artist-wikidata passes undefined when the discogs client is null (P1953 join still works)', async () => {
+    const ctx = makeCtx({ discogs: null });
+    const onProgress = vi.fn();
+    await stage('artist-wikidata').run(ctx, onProgress);
+    expect(enrichArtistWikidata).toHaveBeenCalledWith(
+      ctx.wikidata,
+      undefined,
+      ctx.driver,
+      ctx.log,
+      onProgress,
+    );
+  });
+
   it('verify descriptor run is a no-op — the real gate runs in the orchestrator', async () => {
     // The coverage gate lives in runVerifyGate (it needs cross-stage ranStages); this
     // descriptor exists only for sequence ordering and job-node creation.
@@ -425,6 +463,11 @@ describe('stages skip (return null) when a required client is missing', () => {
   it('nationality skips with no musicbrainz client', async () => {
     expect(await stage('nationality').run(makeCtx({ musicbrainz: null }))).toBeNull();
     expect(enrichNationality).not.toHaveBeenCalled();
+  });
+
+  it('artist-wikidata skips with no wikidata client', async () => {
+    expect(await stage('artist-wikidata').run(makeCtx({ wikidata: null }))).toBeNull();
+    expect(enrichArtistWikidata).not.toHaveBeenCalled();
   });
 });
 

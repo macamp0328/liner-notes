@@ -172,7 +172,7 @@ liner-notes/
 │       │   ├── api/             ← route handlers
 │       │   ├── db/              ← Neo4j driver + repository layer
 │       │   ├── ingestion/       ← Discogs ingestion pipeline
-│       │   ├── enrichment/      ← post-ingest enrichment (lyrics, master-data, nationality, track audio, artist genres/profiles)
+│       │   ├── enrichment/      ← post-ingest enrichment (lyrics, master-data, nationality, track audio, artist genres/profiles/Wikidata bio)
 │       │   ├── observability/   ← stats snapshots + Aura keep-warm timer
 │       │   ├── server.ts        ← Fastify instance builder
 │       │   └── index.ts         ← Fastify entry point

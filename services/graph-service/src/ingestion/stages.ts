@@ -19,6 +19,7 @@ import { enrichTrackWorks } from '../enrichment/track-works.js';
 import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
 import { enrichTrackDeezer } from '../enrichment/track-deezer.js';
 import { enrichNationality } from '../enrichment/artist-nationality.js';
+import { enrichArtistWikidata } from '../enrichment/artist-wikidata.js';
 import type { ProgressReporter } from '../enrichment/progress.js';
 
 /**
@@ -40,6 +41,7 @@ export type ReloadStageName =
   | 'track-acousticbrainz'
   | 'track-deezer'
   | 'nationality'
+  | 'artist-wikidata'
   | 'verify';
 
 /**
@@ -62,10 +64,11 @@ export interface ReloadContext {
  * A rate-limited / contention lane a stage holds while running. Two stages sharing any resource
  * never run concurrently (see `scheduleStages`). Tags fall into two kinds:
  *
- * - `discogs` / `musicbrainz` — the shared HTTP client's rate limiter. The Discogs/MusicBrainz
- *   clients are built once and shared via `ctx`, and their limiters have no shared queue, so two
- *   concurrent stages on one client would double the request rate. Every stage that touches a
- *   client carries its tag.
+ * - `discogs` / `musicbrainz` / `wikidata` — the shared HTTP client's rate limiter. Each client is
+ *   built once and shared via `ctx`, and their limiters have no shared queue, so two concurrent
+ *   stages on one client would double the request rate. Every stage that touches a client carries
+ *   its tag — `nationality` and `artist-wikidata` both drive the one `ctx.wikidata` client, so both
+ *   carry `wikidata` and never overlap.
  * - `track` — a Neo4j node-lock lane for **batched** Track writers. A deadlock needs two
  *   transactions that each hold-and-wait on ≥2 nodes, so it is only possible between two *batched*
  *   writers of the same label. The three batched Track writers (`track-musicbrainz`,
@@ -77,7 +80,7 @@ export interface ReloadContext {
  *   Artist writer (`artist-profiles`/`nationality` write one Artist per tx), so no Artist-axis
  *   deadlock is possible.
  */
-export type ReloadResource = 'discogs' | 'musicbrainz' | 'track';
+export type ReloadResource = 'discogs' | 'musicbrainz' | 'wikidata' | 'track';
 
 export interface StageDescriptor {
   name: ReloadStageName;
@@ -273,9 +276,11 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     }),
   },
   {
+    // Holds `wikidata` too (#341): it drives the one shared `ctx.wikidata` client, which the
+    // `artist-wikidata` stage also uses — the lane serialises that limiter across both stages.
     name: 'nationality',
     deps: ['releases'],
-    resources: ['discogs', 'musicbrainz'],
+    resources: ['discogs', 'musicbrainz', 'wikidata'],
     sources: ['musicbrainz', 'wikidata', 'discogs'],
     run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
       if (!ctx.musicbrainz) return null;
@@ -286,6 +291,29 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
           ctx.log,
           ctx.wikidata ?? undefined,
           ctx.discogs ?? undefined,
+          onProgress,
+        )),
+      };
+    },
+  },
+  {
+    // #341: resolve each Artist's Wikidata QID (P1953 join, Wikipedia-URL fallback) and harvest
+    // lifespan (P569/P570), image (P18), and awards (P166). Holds `wikidata` (shared rate limiter,
+    // serialised with `nationality`) and `discogs` (the fallback's profile fetch — the primary
+    // P1953 join uses the discogsId already on the node, so it needs no Discogs call). Writes one
+    // Artist per tx, so no `track`-style node-lock lane is needed.
+    name: 'artist-wikidata',
+    deps: ['releases'],
+    resources: ['wikidata', 'discogs'],
+    sources: ['wikidata', 'discogs'],
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
+      if (!ctx.wikidata) return null;
+      return {
+        ...(await enrichArtistWikidata(
+          ctx.wikidata,
+          ctx.discogs ?? undefined,
+          ctx.driver,
+          ctx.log,
           onProgress,
         )),
       };
