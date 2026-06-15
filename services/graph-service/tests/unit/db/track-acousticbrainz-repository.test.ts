@@ -3,6 +3,7 @@ import type { Driver, Session, Result, Record as Neo4jRecord } from 'neo4j-drive
 import {
   getTracksForAcousticBrainzEnrichment,
   setTrackAcousticBrainzFeatures,
+  markTrackAcousticBrainzExhausted,
   resetTrackAcousticBrainzEnrichment,
 } from '../../../src/db/track-acousticbrainz-repository.js';
 import type { TrackAcousticBrainzResult } from '../../../src/db/track-acousticbrainz-repository.js';
@@ -66,6 +67,8 @@ describe('getTracksForAcousticBrainzEnrichment', () => {
 
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(query).toContain('recordingMbid IS NOT NULL');
+    // Terminal-empty tracks are excluded for good via the null-safe boolean gate (#384).
+    expect(query).toContain('t.acousticBrainzExhausted IS NULL');
     // "No features" must be ALL features null, not just tempo — low/high-level docs are
     // independent and bpm:0 coerces to null, so tempo alone is an unsafe sentinel.
     expect(query).toContain('coalesce(t.tempo, t.musicalKey, t.musicalScale, t.loudnessDb');
@@ -144,6 +147,33 @@ describe('setTrackAcousticBrainzFeatures', () => {
 });
 
 // ---------------------------------------------------------------------------
+// markTrackAcousticBrainzExhausted
+// ---------------------------------------------------------------------------
+
+describe('markTrackAcousticBrainzExhausted', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('does nothing when the elementIds array is empty', async () => {
+    const { session, runSpy } = makeMockSession();
+    await markTrackAcousticBrainzExhausted(makeMockDriver(session), []);
+    expect(runSpy).not.toHaveBeenCalled();
+  });
+
+  it('runs an UNWIND that sets both the terminal marker and the fetched stamp', async () => {
+    const { session, runSpy } = makeMockSession();
+    await markTrackAcousticBrainzExhausted(makeMockDriver(session), ['4:abc:1', '4:abc:2']);
+
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('UNWIND $elementIds');
+    expect(query).toContain('t.acousticBrainzExhausted = true');
+    expect(query).toContain('t.acousticBrainzFetchedAt = datetime()');
+    expect(params).toHaveProperty('elementIds', ['4:abc:1', '4:abc:2']);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // resetTrackAcousticBrainzEnrichment
 // ---------------------------------------------------------------------------
 
@@ -152,7 +182,7 @@ describe('resetTrackAcousticBrainzEnrichment', () => {
     vi.clearAllMocks();
   });
 
-  it('returns the count of reset tracks', async () => {
+  it('returns the count of reset tracks and clears the terminal marker too', async () => {
     const record = makeNeo4jRecord({ reset: int(42) });
     const { session, runSpy } = makeMockSession({ records: [record] } as unknown as Result);
     const count = await resetTrackAcousticBrainzEnrichment(makeMockDriver(session));
@@ -160,7 +190,10 @@ describe('resetTrackAcousticBrainzEnrichment', () => {
     expect(count).toBe(42);
     const [query] = runSpy.mock.calls[0] as [string];
     expect(query).toContain('acousticBrainzFetchedAt IS NOT NULL');
+    // Broadened guard + REMOVE must cover the terminal marker, or a reset won't re-sweep it (#384).
+    expect(query).toContain('t.acousticBrainzExhausted IS NOT NULL');
     expect(query).toContain('REMOVE');
+    expect(query).toContain('t.acousticBrainzExhausted');
   });
 
   it('returns 0 when no tracks had the fetched marker', async () => {

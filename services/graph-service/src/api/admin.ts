@@ -348,6 +348,21 @@ const trackFeatureSummarySchema = {
   },
 };
 
+// track-acousticbrainz carries an extra `tracksExhausted` terminal-empty counter (#384) the
+// throttle-only track-deezer summary lacks; without it here Fastify's serializer would strip the
+// field from /admin/track-acousticbrainz/status. (A frozen source has no throttle path, so
+// `tracksSkipped` is always 0 — kept for shape parity.)
+const trackAcousticBrainzSummarySchema = {
+  type: 'object',
+  properties: {
+    tracksProcessed: { type: 'integer' },
+    tracksSkipped: { type: 'integer' },
+    tracksExhausted: { type: 'integer' },
+    tracksFailed: { type: 'integer' },
+    durationMs: { type: 'integer' },
+  },
+};
+
 const mbReleaseEventsSummarySchema = {
   type: 'object',
   properties: {
@@ -750,12 +765,11 @@ const PIPELINES: PipelineEntry[] = [
       'own estimates and must never be presented as Spotify-equivalent values. No time signature ' +
       'is provided: AcousticBrainz does not expose a reliable categorical time signature.\n\n' +
       'All fields are nullable and best-effort — AcousticBrainz coverage is crowd-sourced and ' +
-      'frozen at 2022. Re-selects a track that still has no features (null `tempo`) once its last ' +
-      'attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `acousticBrainzFetchedAt` ' +
-      'after each attempt — so a track with no AcousticBrainz data is retried at most once per window ' +
-      'while already-featured tracks are skipped. Run `POST /api/v1/admin/track-acousticbrainz/reset` ' +
+      'frozen at 2022. Because the source is frozen, a recording with no usable features is ' +
+      'permanent: it is marked `acousticBrainzExhausted` (counted `tracksExhausted`) and never ' +
+      're-queried, rather than throttled (#384). Run `POST /api/v1/admin/track-acousticbrainz/reset` ' +
       'to force a full re-run.',
-    statusSummarySchema: trackFeatureSummarySchema,
+    statusSummarySchema: trackAcousticBrainzSummarySchema,
     schemaHas503: false,
     clientCheckFirst: false,
     prepare: (log): PreparedRun => {
@@ -768,7 +782,8 @@ const PIPELINES: PipelineEntry[] = [
     reset: {
       summary: 'Reset AcousticBrainz track enrichment markers for a full re-run',
       description:
-        'Removes the `acousticBrainzFetchedAt` marker and every audio-feature property ' +
+        'Removes the `acousticBrainzFetchedAt` marker, the terminal `acousticBrainzExhausted` ' +
+        'marker, and every audio-feature property ' +
         '(`tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, `dynamicComplexity`, ' +
         '`danceabilityEstimate`, `voiceInstrumental`) from all Track nodes, causing the next ' +
         '`POST /api/v1/admin/track-acousticbrainz/enrich` call to re-process every track from ' +

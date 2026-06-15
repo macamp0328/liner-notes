@@ -4,6 +4,7 @@ import {
   MAX_RECORDING_IDS_PER_CALL,
   buildAcousticBrainzClientFromEnv,
 } from '../../../src/ingestion/acousticbrainz-client.js';
+import { CircuitBreakerOpenError } from '../../../src/ingestion/circuit-breaker.js';
 import { snapshotEnv } from '../../helpers/env.js';
 
 // ---------------------------------------------------------------------------
@@ -331,7 +332,7 @@ describe('AcousticBrainzClient circuit breaker (#242)', () => {
     env.restore();
   });
 
-  it('opens after consecutive fatal (403) responses, then returns an empty map without a fetch', async () => {
+  it('opens after consecutive fatal (403) responses, then throws CircuitBreakerOpenError without a fetch', async () => {
     fetchSpy.mockResolvedValue(makeErrorResponse(403, 'Forbidden'));
     const client = new AcousticBrainzClient({
       userAgent: 'liner-notes/test',
@@ -344,8 +345,9 @@ describe('AcousticBrainzClient circuit breaker (#242)', () => {
     expect(client.breakerSnapshot().open).toBe(true);
 
     const callsBefore = fetchSpy.mock.calls.length;
-    const result = await client.getFeatures(['mbid-3']); // short-circuit
-    expect(result.size).toBe(0);
+    // An open breaker now THROWS rather than swallowing into an empty map (#384): the batch caller
+    // treats it as a transient failure (retry next run), never as a confirmed permanent absence.
+    await expect(client.getFeatures(['mbid-3'])).rejects.toBeInstanceOf(CircuitBreakerOpenError);
     expect(fetchSpy.mock.calls.length).toBe(callsBefore); // no network call
   });
 });

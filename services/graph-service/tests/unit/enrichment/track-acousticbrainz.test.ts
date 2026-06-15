@@ -11,10 +11,12 @@ import { MAX_RECORDING_IDS_PER_CALL } from '../../../src/ingestion/acousticbrain
 
 const mockGetTracks = vi.hoisted(() => vi.fn());
 const mockSetFeatures = vi.hoisted(() => vi.fn());
+const mockMarkExhausted = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/db/track-acousticbrainz-repository.js', () => ({
   getTracksForAcousticBrainzEnrichment: mockGetTracks,
   setTrackAcousticBrainzFeatures: mockSetFeatures,
+  markTrackAcousticBrainzExhausted: mockMarkExhausted,
 }));
 
 // ---------------------------------------------------------------------------
@@ -64,6 +66,7 @@ describe('enrichTrackAcousticBrainz', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSetFeatures.mockResolvedValue(undefined);
+    mockMarkExhausted.mockResolvedValue(undefined);
   });
 
   it('returns zero counts immediately when no unenriched tracks exist', async () => {
@@ -87,30 +90,31 @@ describe('enrichTrackAcousticBrainz', () => {
 
     expect(summary.tracksProcessed).toBe(1);
     expect(summary.tracksSkipped).toBe(0);
+    expect(summary.tracksExhausted).toBe(0);
     expect(summary.tracksFailed).toBe(0);
     expect(mockSetFeatures).toHaveBeenCalledOnce();
+    expect(mockMarkExhausted).toHaveBeenCalledWith(fakeDriver, []);
     const [[, results]] = mockSetFeatures.mock.calls as [[Driver, Array<{ elementId: string }>]];
     expect(results[0]?.elementId).toBe('e1');
     expect(results[0]).toMatchObject({ tempo: 130.5, musicalKey: 'C' });
   });
 
-  it('counts a track as skipped when MBID is absent from the AcousticBrainz response', async () => {
+  it('counts a track as exhausted (terminal) when MBID is absent from the AcousticBrainz response', async () => {
     mockGetTracks.mockResolvedValue([makeTrack('e1', 'missing-mbid')]);
 
     const { client } = makeAbClient(async () => new Map());
     const summary = await enrichTrackAcousticBrainz(client, fakeDriver, silentLogger);
 
+    // Frozen source: a recording absent from a successful response is permanently exhausted (#384).
     expect(summary.tracksProcessed).toBe(0);
-    expect(summary.tracksSkipped).toBe(1);
-    expect(mockSetFeatures).toHaveBeenCalledOnce();
-    const [[, results]] = mockSetFeatures.mock.calls as [
-      [Driver, Array<{ elementId: string; tempo: unknown }>],
-    ];
-    expect(results[0]?.elementId).toBe('e1');
-    expect(results[0]?.tempo).toBeNull();
+    expect(summary.tracksSkipped).toBe(0);
+    expect(summary.tracksExhausted).toBe(1);
+    expect(mockMarkExhausted).toHaveBeenCalledWith(fakeDriver, ['e1']);
+    // No features to write for an absent track — setFeatures is called with an empty batch.
+    expect(mockSetFeatures).toHaveBeenCalledWith(fakeDriver, []);
   });
 
-  it('counts a track as skipped when all feature fields are null', async () => {
+  it('counts a track as exhausted when present but all feature fields are null', async () => {
     const mbid = 'aaaaaaaa-0000-0000-0000-000000000002';
     const emptyFeatures: AcousticBrainzFeatures = {
       tempo: null,
@@ -126,8 +130,28 @@ describe('enrichTrackAcousticBrainz', () => {
     const { client } = makeAbClient(async () => new Map([[mbid, emptyFeatures]]));
     const summary = await enrichTrackAcousticBrainz(client, fakeDriver, silentLogger);
 
+    // Present-but-all-null is just as permanent as absent on a frozen source → terminal, not throttled.
     expect(summary.tracksProcessed).toBe(0);
-    expect(summary.tracksSkipped).toBe(1);
+    expect(summary.tracksSkipped).toBe(0);
+    expect(summary.tracksExhausted).toBe(1);
+    expect(mockMarkExhausted).toHaveBeenCalledWith(fakeDriver, ['e1']);
+  });
+
+  it('splits a mixed batch into processed (features) and exhausted (no features)', async () => {
+    const matched = 'aaaaaaaa-0000-0000-0000-000000000010';
+    const absent = 'aaaaaaaa-0000-0000-0000-000000000011';
+    mockGetTracks.mockResolvedValue([makeTrack('e1', matched), makeTrack('e2', absent)]);
+
+    const { client } = makeAbClient(async () => new Map([[matched, FULL_FEATURES]]));
+    const summary = await enrichTrackAcousticBrainz(client, fakeDriver, silentLogger);
+
+    expect(summary.tracksProcessed).toBe(1);
+    expect(summary.tracksExhausted).toBe(1);
+    expect(summary.tracksSkipped).toBe(0);
+    expect(summary.tracksFailed).toBe(0);
+    const [[, written]] = mockSetFeatures.mock.calls as [[Driver, Array<{ elementId: string }>]];
+    expect(written.map((r) => r.elementId)).toEqual(['e1']);
+    expect(mockMarkExhausted).toHaveBeenCalledWith(fakeDriver, ['e2']);
   });
 
   it('deduplicates recording MBIDs across multiple tracks', async () => {
@@ -184,10 +208,13 @@ describe('enrichTrackAcousticBrainz', () => {
 
     expect(summary.tracksFailed).toBe(2);
     expect(summary.tracksProcessed).toBe(0);
+    // A transient failure must NEVER write the terminal marker (the 404-vs-5xx distinction, #384).
+    expect(summary.tracksExhausted).toBe(0);
     expect(mockSetFeatures).not.toHaveBeenCalled();
+    expect(mockMarkExhausted).not.toHaveBeenCalled();
   });
 
-  it('counts batch tracks as failed when the write throws, and continues without crashing', async () => {
+  it('counts batch tracks as failed when the feature write throws, and continues without crashing', async () => {
     const mbid = 'write-fail-0000-0000-0000-000000000005';
     mockGetTracks.mockResolvedValue([makeTrack('e1', mbid)]);
     mockSetFeatures.mockRejectedValue(new Error('Neo4j write error'));
@@ -197,6 +224,23 @@ describe('enrichTrackAcousticBrainz', () => {
 
     expect(summary.tracksFailed).toBe(1);
     expect(summary.tracksProcessed).toBe(0);
+    expect(summary.tracksExhausted).toBe(0);
+  });
+
+  it('counts the whole batch failed (not partially processed) when the exhausted-marker write throws', async () => {
+    const matched = 'aaaaaaaa-0000-0000-0000-000000000020';
+    const absent = 'aaaaaaaa-0000-0000-0000-000000000021';
+    mockGetTracks.mockResolvedValue([makeTrack('e1', matched), makeTrack('e2', absent)]);
+    // The feature write succeeds; the terminal-marker write (second await) throws.
+    mockMarkExhausted.mockRejectedValue(new Error('Neo4j write error'));
+
+    const { client } = makeAbClient(async () => new Map([[matched, FULL_FEATURES]]));
+    const summary = await enrichTrackAcousticBrainz(client, fakeDriver, silentLogger);
+
+    // Counters increment only after BOTH writes succeed — the processed track is not double-counted.
+    expect(summary.tracksProcessed).toBe(0);
+    expect(summary.tracksExhausted).toBe(0);
+    expect(summary.tracksFailed).toBe(2);
   });
 
   it('continues processing other batches after one batch fails', async () => {
