@@ -49,7 +49,8 @@ export async function getUnenrichedArtistsForWikidata(driver: Driver): Promise<U
  *
  * On a successful resolve every field is overwritten with Wikidata's current truth, including
  * `SET prop = null` for an absent field (Neo4j removes the property) — so a re-run replaces stale
- * values rather than accumulating them. `awards` is stored as a list (possibly empty), never null.
+ * values rather than accumulating them. `awards`, `playsInstrument`, and `playsInstrumentRaw` are
+ * each stored as a list (possibly empty), never null.
  */
 export async function setArtistWikidata(
   driver: Driver,
@@ -68,6 +69,8 @@ export async function setArtistWikidata(
              a.diedDate = $diedDate,
              a.imageUrl = $imageUrl,
              a.awards = $awards,
+             a.playsInstrument = $playsInstrument,
+             a.playsInstrumentRaw = $playsInstrumentRaw,
              a.wikidataFetchedAt = datetime()`,
         {
           discogsId: neo4j.int(discogsId),
@@ -78,6 +81,8 @@ export async function setArtistWikidata(
           diedDate: data.diedDate,
           imageUrl: data.imageUrl,
           awards: data.awards,
+          playsInstrument: data.playsInstrument,
+          playsInstrumentRaw: data.playsInstrumentRaw,
         },
       );
     } else {
@@ -102,7 +107,8 @@ export async function resetArtistWikidataEnrichment(driver: Driver): Promise<num
     const result = await session.run(
       `MATCH (a:Artist) WHERE a.wikidataFetchedAt IS NOT NULL
        REMOVE a.wikidataFetchedAt, a.wikidataQid, a.bornYear, a.bornDate,
-              a.diedYear, a.diedDate, a.imageUrl, a.awards
+              a.diedYear, a.diedDate, a.imageUrl, a.awards,
+              a.playsInstrument, a.playsInstrumentRaw
        RETURN count(a) AS reset`,
     );
     return (result.records[0]?.get('reset') as Neo4jInt | null)?.toNumber() ?? 0;

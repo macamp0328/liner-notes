@@ -28,6 +28,18 @@ export interface InstrumentCredit extends ExploreRelease {
 }
 
 /**
+ * A person-level player of an instrument (#393): an Artist whose Wikidata P1303 set, normalized onto
+ * the #333 family vocabulary, includes the queried family. Distinct from {@link InstrumentCredit},
+ * which is the per-credit axis (someone credited on a release/track playing the instrument).
+ * `playsInstrument` is the artist's full normalized family list, so the caller can show "also plays".
+ */
+export interface InstrumentPlayer {
+  discogsId: number;
+  name: string;
+  playsInstrument: string[];
+}
+
+/**
  * One recording of a Work in the collection (#336). Rows sharing a `recordingMbid` are the same
  * recording on multiple releases (a duplicate); distinct `recordingMbid` values under one Work are
  * different recordings — the versions/covers.
@@ -262,6 +274,39 @@ export async function getReleasesByInstrument(
       instrument: toStr(rec.get('instrument')),
       displayRole: toStr(rec.get('displayRole')),
       scope: toStr(rec.get('scope')),
+    }));
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Person-level players of an instrument family (#393): Artists whose Wikidata P1303 set (normalized
+ * onto the #333 vocabulary and stored on `Artist.playsInstrument`) contains the queried family. The
+ * companion to {@link getReleasesByInstrument} — together they answer "who plays bass" from both the
+ * documented person-level axis (Wikidata) and the per-credit axis (Discogs/MB credits). The stored
+ * families are lowercase, so the param is lowercased to match; that also excludes artists with no
+ * (or an empty) `playsInstrument`.
+ */
+export async function getArtistsByPersonLevelInstrument(
+  driver: Driver,
+  instrument: string,
+): Promise<InstrumentPlayer[]> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `
+      MATCH (a:Artist)
+      WHERE a.discogsId IS NOT NULL AND toLower($instrument) IN a.playsInstrument
+      RETURN a.discogsId AS discogsId, a.name AS name, a.playsInstrument AS playsInstrument
+      ORDER BY name
+      `,
+      { instrument },
+    );
+    return result.records.map((rec) => ({
+      discogsId: toInt(rec.get('discogsId')) ?? 0,
+      name: toStr(rec.get('name')) ?? '',
+      playsInstrument: (rec.get('playsInstrument') as string[] | null) ?? [],
     }));
   } finally {
     await session.close();

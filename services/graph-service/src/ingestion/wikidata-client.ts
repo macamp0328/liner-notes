@@ -1,4 +1,5 @@
 import { transientNetworkCode } from './network-errors.js';
+import { normalizeInstrumentFamilies } from './transforms.js';
 import {
   createRateLimitedFetch,
   RetriesExhaustedError,
@@ -44,6 +45,11 @@ interface SparqlResponse {
  * trustworthy at any Wikidata date precision); `bornDate`/`diedDate` are populated ONLY at day
  * precision, because Wikidata truncates a year/month-precision date to `YYYY-01-01` / `YYYY-MM-01`,
  * which would masquerade as a real day. `awards` is `[]` (not null) when the item lists none.
+ *
+ * `playsInstrument`/`playsInstrumentRaw` are the person-level instrument axis from P1303 (#393),
+ * the companion to the per-credit CREDITED_ON.instrument axis (#333): `playsInstrumentRaw` keeps the
+ * verbatim English labels, `playsInstrument` is those normalized onto the #333 family vocabulary
+ * (deduped, sorted). Both are `[]` (not null) when the item lists no instruments.
  */
 export interface ArtistWikidataData {
   qid: string;
@@ -53,6 +59,8 @@ export interface ArtistWikidataData {
   diedDate: string | null;
   imageUrl: string | null;
   awards: string[];
+  playsInstrument: string[];
+  playsInstrumentRaw: string[];
 }
 
 const SPARQL_ENDPOINT = 'https://query.wikidata.org/sparql';
@@ -167,8 +175,9 @@ export class WikidataClient {
   /**
    * Resolve an artist's full Wikidata biographical bundle by Discogs artist ID (#341).
    * Joins deterministically on P1953 → the QID, then harvests P569/P570 (lifespan), P18 (image),
-   * and P166 (awards, English labels) in one query. Returns null when the Discogs ID is not in
-   * Wikidata. Same soft-skip-to-null and retry semantics as the country lookups.
+   * P166 (awards, English labels), and P1303 (instruments played, English labels, #393) in one
+   * query. Returns null when the Discogs ID is not in Wikidata. Same soft-skip-to-null and retry
+   * semantics as the country lookups.
    */
   async getArtistDataByDiscogsId(discogsId: number): Promise<ArtistWikidataData | null> {
     const query = this.buildArtistDataQuery(`?item wdt:P1953 "${discogsId}" .`);
@@ -201,17 +210,23 @@ export class WikidataClient {
    * those rows and `LIMIT 1` would silently truncate the awards list (and pick an arbitrary image).
    * With only `?item`/dates grouped, every award cross-joins into the single (common-case) row, so
    * the concat is complete. The `LANG="en"` filter is inside the P166 OPTIONAL so an unlabelled
-   * award never blanks the row. Wikidata's SPARQL endpoint pre-declares every prefix used here.
+   * award never blanks the row. P1303 (instruments, #393) is fetched the same way: a second
+   * `GROUP_CONCAT(DISTINCT …)` over the same grouping. Two multi-valued OPTIONALs make the awards ×
+   * instruments cross-product larger, but `DISTINCT` collapses each concat independently per column,
+   * so neither corrupts the other and both come back complete (the count is bounded and tiny per
+   * person). Wikidata's SPARQL endpoint pre-declares every prefix used here.
    */
   private buildArtistDataQuery(subjectLine: string): string {
     return `
       SELECT ?item ?birth ?birthPrecision ?death ?deathPrecision (SAMPLE(?img) AS ?image)
-             (GROUP_CONCAT(DISTINCT ?awardLabel; SEPARATOR="||") AS ?awards) WHERE {
+             (GROUP_CONCAT(DISTINCT ?awardLabel; SEPARATOR="||") AS ?awards)
+             (GROUP_CONCAT(DISTINCT ?instrLabel; SEPARATOR="||") AS ?instruments) WHERE {
         ${subjectLine}
         OPTIONAL { ?item p:P569/psv:P569 [ wikibase:timeValue ?birth ; wikibase:timePrecision ?birthPrecision ] . }
         OPTIONAL { ?item p:P570/psv:P570 [ wikibase:timeValue ?death ; wikibase:timePrecision ?deathPrecision ] . }
         OPTIONAL { ?item wdt:P18 ?img . }
         OPTIONAL { ?item wdt:P166 ?award . ?award rdfs:label ?awardLabel . FILTER(LANG(?awardLabel) = "en") }
+        OPTIONAL { ?item wdt:P1303 ?instr . ?instr rdfs:label ?instrLabel . FILTER(LANG(?instrLabel) = "en") }
       }
       GROUP BY ?item ?birth ?birthPrecision ?death ?deathPrecision
       LIMIT 1
@@ -292,7 +307,8 @@ function parseWikidataDate(value: string | undefined, precision: number | null):
   return datePart && datePart.length > 0 ? datePart : null;
 }
 
-function parseAwards(value: string | undefined): string[] {
+/** Split a `||`-joined GROUP_CONCAT binding (awards, instruments, …) into trimmed, non-empty labels. */
+function parseConcatLabels(value: string | undefined): string[] {
   if (!value) return [];
   return value
     .split('||')
@@ -311,6 +327,7 @@ export function parseArtistWikidataRow(row: SparqlBinding): ArtistWikidataData |
   const birthValue = row['birth']?.value;
   const deathValue = row['death']?.value;
   const image = row['image']?.value?.trim();
+  const playsInstrumentRaw = parseConcatLabels(row['instruments']?.value);
   return {
     qid,
     bornYear: parseWikidataYear(birthValue),
@@ -318,7 +335,9 @@ export function parseArtistWikidataRow(row: SparqlBinding): ArtistWikidataData |
     diedYear: parseWikidataYear(deathValue),
     diedDate: parseWikidataDate(deathValue, parsePrecision(row['deathPrecision']?.value)),
     imageUrl: image && image.length > 0 ? image : null,
-    awards: parseAwards(row['awards']?.value),
+    awards: parseConcatLabels(row['awards']?.value),
+    playsInstrument: normalizeInstrumentFamilies(playsInstrumentRaw),
+    playsInstrumentRaw,
   };
 }
 

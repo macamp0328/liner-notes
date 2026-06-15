@@ -56,11 +56,14 @@ export interface StatsData {
     artistsWithProfile: CoverageMetric;
     artistsWithGenres: CoverageMetric;
     artistsWithStyles: CoverageMetric;
-    // Wikidata enrichment coverage (#341), all over the real-artist (profApplicable) denominator.
+    // Wikidata enrichment coverage (#341, #393), all over the real-artist (profApplicable)
+    // denominator. artistsWithInstruments (person-level P1303, #393) is expected to be thin — bands,
+    // artists not in Wikidata, and people without a P1303 statement all dilute the denominator.
     artistsWithWikidataId: CoverageMetric;
     artistsWithBirthDate: CoverageMetric;
     artistsWithImage: CoverageMetric;
     artistsWithAwards: CoverageMetric;
+    artistsWithInstruments: CoverageMetric;
     artistsWithNationality: SourcedCoverageMetric;
     musiciansWithNationality: SourcedCoverageMetric;
     producersWithNationality: SourcedCoverageMetric;
@@ -161,7 +164,9 @@ const ARTIST_QUERY = `
     count(CASE WHEN applicable AND a.wikidataQid IS NOT NULL THEN 1 END) AS wikidataQidCovered,
     count(CASE WHEN applicable AND a.bornYear IS NOT NULL THEN 1 END) AS bornYearCovered,
     count(CASE WHEN applicable AND a.imageUrl IS NOT NULL THEN 1 END) AS imageCovered,
-    count(CASE WHEN applicable AND a.awards IS NOT NULL AND size(a.awards) > 0 THEN 1 END) AS awardsCovered`;
+    count(CASE WHEN applicable AND a.awards IS NOT NULL AND size(a.awards) > 0 THEN 1 END) AS awardsCovered,
+    // #393 person-level instruments from Wikidata P1303, same real-artist denominator.
+    count(CASE WHEN applicable AND a.playsInstrument IS NOT NULL AND size(a.playsInstrument) > 0 THEN 1 END) AS instrumentsCovered`;
 
 const TRACK_QUERY = `
   MATCH (t:Track)
@@ -370,6 +375,10 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       artistsWithBirthDate: coverage(n(artist, 'bornYearCovered'), n(artist, 'profApplicable')),
       artistsWithImage: coverage(n(artist, 'imageCovered'), n(artist, 'profApplicable')),
       artistsWithAwards: coverage(n(artist, 'awardsCovered'), n(artist, 'profApplicable')),
+      artistsWithInstruments: coverage(
+        n(artist, 'instrumentsCovered'),
+        n(artist, 'profApplicable'),
+      ),
       artistsWithNationality: nationality(natArtist),
       musiciansWithNationality: nationality(natMusician),
       producersWithNationality: nationality(natProducer),

@@ -108,6 +108,10 @@ export interface ArtistFull {
   diedDate: string | null;
   imageUrl: string | null;
   awards: string[];
+  // Person-level instruments from Wikidata P1303 (#393): the normalized #333 families plus the raw
+  // English labels. Companion to the per-credit CREDITED_ON.instrument axis (#333).
+  playsInstrument: string[];
+  playsInstrumentRaw: string[];
   releases: ArtistRelease[];
   credits: ArtistCredit[];
 }
@@ -373,6 +377,7 @@ RETURN a.discogsId AS discogsId, a.name AS name,
        a.realName AS realName, a.profile AS profile,
        a.wikidataQid AS wikidataQid, a.bornYear AS bornYear, a.bornDate AS bornDate,
        a.diedYear AS diedYear, a.diedDate AS diedDate, a.imageUrl AS imageUrl, a.awards AS awards,
+       a.playsInstrument AS playsInstrument, a.playsInstrumentRaw AS playsInstrumentRaw,
   collect(DISTINCT {discogsId: r.discogsId, title: r.title, pressingYear: r.pressingYear,
     format: r.format, thumbUrl: r.thumbUrl, role: rb.role}) AS releases`,
       { discogsId: neo4j.int(discogsId) },
@@ -435,6 +440,9 @@ RETURN release.discogsId AS releaseDiscogsId, release.title AS releaseTitle,
       imageUrl: toStr(rec.get('imageUrl') as unknown),
       // awards is stored as a Neo4j list (possibly empty); null only when never enriched.
       awards: (rec.get('awards') as string[] | null) ?? [],
+      // Same shape as awards: a list (possibly empty), null only before the wikidata enrichment ran.
+      playsInstrument: (rec.get('playsInstrument') as string[] | null) ?? [],
+      playsInstrumentRaw: (rec.get('playsInstrumentRaw') as string[] | null) ?? [],
       releases,
       credits,
     };
