@@ -41,6 +41,7 @@ import { resetLabelHierarchyEnrichment } from '../db/label-hierarchy-repository.
 import { enrichGroupMembers } from '../enrichment/group-members.js';
 import { resetGroupMembers } from '../db/group-members-repository.js';
 import { enrichPersonReconciliation } from '../enrichment/person-reconciliation.js';
+import { enrichSongwriterReconciliation } from '../enrichment/songwriter-reconciliation.js';
 import { runReload } from '../ingestion/orchestrator.js';
 import { RELOAD_STAGES } from '../ingestion/stages.js';
 import {
@@ -390,6 +391,15 @@ const artistGenresSummarySchema = {
 };
 
 const personReconciliationSummarySchema = {
+  type: 'object',
+  properties: {
+    linksReconciled: { type: 'integer' },
+    failed: { type: 'integer' },
+    durationMs: { type: 'integer' },
+  },
+};
+
+const songwriterReconciliationSummarySchema = {
   type: 'object',
   properties: {
     linksReconciled: { type: 'integer' },
@@ -954,6 +964,32 @@ const PIPELINES: PipelineEntry[] = [
         'MusicBrainz artist-ID mapping is currently running — wait for it to finish before resetting',
       run: (driver) => resetMusicbrainzIdEnrichment(driver),
     },
+    state: makePipelineState(),
+  },
+  {
+    name: 'songwriter-reconciliation',
+    statusLabel: 'songwriter reconciliation',
+    runningMessage: 'Songwriter reconciliation already in progress',
+    enrichSummary: 'Promote Work writers to (:Artist|:Musician)-[:WROTE]->(:Work) edges',
+    enrichDescription:
+      "Joins each Work's captured `writerMbids` (from #336) to the Artist/Musician nodes carrying " +
+      'the matching `musicbrainzId` (resolved by `POST /api/v1/admin/mb-artist-id/enrich`) and ' +
+      'MERGEs a `WROTE` edge tagged with the writer roles — ID join only, never name-matching ' +
+      '(#380). No external API and **no new MusicBrainz calls**: the writer MBIDs are already on the ' +
+      'Work nodes. Idempotent and safe to re-run; picks up newly-resolved MBIDs and newly-captured ' +
+      'Works without a re-ingest. Blocks until complete.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest`** — run it after `mb-artist-id` (and ' +
+      '`track-works`), or rely on the orchestrated reload (`POST /api/v1/admin/reload`), which ' +
+      'includes it.\n\n' +
+      '**No reset endpoint:** the pass re-links exhaustively every run, so it is inherently ' +
+      'idempotent and there is nothing to reset.',
+    statusSummarySchema: songwriterReconciliationSummarySchema,
+    schemaHas503: false,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => ({
+      ok: true,
+      run: async (driver) => ({ ...(await enrichSongwriterReconciliation(driver, log)) }),
+    }),
     state: makePipelineState(),
   },
 ];

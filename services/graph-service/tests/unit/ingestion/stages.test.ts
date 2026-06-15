@@ -26,6 +26,7 @@ import { enrichTrackAcousticBrainz } from '../../../src/enrichment/track-acousti
 import { enrichTrackDeezer } from '../../../src/enrichment/track-deezer.js';
 import { enrichNationality } from '../../../src/enrichment/artist-nationality.js';
 import { enrichArtistMusicbrainzIds } from '../../../src/enrichment/artist-musicbrainz-id.js';
+import { enrichSongwriterReconciliation } from '../../../src/enrichment/songwriter-reconciliation.js';
 
 vi.mock('../../../src/ingestion/ingest.js', () => ({ ingestReleases: vi.fn() }));
 vi.mock('../../../src/enrichment/lyrics.js', () => ({
@@ -52,6 +53,9 @@ vi.mock('../../../src/enrichment/track-deezer.js', () => ({ enrichTrackDeezer: v
 vi.mock('../../../src/enrichment/artist-nationality.js', () => ({ enrichNationality: vi.fn() }));
 vi.mock('../../../src/enrichment/artist-musicbrainz-id.js', () => ({
   enrichArtistMusicbrainzIds: vi.fn(),
+}));
+vi.mock('../../../src/enrichment/songwriter-reconciliation.js', () => ({
+  enrichSongwriterReconciliation: vi.fn(),
 }));
 
 const COUNTS = { enriched: 5, skipped: 1, failed: 0, durationMs: 10 };
@@ -105,6 +109,7 @@ beforeEach(() => {
     enrichTrackDeezer,
     enrichNationality,
     enrichArtistMusicbrainzIds,
+    enrichSongwriterReconciliation,
   ]) {
     vi.mocked(fn).mockResolvedValue(COUNTS as never);
   }
@@ -142,6 +147,7 @@ describe('RELOAD_STAGES order', () => {
       'track-deezer',
       'mb-artist-id',
       'nationality',
+      'songwriter-reconciliation',
       'verify',
     ]);
   });
@@ -181,6 +187,21 @@ describe('RELOAD_STAGES dependency graph', () => {
     expect(stage('person-reconciliation').deps).toEqual(
       expect.arrayContaining(['artist-genres', 'group-members']),
     );
+  });
+
+  it('runs songwriter-reconciliation after its data sources and every node writer (#380)', () => {
+    // Reads writerMbids (track-works) + musicbrainzId (mb-artist-id); as a dual-axis WROTE writer it
+    // must not overlap the other Artist/Musician writers — deps person-reconciliation (transitively
+    // artist-genres + group-members) and nationality.
+    expect(stage('songwriter-reconciliation').deps).toEqual(
+      expect.arrayContaining([
+        'track-works',
+        'mb-artist-id',
+        'person-reconciliation',
+        'nationality',
+      ]),
+    );
+    expect(stage('songwriter-reconciliation').resources).toEqual([]);
   });
 
   it('makes verify depend on every other stage so it runs strictly last', () => {
@@ -393,6 +414,12 @@ describe('stage run() delegates to the right enrich function', () => {
       ctx.log,
       onProgress,
     );
+  });
+
+  it('songwriter-reconciliation → enrichSongwriterReconciliation(driver, log)', async () => {
+    const ctx = makeCtx();
+    await stage('songwriter-reconciliation').run(ctx);
+    expect(enrichSongwriterReconciliation).toHaveBeenCalledWith(ctx.driver, ctx.log);
   });
 
   it('verify descriptor run is a no-op — the real gate runs in the orchestrator', async () => {

@@ -20,6 +20,7 @@ import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js
 import { enrichTrackDeezer } from '../enrichment/track-deezer.js';
 import { enrichNationality } from '../enrichment/artist-nationality.js';
 import { enrichArtistMusicbrainzIds } from '../enrichment/artist-musicbrainz-id.js';
+import { enrichSongwriterReconciliation } from '../enrichment/songwriter-reconciliation.js';
 import type { ProgressReporter } from '../enrichment/progress.js';
 
 /**
@@ -42,6 +43,7 @@ export type ReloadStageName =
   | 'track-deezer'
   | 'mb-artist-id'
   | 'nationality'
+  | 'songwriter-reconciliation'
   | 'verify';
 
 /**
@@ -313,6 +315,20 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
         )),
       };
     },
+  },
+  {
+    // #380: promote each Work's captured writerMbids to (:Artist|:Musician)-[:WROTE]->(:Work) edges
+    // by joining on the musicbrainzId from mb-artist-id. Pure Cypher, no MB calls. Like
+    // person-reconciliation it is a dual-axis writer (its two single-label MERGEs lock Artist then
+    // Musician, plus Work), so it must not overlap any node writer: deps it after the two batched
+    // single-axis writers (transitively via person-reconciliation, which already deps artist-genres
+    // + group-members) AND after nationality (per-node Artist/Musician writer). track-works + mb-
+    // artist-id supply the data it reads. Pure-Cypher + fast, so running just before verify is free;
+    // resources [] — ordering via deps handles exclusion, matching person-reconciliation.
+    name: 'songwriter-reconciliation',
+    deps: ['track-works', 'mb-artist-id', 'person-reconciliation', 'nationality'],
+    resources: [],
+    run: async (ctx) => ({ ...(await enrichSongwriterReconciliation(ctx.driver, ctx.log)) }),
   },
 ];
 

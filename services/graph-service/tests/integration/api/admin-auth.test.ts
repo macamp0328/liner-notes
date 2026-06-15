@@ -63,6 +63,8 @@ const ADMIN_ROUTES: { method: 'GET' | 'POST'; url: string }[] = [
   { method: 'POST', url: '/api/v1/admin/mb-artist-id/enrich' },
   { method: 'POST', url: '/api/v1/admin/mb-artist-id/reset' },
   { method: 'GET', url: '/api/v1/admin/mb-artist-id/status' },
+  { method: 'POST', url: '/api/v1/admin/songwriter-reconciliation/enrich' },
+  { method: 'GET', url: '/api/v1/admin/songwriter-reconciliation/status' },
   { method: 'POST', url: '/api/v1/admin/reload' },
   { method: 'GET', url: '/api/v1/admin/reload/status' },
   { method: 'POST', url: '/api/v1/admin/reload/abort' },
