@@ -28,6 +28,7 @@ const DONE_BEFORE_CRASH: string[] = STAGE_NAMES.slice(0, STAGE_NAMES.indexOf(CRA
 const MUSICBRAINZ_STAGES = new Set([
   'track-musicbrainz',
   'track-works',
+  'track-recording-artists',
   'mb-release-events',
   'mb-artist-id',
   'nationality',
