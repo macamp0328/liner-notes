@@ -2198,7 +2198,7 @@
       "post": {
         "summary": "Reset artist Wikidata enrichment markers for a full re-run",
         "tags": ["admin"],
-        "description": "Removes the `wikidataFetchedAt` marker and every Wikidata-sourced property (`wikidataQid`, `bornYear`/`bornDate`, `diedYear`/`diedDate`, `imageUrl`, `awards`) from all Artist nodes, causing the next `POST /api/v1/admin/artist-wikidata/enrich` call to re-resolve every node from scratch.\n\nThis endpoint is blocked while `POST /api/v1/admin/artist-wikidata/enrich` is running.",
+        "description": "Removes the `wikidataFetchedAt` marker and every Wikidata-sourced property (`wikidataQid`, `bornYear`/`bornDate`, `diedYear`/`diedDate`, `imageUrl`, `awards`, instruments, and the P737 `influencedByQids` list) from all Artist nodes, causing the next `POST /api/v1/admin/artist-wikidata/enrich` call to re-resolve every node from scratch. The derived `INFLUENCED_BY` edges are left in place — they are re-MERGEd exhaustively by `POST /api/v1/admin/artist-influences/enrich`.\n\nThis endpoint is blocked while `POST /api/v1/admin/artist-wikidata/enrich` is running.",
         "security": [
           {
             "bearerAuth": []
@@ -2219,6 +2219,65 @@
                       "properties": {
                         "reset": {
                           "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/artist-influences/enrich": {
+      "post": {
+        "summary": "Project Wikidata P737 influences into INFLUENCED_BY edges",
+        "tags": ["admin"],
+        "description": "Resolves each Artist's captured `influencedByQids` (the raw Wikidata P737 target QIDs the `artist-wikidata` pass stored) against the `wikidataQid` on other Artist nodes and MERGEs a `(:Artist)-[:INFLUENCED_BY {source:\"wikidata\"}]->(:Artist)` edge for each in-collection match (#391). Deterministic QID join — a target QID we do not own resolves to no node and is dropped (no name matching). No external API and **no new Wikidata calls**: the QIDs are already on the Artist nodes. Idempotent and safe to re-run; picks up newly-resolved targets without a re-ingest. Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest`** — run it after `artist-wikidata`, or rely on the orchestrated reload (`POST /api/v1/admin/reload`), which includes it.\n\n**No reset endpoint:** the pass re-links exhaustively every run, so it is inherently idempotent and there is nothing to reset (a full wipe is `POST /api/v1/admin/reset?confirm=wipe-all`).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["message", "statusUrl"],
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "statusUrl": {
+                          "type": "string"
                         }
                       }
                     }
@@ -3771,6 +3830,89 @@
         }
       }
     },
+    "/api/v1/admin/artist-influences/status": {
+      "get": {
+        "summary": "Status of the most recent artist influence projection run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult",
+                        "lastError"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "influencedByLinks": {
+                              "type": "integer"
+                            },
+                            "failed": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/reload": {
       "post": {
         "summary": "Trigger the orchestrated reload (ingest + every enrichment) with resume",
@@ -5184,6 +5326,84 @@
         }
       }
     },
+    "/api/v1/explore/influences/{name}": {
+      "get": {
+        "summary": "Who influenced this artist and who they influenced (Wikidata P737)",
+        "tags": ["explore"],
+        "description": "Returns the two-directional influence neighbourhood of this artist (#391): `influencedBy` are the artists Wikidata P737 says influenced this person, and `influenced` are the artists this person influenced. Both are restricted to artists already in the collection — each edge is a deterministic Wikidata QID join, never a name match — so the graph is sparse by design.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "name",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["influencedBy", "influenced"],
+                  "properties": {
+                    "influencedBy": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["discogsId", "name", "wikidataQid"],
+                        "properties": {
+                          "discogsId": {
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "wikidataQid": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "influenced": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["discogsId", "name", "wikidataQid"],
+                        "properties": {
+                          "discogsId": {
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "wikidataQid": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/explore/studio/{name}": {
       "get": {
         "summary": "Releases recorded at this studio",
@@ -6260,7 +6480,8 @@
                             "mastersWithReleaseEvents",
                             "samePersonLinks",
                             "memberOfEdges",
-                            "groupsWithMembers"
+                            "groupsWithMembers",
+                            "influencedByEdges"
                           ],
                           "properties": {
                             "releasesWithOriginalYear": {
@@ -6783,6 +7004,9 @@
                               "type": "integer"
                             },
                             "groupsWithMembers": {
+                              "type": "integer"
+                            },
+                            "influencedByEdges": {
                               "type": "integer"
                             }
                           }
