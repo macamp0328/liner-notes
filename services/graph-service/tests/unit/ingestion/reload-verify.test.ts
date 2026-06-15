@@ -75,6 +75,8 @@ function makeStats(
     },
     tracksWithRecordingMbid: cov(60, 100),
     tracksWithWork: cov(40, 60),
+    // #335: clears the minPct:0 (silently-zero) bar — covered>0 over recordingMbid-bearing tracks.
+    tracksWithMbRecordingArtists: cov(35, 60),
     worksWithMultipleRecordings: 8,
     // #380: clears the minPct:0 (silently-zero) bar — covered>0 over writer-bearing Works.
     worksWithWriterLinks: cov(25, 40),

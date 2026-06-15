@@ -41,6 +41,15 @@ async function seedCoverage(driver: Driver, opts: { originalYear: boolean }): Pr
        MERGE (w:Work {mbid: 'work-seed'})
        MERGE (t)-[rel:RECORDING_OF]->(w) SET rel.source = 'musicbrainz'`,
     );
+    // #335: give the recordingMbid tracks an MB-sourced track credit so
+    // tracksWithMbRecordingArtists (gated silently-zero) clears.
+    await session.run(
+      `MATCH (t:Track) WHERE t.recordingMbid IS NOT NULL
+       MERGE (m:Musician {musicbrainzId: 'mb-seed-performer'})
+         ON CREATE SET m.name = 'Seed Performer'
+       MERGE (m)-[c:CREDITED_ON]->(t)
+       SET c.scope = 'track', c.source = 'musicbrainz', c.role = 'guitar'`,
+    );
     await session.run(`MATCH (a:Artist) WHERE a.discogsId IS NOT NULL SET a.profile = 'seeded'`);
   } finally {
     await session.close();

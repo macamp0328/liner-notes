@@ -802,6 +802,118 @@ describe('MusicBrainzClient', () => {
   });
 
   // -------------------------------------------------------------------------
+  // getArtistsByRecordingMbid (#335)
+  // -------------------------------------------------------------------------
+  describe('getArtistsByRecordingMbid', () => {
+    it('maps performer/instrument/vocal relations with their attributes and MB artist MBID', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            {
+              type: 'instrument',
+              'target-type': 'artist',
+              direction: 'backward',
+              attributes: ['12 string guitar'],
+              artist: { id: 'a-1', name: 'Glenn Frey' },
+            },
+            {
+              type: 'vocal',
+              'target-type': 'artist',
+              direction: 'backward',
+              attributes: ['lead vocals'],
+              artist: { id: 'a-2', name: 'Don Henley' },
+            },
+            {
+              type: 'performer',
+              'target-type': 'artist',
+              direction: 'backward',
+              attributes: [],
+              artist: { id: 'a-3', name: 'Joe Walsh' },
+            },
+          ],
+        }),
+      );
+
+      const artists = await client.getArtistsByRecordingMbid('rec-1');
+
+      expect(artists).toEqual([
+        { mbid: 'a-1', name: 'Glenn Frey', role: 'instrument', attributes: ['12 string guitar'] },
+        { mbid: 'a-2', name: 'Don Henley', role: 'vocal', attributes: ['lead vocals'] },
+        { mbid: 'a-3', name: 'Joe Walsh', role: 'performer', attributes: [] },
+      ]);
+      const url = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(url).toContain('/recording/rec-1');
+      expect(url).toContain('inc=artist-rels');
+    });
+
+    it('excludes production/engineering roles — they are NOT pushed down to a track', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            {
+              type: 'instrument',
+              'target-type': 'artist',
+              attributes: ['piano'],
+              artist: { id: 'a-1', name: 'Performer' },
+            },
+            // album-level production credits — correctly left release-scoped (#335 acceptance case)
+            {
+              type: 'producer',
+              'target-type': 'artist',
+              attributes: [],
+              artist: { id: 'p-1', name: 'Producer' },
+            },
+            {
+              type: 'mix',
+              'target-type': 'artist',
+              attributes: [],
+              artist: { id: 'e-1', name: 'Mixer' },
+            },
+            {
+              type: 'recording',
+              'target-type': 'artist',
+              attributes: [],
+              artist: { id: 'e-2', name: 'Engineer' },
+            },
+          ],
+        }),
+      );
+
+      const artists = await client.getArtistsByRecordingMbid('rec-1');
+
+      expect(artists).toEqual([
+        { mbid: 'a-1', name: 'Performer', role: 'instrument', attributes: ['piano'] },
+      ]);
+    });
+
+    it('ignores performance relations without an artist id or with a non-artist target', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            { type: 'vocal', 'target-type': 'artist' },
+            { type: 'instrument', 'target-type': 'recording', artist: { id: 'a-x', name: 'X' } },
+          ],
+        }),
+      );
+
+      expect(await client.getArtistsByRecordingMbid('rec-1')).toEqual([]);
+    });
+
+    it('returns an empty array when the recording has no relations', async () => {
+      fetchSpy.mockResolvedValueOnce(makeOkResponse({ id: 'rec-1' }));
+      expect(await client.getArtistsByRecordingMbid('rec-1')).toEqual([]);
+    });
+
+    it('returns an empty array on a 404 (recording no longer resolves)', async () => {
+      fetchSpy.mockResolvedValueOnce(makeErrorResponse(404, 'Not Found'));
+      expect(await client.getArtistsByRecordingMbid('gone')).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // searchRecording
   // -------------------------------------------------------------------------
   describe('searchRecording', () => {

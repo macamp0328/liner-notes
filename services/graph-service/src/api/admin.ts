@@ -27,6 +27,8 @@ import { enrichTrackMusicBrainz } from '../enrichment/track-musicbrainz.js';
 import { resetTrackMusicBrainzEnrichment } from '../db/track-musicbrainz-repository.js';
 import { enrichTrackWorks } from '../enrichment/track-works.js';
 import { resetTrackWorksEnrichment } from '../db/track-works-repository.js';
+import { enrichTrackRecordingArtists } from '../enrichment/track-recording-artists.js';
+import { resetRecordingArtistsEnrichment } from '../db/track-recording-artists-repository.js';
 import { buildAcousticBrainzClientFromEnv } from '../ingestion/acousticbrainz-client.js';
 import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
 import { resetTrackAcousticBrainzEnrichment } from '../db/track-acousticbrainz-repository.js';
@@ -381,6 +383,17 @@ const trackWorksSummarySchema = {
   },
 };
 
+const trackRecordingArtistsSummarySchema = {
+  type: 'object',
+  properties: {
+    recordingsProcessed: { type: 'integer' },
+    recordingsSkipped: { type: 'integer' },
+    recordingsFailed: { type: 'integer' },
+    creditEdges: { type: 'integer' },
+    durationMs: { type: 'integer' },
+  },
+};
+
 const artistGenresSummarySchema = {
   type: 'object',
   properties: {
@@ -663,6 +676,59 @@ const PIPELINES: PipelineEntry[] = [
       runningMessage:
         'MusicBrainz works enrichment is currently running — wait for it to finish before resetting',
       run: (driver) => resetTrackWorksEnrichment(driver),
+    },
+    state: makePipelineState(),
+  },
+  {
+    name: 'track-recording-artists',
+    statusLabel: 'MusicBrainz recording-artist credit enrichment',
+    runningMessage: 'MusicBrainz recording-artist credit enrichment already in progress',
+    enrichSummary:
+      'Push MusicBrainz recording-level performance credits down to track-scoped CREDITED_ON edges',
+    enrichDescription:
+      'For each Track that carries a `recordingMbid` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), ' +
+      'fetches the recording’s artist relationships and writes the performer/instrument/vocal credits ' +
+      'as **track-scoped** `CREDITED_ON` edges (`source: "musicbrainz"`, `scope: "track"`), increasing ' +
+      'track-credit coverage from a deterministic source (#335). Blocks until complete.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, and ' +
+      'only after `track-musicbrainz` has populated `recordingMbid` AND `mb-artist-id` has resolved ' +
+      'each person’s `musicbrainzId`.**\n\n' +
+      'Only recording-level performance roles are pushed down; production/engineering roles (producer, ' +
+      'mix, mastering, …) are correctly left release-scoped. Each performer is resolved to our nodes ' +
+      'by the MusicBrainz-artist-MBID join (the `mb-artist-id` mapping, #380) — never name/title ' +
+      'matching; a performer we cannot resolve gets an MBID-keyed fallback `Musician` so provenance is ' +
+      'preserved, never silently merged by name.\n\n' +
+      'Re-selects a Track while it still has no MB-sourced track credit (null `recordingArtistsFetchedAt`) ' +
+      'once its last attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping ' +
+      '`recordingArtistsFetchedAt` after each attempt — so a recording MusicBrainz has no performance ' +
+      'relations for is retried at most once per window. Run ' +
+      '`POST /api/v1/admin/track-recording-artists/reset` to force a full re-run.\n\n' +
+      'Requires `MUSICBRAINZ_USER_AGENT` env var.',
+    statusSummarySchema: trackRecordingArtistsSummarySchema,
+    schemaHas503: true,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => {
+      const mbClient = buildMusicBrainzClientFromEnv(log);
+      if (!mbClient) return { ok: false, message: 'MUSICBRAINZ_USER_AGENT not configured' };
+      return {
+        ok: true,
+        run: async (driver) => ({
+          ...(await enrichTrackRecordingArtists(mbClient, driver, log)),
+        }),
+      };
+    },
+    reset: {
+      summary: 'Reset MusicBrainz recording-artist credit enrichment for a full re-run',
+      description:
+        'Removes every MusicBrainz-sourced track credit (`CREDITED_ON` with `source: "musicbrainz"`, ' +
+        '`scope: "track"`), deletes the MBID-keyed fallback `Musician` nodes this stage created ' +
+        '(`musicbrainzId` set, no `discogsId`), and clears the `recordingArtistsFetchedAt` marker, ' +
+        'causing the next `POST /api/v1/admin/track-recording-artists/enrich` call to re-process ' +
+        'every recording from scratch.\n\n' +
+        'This endpoint is blocked while enrichment is running.',
+      runningMessage:
+        'MusicBrainz recording-artist credit enrichment is currently running — wait for it to finish before resetting',
+      run: (driver) => resetRecordingArtistsEnrichment(driver),
     },
     state: makePipelineState(),
   },
