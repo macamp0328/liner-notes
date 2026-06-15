@@ -10,7 +10,7 @@ name: CI
 #   schema-validation (Neo4j container, started via composite action) │  t=0, in
 #   script-tests (changelog unit tests), terraform (fmt + validate) │  parallel
 #   hadolint (Dockerfile lint), kubeconform (k8s manifest validate)  │
-#   markdownlint (Markdown structure)                                │
+#   markdownlint (Markdown structure), yamllint (YAML semantics)     │
 #   audit, secrets-scan, codeql, actionlint (+ standalone shellcheck) ┘
 #
 #   lint, typecheck ──→ docker-build   (the ONLY gate: the multi-stage build
@@ -49,7 +49,7 @@ permissions:
   contents: read
 
 # Rapid agent push cadence means a PR head is often superseded within seconds —
-# cancel the obsolete run instead of letting the full 14-job fan-out finish for
+# cancel the obsolete run instead of letting the full 15-job fan-out finish for
 # nothing. Pushes to main never cancel (each merged commit keeps its CI record).
 concurrency:
   group: ci-${{ github.ref }}
@@ -554,3 +554,19 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Lint Markdown
         run: pnpm markdownlint
+
+  yamllint:
+    name: YAML Lint
+    # Semantic/structural YAML checks Prettier can't see: duplicate mapping keys
+    # and YAML 1.1 "Norway problem" truthy values (yes/no/on/off used where a real
+    # boolean was meant). Config + scope live in .yamllint.yaml (relaxed preset with
+    # the formatting rules Prettier owns disabled). yamllint is a Python tool with no
+    # standalone binary, so — like terraform/hadolint, which are also CI-only — it's
+    # pinned via pipx rather than added to package.json. Non-strict, so only the
+    # high-signal error rules gate (warnings print but don't fail). See issue #349.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Lint YAML (pinned yamllint via pipx)
+        run: pipx run yamllint==1.38.0 --format github .
