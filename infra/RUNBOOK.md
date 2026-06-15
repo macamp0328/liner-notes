@@ -959,6 +959,47 @@ The `KUBECONFIG_B64` **secret** was set in [CD — cluster bootstrap](#cd--clust
 
 ---
 
+## Schema diagram refresh (ADR 0004)
+
+The [`Schema Diagram`](../.github/workflows/schema-diagram.yml) workflow introspects the **live prod
+graph** weekly (and after each successful Deploy) and opens a PR refreshing the committed data-model
+diagrams under `services/graph-service/docs/schema/` (see [ADR 0004](../docs/adr/0004-data-model-diagrams-from-live-introspection.md)).
+It is **not** a fail-on-drift gate — it's a scheduled producer, so it needs prod read access and a
+token that lets the bot PR trigger CI. Three one-time wirings:
+
+1. **Read-only OIDC role (Terraform, admin `root` profile).** `cicd.tf` adds
+   `aws_iam_role.github_schema_diagram` — trust scoped to `ref:refs/heads/main` (so
+   schedule/dispatch/workflow_run assume it **without** the production-environment approval gate),
+   policy = `secretsmanager:GetSecretValue` + `DescribeSecret` on only the graph-service secret. Apply
+   from the **primary checkout** with the **admin root** profile (the shared OIDC provider is in this
+   state — same constraint as the CD role bootstrap above), then record the output:
+
+   ```bash
+   terraform -chdir=infra/terraform apply
+   terraform -chdir=infra/terraform output -raw github_schema_diagram_role_arn
+   gh variable set AWS_SCHEMA_DIAGRAM_ROLE_ARN --body "<that ARN>"
+   ```
+
+2. **GitHub App (for the auto-PR).** A PR opened with the default `GITHUB_TOKEN` lands in an
+   approval-blocked state and its required checks never run, so it can't merge. Create a minimal
+   GitHub App on your account, **install it on this repo** with **Contents: read & write** +
+   **Pull requests: read & write**, then:
+
+   ```bash
+   gh variable set SCHEMA_DIAGRAM_APP_ID --body "<the App's numeric id>"
+   gh secret   set SCHEMA_DIAGRAM_APP_PRIVATE_KEY < path/to/app-private-key.pem
+   ```
+
+   The bot PR is always **human-merged** (CODEOWNERS routes it to you) — the App token only makes the
+   checks go green so it's one-click-mergeable on review.
+
+3. **Nothing else.** When the DB is asleep (node powered off / Aura paused) the run is a clean no-op
+   (the generator exits 0 and writes nothing). Trigger an on-demand refresh from the **Actions** tab
+   (`workflow_dispatch`) once the node is up; the AWS/OIDC path only works once the workflow is on
+   `main` (a feature-branch dispatch has a different OIDC `sub` and is rejected).
+
+---
+
 ## Full reload from scratch
 
 Use this to discard the entire graph and rebuild it from Discogs — e.g. after a schema change, to clear stale nodes that `MERGE` can't remove (releases deleted from the collection), or to validate the ingestion + enrichment pipeline end-to-end on an empty graph.

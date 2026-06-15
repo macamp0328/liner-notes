@@ -12,6 +12,10 @@ flowchart LR
     aws_iam_role_github_deploy["👤 github_deploy<br/><small>IAM role</small>"]:::iam
     data_aws_iam_policy_document_github_deploy["📜 github_deploy<br/><small>📥 policy doc</small>"]:::iam
     aws_iam_role_policy_github_deploy["📜 github_deploy<br/><small>role policy</small>"]:::iam
+    data_aws_iam_policy_document_github_schema_diagram_assume["📜 github_schema_diagram_assume<br/><small>📥 policy doc</small>"]:::iam
+    aws_iam_role_github_schema_diagram["👤 github_schema_diagram<br/><small>IAM role</small>"]:::iam
+    data_aws_iam_policy_document_github_schema_diagram["📜 github_schema_diagram<br/><small>📥 policy doc</small>"]:::iam
+    aws_iam_role_policy_github_schema_diagram["📜 github_schema_diagram<br/><small>role policy</small>"]:::iam
   end
   subgraph ext_ec2_tf["ec2.tf"]
     aws_instance_k3s(["🖥️ k3s<br/><small>EC2 instance</small>"]):::compute
@@ -27,13 +31,20 @@ flowchart LR
   end
   aws_iam_role_policy_github_deploy --> aws_iam_role_github_deploy
   aws_iam_role_policy_github_deploy --> data_aws_iam_policy_document_github_deploy
+  aws_iam_role_policy_github_schema_diagram --> aws_iam_role_github_schema_diagram
+  aws_iam_role_policy_github_schema_diagram --> data_aws_iam_policy_document_github_schema_diagram
   aws_iam_role_github_deploy -.-> aws_ecr_repository_graph_service
+  aws_iam_role_github_deploy --> aws_iam_role_github_schema_diagram
   aws_iam_role_github_deploy -.-> aws_instance_k3s
   aws_iam_role_github_deploy -.-> aws_secretsmanager_secret_graph_service
   aws_iam_role_github_deploy -.-> data_aws_caller_identity_current
   aws_iam_role_github_deploy --> data_aws_iam_policy_document_github_deploy
   aws_iam_role_github_deploy --> data_aws_iam_policy_document_github_deploy_assume
+  aws_iam_role_github_deploy --> data_aws_iam_policy_document_github_schema_diagram
+  aws_iam_role_github_deploy --> data_aws_iam_policy_document_github_schema_diagram_assume
+  aws_iam_role_github_schema_diagram --> data_aws_iam_policy_document_github_schema_diagram_assume
   data_aws_iam_policy_document_github_deploy -.-> aws_ecr_repository_graph_service
   data_aws_iam_policy_document_github_deploy -.-> aws_instance_k3s
   data_aws_iam_policy_document_github_deploy -.-> aws_secretsmanager_secret_graph_service
   data_aws_iam_policy_document_github_deploy -.-> data_aws_caller_identity_current
+  data_aws_iam_policy_document_github_schema_diagram -.-> aws_secretsmanager_secret_graph_service
