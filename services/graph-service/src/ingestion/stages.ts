@@ -303,8 +303,9 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     // #335: push MusicBrainz recording-level performance credits down to the specific Track. Deps
     // BOTH track-musicbrainz (for the recordingMbid it queries) AND mb-artist-id (for the
     // musicbrainzId join that resolves each performer). Ordered after mb-artist-id so the array stays
-    // a valid topological sort — running mb-artist-id first is also what stops every credit from
-    // spawning a duplicate fallback person. Holds `musicbrainz` (shared rate limiter) and `track`
+    // a valid topological sort — running mb-artist-id first lets a performer whose Discogs↔MB link
+    // resolved be reused instead of duplicated (a performer MusicBrainz has no Discogs link for still
+    // gets an MBID-keyed fallback node, by design). Holds `musicbrainz` (shared rate limiter) and `track`
     // (its batched write touches ≥2 Track nodes per tx — the same deadlock class as the other batched
     // Track writers, so it serialises with them on the node-lock lane).
     name: 'track-recording-artists',
