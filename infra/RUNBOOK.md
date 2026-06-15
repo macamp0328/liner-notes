@@ -757,7 +757,7 @@ Puts Cloudflare in front of the NodePort so the API is served over HTTPS on a cu
 
 - A domain (zone) added to Cloudflare, and a subdomain to serve graph-service on (e.g. `api.example.com`).
 - The zone ID — Cloudflare dashboard → the zone → **Overview** → API → **Zone ID**.
-- A Cloudflare API token (My Profile → API Tokens → Create Token) scoped to that zone with **Zone → DNS → Edit** and **Zone → Zone Settings → Edit**. Export it before every `terraform` run — it is read from the environment, never stored in tfvars or state:
+- A Cloudflare API token (My Profile → API Tokens → Create Token) scoped to that zone with **Zone → DNS → Edit**, **Zone → Zone Settings → Edit**, and **Zone → Origin Rules → Edit** (the origin ruleset in [`cloudflare.tf`](terraform/cloudflare.tf) needs the third scope). Keep it in the gitignored `.env.local` (documented in [`.env.example`](../.env.example)) and export it before every `terraform` run — it is read from the environment, never stored in tfvars or state:
 
   ```bash
   export CLOUDFLARE_API_TOKEN=...
