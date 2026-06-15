@@ -24,9 +24,9 @@ upkeep, no committed `CHANGELOG.md`. See
 
 ## Data model
 
-Your collection's graph — every node label, its properties, and how they connect — is documented
-**straight from the live production database**, so it never drifts from what's actually there. Browse it
-as an interactive, pan-and-zoom diagram:
+Your collection's graph — every node label, its properties, and how they connect — is generated
+**straight from the live production database**, not a hand-maintained doc that quietly goes stale.
+Browse it as an interactive, pan-and-zoom diagram:
 
 **[→ Live schema diagram](https://macamp0328.github.io/liner-notes/)**
 
