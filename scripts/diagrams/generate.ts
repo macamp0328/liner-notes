@@ -43,25 +43,27 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 const TF_DIR = join(REPO_ROOT, 'infra', 'terraform');
 const OUT_DIR = join(REPO_ROOT, 'infra', 'diagrams');
 const PER_FILE_DIR = join(OUT_DIR, 'per-file');
 
-type ResourceRef = {
+export type ResourceRef = {
   kind: 'resource' | 'data';
   type: string;
   name: string;
   file: string;
 };
 
-type Address = string; // e.g. "aws_vpc.main" or "data.aws_ami.al2023"
+export type Address = string; // e.g. "aws_vpc.main" or "data.aws_ami.al2023"
 
 const SKIP_FILES = new Set(['outputs.tf', 'variables.tf']);
 
@@ -77,17 +79,17 @@ function listTfFiles(): string[] {
 }
 
 // Strip line and block comments so they can't produce false-positive matches.
-function stripComments(src: string): string {
+export function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])(\/\/|#)[^\n]*/g, '$1');
 }
 
-type Block = { decl: ResourceRef; body: string };
+export type Block = { decl: ResourceRef; body: string };
 
 // Extract each `resource|data "type" "name" { ... }` block via brace-matching.
 // Tracks string literals so braces inside HCL strings don't throw off the
 // depth counter. Returns the inner body (without the outer braces) per block,
 // which is what we scan for cross-resource references.
-function parseBlocks(src: string, file: string): Block[] {
+export function parseBlocks(src: string, file: string): Block[] {
   const out: Block[] = [];
   // Reset regex state by constructing a fresh stateful matcher.
   const headerRE = /^(resource|data)\s+"([a-zA-Z0-9_-]+)"\s+"([a-zA-Z0-9_-]+)"\s*\{/gm;
@@ -141,7 +143,7 @@ function addressOf(r: ResourceRef): Address {
 // falls back to the whole address so the result is always a string — a
 // well-formed address always has the segments; the fallback only satisfies
 // noUncheckedIndexedAccess for the categorize()/label callers.
-function splitAddress(addr: string): { type: string; name: string } {
+export function splitAddress(addr: string): { type: string; name: string } {
   const segments = addr.split('.');
   return addr.startsWith('data.')
     ? { type: segments[1] ?? addr, name: segments[2] ?? addr }
@@ -150,7 +152,7 @@ function splitAddress(addr: string): { type: string; name: string } {
 
 // Find which declared addresses are referenced in `src`. We look for token
 // patterns and intersect with the known set so we never invent references.
-function findReferences(src: string, known: Set<Address>): Set<Address> {
+export function findReferences(src: string, known: Set<Address>): Set<Address> {
   const found = new Set<Address>();
   // Resource refs: aws_foo.bar(.attr)?
   const RES_RE = /\b([a-z][a-z0-9_]+)\.([a-z][a-z0-9_]+)/g;
@@ -174,7 +176,7 @@ function mermaidId(addr: Address): string {
 // Pull the first leading `# …` comment line out of a .tf file to use as the
 // subgraph caption. Most files in infra/terraform/ open with a one-sentence
 // summary; falling back to null is fine — the caption is purely additive.
-function extractCaption(raw: string): string | null {
+export function extractCaption(raw: string): string | null {
   const firstLine = raw.split('\n')[0]?.trim();
   if (!firstLine || !firstLine.startsWith('#')) return null;
   const text = firstLine.replace(/^#+\s*/, '').trim();
@@ -184,7 +186,7 @@ function extractCaption(raw: string): string | null {
   return text.replace(/["<>]/g, '').slice(0, 80);
 }
 
-type ResourceEdge = {
+export type ResourceEdge = {
   from: Address; // an address declared in this file
   to: Address; // any known address (same file or another file)
 };
@@ -208,7 +210,7 @@ function categoryClassDef(cat: Category): string {
   return `  classDef ${cat} fill:${meta.fill},stroke:#475569,color:#0f172a`;
 }
 
-function buildPerFileMermaid(
+export function buildPerFileMermaid(
   file: string,
   fileCaption: string | null,
   blocksInFile: Block[],
@@ -394,7 +396,7 @@ function inlineIntoMarkdown(mmdName: string, body: string, targets: string[]): v
 // final SVG. Extend the regexes when a new family of AWS resources lands.
 // ---------------------------------------------------------------------------
 
-type Category =
+export type Category =
   | 'iam'
   | 'compute'
   | 'networking'
@@ -415,7 +417,7 @@ const CATEGORY_META: Record<Category, { label: string; fill: string; order: numb
   other: { label: 'Other', fill: '#f1f5f9', order: 8 }, // soft gray
 };
 
-function categorize(resourceType: string): Category {
+export function categorize(resourceType: string): Category {
   const t = resourceType.replace(/^aws_/, '');
   if (/^(iam_|caller_identity)/.test(t)) return 'iam';
   if (/^(instance|eip|ami|launch_template|autoscaling|ebs)/.test(t)) return 'compute';
@@ -547,7 +549,7 @@ function escapeHtml(s: string): string {
 // nodes + edges, then emit a new DOT with category clusters, per-cluster fill
 // colors, rounded box nodes, Helvetica, and orthogonal edge routing. Same DOT
 // input → byte-identical SVG; node order is deterministic via sort.
-function postProcessDot(dot: string, extraNodes: Set<string> = new Set()): string {
+export function postProcessDot(dot: string, extraNodes: Set<string> = new Set()): string {
   const edgeRE = /^\s*"([^"]+)"\s*->\s*"([^"]+)"\s*;\s*$/;
   const nodeRE = /^\s*"([^"]+)"\s*\[[^\]]*\]\s*;\s*$/;
 
@@ -789,4 +791,13 @@ function main(): void {
   console.log('\n✅ Diagrams regenerated.');
 }
 
-main();
+// Run main() only when invoked as the entry point, not when a test imports the
+// module for its pure functions (importing would spawn inframap/docker and write
+// files). realpathSync normalizes symlinks/relative argv so the compare is exact
+// under `tsx scripts/diagrams/generate.ts`.
+if (
+  process.argv[1] &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
+  main();
+}
