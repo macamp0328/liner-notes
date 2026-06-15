@@ -195,22 +195,25 @@ export class WikidataClient {
   /**
    * Build the artist-data SPARQL, parameterized only by the line that binds `?item` (P1953 match
    * or a Wikipedia `schema:about` IRI). Dates go through `p:`/`psv:` so the `timePrecision`
-   * qualifier comes back alongside the value; only `awards` is multi-valued, so it is the sole
-   * field in the GROUP_CONCAT — `LIMIT 1` + GROUP BY collapse any multi-image/multi-birth item to
-   * one row. The `LANG="en"` filter is inside the P166 OPTIONAL so an unlabelled award never
-   * blanks the row. Wikidata's SPARQL endpoint pre-declares every prefix used here.
+   * qualifier comes back paired with its value (both in GROUP BY, so they stay from the same
+   * statement). `?image` is `SAMPLE`d and kept OUT of GROUP BY: an item with several P18 images
+   * must NOT fan out into one row per image, or the `GROUP_CONCAT` awards would be split across
+   * those rows and `LIMIT 1` would silently truncate the awards list (and pick an arbitrary image).
+   * With only `?item`/dates grouped, every award cross-joins into the single (common-case) row, so
+   * the concat is complete. The `LANG="en"` filter is inside the P166 OPTIONAL so an unlabelled
+   * award never blanks the row. Wikidata's SPARQL endpoint pre-declares every prefix used here.
    */
   private buildArtistDataQuery(subjectLine: string): string {
     return `
-      SELECT ?item ?birth ?birthPrecision ?death ?deathPrecision ?image
+      SELECT ?item ?birth ?birthPrecision ?death ?deathPrecision (SAMPLE(?img) AS ?image)
              (GROUP_CONCAT(DISTINCT ?awardLabel; SEPARATOR="||") AS ?awards) WHERE {
         ${subjectLine}
         OPTIONAL { ?item p:P569/psv:P569 [ wikibase:timeValue ?birth ; wikibase:timePrecision ?birthPrecision ] . }
         OPTIONAL { ?item p:P570/psv:P570 [ wikibase:timeValue ?death ; wikibase:timePrecision ?deathPrecision ] . }
-        OPTIONAL { ?item wdt:P18 ?image . }
+        OPTIONAL { ?item wdt:P18 ?img . }
         OPTIONAL { ?item wdt:P166 ?award . ?award rdfs:label ?awardLabel . FILTER(LANG(?awardLabel) = "en") }
       }
-      GROUP BY ?item ?birth ?birthPrecision ?death ?deathPrecision ?image
+      GROUP BY ?item ?birth ?birthPrecision ?death ?deathPrecision
       LIMIT 1
     `;
   }

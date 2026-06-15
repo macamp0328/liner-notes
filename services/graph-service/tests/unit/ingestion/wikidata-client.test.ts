@@ -421,7 +421,16 @@ describe('WikidataClient', () => {
       const url = fetchSpy.mock.calls[0]?.[0] as string;
       expect(url).toContain('query.wikidata.org/sparql');
       expect(url).toContain('470470');
-      expect(decodeURIComponent(url)).toContain('wdt:P1953');
+      const decoded = decodeURIComponent(url);
+      expect(decoded).toContain('wdt:P1953');
+      // Awards-truncation guard: ?image is SAMPLE'd and NOT a GROUP BY key — otherwise an item with
+      // multiple P18 images fans out into one row per image and LIMIT 1 truncates the GROUP_CONCAT
+      // awards (and picks an arbitrary image). GROUP BY must contain only ?item + the date columns.
+      expect(decoded).toContain('(SAMPLE(?img) AS ?image)');
+      expect(decoded).toMatch(
+        /GROUP BY \?item \?birth \?birthPrecision \?death \?deathPrecision\s/,
+      );
+      expect(decoded).not.toMatch(/GROUP BY[^}]*\?image/);
     });
 
     it('keeps the year but drops the date at year precision (Jan-1 truncation)', async () => {
