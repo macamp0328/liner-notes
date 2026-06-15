@@ -41,6 +41,7 @@ const ALL_STAGES: ReloadStageName[] = [
   'mb-artist-id',
   'nationality',
   'artist-wikidata',
+  'artist-influences',
   'songwriter-reconciliation',
   'verify',
 ];
@@ -91,6 +92,8 @@ function makeStats(
     samePersonLinks: cov(80, 80),
     memberOfEdges: 12,
     groupsWithMembers: 4,
+    // #391: ungated raw count (surfaced in /stats only, like memberOfEdges).
+    influencedByEdges: 6,
   };
   return {
     counts: {
