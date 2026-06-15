@@ -24,9 +24,9 @@ describe('applySchema', () => {
     } as unknown as Driver;
   });
 
-  it('opens and closes a fresh session for each of the 56 statements', async () => {
+  it('opens and closes a fresh session for each of the 57 statements', async () => {
     await applySchema(driver);
-    expect(sessions).toHaveLength(56);
+    expect(sessions).toHaveLength(57);
     for (const s of sessions) {
       expect(s.run).toHaveBeenCalledTimes(1);
       expect(s.close).toHaveBeenCalledTimes(1);
@@ -44,6 +44,16 @@ describe('applySchema', () => {
     ]) {
       expect(stmts.some((s) => s.includes(needle))).toBe(true);
     }
+  });
+
+  it('creates the wikidataQid lookup index for the influence join (issue #391)', async () => {
+    await applySchema(driver);
+    const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
+    expect(
+      stmts.some(
+        (s) => s.includes('CREATE INDEX artist_wikidata_qid') && s.includes('a.wikidataQid'),
+      ),
+    ).toBe(true);
   });
 
   it('creates the Work uniqueness constraint and worksFetchedAt index (issue #336)', async () => {

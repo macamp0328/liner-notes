@@ -152,6 +152,7 @@ describe('RELOAD_STAGES order', () => {
       'track-recording-artists',
       'nationality',
       'artist-wikidata',
+      'artist-influences',
       'songwriter-reconciliation',
       'verify',
     ]);

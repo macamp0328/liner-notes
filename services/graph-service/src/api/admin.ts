@@ -38,6 +38,7 @@ import { resetTrackDeezerEnrichment } from '../db/track-deezer-repository.js';
 import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
 import { resetArtistProfilesEnrichment } from '../db/artist-profiles-repository.js';
 import { enrichArtistWikidata } from '../enrichment/artist-wikidata.js';
+import { enrichArtistInfluences } from '../enrichment/artist-influences.js';
 import { resetArtistWikidataEnrichment } from '../db/artist-wikidata-repository.js';
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
 import { enrichLabelHierarchy } from '../enrichment/label-hierarchy.js';
@@ -433,6 +434,15 @@ const songwriterReconciliationSummarySchema = {
   type: 'object',
   properties: {
     linksReconciled: { type: 'integer' },
+    failed: { type: 'integer' },
+    durationMs: { type: 'integer' },
+  },
+};
+
+const artistInfluencesSummarySchema = {
+  type: 'object',
+  properties: {
+    influencedByLinks: { type: 'integer' },
     failed: { type: 'integer' },
     durationMs: { type: 'integer' },
   },
@@ -1115,14 +1125,42 @@ const PIPELINES: PipelineEntry[] = [
       summary: 'Reset artist Wikidata enrichment markers for a full re-run',
       description:
         'Removes the `wikidataFetchedAt` marker and every Wikidata-sourced property (`wikidataQid`, ' +
-        '`bornYear`/`bornDate`, `diedYear`/`diedDate`, `imageUrl`, `awards`) from all Artist nodes, ' +
-        'causing the next `POST /api/v1/admin/artist-wikidata/enrich` call to re-resolve every node ' +
-        'from scratch.\n\n' +
+        '`bornYear`/`bornDate`, `diedYear`/`diedDate`, `imageUrl`, `awards`, instruments, and the ' +
+        'P737 `influencedByQids` list) from all Artist nodes, causing the next ' +
+        '`POST /api/v1/admin/artist-wikidata/enrich` call to re-resolve every node from scratch. The ' +
+        'derived `INFLUENCED_BY` edges are left in place — they are re-MERGEd exhaustively by ' +
+        '`POST /api/v1/admin/artist-influences/enrich`.\n\n' +
         'This endpoint is blocked while `POST /api/v1/admin/artist-wikidata/enrich` is running.',
       runningMessage:
         'Artist Wikidata enrichment is currently running — wait for it to finish before resetting',
       run: (driver) => resetArtistWikidataEnrichment(driver),
     },
+    state: makePipelineState(),
+  },
+  {
+    name: 'artist-influences',
+    statusLabel: 'artist influence projection',
+    runningMessage: 'Artist influence projection already in progress',
+    enrichSummary: 'Project Wikidata P737 influences into INFLUENCED_BY edges',
+    enrichDescription:
+      "Resolves each Artist's captured `influencedByQids` (the raw Wikidata P737 target QIDs the " +
+      '`artist-wikidata` pass stored) against the `wikidataQid` on other Artist nodes and MERGEs a ' +
+      '`(:Artist)-[:INFLUENCED_BY {source:"wikidata"}]->(:Artist)` edge for each in-collection match ' +
+      '(#391). Deterministic QID join — a target QID we do not own resolves to no node and is dropped ' +
+      '(no name matching). No external API and **no new Wikidata calls**: the QIDs are already on the ' +
+      'Artist nodes. Idempotent and safe to re-run; picks up newly-resolved targets without a ' +
+      're-ingest. Blocks until complete.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest`** — run it after `artist-wikidata`, or ' +
+      'rely on the orchestrated reload (`POST /api/v1/admin/reload`), which includes it.\n\n' +
+      '**No reset endpoint:** the pass re-links exhaustively every run, so it is inherently ' +
+      'idempotent and there is nothing to reset (a full wipe is `POST /api/v1/admin/reset?confirm=wipe-all`).',
+    statusSummarySchema: artistInfluencesSummarySchema,
+    schemaHas503: false,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => ({
+      ok: true,
+      run: async (driver) => ({ ...(await enrichArtistInfluences(driver, log)) }),
+    }),
     state: makePipelineState(),
   },
 ];

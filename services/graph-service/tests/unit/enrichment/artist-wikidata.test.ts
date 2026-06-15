@@ -23,6 +23,7 @@ const DATA: ArtistWikidataData = {
   awards: ['Grammy Award'],
   playsInstrument: ['guitar', 'vocals'],
   playsInstrumentRaw: ['guitar', 'vocals'],
+  influencedByQids: ['Q5383'],
 };
 
 function makeWdClient(

@@ -284,6 +284,54 @@ export async function seedSongwriters(driver: Driver): Promise<void> {
 }
 
 /**
+ * Seed Wikidata-influence fixtures (#391) for the `/explore/influences/:name` route. Call AFTER
+ * seedGraph(). Self-contained (discogsIds ≥ 970000, distinct names) so it doesn't perturb the other
+ * explore assertions. Sets only the raw `influencedByQids` lists — NO `INFLUENCED_BY` edges — so the
+ * test drives the real `linkInfluencedBy` projection and exercises the QID-join confidence gate end
+ * to end:
+ *
+ *   - "Influence Beta" → influencedByQids [Q-inf-gamma, Q-inf-unowned]: gamma is in-collection (links),
+ *     the unowned QID resolves to no node and is dropped.
+ *   - "Influence Alpha" → influencedByQids [Q-inf-beta]: so beta is influenced-by gamma AND influences
+ *     alpha — both traversal directions are non-empty for beta.
+ *   - two distinct artists BOTH named "Influence Dup" (different discogsIds/QIDs), each with its own
+ *     outgoing influence → the route must UNION both nodes' neighbours (Artist.name is not unique).
+ */
+export async function seedInfluences(driver: Driver): Promise<void> {
+  const session = driver.session();
+  try {
+    await session.run(
+      `MERGE (alpha:Artist {discogsId: 970001})
+         SET alpha.name = 'Influence Alpha', alpha.wikidataQid = 'Q-inf-alpha',
+             alpha.influencedByQids = ['Q-inf-beta']
+       MERGE (beta:Artist {discogsId: 970002})
+         SET beta.name = 'Influence Beta', beta.wikidataQid = 'Q-inf-beta',
+             beta.influencedByQids = ['Q-inf-gamma', 'Q-inf-unowned']
+       MERGE (gamma:Artist {discogsId: 970003})
+         SET gamma.name = 'Influence Gamma', gamma.wikidataQid = 'Q-inf-gamma',
+             gamma.influencedByQids = []
+       // Two distinct artists sharing a name — the route must union both nodes' edges. They point at
+       // their own dedicated targets (delta/epsilon) so they don't perturb the alpha/beta/gamma
+       // assertions above.
+       MERGE (delta:Artist {discogsId: 970006})
+         SET delta.name = 'Influence Delta', delta.wikidataQid = 'Q-inf-delta',
+             delta.influencedByQids = []
+       MERGE (epsilon:Artist {discogsId: 970007})
+         SET epsilon.name = 'Influence Epsilon', epsilon.wikidataQid = 'Q-inf-epsilon',
+             epsilon.influencedByQids = []
+       MERGE (dup1:Artist {discogsId: 970004})
+         SET dup1.name = 'Influence Dup', dup1.wikidataQid = 'Q-inf-dup1',
+             dup1.influencedByQids = ['Q-inf-delta']
+       MERGE (dup2:Artist {discogsId: 970005})
+         SET dup2.name = 'Influence Dup', dup2.wikidataQid = 'Q-inf-dup2',
+             dup2.influencedByQids = ['Q-inf-epsilon']`,
+    );
+  } finally {
+    await session.close();
+  }
+}
+
+/**
  * Seed entity-resolution fixtures (#330) for the explore + reconciliation tests. Call AFTER
  * seedGraph(). All entities use discogsIds ≥ 900000 and distinct names so they don't perturb the
  * other explore assertions (which match by their own names / use `>=` bounds). Writes the same

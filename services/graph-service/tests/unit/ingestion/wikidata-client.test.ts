@@ -15,6 +15,7 @@ type ArtistRowFields = {
   image?: string;
   awards?: string;
   instruments?: string;
+  influencers?: string;
 };
 
 function makeArtistRow(fields: ArtistRowFields): Record<string, { type: string; value: string }> {
@@ -28,9 +29,11 @@ function makeArtistRow(fields: ArtistRowFields): Record<string, { type: string; 
   if (fields.deathPrecision)
     row['deathPrecision'] = { type: 'literal', value: fields.deathPrecision };
   if (fields.image) row['image'] = { type: 'uri', value: fields.image };
-  // GROUP_CONCAT always binds ?awards / ?instruments, even to an empty string.
+  // GROUP_CONCAT always binds ?awards / ?instruments / ?influencers, even to an empty string.
   row['awards'] = { type: 'literal', value: fields.awards ?? '' };
   row['instruments'] = { type: 'literal', value: fields.instruments ?? '' };
+  // #391: P737 GROUP_CONCATs the raw influence entity IRIs (not labels), joined by "||".
+  row['influencers'] = { type: 'literal', value: fields.influencers ?? '' };
   return row;
 }
 
@@ -406,6 +409,8 @@ describe('WikidataClient', () => {
             image: 'http://commons.wikimedia.org/wiki/Special:FilePath/Paul%20Simon.jpg',
             awards: 'Grammy Award||Mercury Prize',
             instruments: 'guitar||bass guitar||piano',
+            influencers:
+              'http://www.wikidata.org/entity/Q5383||http://www.wikidata.org/entity/Q1124',
           }),
         ),
       );
@@ -423,6 +428,8 @@ describe('WikidataClient', () => {
         // raw labels preserved verbatim; normalized onto the #333 family vocab (bass guitar → bass), deduped + sorted.
         playsInstrument: ['bass', 'guitar', 'piano'],
         playsInstrumentRaw: ['guitar', 'bass guitar', 'piano'],
+        // #391: P737 target IRIs reduced to bare QIDs for the in-collection influence join.
+        influencedByQids: ['Q5383', 'Q1124'],
       });
       const url = fetchSpy.mock.calls[0]?.[0] as string;
       expect(url).toContain('query.wikidata.org/sparql');
@@ -433,6 +440,11 @@ describe('WikidataClient', () => {
       expect(decoded).toContain('wdt:P1303');
       expect(decoded).toContain(
         '(GROUP_CONCAT(DISTINCT ?instrLabel; SEPARATOR="||") AS ?instruments)',
+      );
+      // #391: P737 (influences) is harvested in the same bundle, over the raw entity IRI (no label).
+      expect(decoded).toContain('wdt:P737');
+      expect(decoded).toContain(
+        '(GROUP_CONCAT(DISTINCT ?influencer; SEPARATOR="||") AS ?influencers)',
       );
       // Awards-truncation guard: ?image is SAMPLE'd and NOT a GROUP BY key — otherwise an item with
       // multiple P18 images fans out into one row per image and LIMIT 1 truncates the GROUP_CONCAT
@@ -466,6 +478,7 @@ describe('WikidataClient', () => {
       expect(result?.awards).toEqual([]);
       expect(result?.playsInstrument).toEqual([]);
       expect(result?.playsInstrumentRaw).toEqual([]);
+      expect(result?.influencedByQids).toEqual([]);
     });
 
     it('returns null when the Discogs ID is not in Wikidata (no bindings)', async () => {
@@ -540,6 +553,33 @@ describe('WikidataClient', () => {
       );
       expect(result?.playsInstrument).toEqual(['piano']);
       expect(result?.playsInstrumentRaw).toEqual(['theremin', 'piano']);
+    });
+
+    it('coerces an empty influencers concat to [] (#391)', () => {
+      const result = parseArtistWikidataRow(makeArtistRow({ qid: 'Q5', influencers: '' }));
+      expect(result?.influencedByQids).toEqual([]);
+    });
+
+    it('reduces P737 influence IRIs to bare QIDs, dropping any unresolvable segment (#391)', () => {
+      const result = parseArtistWikidataRow(
+        makeArtistRow({
+          qid: 'Q5',
+          influencers:
+            'http://www.wikidata.org/entity/Q5383||not-an-entity-iri||http://www.wikidata.org/entity/Q1124',
+        }),
+      );
+      expect(result?.influencedByQids).toEqual(['Q5383', 'Q1124']);
+    });
+
+    it('dedupes repeated P737 QIDs so the stored list and the edge count stay exact (#391)', () => {
+      const result = parseArtistWikidataRow(
+        makeArtistRow({
+          qid: 'Q5',
+          influencers:
+            'http://www.wikidata.org/entity/Q5383||http://www.wikidata.org/entity/Q5383||http://www.wikidata.org/entity/Q1124',
+        }),
+      );
+      expect(result?.influencedByQids).toEqual(['Q5383', 'Q1124']);
     });
   });
 });

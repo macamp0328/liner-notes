@@ -49,8 +49,10 @@ export async function getUnenrichedArtistsForWikidata(driver: Driver): Promise<U
  *
  * On a successful resolve every field is overwritten with Wikidata's current truth, including
  * `SET prop = null` for an absent field (Neo4j removes the property) — so a re-run replaces stale
- * values rather than accumulating them. `awards`, `playsInstrument`, and `playsInstrumentRaw` are
- * each stored as a list (possibly empty), never null.
+ * values rather than accumulating them. `awards`, `playsInstrument`, `playsInstrumentRaw`, and
+ * `influencedByQids` are each stored as a list (possibly empty), never null. `influencedByQids` (P737,
+ * #391) is the raw target-QID list the `artist-influences` pass later resolves into `INFLUENCED_BY`
+ * edges.
  */
 export async function setArtistWikidata(
   driver: Driver,
@@ -71,6 +73,7 @@ export async function setArtistWikidata(
              a.awards = $awards,
              a.playsInstrument = $playsInstrument,
              a.playsInstrumentRaw = $playsInstrumentRaw,
+             a.influencedByQids = $influencedByQids,
              a.wikidataFetchedAt = datetime()`,
         {
           discogsId: neo4j.int(discogsId),
@@ -83,6 +86,7 @@ export async function setArtistWikidata(
           awards: data.awards,
           playsInstrument: data.playsInstrument,
           playsInstrumentRaw: data.playsInstrumentRaw,
+          influencedByQids: data.influencedByQids,
         },
       );
     } else {
@@ -99,7 +103,10 @@ export async function setArtistWikidata(
 
 /**
  * Clear every Wikidata-sourced property + the `wikidataFetchedAt` marker from all Artist nodes so
- * the next enrichment run re-resolves them from scratch.
+ * the next enrichment run re-resolves them from scratch. Also drops `influencedByQids` (#391) — the
+ * raw P737 list the `artist-influences` pass reads; the derived `INFLUENCED_BY` edges are left as-is
+ * (re-MERGEd exhaustively each run, like the other reconciliation passes — a from-scratch wipe is
+ * `POST /reset?confirm=wipe-all`).
  */
 export async function resetArtistWikidataEnrichment(driver: Driver): Promise<number> {
   const session = driver.session();
@@ -108,7 +115,7 @@ export async function resetArtistWikidataEnrichment(driver: Driver): Promise<num
       `MATCH (a:Artist) WHERE a.wikidataFetchedAt IS NOT NULL
        REMOVE a.wikidataFetchedAt, a.wikidataQid, a.bornYear, a.bornDate,
               a.diedYear, a.diedDate, a.imageUrl, a.awards,
-              a.playsInstrument, a.playsInstrumentRaw
+              a.playsInstrument, a.playsInstrumentRaw, a.influencedByQids
        RETURN count(a) AS reset`,
     );
     return (result.records[0]?.get('reset') as Neo4jInt | null)?.toNumber() ?? 0;

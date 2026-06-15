@@ -96,6 +96,12 @@ export interface StatsData {
     samePersonLinks: CoverageMetric;
     memberOfEdges: number;
     groupsWithMembers: number;
+    // Wikidata influence graph (#391). A derived "influence within my collection" graph, sparse by
+    // design (only edges between two in-collection artists survive the QID join). A raw count — like
+    // memberOfEdges/wroteEdges, INFLUENCED_BY has no knowable denominator — so it is intentionally
+    // not a CoverageMetric and the verify gate skips it (Wikidata-derived data is ungated; it can
+    // legitimately resolve zero for an obscure collection).
+    influencedByEdges: number;
   };
 }
 
@@ -238,6 +244,13 @@ const MEMBER_OF_QUERY = `
   MATCH (:Musician)-[r:MEMBER_OF]->(:Musician)
   RETURN count(r) AS memberOfEdges`;
 
+// INFLUENCED_BY edge count (#391) — the Wikidata P737 influence graph, sparse by design. A
+// relationship scan; count() over zero matched rows returns one row with 0, so this is empty-graph
+// safe (mirrors MEMBER_OF_QUERY).
+const INFLUENCED_BY_QUERY = `
+  MATCH (:Artist)-[r:INFLUENCED_BY]->(:Artist)
+  RETURN count(r) AS influencedByEdges`;
+
 // Nationality (ORIGIN_COUNTRY) coverage for one people-label, split by the
 // `source` stored on the relationship. One scan per label; the applicable gate
 // mirrors that label's enrichment selector. `label` and `applicableExpr` are
@@ -309,6 +322,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
     musician,
     memberOf,
     wrote,
+    influencedBy,
   ] = await Promise.all([
     runCounts(driver, RELEASE_QUERY),
     runCounts(driver, ARTIST_QUERY),
@@ -322,6 +336,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
     runCounts(driver, MUSICIAN_QUERY),
     runCounts(driver, MEMBER_OF_QUERY),
     runCounts(driver, WROTE_EDGE_QUERY),
+    runCounts(driver, INFLUENCED_BY_QUERY),
   ]);
 
   const n = (m: Map<string, number>, key: string): number => m.get(key) ?? 0;
@@ -422,6 +437,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       ),
       memberOfEdges: n(memberOf, 'memberOfEdges'),
       groupsWithMembers: n(musician, 'groupsWithMembers'),
+      influencedByEdges: n(influencedBy, 'influencedByEdges'),
     },
   };
 }

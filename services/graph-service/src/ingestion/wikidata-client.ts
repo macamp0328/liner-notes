@@ -50,6 +50,11 @@ interface SparqlResponse {
  * the companion to the per-credit CREDITED_ON.instrument axis (#333): `playsInstrumentRaw` keeps the
  * verbatim English labels, `playsInstrument` is those normalized onto the #333 family vocabulary
  * (deduped, sorted). Both are `[]` (not null) when the item lists no instruments.
+ *
+ * `influencedByQids` is the bare list of Wikidata QIDs this item asserts as influences via P737
+ * ("influenced by"), #391. We keep the QIDs (not labels) because the `artist-influences` pass resolves
+ * each one against the stored `Artist.wikidataQid` to write an in-collection `INFLUENCED_BY` edge —
+ * a deterministic QID join, never a name match. `[]` (not null) when the item lists no influences.
  */
 export interface ArtistWikidataData {
   qid: string;
@@ -61,6 +66,7 @@ export interface ArtistWikidataData {
   awards: string[];
   playsInstrument: string[];
   playsInstrumentRaw: string[];
+  influencedByQids: string[];
 }
 
 const SPARQL_ENDPOINT = 'https://query.wikidata.org/sparql';
@@ -214,19 +220,25 @@ export class WikidataClient {
    * `GROUP_CONCAT(DISTINCT …)` over the same grouping. Two multi-valued OPTIONALs make the awards ×
    * instruments cross-product larger, but `DISTINCT` collapses each concat independently per column,
    * so neither corrupts the other and both come back complete (the count is bounded and tiny per
-   * person). Wikidata's SPARQL endpoint pre-declares every prefix used here.
+   * person). P737 (influences, #391) is fetched the same way — a third `GROUP_CONCAT(DISTINCT …)`,
+   * but over the raw `?influencer` entity IRI (no `rdfs:label` join): the `artist-influences` pass
+   * resolves each by QID, not by name. Three multi-valued OPTIONALs make the cross-product larger
+   * still, yet the per-column `DISTINCT` keeps each concat independent and complete. Wikidata's SPARQL
+   * endpoint pre-declares every prefix used here.
    */
   private buildArtistDataQuery(subjectLine: string): string {
     return `
       SELECT ?item ?birth ?birthPrecision ?death ?deathPrecision (SAMPLE(?img) AS ?image)
              (GROUP_CONCAT(DISTINCT ?awardLabel; SEPARATOR="||") AS ?awards)
-             (GROUP_CONCAT(DISTINCT ?instrLabel; SEPARATOR="||") AS ?instruments) WHERE {
+             (GROUP_CONCAT(DISTINCT ?instrLabel; SEPARATOR="||") AS ?instruments)
+             (GROUP_CONCAT(DISTINCT ?influencer; SEPARATOR="||") AS ?influencers) WHERE {
         ${subjectLine}
         OPTIONAL { ?item p:P569/psv:P569 [ wikibase:timeValue ?birth ; wikibase:timePrecision ?birthPrecision ] . }
         OPTIONAL { ?item p:P570/psv:P570 [ wikibase:timeValue ?death ; wikibase:timePrecision ?deathPrecision ] . }
         OPTIONAL { ?item wdt:P18 ?img . }
         OPTIONAL { ?item wdt:P166 ?award . ?award rdfs:label ?awardLabel . FILTER(LANG(?awardLabel) = "en") }
         OPTIONAL { ?item wdt:P1303 ?instr . ?instr rdfs:label ?instrLabel . FILTER(LANG(?instrLabel) = "en") }
+        OPTIONAL { ?item wdt:P737 ?influencer . }
       }
       GROUP BY ?item ?birth ?birthPrecision ?death ?deathPrecision
       LIMIT 1
@@ -317,6 +329,21 @@ function parseConcatLabels(value: string | undefined): string[] {
 }
 
 /**
+ * Split a `||`-joined GROUP_CONCAT of Wikidata entity IRIs (P737 influences, #391) into bare,
+ * deduped QIDs, dropping any segment that isn't a resolvable `Q\d+` IRI. `[]` when the binding is
+ * absent/empty. The SPARQL already `GROUP_CONCAT(DISTINCT …)`s, but deduping here keeps the stored
+ * `influencedByQids` clean independent of the query and makes the resolve pass's per-edge count exact.
+ */
+function parseConcatQids(value: string | undefined): string[] {
+  if (!value) return [];
+  const qids = value
+    .split('||')
+    .map((iri) => extractQid(iri.trim()))
+    .filter((qid): qid is string => qid !== null);
+  return [...new Set(qids)];
+}
+
+/**
  * Map a SPARQL result row from {@link WikidataClient.buildArtistDataQuery} onto
  * {@link ArtistWikidataData}. Returns null when the row carries no resolvable QID (the join key) —
  * the bundle is meaningless without it.
@@ -338,6 +365,7 @@ export function parseArtistWikidataRow(row: SparqlBinding): ArtistWikidataData |
     awards: parseConcatLabels(row['awards']?.value),
     playsInstrument: normalizeInstrumentFamilies(playsInstrumentRaw),
     playsInstrumentRaw,
+    influencedByQids: parseConcatQids(row['influencers']?.value),
   };
 }
 

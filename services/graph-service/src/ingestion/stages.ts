@@ -23,6 +23,7 @@ import { enrichNationality } from '../enrichment/artist-nationality.js';
 import { enrichArtistMusicbrainzIds } from '../enrichment/artist-musicbrainz-id.js';
 import { enrichSongwriterReconciliation } from '../enrichment/songwriter-reconciliation.js';
 import { enrichArtistWikidata } from '../enrichment/artist-wikidata.js';
+import { enrichArtistInfluences } from '../enrichment/artist-influences.js';
 import type { ProgressReporter } from '../enrichment/progress.js';
 
 /**
@@ -48,6 +49,7 @@ export type ReloadStageName =
   | 'nationality'
   | 'songwriter-reconciliation'
   | 'artist-wikidata'
+  | 'artist-influences'
   | 'verify';
 
 /**
@@ -365,6 +367,18 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
         )),
       };
     },
+  },
+  {
+    // #391: project each Artist's captured P737 influences (the `influencedByQids` list artist-wikidata
+    // stored) into in-collection (:Artist)-[:INFLUENCED_BY {source:"wikidata"}]->(:Artist) edges,
+    // resolving each target QID against `a.wikidataQid` (deterministic QID join; unowned targets are
+    // dropped). Deps `artist-wikidata` so every QID is stored before resolution — creating edges inline
+    // in that pass would miss any target enriched later in the same pass. Pure Cypher, no external
+    // client: resources [] (ordering via deps), no `sources`.
+    name: 'artist-influences',
+    deps: ['artist-wikidata'],
+    resources: [],
+    run: async (ctx) => ({ ...(await enrichArtistInfluences(ctx.driver, ctx.log)) }),
   },
   {
     // #380: promote each Work's captured writerMbids to (:Artist|:Musician)-[:WROTE]->(:Work) edges
