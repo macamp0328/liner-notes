@@ -25,6 +25,12 @@ on:
     branches: [main]
     paths:
       - 'services/graph-service/**'
+      # Committed docs artifacts (openapi.json, insomnia collection, schema diagrams)
+      # are build/runtime-irrelevant — the Dockerfile never COPYs docs/. A docs-only
+      # change (e.g. a schema-diagram refresh PR) must not trigger a prod redeploy of
+      # an unchanged image. The '!' negation must follow the broad positive above; the
+      # later positives don't overlap docs/**, so it only carves out the docs subtree. (#410)
+      - '!services/graph-service/docs/**'
       - 'infra/k8s/**'
       - '.github/workflows/deploy.yml'
       # Root-level build inputs the Dockerfile COPYs — without these a
