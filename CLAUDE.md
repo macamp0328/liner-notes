@@ -80,17 +80,21 @@ pnpm diagrams:generate
 # See .github/workflows/diagrams.yml.
 
 # Changelog (plain-English, AI-written, VERSIONED, self-healing). See scripts/changelog/README.md.
-# Cutting a release is a DELIBERATE, batched action — run `changelog:release` (Actions "Run
-# workflow", or locally) when you've shipped a batch and want to declare it released. Merged PRs
-# accumulate in a rolling "unreleased" DRAFT until then; note richness ramps with an importance
-# tier (maintenance/standard/notable). The cut tags current main HEAD by default (pass HEAD_SHA to
-# pin a commit). NOT committed files, NOT a PR check; tag refs can't retrigger branch-filtered CI.
+# A release is cut AUTOMATICALLY on every successful Deploy (workflow_run): approving the
+# production deploy gate cuts a `vYYYY.MM.DD` release of everything merged since the last one,
+# tagged at the DEPLOYED commit. Merged PRs accumulate in a rolling "unreleased" DRAFT until that
+# deploy. A manual fallback exists — `changelog:release` (Actions "Run workflow", or locally) — and
+# a cut with nothing pending is a no-op. Note richness ramps with an importance tier
+# (maintenance/standard/notable). NOT committed files, NOT a PR check; tag refs can't retrigger
+# branch-filtered CI. CAVEAT: Deploy is PATH-FILTERED (services/infra/lockfile/etc.), so a batch of
+# only docs/scripts/CI changes never deploys and never auto-cuts — it rides the next deployable
+# merge, or use the manual fallback. (Auto-cut is also gated to main deploys.)
 pnpm changelog:test                            # unit tests (scripts/changelog/*.test.ts)
 pnpm changelog:update 304                      # summarise one PR by number (also refreshes it)
 pnpm changelog:backfill                        # seed history (also upgrades PR-title fallbacks)
 pnpm changelog:backfill --refresh              # re-summarise every entry (e.g. after style.md edits)
 pnpm changelog:reconcile --since 2026-06-01    # heal missed PRs + re-render published releases (no AI)
-pnpm changelog:release                         # cut a version deliberately (tags main HEAD; HEAD_SHA to pin)
+pnpm changelog:release                         # manual fallback cut (auto-cuts on deploy; tags main HEAD, HEAD_SHA to pin)
 pnpm changelog:baseline                        # one-shot: publish the v0.1.0 history baseline
 # Local runs auto-load ANTHROPIC_API_KEY from .env.local/.env (no export needed).
 ```
@@ -104,10 +108,11 @@ human-facing is a deterministic `render()` of that store — `renderUnreleased` 
 `renderVersion` (each published release, tier-aware), `renderBaseline` (the v0.1.0 history). **Three
 writers** keep it current: the per-merge hook
 ([`.github/workflows/changelog.yml`](.github/workflows/changelog.yml), `changelog:update`); **the cut**
-([`.github/workflows/changelog-release.yml`](.github/workflows/changelog-release.yml), a **deliberate
-`workflow_dispatch`** you run after shipping a batch — it runs `changelog:release` to publish a
-`vYYYY.MM.DD` release and stamp the swept records; cutting is decoupled from Deploy so merged PRs
-accumulate in the draft until you choose to release them); and a weekly self-healing reconciler
+([`.github/workflows/changelog-release.yml`](.github/workflows/changelog-release.yml)) — fired
+**automatically on every successful Deploy** (`workflow_run`; the production deploy gate is the manual
+approval, so an approved deploy cuts a `vYYYY.MM.DD` release of everything merged since the last one,
+tagged at the deployed commit), with `workflow_dispatch`/`changelog:release` as a manual fallback;
+and a weekly self-healing reconciler
 ([`.github/workflows/changelog-reconcile.yml`](.github/workflows/changelog-reconcile.yml)) that fills
 gaps and **re-renders every published release from the frozen store with no new AI calls**.
 Summaries come from Claude via structured outputs (up to two sentences; default `claude-opus-4-8`,
@@ -372,13 +377,13 @@ No service talks to Neo4j directly except `graph-service`.
 The repo is built for agent-driven work, so the guardrails are layered — each wall assumes the
 one before it was skipped. Don't fight them; a blocked command means fix the cause, not bypass.
 
-| Layer               | Mechanism                                                                                                  | What it stops                                                                                                                                        |
-| ------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Agent (Claude Code) | `.claude/hooks/bash-guard.sh` (PreToolUse) + `permissions` in `.claude/settings.json`                      | `--no-verify` hook bypasses, plain `git push --force`/`-f`; reading `.env.local`/`*.tfstate`; unprompted `terraform apply/destroy`, `kubectl delete` |
-| Local git (husky)   | `pre-commit`, `pre-push`                                                                                   | commits on `main`, pushes targeting `main`; unformatted/unlinted/untested/under-covered code reaching origin                                         |
-| CI (`ci.yml` & co.) | 11-job fan-out (incl. `script-tests`, `terraform`, shellcheck) + drift guards (diagrams, insomnia/openapi) | everything above, re-checked server-side; secrets (TruffleHog), CVEs (audit), CodeQL findings; terraform fmt/validate; `*.sh` lint                   |
-| GitHub              | branch protection + squash-merge + CODEOWNERS                                                              | direct pushes to `main`, merging with red checks, unreviewed changes                                                                                 |
-| Runtime             | helmet headers, global rate limit, admin bearer auth, env validation at startup                            | missing `ADMIN_TOKEN` in production is a **startup failure**, not a silent 503 admin surface                                                         |
+| Layer               | Mechanism                                                                                                                             | What it stops                                                                                                                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent (Claude Code) | `.claude/hooks/bash-guard.sh` (PreToolUse) + `permissions` in `.claude/settings.json`                                                 | `--no-verify` hook bypasses, plain `git push --force`/`-f`; reading `.env.local`/`*.tfstate`; unprompted `terraform apply/destroy`, `kubectl delete`                                               |
+| Local git (husky)   | `pre-commit`, `pre-push`                                                                                                              | commits on `main`, pushes targeting `main`; unformatted/unlinted/untested/under-covered code reaching origin                                                                                       |
+| CI (`ci.yml` & co.) | 13-job fan-out (incl. `script-tests`, `terraform`, shellcheck, `hadolint`, `kubeconform`) + drift guards (diagrams, insomnia/openapi) | everything above, re-checked server-side; secrets (TruffleHog), CVEs (audit), CodeQL findings; terraform fmt/validate; `*.sh` lint; Dockerfile lint (hadolint); k8s manifest schemas (kubeconform) |
+| GitHub              | branch protection + squash-merge + CODEOWNERS                                                                                         | direct pushes to `main`, merging with red checks, unreviewed changes                                                                                                                               |
+| Runtime             | helmet headers, global rate limit, admin bearer auth, env validation at startup                                                       | missing `ADMIN_TOKEN` in production is a **startup failure**, not a silent 503 admin surface                                                                                                       |
 
 Notes for agents:
 
@@ -394,22 +399,24 @@ Notes for agents:
 
 ## CI Requirements
 
-**Parallel fan-out:** `format`, `lint`, `typecheck`, `tests-and-coverage`, `schema-validation`, `script-tests`, `terraform`, `audit`, `secrets-scan`, `codeql`, and `actionlint` all start in parallel at t=0 (`actionlint` also shellchecks the standalone `*.sh` scripts). `docker-build` is the only gated job — it waits on `lint` + `typecheck` (the multi-stage build compiles TS, so a type error would fail it anyway) but **not** on the ~90s test job, so it builds alongside it. There is deliberately no static fast-fail gate on the test/schema jobs: it traded ~1 min of green-path wall-clock for runner minutes that were only saved on red PRs. The critical path is now `max(tests-and-coverage, codeql)` ≈ 85s.
+**Parallel fan-out:** `format`, `lint`, `typecheck`, `tests-and-coverage`, `schema-validation`, `script-tests`, `terraform`, `hadolint`, `kubeconform`, `audit`, `secrets-scan`, `codeql`, and `actionlint` all start in parallel at t=0 (`actionlint` also shellchecks the standalone `*.sh` scripts). `docker-build` is the only gated job — it waits on `lint` + `typecheck` (the multi-stage build compiles TS, so a type error would fail it anyway) but **not** on the ~90s test job, so it builds alongside it. There is deliberately no static fast-fail gate on the test/schema jobs: it traded ~1 min of green-path wall-clock for runner minutes that were only saved on red PRs. The critical path is now `max(tests-and-coverage, codeql)` ≈ 85s.
 
-| Check             | Tool                                                   | Requirement                                                                            |
-| ----------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| Format check      | Prettier                                               | Zero differences                                                                       |
-| Linting           | ESLint + security plugin                               | Zero warnings/errors (src + tests + `scripts/` + service scripts + configs — see note) |
-| Type checking     | TypeScript strict (src + tests + `scripts/` + configs) | Zero errors                                                                            |
-| Tests & Coverage  | Vitest + coverage-v8 + Neo4j container                 | All tests pass; thresholds met                                                         |
-| Schema validation | tsx + Neo4j container                                  | Constraints/indexes apply idempotently                                                 |
-| Script tests      | node:test via tsx (`changelog:test`)                   | All changelog generator tests pass                                                     |
-| Terraform         | `terraform fmt -check` + `validate`                    | Formatted; both roots validate (`init -backend=false`)                                 |
-| Shellcheck        | shellcheck (pinned, in `actionlint`)                   | Standalone `*.sh` clean                                                                |
-| Docker build      | Docker Buildx                                          | Image builds successfully                                                              |
-| Security audit    | `pnpm audit`                                           | No high/critical vulnerabilities                                                       |
-| Secrets scan      | TruffleHog                                             | No credentials in committed code                                                       |
-| CodeQL scan       | GitHub CodeQL (security-extended)                      | No security alerts                                                                     |
+| Check             | Tool                                                   | Requirement                                                                                      |
+| ----------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| Format check      | Prettier                                               | Zero differences                                                                                 |
+| Linting           | ESLint + security plugin                               | Zero warnings/errors (src + tests + `scripts/` + service scripts + configs — see note)           |
+| Type checking     | TypeScript strict (src + tests + `scripts/` + configs) | Zero errors                                                                                      |
+| Tests & Coverage  | Vitest + coverage-v8 + Neo4j container                 | All tests pass; thresholds met                                                                   |
+| Schema validation | tsx + Neo4j container                                  | Constraints/indexes apply idempotently                                                           |
+| Script tests      | node:test via tsx (`changelog:test`)                   | All changelog generator tests pass                                                               |
+| Terraform         | `terraform fmt -check` + `validate`                    | Formatted; both roots validate (`init -backend=false`)                                           |
+| K8s manifests     | kubeconform (pinned, kustomize-built)                  | Manifests validate vs upstream schemas; only the 2 ESO CRD kinds `-skip`ped by name              |
+| Shellcheck        | shellcheck (pinned, in `actionlint`)                   | Standalone `*.sh` clean                                                                          |
+| Docker build      | Docker Buildx                                          | Image builds successfully                                                                        |
+| Dockerfile lint   | hadolint (pinned binary)                               | Dockerfile passes hadolint (default rules); add `.hadolint.yaml` only to justify a needed ignore |
+| Security audit    | `pnpm audit`                                           | No high/critical vulnerabilities                                                                 |
+| Secrets scan      | TruffleHog                                             | No credentials in committed code                                                                 |
+| CodeQL scan       | GitHub CodeQL (security-extended)                      | No security alerts                                                                               |
 
 > **Lint scope note:** `lint`/`typecheck` are root-level (`pnpm lint` / `pnpm typecheck`), not `--filter graph-service`, so they cover `scripts/`, the service-level `scripts/`, and the vitest configs — not just `src`. Type-aware ESLint needs every file in a tsconfig: `scripts/tsconfig.json` plus `tsconfig.test.json`'s widened `include` provide that (see `.eslintrc.cjs` `overrides`). `eslint-plugin-security`'s `detect-non-literal-fs-filename` / `detect-object-injection` are scoped **off** for the trusted-path `scripts/` tooling (they target untrusted-input web handlers). **Test files are linted too** (#345): three idiomatic-noise rules — `unbound-method` (passing `obj.method` to `expect`), `require-await` (async mock signatures), `detect-object-injection` (`arr[i]` in assertions) — are tuned **off** for tests, while the correctness rules stay on. `no-floating-promises` is the load-bearing one: kept **on** for the vitest tests (a missing `await` on an async assertion is a silent false-green) and turned **off** only for the root `scripts/**/*.test.ts` node:test suite, where a top-level `test(...)` floats by design.
 
