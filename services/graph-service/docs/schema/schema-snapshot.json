@@ -1,0 +1,1093 @@
+{
+  "schemaVersion": 1,
+  "labels": [
+    {
+      "label": "Artist",
+      "properties": [
+        {
+          "name": "discogsId",
+          "types": ["Long"],
+          "mandatory": false,
+          "unique": true,
+          "indexed": true
+        },
+        {
+          "name": "genres",
+          "types": ["StringArray"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "name",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "nationalityFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "profile",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "profileFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "realName",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "styles",
+          "types": ["StringArray"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        }
+      ]
+    },
+    {
+      "label": "Country",
+      "properties": [
+        {
+          "name": "name",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": true,
+          "indexed": true
+        }
+      ]
+    },
+    {
+      "label": "Genre",
+      "properties": [
+        {
+          "name": "name",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": true,
+          "indexed": true
+        }
+      ]
+    },
+    {
+      "label": "Label",
+      "properties": [
+        {
+          "name": "discogsId",
+          "types": ["Long"],
+          "mandatory": false,
+          "unique": true,
+          "indexed": true
+        },
+        {
+          "name": "labelHierarchyFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "name",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        }
+      ]
+    },
+    {
+      "label": "Master",
+      "properties": [
+        {
+          "name": "discogsId",
+          "types": ["Long"],
+          "mandatory": false,
+          "unique": true,
+          "indexed": true
+        },
+        {
+          "name": "mbReleaseEventsFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "title",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "year",
+          "types": ["Long"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        }
+      ]
+    },
+    {
+      "label": "Musician",
+      "properties": [
+        {
+          "name": "discogsId",
+          "types": ["Long"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "membersFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "name",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "nationalityFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "notAGroup",
+          "types": ["Boolean"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        }
+      ]
+    },
+    {
+      "label": "Release",
+      "properties": [
+        {
+          "name": "barcode",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "communityRating",
+          "types": ["Double"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "communityRatingCount",
+          "types": ["Long"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "discogsId",
+          "types": ["Long"],
+          "mandatory": false,
+          "unique": true,
+          "indexed": true
+        },
+        {
+          "name": "discogsUrl",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "format",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "isVariousArtists",
+          "types": ["Boolean"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "masterDiscogsId",
+          "types": ["Long"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "masterFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "notes",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "originalYear",
+          "types": ["Long"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "pressingYear",
+          "types": ["Long"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "releaseDate",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "thumbUrl",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "title",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        }
+      ]
+    },
+    {
+      "label": "ReloadJob",
+      "properties": [
+        {
+          "name": "completedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "durationMs",
+          "types": ["Long"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "jobId",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": true,
+          "indexed": true
+        },
+        {
+          "name": "startedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "status",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        }
+      ]
+    },
+    {
+      "label": "ReloadStage",
+      "properties": [
+        {
+          "name": "completedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "countsJson",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "jobId",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "ordinal",
+          "types": ["Long"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "stage",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "startedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "status",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        }
+      ]
+    },
+    {
+      "label": "Studio",
+      "properties": [
+        {
+          "name": "name",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        }
+      ]
+    },
+    {
+      "label": "Style",
+      "properties": [
+        {
+          "name": "name",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": true,
+          "indexed": true
+        }
+      ]
+    },
+    {
+      "label": "Track",
+      "properties": [
+        {
+          "name": "acousticBrainzFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "danceabilityEstimate",
+          "types": ["Double"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "deezerBpm",
+          "types": ["Double"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "deezerFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "deezerGain",
+          "types": ["Double"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "duration",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "durationSeconds",
+          "types": ["Long"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "dynamicComplexity",
+          "types": ["Double"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "isInstrumental",
+          "types": ["Boolean"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "isrc",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "loudnessDb",
+          "types": ["Double"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "lyrics",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "lyricsConfidence",
+          "types": ["Double"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "lyricsFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "lyricsMatchedArtist",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "lyricsMatchedTitle",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "lyricsSource",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "lyricsStatus",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "musicBrainzFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "musicalKey",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "musicalScale",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "position",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "recordingMbid",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "releaseDiscogsId",
+          "types": ["Long"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "tempo",
+          "types": ["Double"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "title",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "voiceInstrumental",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "CREDITED_ON",
+      "from": "Musician",
+      "to": "Release"
+    },
+    {
+      "type": "CREDITED_ON",
+      "from": "Musician",
+      "to": "Track"
+    },
+    {
+      "type": "FROM_COUNTRY",
+      "from": "Release",
+      "to": "Country"
+    },
+    {
+      "type": "HAS_STAGE",
+      "from": "ReloadJob",
+      "to": "ReloadStage"
+    },
+    {
+      "type": "HAS_TRACK",
+      "from": "Release",
+      "to": "Track"
+    },
+    {
+      "type": "IN_GENRE",
+      "from": "Release",
+      "to": "Genre"
+    },
+    {
+      "type": "IN_STYLE",
+      "from": "Release",
+      "to": "Style"
+    },
+    {
+      "type": "MB_RELEASED_IN",
+      "from": "Master",
+      "to": "Country"
+    },
+    {
+      "type": "MEMBER_OF",
+      "from": "Musician",
+      "to": "Musician"
+    },
+    {
+      "type": "ON_LABEL",
+      "from": "Release",
+      "to": "Label"
+    },
+    {
+      "type": "ORIGIN_COUNTRY",
+      "from": "Artist",
+      "to": "Country"
+    },
+    {
+      "type": "ORIGIN_COUNTRY",
+      "from": "Musician",
+      "to": "Country"
+    },
+    {
+      "type": "PARENT_LABEL",
+      "from": "Label",
+      "to": "Label"
+    },
+    {
+      "type": "RECORDED_AT",
+      "from": "Release",
+      "to": "Studio"
+    },
+    {
+      "type": "RELEASED_BY",
+      "from": "Release",
+      "to": "Artist"
+    },
+    {
+      "type": "RELEASED_IN",
+      "from": "Master",
+      "to": "Country"
+    },
+    {
+      "type": "SAME_PERSON_AS",
+      "from": "Musician",
+      "to": "Artist"
+    }
+  ],
+  "constraints": [
+    {
+      "name": "artist_discogs_id",
+      "type": "NODE_PROPERTY_UNIQUENESS",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Artist"],
+      "properties": ["discogsId"]
+    },
+    {
+      "name": "country_name",
+      "type": "NODE_PROPERTY_UNIQUENESS",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Country"],
+      "properties": ["name"]
+    },
+    {
+      "name": "genre_name",
+      "type": "NODE_PROPERTY_UNIQUENESS",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Genre"],
+      "properties": ["name"]
+    },
+    {
+      "name": "label_discogs_id",
+      "type": "NODE_PROPERTY_UNIQUENESS",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Label"],
+      "properties": ["discogsId"]
+    },
+    {
+      "name": "master_discogs_id",
+      "type": "NODE_PROPERTY_UNIQUENESS",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Master"],
+      "properties": ["discogsId"]
+    },
+    {
+      "name": "release_discogs_id",
+      "type": "NODE_PROPERTY_UNIQUENESS",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Release"],
+      "properties": ["discogsId"]
+    },
+    {
+      "name": "reload_job_id",
+      "type": "NODE_PROPERTY_UNIQUENESS",
+      "entityType": "NODE",
+      "labelsOrTypes": ["ReloadJob"],
+      "properties": ["jobId"]
+    },
+    {
+      "name": "style_name",
+      "type": "NODE_PROPERTY_UNIQUENESS",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Style"],
+      "properties": ["name"]
+    },
+    {
+      "name": "work_mbid",
+      "type": "NODE_PROPERTY_UNIQUENESS",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Work"],
+      "properties": ["mbid"]
+    }
+  ],
+  "indexes": [
+    {
+      "name": "artist_discogs_id",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Artist"],
+      "properties": ["discogsId"],
+      "owningConstraint": "artist_discogs_id"
+    },
+    {
+      "name": "artist_mb_id_fetched_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Artist"],
+      "properties": ["musicbrainzIdFetchedAt"],
+      "owningConstraint": null
+    },
+    {
+      "name": "artist_musicbrainz_id",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Artist"],
+      "properties": ["musicbrainzId"],
+      "owningConstraint": null
+    },
+    {
+      "name": "artist_nationality_fetched_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Artist"],
+      "properties": ["nationalityFetchedAt"],
+      "owningConstraint": null
+    },
+    {
+      "name": "artist_wikidata_fetched_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Artist"],
+      "properties": ["wikidataFetchedAt"],
+      "owningConstraint": null
+    },
+    {
+      "name": "country_name",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Country"],
+      "properties": ["name"],
+      "owningConstraint": "country_name"
+    },
+    {
+      "name": "genre_name",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Genre"],
+      "properties": ["name"],
+      "owningConstraint": "genre_name"
+    },
+    {
+      "name": "index_1b9dcc97",
+      "indexType": "LOOKUP",
+      "entityType": "RELATIONSHIP",
+      "labelsOrTypes": [],
+      "properties": [],
+      "owningConstraint": null
+    },
+    {
+      "name": "index_460996c0",
+      "indexType": "LOOKUP",
+      "entityType": "NODE",
+      "labelsOrTypes": [],
+      "properties": [],
+      "owningConstraint": null
+    },
+    {
+      "name": "label_discogs_id",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Label"],
+      "properties": ["discogsId"],
+      "owningConstraint": "label_discogs_id"
+    },
+    {
+      "name": "label_hierarchy_fetched_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Label"],
+      "properties": ["labelHierarchyFetchedAt"],
+      "owningConstraint": null
+    },
+    {
+      "name": "lyricsSearch",
+      "indexType": "FULLTEXT",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Track"],
+      "properties": ["lyrics"],
+      "owningConstraint": null
+    },
+    {
+      "name": "master_discogs_id",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Master"],
+      "properties": ["discogsId"],
+      "owningConstraint": "master_discogs_id"
+    },
+    {
+      "name": "master_mb_release_events_fetched_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Master"],
+      "properties": ["mbReleaseEventsFetchedAt"],
+      "owningConstraint": null
+    },
+    {
+      "name": "musician_discogs_id",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Musician"],
+      "properties": ["discogsId"],
+      "owningConstraint": null
+    },
+    {
+      "name": "musician_mb_id_fetched_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Musician"],
+      "properties": ["musicbrainzIdFetchedAt"],
+      "owningConstraint": null
+    },
+    {
+      "name": "musician_members_fetched_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Musician"],
+      "properties": ["membersFetchedAt"],
+      "owningConstraint": null
+    },
+    {
+      "name": "musician_musicbrainz_id",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Musician"],
+      "properties": ["musicbrainzId"],
+      "owningConstraint": null
+    },
+    {
+      "name": "musician_name",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Musician"],
+      "properties": ["name"],
+      "owningConstraint": null
+    },
+    {
+      "name": "musician_nationality_fetched_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Musician"],
+      "properties": ["nationalityFetchedAt"],
+      "owningConstraint": null
+    },
+    {
+      "name": "releaseArtistTrackSearch",
+      "indexType": "FULLTEXT",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Release", "Artist", "Track"],
+      "properties": ["title", "name"],
+      "owningConstraint": null
+    },
+    {
+      "name": "release_discogs_id",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Release"],
+      "properties": ["discogsId"],
+      "owningConstraint": "release_discogs_id"
+    },
+    {
+      "name": "release_master_fetched_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Release"],
+      "properties": ["masterFetchedAt"],
+      "owningConstraint": null
+    },
+    {
+      "name": "release_pressing_year",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Release"],
+      "properties": ["pressingYear"],
+      "owningConstraint": null
+    },
+    {
+      "name": "reload_job_id",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["ReloadJob"],
+      "properties": ["jobId"],
+      "owningConstraint": "reload_job_id"
+    },
+    {
+      "name": "reload_job_started_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["ReloadJob"],
+      "properties": ["startedAt"],
+      "owningConstraint": null
+    },
+    {
+      "name": "reload_stage_job",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["ReloadStage"],
+      "properties": ["jobId"],
+      "owningConstraint": null
+    },
+    {
+      "name": "studio_name",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Studio"],
+      "properties": ["name"],
+      "owningConstraint": null
+    },
+    {
+      "name": "style_name",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Style"],
+      "properties": ["name"],
+      "owningConstraint": "style_name"
+    },
+    {
+      "name": "trackLyrics",
+      "indexType": "FULLTEXT",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Track"],
+      "properties": ["lyrics", "title"],
+      "owningConstraint": null
+    },
+    {
+      "name": "track_acousticbrainz_fetched_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Track"],
+      "properties": ["acousticBrainzFetchedAt"],
+      "owningConstraint": null
+    },
+    {
+      "name": "track_deezer_fetched_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Track"],
+      "properties": ["deezerFetchedAt"],
+      "owningConstraint": null
+    },
+    {
+      "name": "track_isrc",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Track"],
+      "properties": ["isrc"],
+      "owningConstraint": null
+    },
+    {
+      "name": "track_lyrics_fetched_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Track"],
+      "properties": ["lyricsFetchedAt"],
+      "owningConstraint": null
+    },
+    {
+      "name": "track_musical_scale",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Track"],
+      "properties": ["musicalScale"],
+      "owningConstraint": null
+    },
+    {
+      "name": "track_musicbrainz_fetched_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Track"],
+      "properties": ["musicBrainzFetchedAt"],
+      "owningConstraint": null
+    },
+    {
+      "name": "track_recording_artists_fetched_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Track"],
+      "properties": ["recordingArtistsFetchedAt"],
+      "owningConstraint": null
+    },
+    {
+      "name": "track_recording_mbid",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Track"],
+      "properties": ["recordingMbid"],
+      "owningConstraint": null
+    },
+    {
+      "name": "track_tempo",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Track"],
+      "properties": ["tempo"],
+      "owningConstraint": null
+    },
+    {
+      "name": "track_works_fetched_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Track"],
+      "properties": ["worksFetchedAt"],
+      "owningConstraint": null
+    },
+    {
+      "name": "work_mbid",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Work"],
+      "properties": ["mbid"],
+      "owningConstraint": "work_mbid"
+    }
+  ]
+}
