@@ -183,6 +183,7 @@ const completeSummary: IngestionSummary = {
   lyricsEnrichment: {
     enriched: 8,
     skipped: 2,
+    exhausted: 0,
     failed: 0,
     durationMs: 1000,
     geniusFatalCount: 0,
@@ -190,7 +191,7 @@ const completeSummary: IngestionSummary = {
     lrclibFatalCount: 0,
     lrclibBreakerOpen: 0,
   },
-  masterDataEnrichment: { enriched: 5, skipped: 2, failed: 0, durationMs: 500 },
+  masterDataEnrichment: { enriched: 5, skipped: 2, exhausted: 0, failed: 0, durationMs: 500 },
   artistGenresEnrichment: {
     genresEnriched: 10,
     stylesEnriched: 9,
@@ -198,7 +199,7 @@ const completeSummary: IngestionSummary = {
     failed: 0,
     durationMs: 200,
   },
-  artistProfilesEnrichment: { enriched: 8, skipped: 2, failed: 0, durationMs: 8000 },
+  artistProfilesEnrichment: { enriched: 8, skipped: 2, exhausted: 0, failed: 0, durationMs: 8000 },
 };
 
 const idleState: JobState = {

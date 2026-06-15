@@ -191,6 +191,7 @@ export async function runIngestion(
   const emptyLyrics: LyricsEnrichmentSummary = {
     enriched: 0,
     skipped: 0,
+    exhausted: 0,
     failed: 0,
     durationMs: 0,
     geniusFatalCount: 0,
@@ -201,6 +202,7 @@ export async function runIngestion(
   const emptyMasterData: MasterDataEnrichmentSummary = {
     enriched: 0,
     skipped: 0,
+    exhausted: 0,
     failed: 0,
     durationMs: 0,
   };
@@ -214,6 +216,7 @@ export async function runIngestion(
   const emptyArtistProfiles: ArtistProfilesEnrichmentSummary = {
     enriched: 0,
     skipped: 0,
+    exhausted: 0,
     failed: 0,
     durationMs: 0,
   };

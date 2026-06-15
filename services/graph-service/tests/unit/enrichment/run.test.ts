@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { Driver } from 'neo4j-driver';
-import { runEnrichment, type EnrichmentStage } from '../../../src/enrichment/run.js';
+import {
+  runEnrichment,
+  TERMINAL_EMPTY,
+  type EnrichmentStage,
+} from '../../../src/enrichment/run.js';
 import { __resetShutdown } from '../../../src/lifecycle/shutdown.js';
 
 // ---------------------------------------------------------------------------
@@ -77,9 +81,63 @@ describe('runEnrichment', () => {
 
     const summary = await runEnrichment(fakeDriver, stage);
 
-    expect(summary).toMatchObject({ enriched: 0, skipped: 1, failed: 0 });
+    expect(summary).toMatchObject({ enriched: 0, skipped: 1, exhausted: 0, failed: 0 });
     expect(markAttempted).toHaveBeenCalledWith(fakeDriver, { id: 1 });
     expect(write).not.toHaveBeenCalled();
+  });
+
+  it('writes the terminal marker and counts exhausted when resolve returns TERMINAL_EMPTY', async () => {
+    const write = vi.fn().mockResolvedValue(undefined);
+    const markAttempted = vi.fn().mockResolvedValue(undefined);
+    const markTerminal = vi.fn().mockResolvedValue(undefined);
+    const stage = makeStage({
+      selectCandidates: vi.fn().mockResolvedValue([{ id: 1 }]),
+      resolve: vi.fn().mockResolvedValue(TERMINAL_EMPTY),
+      write,
+      markAttempted,
+      markTerminal,
+    });
+
+    const summary = await runEnrichment(fakeDriver, stage);
+
+    expect(summary).toMatchObject({ enriched: 0, skipped: 0, exhausted: 1, failed: 0 });
+    expect(markTerminal).toHaveBeenCalledWith(fakeDriver, { id: 1 });
+    expect(markAttempted).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('throws into failed (no silent throttle) when TERMINAL_EMPTY without markTerminal', async () => {
+    const logger = makeMockLogger();
+    const markAttempted = vi.fn().mockResolvedValue(undefined);
+    const stage = makeStage({
+      selectCandidates: vi.fn().mockResolvedValue([{ id: 1 }]),
+      resolve: vi.fn().mockResolvedValue(TERMINAL_EMPTY),
+      markAttempted,
+      // no markTerminal declared → the runner must throw, not fall back to markAttempted
+    });
+
+    const summary = await runEnrichment(fakeDriver, stage, { logger });
+
+    expect(summary).toMatchObject({ enriched: 0, skipped: 0, exhausted: 0, failed: 1 });
+    expect(markAttempted).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('no markTerminal'));
+  });
+
+  it('throws into failed when resolve returns null without markAttempted', async () => {
+    const logger = makeMockLogger();
+    // Built inline (not via makeStage) so `markAttempted` is genuinely absent — under
+    // exactOptionalPropertyTypes an explicit `markAttempted: undefined` is not assignable.
+    const stage: EnrichmentStage<Item, string> = {
+      name: 'fake',
+      selectCandidates: vi.fn().mockResolvedValue([{ id: 1 }]),
+      resolve: vi.fn().mockResolvedValue(null),
+      write: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const summary = await runEnrichment(fakeDriver, stage, { logger });
+
+    expect(summary).toMatchObject({ enriched: 0, skipped: 0, exhausted: 0, failed: 1 });
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('no markAttempted'));
   });
 
   it('counts failed exactly once and does not stamp when resolve throws (double-count guard)', async () => {
@@ -137,22 +195,26 @@ describe('runEnrichment', () => {
     expect(markAttempted).toHaveBeenCalledWith(fakeDriver, { id: 3 });
   });
 
-  it('aggregates enriched/skipped/failed across a mixed batch', async () => {
-    const items = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }];
+  it('aggregates enriched/skipped/exhausted/failed across a mixed batch', async () => {
+    const items = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }];
+    const markTerminal = vi.fn().mockResolvedValue(undefined);
     const resolve = vi
       .fn()
       .mockResolvedValueOnce('a') // enriched
       .mockResolvedValueOnce('b') // enriched
       .mockResolvedValueOnce(null) // skipped
+      .mockResolvedValueOnce(TERMINAL_EMPTY) // exhausted
       .mockRejectedValueOnce(new Error('e')); // failed
     const stage = makeStage({
       selectCandidates: vi.fn().mockResolvedValue(items),
       resolve,
+      markTerminal,
     });
 
     const summary = await runEnrichment(fakeDriver, stage);
 
-    expect(summary).toMatchObject({ enriched: 2, skipped: 1, failed: 1 });
+    expect(summary).toMatchObject({ enriched: 2, skipped: 1, exhausted: 1, failed: 1 });
+    expect(markTerminal).toHaveBeenCalledWith(fakeDriver, { id: 4 });
   });
 
   it('returns a failed summary (does not throw) when selectCandidates fails', async () => {
@@ -163,7 +225,7 @@ describe('runEnrichment', () => {
 
     const summary = await runEnrichment(fakeDriver, stage, { logger });
 
-    expect(summary).toMatchObject({ enriched: 0, skipped: 0, failed: 1 });
+    expect(summary).toMatchObject({ enriched: 0, skipped: 0, exhausted: 0, failed: 1 });
     expect(summary.durationMs).toBeGreaterThanOrEqual(0);
     expect(stage.resolve).not.toHaveBeenCalled();
     expect(logger.error).toHaveBeenCalled();
@@ -289,7 +351,7 @@ describe('runEnrichment', () => {
     await runEnrichment(fakeDriver, stage, { logger });
 
     expect(logger.info).toHaveBeenCalledWith(
-      '[fake] Progress: 10/10 — enriched=8, skipped=1, failed=1',
+      '[fake] Progress: 10/10 — enriched=8, skipped=1, exhausted=0, failed=1',
     );
   });
 
@@ -352,14 +414,16 @@ describe('runEnrichment', () => {
   });
 
   it('preserves the stamp-on-attempt contract and final totals under concurrency', async () => {
-    const items = Array.from({ length: 9 }, (_, k) => ({ id: k }));
+    const items = Array.from({ length: 12 }, (_, k) => ({ id: k }));
     const write = vi.fn().mockResolvedValue(undefined);
     const markAttempted = vi.fn().mockResolvedValue(undefined);
-    // id % 3 === 0 → enriched, === 1 → skipped (null), === 2 → failed (throw)
+    const markTerminal = vi.fn().mockResolvedValue(undefined);
+    // id % 4 === 0 → enriched, === 1 → skipped (null), === 2 → failed (throw), === 3 → exhausted
     const resolve = vi.fn().mockImplementation(async (item: Item) => {
       await tick();
-      if (item.id % 3 === 1) return null;
-      if (item.id % 3 === 2) throw new Error('boom');
+      if (item.id % 4 === 1) return null;
+      if (item.id % 4 === 2) throw new Error('boom');
+      if (item.id % 4 === 3) return TERMINAL_EMPTY;
       return 'data';
     });
     const stage = makeStage({
@@ -367,13 +431,15 @@ describe('runEnrichment', () => {
       resolve,
       write,
       markAttempted,
+      markTerminal,
     });
 
     const summary = await runEnrichment(fakeDriver, stage, { concurrency: 5 });
 
-    expect(summary).toMatchObject({ enriched: 3, skipped: 3, failed: 3 });
+    expect(summary).toMatchObject({ enriched: 3, skipped: 3, exhausted: 3, failed: 3 });
     expect(write).toHaveBeenCalledTimes(3);
     expect(markAttempted).toHaveBeenCalledTimes(3);
+    expect(markTerminal).toHaveBeenCalledTimes(3);
   });
 
   it('processes every item exactly once and ends progress at (total,total) under concurrency', async () => {

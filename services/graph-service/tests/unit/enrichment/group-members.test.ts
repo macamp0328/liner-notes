@@ -4,12 +4,12 @@ import { enrichGroupMembers } from '../../../src/enrichment/group-members.js';
 
 const mockGetGroupCandidates = vi.hoisted(() => vi.fn());
 const mockSetGroupMembers = vi.hoisted(() => vi.fn());
-const mockStampMembersFetched = vi.hoisted(() => vi.fn());
+const mockMarkNotAGroup = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/db/group-members-repository.js', () => ({
   getGroupCandidates: mockGetGroupCandidates,
   setGroupMembers: mockSetGroupMembers,
-  stampMembersFetched: mockStampMembersFetched,
+  markNotAGroup: mockMarkNotAGroup,
 }));
 
 const fakeDriver = {} as Driver;
@@ -38,7 +38,7 @@ describe('enrichGroupMembers', () => {
     vi.clearAllMocks();
     mockGetGroupCandidates.mockResolvedValue([]);
     mockSetGroupMembers.mockResolvedValue(undefined);
-    mockStampMembersFetched.mockResolvedValue(undefined);
+    mockMarkNotAGroup.mockResolvedValue(undefined);
   });
 
   it('returns zero counts when no candidates need checking', async () => {
@@ -61,20 +61,22 @@ describe('enrichGroupMembers', () => {
       { id: 11, active: true },
       { id: 22, active: false },
     ]);
-    expect(mockStampMembersFetched).not.toHaveBeenCalled();
+    expect(mockMarkNotAGroup).not.toHaveBeenCalled();
     expect(summary.enriched).toBe(1);
     expect(summary.skipped).toBe(0);
+    expect(summary.exhausted).toBe(0);
   });
 
-  it('skips (stamps marker) a non-group with no members', async () => {
+  it('exhausts (marks non-group) a musician with no members', async () => {
     mockGetGroupCandidates.mockResolvedValue([{ discogsId: 42 }]);
     const client = makeClient(async () => ({ id: 42 }));
 
     const summary = await enrichGroupMembers(client, fakeDriver);
 
-    expect(mockStampMembersFetched).toHaveBeenCalledWith(fakeDriver, 42);
+    expect(mockMarkNotAGroup).toHaveBeenCalledWith(fakeDriver, 42);
     expect(mockSetGroupMembers).not.toHaveBeenCalled();
-    expect(summary.skipped).toBe(1);
+    expect(summary.exhausted).toBe(1);
+    expect(summary.skipped).toBe(0);
     expect(summary.enriched).toBe(0);
   });
 
@@ -88,15 +90,16 @@ describe('enrichGroupMembers', () => {
     expect(summary.enriched).toBe(1);
   });
 
-  it('skips a group whose every member is id===0 (no linkable members)', async () => {
+  it('exhausts a group whose every member is id===0 (no linkable members)', async () => {
     mockGetGroupCandidates.mockResolvedValue([{ discogsId: 900 }]);
     const client = makeClient(async () => ({ id: 900, members: [member(0), member(0)] }));
 
     const summary = await enrichGroupMembers(client, fakeDriver);
 
     expect(mockSetGroupMembers).not.toHaveBeenCalled();
-    expect(mockStampMembersFetched).toHaveBeenCalledWith(fakeDriver, 900);
-    expect(summary.skipped).toBe(1);
+    expect(mockMarkNotAGroup).toHaveBeenCalledWith(fakeDriver, 900);
+    expect(summary.exhausted).toBe(1);
+    expect(summary.skipped).toBe(0);
   });
 
   it('counts a fetch failure and continues', async () => {

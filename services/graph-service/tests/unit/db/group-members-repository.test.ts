@@ -3,7 +3,7 @@ import type { Driver, Session } from 'neo4j-driver';
 import {
   getGroupCandidates,
   setGroupMembers,
-  stampMembersFetched,
+  markNotAGroup,
   resetGroupMembers,
 } from '../../../src/db/group-members-repository.js';
 
@@ -85,15 +85,15 @@ describe('setGroupMembers', () => {
   });
 });
 
-describe('stampMembersFetched', () => {
+describe('markNotAGroup', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('stamps membersFetchedAt and the permanent notAGroup marker without writing edges', async () => {
     const { session, runSpy } = makeMockSession();
-    await stampMembersFetched(makeDriver(session), 555);
+    await markNotAGroup(makeDriver(session), 555);
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(query).toContain('SET m.membersFetchedAt = datetime()');
-    // The markAttempted path proves the node is a person → mark it a non-group for good.
+    // The markTerminal path proves the node is a person → mark it a non-group for good.
     expect(query).toContain('m.notAGroup = true');
     expect(query).not.toContain('MEMBER_OF');
     expect((params['discogsId'] as { toNumber(): number }).toNumber()).toBe(555);
