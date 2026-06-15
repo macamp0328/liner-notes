@@ -148,6 +148,13 @@ pnpm changelog:baseline                                 # publish v0.1.0 "Initia
    button (Actions tab), or `pnpm changelog:release` locally (tags main HEAD, or pass `HEAD_SHA`).
 4. A cut with nothing pending is a no-op (**no empty release**).
 
+> **Caveat — Deploy is path-filtered.** It only runs on changes under `services/graph-service/**`,
+> `infra/k8s/**`, the lockfile/manifests, and `deploy.yml`. A batch of **only** docs / scripts /
+> terraform / CI changes never deploys, so it never auto-cuts — those entries wait in the draft and
+> ride the **next deployable merge** (which sweeps everything pending), or you cut them with the
+> manual fallback. The auto-trigger also only restricts to `main`, so a `workflow_dispatch` deploy
+> on a feature branch will **not** cut a release.
+
 ## Forking / tuning
 
 - **Cheaper model:** set `CHANGELOG_MODEL=claude-haiku-4-5` (in the workflow `env`, or your shell).

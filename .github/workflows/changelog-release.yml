@@ -55,9 +55,13 @@ jobs:
   release:
     name: Cut changelog version
     runs-on: ubuntu-latest
-    # On the auto path, only cut after a SUCCESSFUL deploy (skip failed/cancelled
-    # runs). A manual dispatch has no workflow_run context, so always run then.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # On the auto path, only cut after a SUCCESSFUL deploy OF MAIN. The head_branch
+    # gate matters because deploy.yml also has `workflow_dispatch: {}`, which the
+    # Actions UI can run on any ref — without it, a Deploy dispatched on a feature
+    # branch would cut a release tagged at an un-merged commit and prematurely stamp
+    # the backlog. A manual dispatch of THIS workflow has no workflow_run context, so
+    # the first clause always lets it run.
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
     steps:
       - uses: actions/checkout@v6
 

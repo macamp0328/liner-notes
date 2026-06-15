@@ -86,7 +86,9 @@ pnpm diagrams:generate
 # deploy. A manual fallback exists — `changelog:release` (Actions "Run workflow", or locally) — and
 # a cut with nothing pending is a no-op. Note richness ramps with an importance tier
 # (maintenance/standard/notable). NOT committed files, NOT a PR check; tag refs can't retrigger
-# branch-filtered CI.
+# branch-filtered CI. CAVEAT: Deploy is PATH-FILTERED (services/infra/lockfile/etc.), so a batch of
+# only docs/scripts/CI changes never deploys and never auto-cuts — it rides the next deployable
+# merge, or use the manual fallback. (Auto-cut is also gated to main deploys.)
 pnpm changelog:test                            # unit tests (scripts/changelog/*.test.ts)
 pnpm changelog:update 304                      # summarise one PR by number (also refreshes it)
 pnpm changelog:backfill                        # seed history (also upgrades PR-title fallbacks)
