@@ -76,6 +76,27 @@ export interface SongwriterWork {
   thumbUrl: string | null;
 }
 
+/**
+ * One end of an in-collection influence relationship (#391): an Artist the queried person influenced
+ * or was influenced by, both keyed on the Wikidata QID join. `wikidataQid` is the QID the
+ * `INFLUENCED_BY` edge resolved on (always present — the edge can't exist without it).
+ */
+export interface InfluenceArtist {
+  discogsId: number;
+  name: string;
+  wikidataQid: string;
+}
+
+/**
+ * The two-directional influence neighbourhood of one Artist (#391): `influencedBy` are the artists
+ * the named person was influenced by (outgoing P737 edges), `influenced` are the artists they
+ * influenced (incoming edges). Both are empty for an unknown name or one with no INFLUENCED_BY edges.
+ */
+export interface ArtistInfluences {
+  influencedBy: InfluenceArtist[];
+  influenced: InfluenceArtist[];
+}
+
 export interface ConnectionNode {
   type: string;
   discogsId: number | null;
@@ -400,6 +421,45 @@ export async function getWorksBySongwriter(
       year: toInt(rec.get('year')),
       thumbUrl: toStr(rec.get('thumbUrl')),
     }));
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * The two-directional Wikidata-P737 influence neighbourhood of an Artist (#391), matched
+ * case-insensitively by name. `influencedBy` traverses outgoing `INFLUENCED_BY` (who this person was
+ * influenced by); `influenced` traverses incoming (who they influenced). Only in-collection artists
+ * appear — the edges only ever link two Artist nodes that share the QID join. Returns empty arrays
+ * for an unknown name or one with no influence edges.
+ */
+export async function getArtistInfluences(driver: Driver, name: string): Promise<ArtistInfluences> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `
+      MATCH (a:Artist) WHERE toLower(a.name) = toLower($name)
+      OPTIONAL MATCH (a)-[:INFLUENCED_BY]->(src:Artist)
+      WITH a, collect(DISTINCT src) AS influencedBy
+      OPTIONAL MATCH (a)<-[:INFLUENCED_BY]-(dst:Artist)
+      WITH influencedBy, collect(DISTINCT dst) AS influenced
+      RETURN
+        [x IN influencedBy | { discogsId: x.discogsId, name: x.name, wikidataQid: x.wikidataQid }] AS influencedBy,
+        [x IN influenced | { discogsId: x.discogsId, name: x.name, wikidataQid: x.wikidataQid }] AS influenced
+      `,
+      { name },
+    );
+    const record = result.records[0];
+    const mapList = (raw: unknown): InfluenceArtist[] =>
+      ((raw as Array<Record<string, unknown>> | null) ?? []).map((x) => ({
+        discogsId: toInt(x['discogsId']) ?? 0,
+        name: toStr(x['name']) ?? '',
+        wikidataQid: toStr(x['wikidataQid']) ?? '',
+      }));
+    return {
+      influencedBy: record ? mapList(record.get('influencedBy')) : [],
+      influenced: record ? mapList(record.get('influenced')) : [],
+    };
   } finally {
     await session.close();
   }

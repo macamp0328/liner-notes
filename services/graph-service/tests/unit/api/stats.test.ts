@@ -74,6 +74,7 @@ const STATS = {
     samePersonLinks: { covered: 25, applicable: 25, pct: 100 },
     memberOfEdges: 9,
     groupsWithMembers: 3,
+    influencedByEdges: 7,
   },
 };
 

@@ -44,11 +44,14 @@ function makeDriver(byLabel: {
   work?: Record<string, unknown>;
   // #380: optional so existing cases need no change.
   wrote?: Record<string, unknown>;
+  // #391: optional so existing cases need no change.
+  influencedBy?: Record<string, unknown>;
 }): Driver {
   const musician = byLabel.musician ?? { total: int(0), groupsWithMembers: int(0) };
   const memberOf = byLabel.memberOf ?? { memberOfEdges: int(0) };
   const work = byLabel.work ?? { total: int(0), multiRecording: int(0) };
   const wrote = byLabel.wrote ?? { wroteEdges: int(0) };
+  const influencedBy = byLabel.influencedBy ?? { influencedByEdges: int(0) };
   const run = vi.fn(async (cypher: string) => {
     let fields: Record<string, unknown>;
     if (cypher.includes('(p:Artist)')) fields = byLabel.natArtist;
@@ -58,6 +61,8 @@ function makeDriver(byLabel: {
     else if (cypher.includes('[r:MEMBER_OF]')) fields = memberOf;
     // #380: WROTE edge scan references (:Work) but not (w:Work) — route it before the work check.
     else if (cypher.includes('[r:WROTE]')) fields = wrote;
+    // #391: INFLUENCED_BY edge scan references (:Artist) but not (a:Artist) — route it explicitly.
+    else if (cypher.includes('[r:INFLUENCED_BY]')) fields = influencedBy;
     else if (cypher.includes('(m:Musician)')) fields = musician;
     else if (cypher.includes('(r:Release)')) fields = byLabel.release;
     else if (cypher.includes('(a:Artist)')) fields = byLabel.artist;
@@ -123,6 +128,7 @@ describe('getStats', () => {
         groupsWithMembers: int(3),
       },
       memberOf: { memberOfEdges: int(9) },
+      influencedBy: { influencedByEdges: int(13) },
     });
 
     const stats = await getStats(driver);
@@ -152,6 +158,7 @@ describe('getStats', () => {
     expect(stats.enrichment.samePersonLinks).toEqual({ covered: 25, applicable: 25, pct: 100 });
     expect(stats.enrichment.memberOfEdges).toBe(9);
     expect(stats.enrichment.groupsWithMembers).toBe(3);
+    expect(stats.enrichment.influencedByEdges).toBe(13);
 
     // master-gated denominator
     expect(stats.enrichment.releasesWithOriginalYear).toEqual({

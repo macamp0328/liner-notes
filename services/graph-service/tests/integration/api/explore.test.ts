@@ -8,8 +8,10 @@ import {
   seedEntityResolution,
   seedWorks,
   seedSongwriters,
+  seedInfluences,
 } from '../../fixtures/loader.js';
 import { getDriver } from '../../../src/db/client.js';
+import { linkInfluencedBy } from '../../../src/db/artist-influences-repository.js';
 
 const SEED_RELEASE_ID = 7000001; // Maiden Voyage — Herbie Hancock, Blue Note, US, 1966
 
@@ -24,6 +26,9 @@ describe('explore routes', () => {
     await seedEntityResolution(getDriver());
     await seedWorks(getDriver());
     await seedSongwriters(getDriver());
+    await seedInfluences(getDriver());
+    // Drive the real projection so the route reads production-shaped INFLUENCED_BY edges (#391).
+    await linkInfluencedBy(getDriver());
   });
 
   afterAll(async () => {
@@ -215,6 +220,51 @@ describe('explore routes', () => {
       const res = await app.inject({ method: 'GET', url: '/api/v1/explore/songwriter/__nobody__' });
       expect(res.statusCode).toBe(200);
       expect(JSON.parse(res.payload)).toEqual([]);
+    });
+  });
+
+  // #391: Wikidata P737 influence graph, projected into in-collection INFLUENCED_BY edges.
+  describe('GET /api/v1/explore/influences/:name', () => {
+    type InfluencesBody = {
+      influencedBy: Array<{ discogsId: number; name: string; wikidataQid: string }>;
+      influenced: Array<{ discogsId: number; name: string; wikidataQid: string }>;
+    };
+
+    it('returns both directions of the influence neighbourhood', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/influences/Influence%20Beta',
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as InfluencesBody;
+      // Beta was influenced by Gamma (the unowned QID was dropped by the confidence gate)...
+      expect(body.influencedBy).toEqual([
+        { discogsId: 970003, name: 'Influence Gamma', wikidataQid: 'Q-inf-gamma' },
+      ]);
+      // ...and Beta influenced Alpha (incoming edge).
+      expect(body.influenced).toEqual([
+        { discogsId: 970001, name: 'Influence Alpha', wikidataQid: 'Q-inf-alpha' },
+      ]);
+    });
+
+    it('matches case-insensitively', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/influences/influence%20gamma',
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as InfluencesBody;
+      // Gamma influenced Beta; nothing in-collection influenced Gamma.
+      expect(body.influenced).toEqual([
+        { discogsId: 970002, name: 'Influence Beta', wikidataQid: 'Q-inf-beta' },
+      ]);
+      expect(body.influencedBy).toEqual([]);
+    });
+
+    it('returns empty arrays for a name with no influence edges', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/influences/__nobody__' });
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.payload)).toEqual({ influencedBy: [], influenced: [] });
     });
   });
 

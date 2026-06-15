@@ -7,6 +7,7 @@ import {
   getArtistsByPersonLevelInstrument,
   getRecordingsByWork,
   getWorksBySongwriter,
+  getArtistInfluences,
   getReleasesByStudio,
   getReleasesByLabel,
   getReleasesByGenre,
@@ -25,6 +26,7 @@ import {
   type InstrumentPlayer,
   type WorkRecording,
   type SongwriterWork,
+  type ArtistInfluences,
   type ConnectionNode,
   type SharedMusiciansResult,
   type InternationalTrack,
@@ -138,6 +140,25 @@ const songwriterWorkSchema = {
     artist: { type: 'string', nullable: true },
     year: { type: 'integer', nullable: true },
     thumbUrl: { type: 'string', nullable: true },
+  },
+} as const;
+
+const influenceArtistSchema = {
+  type: 'object',
+  required: ['discogsId', 'name', 'wikidataQid'],
+  properties: {
+    discogsId: { type: 'integer' },
+    name: { type: 'string' },
+    wikidataQid: { type: 'string' },
+  },
+} as const;
+
+const artistInfluencesResponseSchema = {
+  type: 'object',
+  required: ['influencedBy', 'influenced'],
+  properties: {
+    influencedBy: { type: 'array', items: influenceArtistSchema },
+    influenced: { type: 'array', items: influenceArtistSchema },
   },
 } as const;
 
@@ -398,6 +419,36 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply): Promise<SongwriterWork[] | ErrorReply> => {
       const items = await getWorksBySongwriter(getDriver(), request.params.name);
       return reply.send(items);
+    },
+  );
+
+  // GET /api/v1/explore/influences/:name — the Wikidata P737 influence neighbourhood (#391)
+  fastify.get<{ Params: NameParams; Reply: ArtistInfluences | ErrorReply }>(
+    '/api/v1/explore/influences/:name',
+    {
+      schema: {
+        tags: ['explore'],
+        summary: 'Who influenced this artist and who they influenced (Wikidata P737)',
+        description:
+          'Returns the two-directional influence neighbourhood of this artist (#391): ' +
+          '`influencedBy` are the artists Wikidata P737 says influenced this person, and `influenced` ' +
+          'are the artists this person influenced. Both are restricted to artists already in the ' +
+          'collection — each edge is a deterministic Wikidata QID join, never a name match — so the ' +
+          'graph is sparse by design.',
+        params: {
+          type: 'object',
+          required: ['name'],
+          properties: { name: { type: 'string' } },
+        },
+        response: {
+          200: artistInfluencesResponseSchema,
+          400: errorResponseRef,
+        },
+      },
+    },
+    async (request, reply): Promise<ArtistInfluences | ErrorReply> => {
+      const result = await getArtistInfluences(getDriver(), request.params.name);
+      return reply.send(result);
     },
   );
 

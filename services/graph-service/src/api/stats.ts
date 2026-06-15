@@ -135,6 +135,7 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
                       'samePersonLinks',
                       'memberOfEdges',
                       'groupsWithMembers',
+                      'influencedByEdges',
                     ],
                     properties: {
                       releasesWithOriginalYear: coverageSchema,
@@ -166,6 +167,7 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
                       samePersonLinks: coverageSchema,
                       memberOfEdges: { type: 'integer' },
                       groupsWithMembers: { type: 'integer' },
+                      influencedByEdges: { type: 'integer' },
                     },
                   },
                 },
