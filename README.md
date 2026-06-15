@@ -22,6 +22,21 @@ structured store; a deploy cuts the version; a weekly job self-heals anything mi
 upkeep, no committed `CHANGELOG.md`. See
 [`scripts/changelog/README.md`](scripts/changelog/README.md) for how it works and how to fork it.
 
+## Data model
+
+Your collection's graph — every node label, its properties, and how they connect — is documented
+**straight from the live production database**, so it never drifts from what's actually there. Browse it
+as an interactive, pan-and-zoom diagram:
+
+**[→ Live schema diagram](https://macamp0328.github.io/liner-notes/)**
+
+A scheduled job re-introspects prod and opens a PR with any model changes (plus a drift report against
+`src/db/schema.ts`), so the picture stays current with zero hand-maintenance. The same
+entity-relationship and graph-of-labels views also render in
+[`services/graph-service/docs/schema/SCHEMA.md`](services/graph-service/docs/schema/SCHEMA.md), backed by
+a machine-readable snapshot. See [ADR 0004](docs/adr/0004-data-model-diagrams-from-live-introspection.md)
+for the design and [`scripts/schema-diagram/README.md`](scripts/schema-diagram/README.md) for the tool.
+
 ## Quick Start
 
 ```bash

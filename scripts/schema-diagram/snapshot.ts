@@ -132,7 +132,11 @@ export function buildIndexes(rows: ShowIndexRow[]): IndexSchema[] {
     .sort((a, b) => byString(a.name, b.name));
 }
 
-/** True if some NODE uniqueness/key constraint covers (label, property). */
+/** True if some NODE uniqueness/key constraint covers (label, property).
+ *  Note: a composite (multi-property) constraint marks EACH of its properties as
+ *  unique independently, so the ER diagram would render a composite key as several
+ *  separate PKs. No composite constraints exist today; revisit this if one is added.
+ *  (`isIndexed` has the same per-property semantics for composite indexes.) */
 function isUnique(label: string, property: string, constraints: ConstraintSchema[]): boolean {
   return constraints.some(
     (c) =>
