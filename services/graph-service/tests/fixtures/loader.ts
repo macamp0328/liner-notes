@@ -237,6 +237,41 @@ export async function seedWorks(driver: Driver): Promise<void> {
 }
 
 /**
+ * Seed a songwriter fixture (#380) for the explore + reconciliation tests. Call AFTER seedGraph().
+ * Writes the post-reconciliation end state directly (the same shapes the mb-artist-id +
+ * songwriter-reconciliation passes produce): a person present as BOTH an Artist and a Musician
+ * (SAME_PERSON_AS-linked, both carrying `musicbrainzId`), a Work whose captured `writerMbids` name
+ * that MBID, a `WROTE` edge tagged with the writer roles, and an in-collection recording of the
+ * Work. discogsIds ≥ 900600 + a distinct name so it doesn't perturb the other explore assertions.
+ */
+export async function seedSongwriters(driver: Driver): Promise<void> {
+  const session = driver.session();
+  try {
+    await session.run(
+      `MERGE (a:Artist {discogsId: 900600})
+         SET a.name = 'Test Songwriter', a.musicbrainzId = 'mb-songwriter-1'
+       MERGE (m:Musician {discogsId: 900600})
+         SET m.name = 'Test Songwriter', m.musicbrainzId = 'mb-songwriter-1'
+       MERGE (m)-[:SAME_PERSON_AS]->(a)
+       MERGE (w:Work {mbid: 'work-songwriter-1'})
+         SET w.title = 'A Written Song', w.type = 'Song',
+             w.writers = ['Test Songwriter'], w.writerMbids = ['mb-songwriter-1'],
+             w.writerRoles = ['composer']
+       MERGE (r:Release {discogsId: 7060001})
+         SET r.title = 'Songwriter LP', r.pressingYear = 1972
+       MERGE (t:Track {position: 'A1', releaseDiscogsId: 7060001})
+         SET t.title = 'A Written Song', t.recordingMbid = 'rec-songwriter-1'
+       MERGE (r)-[:HAS_TRACK]->(t)
+       MERGE (t)-[rof:RECORDING_OF]->(w) SET rof.source = 'musicbrainz'
+       MERGE (a)-[wa:WROTE]->(w) SET wa.source = 'musicbrainz', wa.roles = ['composer']
+       MERGE (m)-[wm:WROTE]->(w) SET wm.source = 'musicbrainz', wm.roles = ['composer']`,
+    );
+  } finally {
+    await session.close();
+  }
+}
+
+/**
  * Seed entity-resolution fixtures (#330) for the explore + reconciliation tests. Call AFTER
  * seedGraph(). All entities use discogsIds ≥ 900000 and distinct names so they don't perturb the
  * other explore assertions (which match by their own names / use `>=` bounds). Writes the same

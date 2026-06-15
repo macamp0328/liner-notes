@@ -24,12 +24,25 @@ describe('applySchema', () => {
     } as unknown as Driver;
   });
 
-  it('opens and closes a fresh session for each of the 51 statements', async () => {
+  it('opens and closes a fresh session for each of the 55 statements', async () => {
     await applySchema(driver);
-    expect(sessions).toHaveLength(51);
+    expect(sessions).toHaveLength(55);
     for (const s of sessions) {
       expect(s.run).toHaveBeenCalledTimes(1);
       expect(s.close).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('creates the musicbrainzId mapping + marker indexes on Artist and Musician (issue #380)', async () => {
+    await applySchema(driver);
+    const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
+    for (const needle of [
+      'artist_musicbrainz_id',
+      'musician_musicbrainz_id',
+      'artist_mb_id_fetched_at',
+      'musician_mb_id_fetched_at',
+    ]) {
+      expect(stmts.some((s) => s.includes(needle))).toBe(true);
     }
   });
 

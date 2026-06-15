@@ -48,6 +48,13 @@ const statements = [
   'DROP INDEX track_deezer_fetched IF EXISTS',
   'CREATE INDEX artist_nationality_fetched_at IF NOT EXISTS FOR (a:Artist) ON (a.nationalityFetchedAt)',
   'CREATE INDEX musician_nationality_fetched_at IF NOT EXISTS FOR (m:Musician) ON (m.nationalityFetchedAt)',
+  // issue #380: Discogs↔MusicBrainz-artist identity mapping. musicbrainzId backs the WROTE
+  // reconciliation join (Work.writerMbids → person node); the *FetchedAt marker backs the
+  // staleness-gated mb-artist-id candidate scan.
+  'CREATE INDEX artist_musicbrainz_id IF NOT EXISTS FOR (a:Artist) ON (a.musicbrainzId)',
+  'CREATE INDEX musician_musicbrainz_id IF NOT EXISTS FOR (m:Musician) ON (m.musicbrainzId)',
+  'CREATE INDEX artist_mb_id_fetched_at IF NOT EXISTS FOR (a:Artist) ON (a.musicbrainzIdFetchedAt)',
+  'CREATE INDEX musician_mb_id_fetched_at IF NOT EXISTS FOR (m:Musician) ON (m.musicbrainzIdFetchedAt)',
   // issue #341: Wikidata enrichment marker — backs the staleness-gated candidate scan
   // (getUnenrichedArtistsForWikidata). The wikidataQid lookup index is deferred to the
   // influence/relational follow-ups that actually query by it.

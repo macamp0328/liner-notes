@@ -19,6 +19,8 @@ import { enrichTrackWorks } from '../enrichment/track-works.js';
 import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
 import { enrichTrackDeezer } from '../enrichment/track-deezer.js';
 import { enrichNationality } from '../enrichment/artist-nationality.js';
+import { enrichArtistMusicbrainzIds } from '../enrichment/artist-musicbrainz-id.js';
+import { enrichSongwriterReconciliation } from '../enrichment/songwriter-reconciliation.js';
 import { enrichArtistWikidata } from '../enrichment/artist-wikidata.js';
 import type { ProgressReporter } from '../enrichment/progress.js';
 
@@ -40,7 +42,9 @@ export type ReloadStageName =
   | 'track-works'
   | 'track-acousticbrainz'
   | 'track-deezer'
+  | 'mb-artist-id'
   | 'nationality'
+  | 'songwriter-reconciliation'
   | 'artist-wikidata'
   | 'verify';
 
@@ -276,10 +280,31 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     }),
   },
   {
-    // Holds `wikidata` too (#341): it drives the one shared `ctx.wikidata` client, which the
-    // `artist-wikidata` stage also uses — the lane serialises that limiter across both stages.
-    name: 'nationality',
+    // #380: resolve each Artist/Musician's MusicBrainz artist MBID (via the Discogs-URL relation)
+    // and store it as `musicbrainzId` — the deterministic identity mapping the
+    // `songwriter-reconciliation` pass joins on to promote Work writers to WROTE edges. Holds the
+    // `musicbrainz` rate-limiter lane. Ordered before `nationality` (which deps it) so nationality
+    // reuses the stored MBID and skips its own `/url` lookup — net-zero MB calls across the two for
+    // resolvable nodes (mb-artist-id does the `/url`, nationality the `/artist`).
+    name: 'mb-artist-id',
     deps: ['releases'],
+    resources: ['musicbrainz'],
+    sources: ['musicbrainz'],
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
+      if (!ctx.musicbrainz) return null;
+      return {
+        ...(await enrichArtistMusicbrainzIds(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)),
+      };
+    },
+  },
+  {
+    // #380: deps mb-artist-id so the musicbrainzId is populated first — resolveCountry then reuses
+    // it (getCountryByMbid) and skips its own `/url` lookup. Both already share the `musicbrainz`
+    // lane (never overlap); the dep only pins the order so the reuse actually kicks in.
+    // #341: also holds the `wikidata` lane — it drives the one shared `ctx.wikidata` client, which
+    // the `artist-wikidata` stage also uses, so the lane serialises that limiter across both.
+    name: 'nationality',
+    deps: ['releases', 'mb-artist-id'],
     resources: ['discogs', 'musicbrainz', 'wikidata'],
     sources: ['musicbrainz', 'wikidata', 'discogs'],
     run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
@@ -318,6 +343,26 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
         )),
       };
     },
+  },
+  {
+    // #380: promote each Work's captured writerMbids to (:Artist|:Musician)-[:WROTE]->(:Work) edges
+    // by joining on the musicbrainzId from mb-artist-id. Pure Cypher, no MB calls. Like
+    // person-reconciliation it is a dual-axis writer (its two single-label MERGEs lock Artist then
+    // Musician, plus Work), so it must not overlap any node writer: deps it after the two batched
+    // single-axis writers (transitively via person-reconciliation, which already deps artist-genres
+    // + group-members) AND after the per-node Artist writers nationality + artist-wikidata. track-
+    // works + mb-artist-id supply the data it reads. Pure-Cypher + fast, so running just before
+    // verify is free; resources [] — ordering via deps handles exclusion, matching person-reconciliation.
+    name: 'songwriter-reconciliation',
+    deps: [
+      'track-works',
+      'mb-artist-id',
+      'person-reconciliation',
+      'nationality',
+      'artist-wikidata',
+    ],
+    resources: [],
+    run: async (ctx) => ({ ...(await enrichSongwriterReconciliation(ctx.driver, ctx.log)) }),
   },
 ];
 

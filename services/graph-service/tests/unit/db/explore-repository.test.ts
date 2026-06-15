@@ -5,6 +5,7 @@ import {
   getReleasesByCredit,
   getReleasesByInstrument,
   getRecordingsByWork,
+  getWorksBySongwriter,
   getReleasesByStudio,
   getReleasesByLabel,
   getReleasesByGenre,
@@ -298,6 +299,78 @@ describe('getRecordingsByWork', () => {
   it('returns an empty array for an unknown work', async () => {
     const { session } = makeMockSession([makeResult([])]);
     expect(await getRecordingsByWork(makeMockDriver(session), 'nope')).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getWorksBySongwriter (#380)
+// ---------------------------------------------------------------------------
+
+describe('getWorksBySongwriter', () => {
+  it('maps songwriter works (both labels, by name) and carries the WROTE roles', async () => {
+    const rec = makeRecord({
+      workMbid: 'work-1',
+      workTitle: 'Who Do You Love?',
+      roles: ['composer', 'lyricist'],
+      recordingMbid: 'rec-1',
+      trackTitle: 'Who Do You Love',
+      position: 'A1',
+      discogsId: makeNeo4jInt(7000001),
+      releaseTitle: 'La Bamba',
+      artist: 'Bo Diddley',
+      year: makeNeo4jInt(1987),
+      thumbUrl: null,
+    });
+    const { session, runSpy } = makeMockSession([makeResult([rec])]);
+
+    const out = await getWorksBySongwriter(makeMockDriver(session), 'Bo Diddley');
+
+    expect(out).toEqual([
+      {
+        workMbid: 'work-1',
+        workTitle: 'Who Do You Love?',
+        roles: ['composer', 'lyricist'],
+        recordingMbid: 'rec-1',
+        trackTitle: 'Who Do You Love',
+        position: 'A1',
+        discogsId: 7000001,
+        releaseTitle: 'La Bamba',
+        artist: 'Bo Diddley',
+        year: 1987,
+        thumbUrl: null,
+      },
+    ]);
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('[wr:WROTE]->(w:Work)');
+    expect(query).toContain('(p:Artist OR p:Musician)');
+    expect(query).toContain('toLower(p.name) = toLower($name)');
+    expect(params).toEqual({ name: 'Bo Diddley' });
+  });
+
+  it('defaults missing roles to an empty array', async () => {
+    const rec = makeRecord({
+      workMbid: 'work-2',
+      workTitle: 'Instrumental Theme',
+      roles: null,
+      recordingMbid: 'rec-2',
+      trackTitle: 'Theme',
+      position: null,
+      discogsId: makeNeo4jInt(7000002),
+      releaseTitle: 'Soundtrack',
+      artist: null,
+      year: null,
+      thumbUrl: null,
+    });
+    const { session } = makeMockSession([makeResult([rec])]);
+
+    const out = await getWorksBySongwriter(makeMockDriver(session), 'Someone');
+
+    expect(out[0]?.roles).toEqual([]);
+  });
+
+  it('returns an empty array for a name with no WROTE edges', async () => {
+    const { session } = makeMockSession([makeResult([])]);
+    expect(await getWorksBySongwriter(makeMockDriver(session), 'Nobody')).toEqual([]);
   });
 });
 

@@ -25,10 +25,12 @@ const fakeDriver = {} as Driver;
 function makeMbClient(
   byDiscogsId: (id: number) => Promise<string | null> = async () => null,
   byName: (name: string) => Promise<string | null> = async () => null,
+  byMbid: (mbid: string) => Promise<string | null> = async () => null,
 ) {
   return {
     getCountryByDiscogsId: vi.fn().mockImplementation(byDiscogsId),
     getCountryByName: vi.fn().mockImplementation(byName),
+    getCountryByMbid: vi.fn().mockImplementation(byMbid),
   } as unknown as import('../../../src/ingestion/musicbrainz-client.js').MusicBrainzClient;
 }
 
@@ -215,6 +217,43 @@ describe('enrichNationality', () => {
     expect(first.enriched).toBe(0);
     expect(second.enriched).toBe(0);
     expect(mockSetArtistNationality).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // MusicBrainz-ID reuse (#380)
+  // ---------------------------------------------------------------------------
+
+  describe('musicbrainzId reuse', () => {
+    it('reuses a stored MBID via getCountryByMbid and skips the /url lookup', async () => {
+      mockGetUnenrichedArtists.mockResolvedValue([
+        { discogsId: 1, name: 'Miles Davis', musicbrainzId: 'mb-1' },
+      ]);
+      const client = makeMbClient(
+        async () => 'XX', // getCountryByDiscogsId — must NOT be used
+        async () => null,
+        async () => 'US', // getCountryByMbid
+      );
+
+      const summary = await enrichNationality(client, fakeDriver);
+
+      expect(client.getCountryByMbid).toHaveBeenCalledWith('mb-1');
+      expect(client.getCountryByDiscogsId).not.toHaveBeenCalled();
+      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 1, 'US', 'musicbrainz');
+      expect(summary.enriched).toBe(1);
+    });
+
+    it('falls back to getCountryByDiscogsId when no MBID is stored', async () => {
+      mockGetUnenrichedArtists.mockResolvedValue([
+        { discogsId: 2, name: 'No MBID', musicbrainzId: null },
+      ]);
+      const client = makeMbClient(async () => 'GB');
+
+      await enrichNationality(client, fakeDriver);
+
+      expect(client.getCountryByDiscogsId).toHaveBeenCalledWith(2);
+      expect(client.getCountryByMbid).not.toHaveBeenCalled();
+      expect(mockSetArtistNationality).toHaveBeenCalledWith(fakeDriver, 2, 'GB', 'musicbrainz');
+    });
   });
 
   // ---------------------------------------------------------------------------

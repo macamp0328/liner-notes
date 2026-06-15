@@ -48,6 +48,11 @@ export interface NationalityEnrichmentSummary extends NationalityExtras {
  *
  * Conflict resolution for source 1: when MB and WD disagree, Wikidata is preferred and
  * the discrepancy is logged.
+ *
+ * MusicBrainz reuse (#380): when the node already carries a `musicbrainzId` (resolved by the
+ * mb-artist-id pass that runs first in the reload), the MB lookup goes straight to
+ * `getCountryByMbid` and skips the `/url` Discogs-relation call — net-zero MB calls across the two
+ * stages. Falls back to the two-step `getCountryByDiscogsId` when no MBID is stored.
  */
 async function resolveCountry(
   mbClient: MusicBrainzClient,
@@ -57,11 +62,16 @@ async function resolveCountry(
   name: string,
   label: string,
   log: Logger,
+  musicbrainzId: string | null = null,
 ): Promise<ResolvedNationality | null> {
   if (discogsId !== null) {
-    // Source 1: MB + WD by Discogs ID (parallel)
+    // Source 1: MB + WD by Discogs ID (parallel). Reuse a stored MBID when present (#380) — a
+    // resolved MBID is always a non-empty UUID, so a truthy check also treats absent/null as
+    // "fall back to the two-step Discogs-URL lookup".
     const [mbCountry, wdCountry] = await Promise.all([
-      mbClient.getCountryByDiscogsId(discogsId),
+      musicbrainzId
+        ? mbClient.getCountryByMbid(musicbrainzId)
+        : mbClient.getCountryByDiscogsId(discogsId),
       wdClient ? wdClient.getCountryByDiscogsId(discogsId) : Promise.resolve(null),
     ]);
 
@@ -168,7 +178,16 @@ export async function enrichNationality(
       return artists;
     },
     resolve: (artist) =>
-      resolveCountry(mbClient, wd, dc, artist.discogsId, artist.name, 'Artist', log),
+      resolveCountry(
+        mbClient,
+        wd,
+        dc,
+        artist.discogsId,
+        artist.name,
+        'Artist',
+        log,
+        artist.musicbrainzId,
+      ),
     async write(d, artist, resolved) {
       await setArtistNationality(d, artist.discogsId, resolved.country, resolved.source);
       recordSource(resolved.source);
@@ -192,7 +211,16 @@ export async function enrichNationality(
     selectCandidates: (d) => getUnenrichedMusiciansForNationality(d),
     resolve: (person) =>
       person.discogsId !== null
-        ? resolveCountry(mbClient, wd, dc, person.discogsId, person.name, 'musician', log)
+        ? resolveCountry(
+            mbClient,
+            wd,
+            dc,
+            person.discogsId,
+            person.name,
+            'musician',
+            log,
+            person.musicbrainzId,
+          )
         : resolveCountryByName(mbClient, person.name),
     async write(d, person, resolved) {
       await setMusicianNationality(d, person, resolved.country, resolved.source);

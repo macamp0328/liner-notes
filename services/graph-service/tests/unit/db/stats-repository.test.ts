@@ -42,10 +42,13 @@ function makeDriver(byLabel: {
   memberOf?: Record<string, unknown>;
   // #336: optional so existing cases need no change.
   work?: Record<string, unknown>;
+  // #380: optional so existing cases need no change.
+  wrote?: Record<string, unknown>;
 }): Driver {
   const musician = byLabel.musician ?? { total: int(0), groupsWithMembers: int(0) };
   const memberOf = byLabel.memberOf ?? { memberOfEdges: int(0) };
   const work = byLabel.work ?? { total: int(0), multiRecording: int(0) };
+  const wrote = byLabel.wrote ?? { wroteEdges: int(0) };
   const run = vi.fn(async (cypher: string) => {
     let fields: Record<string, unknown>;
     if (cypher.includes('(p:Artist)')) fields = byLabel.natArtist;
@@ -53,6 +56,8 @@ function makeDriver(byLabel: {
     else if (cypher.includes("roleCategory = 'engineer'")) fields = byLabel.natEngineer;
     else if (cypher.includes('(p:Musician)')) fields = byLabel.natMusician;
     else if (cypher.includes('[r:MEMBER_OF]')) fields = memberOf;
+    // #380: WROTE edge scan references (:Work) but not (w:Work) — route it before the work check.
+    else if (cypher.includes('[r:WROTE]')) fields = wrote;
     else if (cypher.includes('(m:Musician)')) fields = musician;
     else if (cypher.includes('(r:Release)')) fields = byLabel.release;
     else if (cypher.includes('(a:Artist)')) fields = byLabel.artist;
@@ -97,7 +102,13 @@ describe('getStats', () => {
         deezerGainCovered: int(24),
       },
       master: { total: int(7), releaseEventsCovered: int(5) },
-      work: { total: int(50), multiRecording: int(4) },
+      work: {
+        total: int(50),
+        multiRecording: int(4),
+        writersApplicable: int(40),
+        writerLinksCovered: int(30),
+      },
+      wrote: { wroteEdges: int(55) },
       natArtist: nat(16, 12, 7, 4),
       natMusician: nat(50, 30, 10, 5),
       natProducer: nat(8, 4, 4, 0),
@@ -125,6 +136,9 @@ describe('getStats', () => {
     // plus the raw count of cover/version groups (works with >1 distinct recording).
     expect(stats.enrichment.tracksWithWork).toEqual({ covered: 42, applicable: 70, pct: 60 });
     expect(stats.enrichment.worksWithMultipleRecordings).toBe(4);
+    // #380 songwriter reconciliation: WROTE coverage over writer-bearing Works (30/40) + raw count.
+    expect(stats.enrichment.worksWithWriterLinks).toEqual({ covered: 30, applicable: 40, pct: 75 });
+    expect(stats.enrichment.wroteEdges).toBe(55);
     // #330 entity-resolution stats: reconciliation coverage + raw MEMBER_OF counts.
     expect(stats.enrichment.samePersonLinks).toEqual({ covered: 25, applicable: 25, pct: 100 });
     expect(stats.enrichment.memberOfEdges).toBe(9);

@@ -29,6 +29,7 @@ const MUSICBRAINZ_STAGES = new Set([
   'track-musicbrainz',
   'track-works',
   'mb-release-events',
+  'mb-artist-id',
   'nationality',
 ]);
 

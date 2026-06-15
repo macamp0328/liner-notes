@@ -49,15 +49,29 @@ function makeNeo4jInt(n: number) {
 // getUnenrichedArtistsForNationality
 // ---------------------------------------------------------------------------
 describe('getUnenrichedArtistsForNationality', () => {
-  it('returns mapped artists from query results', async () => {
-    const record = makeRecord({ discogsId: makeNeo4jInt(42), name: 'Miles Davis' });
-    const { session } = makeMockSession({ records: [record] });
+  it('returns mapped artists from query results, carrying any stored musicbrainzId (#380)', async () => {
+    const record = makeRecord({
+      discogsId: makeNeo4jInt(42),
+      name: 'Miles Davis',
+      musicbrainzId: 'mb-42',
+    });
+    const { session, runSpy } = makeMockSession({ records: [record] });
     const driver = makeMockDriver(session);
 
     const result = await getUnenrichedArtistsForNationality(driver);
 
-    expect(result).toEqual([{ discogsId: 42, name: 'Miles Davis' }]);
+    expect(result).toEqual([{ discogsId: 42, name: 'Miles Davis', musicbrainzId: 'mb-42' }]);
+    expect(runSpy.mock.calls[0]?.[0]).toContain('a.musicbrainzId AS musicbrainzId');
     expect(session.close).toHaveBeenCalled();
+  });
+
+  it('maps a missing musicbrainzId to null', async () => {
+    const record = makeRecord({ discogsId: makeNeo4jInt(43), name: 'No MBID' });
+    const { session } = makeMockSession({ records: [record] });
+
+    const result = await getUnenrichedArtistsForNationality(makeMockDriver(session));
+
+    expect(result).toEqual([{ discogsId: 43, name: 'No MBID', musicbrainzId: null }]);
   });
 
   it('selects artists with no ORIGIN_COUNTRY, gated by the staleness window', async () => {
@@ -99,22 +113,26 @@ describe('getUnenrichedArtistsForNationality', () => {
 // getUnenrichedMusiciansForNationality
 // ---------------------------------------------------------------------------
 describe('getUnenrichedMusiciansForNationality', () => {
-  it('returns musician with discogsId', async () => {
-    const record = makeRecord({ discogsId: makeNeo4jInt(10), name: 'Ron Carter' });
+  it('returns musician with discogsId and stored musicbrainzId', async () => {
+    const record = makeRecord({
+      discogsId: makeNeo4jInt(10),
+      name: 'Ron Carter',
+      musicbrainzId: 'mb-10',
+    });
     const { session } = makeMockSession({ records: [record] });
 
     const result = await getUnenrichedMusiciansForNationality(makeMockDriver(session));
 
-    expect(result).toEqual([{ discogsId: 10, name: 'Ron Carter' }]);
+    expect(result).toEqual([{ discogsId: 10, name: 'Ron Carter', musicbrainzId: 'mb-10' }]);
   });
 
-  it('returns musician with null discogsId', async () => {
+  it('returns musician with null discogsId and null musicbrainzId', async () => {
     const record = makeRecord({ discogsId: null, name: 'Session Player' });
     const { session } = makeMockSession({ records: [record] });
 
     const result = await getUnenrichedMusiciansForNationality(makeMockDriver(session));
 
-    expect(result).toEqual([{ discogsId: null, name: 'Session Player' }]);
+    expect(result).toEqual([{ discogsId: null, name: 'Session Player', musicbrainzId: null }]);
   });
 
   it('queries the Musician label', async () => {

@@ -73,6 +73,11 @@ export interface StatsData {
     // groups (no knowable denominator), so like memberOfEdges it is not a CoverageMetric.
     tracksWithWork: CoverageMetric;
     worksWithMultipleRecordings: number;
+    // Songwriter reconciliation (#380). worksWithWriterLinks IS gateable (covered/applicable over
+    // Works whose writers were captured — those with ≥1 WROTE edge). wroteEdges is a raw count
+    // (WROTE has no knowable denominator); not a CoverageMetric, so the verify gate skips it.
+    worksWithWriterLinks: CoverageMetric;
+    wroteEdges: number;
     tracksWithIsrc: CoverageMetric;
     tracksWithTempo: CoverageMetric;
     tracksWithDeezerBpm: CoverageMetric;
@@ -181,14 +186,25 @@ const MASTER_QUERY = `
     count(m) AS total,
     count(CASE WHEN EXISTS { (m)-[:MB_RELEASED_IN]->() } THEN 1 END) AS releaseEventsCovered`;
 
-// Work coverage (#336). One row per Work that has ≥1 RECORDING_OF, grouped to count distinct
+// Work coverage (#336, #380). One row per Work that has ≥1 RECORDING_OF, grouped to count distinct
 // recordings; the bare final aggregation returns one row of zeros on an empty graph (no Work
 // nodes → no rows into the grouping → count() over zero rows is 0). `multiRecording` counts Works
 // with >1 DISTINCT recordingMbid — the true cover/version groups, not the same recording reissued.
+// `writersApplicable` = Works whose writers were captured (#336); `writerLinksCovered` = those with
+// ≥1 WROTE edge created by the songwriter-reconciliation pass (#380).
 const WORK_QUERY = `
   MATCH (w:Work)<-[:RECORDING_OF]-(t:Track)
   WITH w, count(DISTINCT t.recordingMbid) AS recs
-  RETURN count(w) AS total, count(CASE WHEN recs > 1 THEN 1 END) AS multiRecording`;
+  RETURN count(w) AS total,
+    count(CASE WHEN recs > 1 THEN 1 END) AS multiRecording,
+    count(CASE WHEN w.writerMbids IS NOT NULL THEN 1 END) AS writersApplicable,
+    count(CASE WHEN w.writerMbids IS NOT NULL AND EXISTS { (w)<-[:WROTE]-() } THEN 1 END) AS writerLinksCovered`;
+
+// WROTE edge count (#380) — a relationship scan can't ride the Work node scan above. count() over
+// zero matched rows returns one row with 0, so this is empty-graph safe (mirrors MEMBER_OF_QUERY).
+const WROTE_EDGE_QUERY = `
+  MATCH (:Work)<-[r:WROTE]-()
+  RETURN count(r) AS wroteEdges`;
 
 // Entity-resolution (#330) per-Musician scan. samePersonApplicable = Musicians whose discogsId
 // matches an Artist (the reconciliation target set); samePersonCovered = those already linked via
@@ -281,6 +297,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
     natEngineer,
     musician,
     memberOf,
+    wrote,
   ] = await Promise.all([
     runCounts(driver, RELEASE_QUERY),
     runCounts(driver, ARTIST_QUERY),
@@ -293,6 +310,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
     runCounts(driver, ENGINEER_NATIONALITY_QUERY),
     runCounts(driver, MUSICIAN_QUERY),
     runCounts(driver, MEMBER_OF_QUERY),
+    runCounts(driver, WROTE_EDGE_QUERY),
   ]);
 
   const n = (m: Map<string, number>, key: string): number => m.get(key) ?? 0;
@@ -369,6 +387,10 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       // has a recordingMbid), mirroring tracksWithTempo.
       tracksWithWork: coverage(n(track, 'worksCovered'), mbidCovered),
       worksWithMultipleRecordings: n(work, 'multiRecording'),
+      // Applicable denominator is the upstream gate: a Work can only be linked if its writers were
+      // captured (#336). covered = those Works with ≥1 WROTE edge (#380).
+      worksWithWriterLinks: coverage(n(work, 'writerLinksCovered'), n(work, 'writersApplicable')),
+      wroteEdges: n(wrote, 'wroteEdges'),
       tracksWithIsrc: coverage(isrcCovered, trackTotal),
       // Applicable denominators are the upstream gates: tempo needs a recordingMbid,
       // deezerBpm/deezerGain need an isrc (both produced by track-musicbrainz enrichment).

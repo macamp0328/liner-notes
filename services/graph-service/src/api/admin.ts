@@ -18,6 +18,8 @@ import { buildMusicBrainzClientFromEnv } from '../ingestion/musicbrainz-client.j
 import { buildWikidataClientFromEnv } from '../ingestion/wikidata-client.js';
 import { enrichNationality } from '../enrichment/artist-nationality.js';
 import { resetNationalityEnrichment } from '../db/artist-nationality-repository.js';
+import { enrichArtistMusicbrainzIds } from '../enrichment/artist-musicbrainz-id.js';
+import { resetMusicbrainzIdEnrichment } from '../db/artist-musicbrainz-id-repository.js';
 import { enrichMasterData } from '../enrichment/master-data.js';
 import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
 import { resetMbReleaseEventsEnrichment } from '../db/mb-release-events-repository.js';
@@ -41,6 +43,7 @@ import { resetLabelHierarchyEnrichment } from '../db/label-hierarchy-repository.
 import { enrichGroupMembers } from '../enrichment/group-members.js';
 import { resetGroupMembers } from '../db/group-members-repository.js';
 import { enrichPersonReconciliation } from '../enrichment/person-reconciliation.js';
+import { enrichSongwriterReconciliation } from '../enrichment/songwriter-reconciliation.js';
 import { runReload } from '../ingestion/orchestrator.js';
 import { RELOAD_STAGES } from '../ingestion/stages.js';
 import {
@@ -390,6 +393,15 @@ const artistGenresSummarySchema = {
 };
 
 const personReconciliationSummarySchema = {
+  type: 'object',
+  properties: {
+    linksReconciled: { type: 'integer' },
+    failed: { type: 'integer' },
+    durationMs: { type: 'integer' },
+  },
+};
+
+const songwriterReconciliationSummarySchema = {
   type: 'object',
   properties: {
     linksReconciled: { type: 'integer' },
@@ -909,6 +921,76 @@ const PIPELINES: PipelineEntry[] = [
     prepare: (log): PreparedRun => ({
       ok: true,
       run: async (driver) => ({ ...(await enrichPersonReconciliation(driver, log)) }),
+    }),
+    state: makePipelineState(),
+  },
+  {
+    name: 'mb-artist-id',
+    statusLabel: 'MusicBrainz artist-ID mapping',
+    runningMessage: 'MusicBrainz artist-ID mapping already in progress',
+    enrichSummary: 'Resolve each Artist/Musician MusicBrainz artist MBID (musicbrainzId)',
+    enrichDescription:
+      'Resolves the MusicBrainz artist MBID for every Artist and Musician node carrying a ' +
+      '`discogsId` (via the MusicBrainz Discogs-URL relation) and stores it as `musicbrainzId` — the ' +
+      'deterministic Discogs↔MB-artist identity mapping (#380). ' +
+      '`POST /api/v1/admin/songwriter-reconciliation/enrich` then joins on it to promote each ' +
+      "Work's captured `writerMbids` to `(:Artist|:Musician)-[:WROTE]->(:Work)` edges — ID join " +
+      'only, never name-matching.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest`** — run it after a re-ingest, or rely ' +
+      'on the orchestrated reload (`POST /api/v1/admin/reload`), which includes it before ' +
+      '`nationality` (which reuses the stored MBID to skip its own `/url` lookup).\n\n' +
+      'Selects nodes that still have no `musicbrainzId` and whose last attempt has aged past ' +
+      '`ENRICHMENT_STALENESS_DAYS` (default 30), stamping `musicbrainzIdFetchedAt` after each ' +
+      'attempt — so a node MusicBrainz has no Discogs link for is retried at most once per window. ' +
+      'Run `POST /api/v1/admin/mb-artist-id/reset` to force a full re-resolve.\n\n' +
+      'Requires `MUSICBRAINZ_USER_AGENT` env var.',
+    statusSummarySchema: standardSummarySchema,
+    schemaHas503: true,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => {
+      const mbClient = buildMusicBrainzClientFromEnv(log);
+      if (!mbClient) return { ok: false, message: 'MUSICBRAINZ_USER_AGENT not configured' };
+      return {
+        ok: true,
+        run: async (driver) => ({ ...(await enrichArtistMusicbrainzIds(mbClient, driver, log)) }),
+      };
+    },
+    reset: {
+      summary: 'Reset MusicBrainz artist-ID mapping markers for a full re-resolve',
+      description:
+        'Removes the `musicbrainzId` and `musicbrainzIdFetchedAt` properties from all Artist and ' +
+        'Musician nodes, causing the next `POST /api/v1/admin/mb-artist-id/enrich` call to ' +
+        're-resolve every node from scratch.\n\n' +
+        'This endpoint is blocked while `POST /api/v1/admin/mb-artist-id/enrich` is running.',
+      runningMessage:
+        'MusicBrainz artist-ID mapping is currently running — wait for it to finish before resetting',
+      run: (driver) => resetMusicbrainzIdEnrichment(driver),
+    },
+    state: makePipelineState(),
+  },
+  {
+    name: 'songwriter-reconciliation',
+    statusLabel: 'songwriter reconciliation',
+    runningMessage: 'Songwriter reconciliation already in progress',
+    enrichSummary: 'Promote Work writers to (:Artist|:Musician)-[:WROTE]->(:Work) edges',
+    enrichDescription:
+      "Joins each Work's captured `writerMbids` (from #336) to the Artist/Musician nodes carrying " +
+      'the matching `musicbrainzId` (resolved by `POST /api/v1/admin/mb-artist-id/enrich`) and ' +
+      'MERGEs a `WROTE` edge tagged with the writer roles — ID join only, never name-matching ' +
+      '(#380). No external API and **no new MusicBrainz calls**: the writer MBIDs are already on the ' +
+      'Work nodes. Idempotent and safe to re-run; picks up newly-resolved MBIDs and newly-captured ' +
+      'Works without a re-ingest. Blocks until complete.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest`** — run it after `mb-artist-id` (and ' +
+      '`track-works`), or rely on the orchestrated reload (`POST /api/v1/admin/reload`), which ' +
+      'includes it.\n\n' +
+      '**No reset endpoint:** the pass re-links exhaustively every run, so it is inherently ' +
+      'idempotent and there is nothing to reset.',
+    statusSummarySchema: songwriterReconciliationSummarySchema,
+    schemaHas503: false,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => ({
+      ok: true,
+      run: async (driver) => ({ ...(await enrichSongwriterReconciliation(driver, log)) }),
     }),
     state: makePipelineState(),
   },

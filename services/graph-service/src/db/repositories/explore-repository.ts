@@ -44,6 +44,26 @@ export interface WorkRecording {
   thumbUrl: string | null;
 }
 
+/**
+ * One in-collection recording of a Work written by a given person (#380). Flat like
+ * {@link WorkRecording} — one row per recording — plus the composition (`workMbid`/`workTitle`) and
+ * the writer's `roles` on that Work (e.g. `["composer", "lyricist"]`). Multiple rows share a
+ * `workMbid` when several recordings of the same composition are owned.
+ */
+export interface SongwriterWork {
+  workMbid: string;
+  workTitle: string;
+  roles: string[];
+  recordingMbid: string;
+  trackTitle: string;
+  position: string | null;
+  discogsId: number;
+  releaseTitle: string;
+  artist: string | null;
+  year: number | null;
+  thumbUrl: string | null;
+}
+
 export interface ConnectionNode {
   type: string;
   discogsId: number | null;
@@ -279,6 +299,53 @@ export async function getRecordingsByWork(driver: Driver, mbid: string): Promise
     );
     return result.records.map((rec) => ({
       workTitle: toStr(rec.get('workTitle')) ?? '',
+      recordingMbid: toStr(rec.get('recordingMbid')) ?? '',
+      trackTitle: toStr(rec.get('trackTitle')) ?? '',
+      position: toStr(rec.get('position')),
+      discogsId: toInt(rec.get('discogsId')) ?? 0,
+      releaseTitle: toStr(rec.get('releaseTitle')) ?? '',
+      artist: toStr(rec.get('artist')),
+      year: toInt(rec.get('year')),
+      thumbUrl: toStr(rec.get('thumbUrl')),
+    }));
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Every in-collection recording of a composition written by `name` (#380), via the WROTE edges the
+ * songwriter-reconciliation pass created from each Work's MusicBrainz writer MBIDs. Matches the
+ * writer across BOTH person labels (a songwriter can be a primary `Artist` and/or a session
+ * `Musician`), case-insensitively by name. `DISTINCT` collapses the duplicate row a SAME_PERSON_AS
+ * pair would otherwise produce (both nodes carry the same MBID → same WROTE roles). Returns an empty
+ * array for an unknown name or one with no WROTE edges.
+ */
+export async function getWorksBySongwriter(
+  driver: Driver,
+  name: string,
+): Promise<SongwriterWork[]> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `
+      MATCH (p)-[wr:WROTE]->(w:Work)
+      WHERE (p:Artist OR p:Musician) AND toLower(p.name) = toLower($name)
+      MATCH (t:Track)-[:RECORDING_OF]->(w)
+      MATCH (r:Release)-[:HAS_TRACK]->(t)
+      OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
+      RETURN DISTINCT w.mbid AS workMbid, w.title AS workTitle, wr.roles AS roles,
+             t.recordingMbid AS recordingMbid, t.title AS trackTitle, t.position AS position,
+             r.discogsId AS discogsId, r.title AS releaseTitle, a.name AS artist,
+             coalesce(r.originalYear, r.pressingYear) AS year, r.thumbUrl AS thumbUrl
+      ORDER BY workTitle, year, discogsId
+      `,
+      { name },
+    );
+    return result.records.map((rec) => ({
+      workMbid: toStr(rec.get('workMbid')) ?? '',
+      workTitle: toStr(rec.get('workTitle')) ?? '',
+      roles: ((rec.get('roles') as unknown[] | null) ?? []).map((r) => String(r)),
       recordingMbid: toStr(rec.get('recordingMbid')) ?? '',
       trackTitle: toStr(rec.get('trackTitle')) ?? '',
       position: toStr(rec.get('position')),
