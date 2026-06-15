@@ -1,19 +1,24 @@
 # yamllint — semantic/structural YAML checks only (issue #349).
 #
-# Prettier already owns *formatting* (indentation, line length, spacing, quoting),
-# so this starts from the `relaxed` preset and the few style rules left on are
-# disabled below with a reason — the linter must never fight the formatter. What we
-# DO enforce is the high-signal tail Prettier can't see: duplicate mapping keys, and
-# YAML 1.1 "Norway problem" truthy values (yes/no/on/off) used where a real boolean
-# was meant. Run non-strict (`yamllint .`), so only these error-level rules gate.
+# Prettier already owns *formatting* (indentation, line length, spacing, quoting,
+# trailing whitespace, final newline, line endings), so this starts from the `relaxed`
+# preset and disables EVERY formatting rule it leaves at error — the linter must never
+# fight the formatter, and formatting stays single-sourced in Prettier. What actually
+# gates is the high-signal semantic tail Prettier can't see: duplicate mapping keys,
+# bad YAML anchors, and YAML 1.1 "Norway problem" truthy values (yes/no/on/off) used
+# where a real boolean was meant. Run non-strict (`yamllint .`).
 extends: relaxed
 
 rules:
-  # Disable the remaining style rules Prettier owns:
+  # Formatting rules Prettier owns — disabled so the linter never fights the formatter.
+  # (relaxed downgrades/disables most style rules but leaves these four at error.)
   line-length: disable # Prettier wraps; an 80-col cap is not our standard
+  trailing-spaces: disable # Prettier strips trailing whitespace
+  new-line-at-end-of-file: disable # Prettier ensures a final newline
+  new-lines: disable # Prettier normalises line endings to LF
   document-start: disable # our YAML omits `---`; k8s multi-doc `---` is a separator, not a header
 
-  # High-signal checks we DO enforce (promoted to errors so they gate):
+  # High-signal semantic checks we DO enforce (promoted to errors so they gate):
   truthy:
     # Only real booleans as VALUES; flag yes/no/on/off/Yes/No/True/False. check-keys
     # false so GitHub Actions' `on:` trigger key (parsed as the boolean `on`) is fine.
@@ -22,6 +27,8 @@ rules:
     level: error
   key-duplicates:
     level: error
+  # `anchors` (duplicate/undeclared/unused YAML anchors) is a real-bug check, not
+  # formatting, so it stays at the preset's inherited error level.
 
 # gitignore-style patterns (match at any depth): dependency/build trees, the two
 # committed-but-generated YAML artifacts, and the vendored/local skill docs.

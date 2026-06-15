@@ -32,13 +32,14 @@ pnpm --filter graph-service dev
 # Commit message format is not enforced — the repo squash-merges into main, so
 # the PR title is what lands in history, not individual branch commits.
 
-# One-shot local gauntlet — run before pushing. Mirrors the pre-push hook and the
-# fast half of the CI fan-out (prettier --check → lint → typecheck → unit coverage).
+# One-shot local gauntlet — run before pushing. Covers the offline half of the CI
+# fan-out: prettier --check → markdownlint → lint → typecheck → unit coverage →
+# scripts:test. (yamllint/tflint stay CI-only — external Python/binary tools.)
 pnpm verify
 
 # Doc/config/Terraform lint gates (CI re-runs all three — see CI Requirements).
-# markdownlint is a devDependency so it runs locally; yamllint/tflint are CI-pinned
-# (no package.json entry) with the local fallbacks shown.
+# markdownlint is a devDependency (also part of `pnpm verify`); yamllint/tflint are
+# CI-pinned (no package.json entry) with the local fallbacks shown.
 pnpm markdownlint                              # Markdown structure (config: .markdownlint-cli2.jsonc)
 pipx run yamllint==1.38.0 --format github .    # YAML semantics (config: .yamllint.yaml)
 # tflint (Terraform lint + AWS ruleset, config: .tflint.hcl): install tflint, then
