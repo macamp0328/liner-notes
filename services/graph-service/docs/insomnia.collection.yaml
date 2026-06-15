@@ -534,7 +534,7 @@ collection:
         pathParameters:
           - name: name
             value: Bob Clearmountain
-      - name: Musicians who play this instrument and the releases they play it on
+      - name: Who plays this instrument — per-credit (credits) and person-level (players)
         meta:
           id: req_618fefd110cc6ec3993fd4d6e4100f1d
           sortKey: 300

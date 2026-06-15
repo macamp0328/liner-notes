@@ -52,6 +52,8 @@ const FULL_DATA: ArtistWikidataData = {
   diedDate: null,
   imageUrl: 'http://commons.wikimedia.org/wiki/Special:FilePath/Paul.jpg',
   awards: ['Grammy Award'],
+  playsInstrument: ['guitar', 'vocals'],
+  playsInstrumentRaw: ['guitar', 'vocals'],
 };
 
 describe('getUnenrichedArtistsForWikidata', () => {
@@ -102,11 +104,15 @@ describe('setArtistWikidata', () => {
     expect(query).toContain('a.wikidataQid = $qid');
     expect(query).toContain('a.bornYear = $bornYear');
     expect(query).toContain('a.awards = $awards');
+    expect(query).toContain('a.playsInstrument = $playsInstrument');
+    expect(query).toContain('a.playsInstrumentRaw = $playsInstrumentRaw');
     expect(query).toContain('a.wikidataFetchedAt = datetime()');
     expect(params).toMatchObject({
       qid: 'Q1299',
       bornDate: '1941-10-13',
       awards: ['Grammy Award'],
+      playsInstrument: ['guitar', 'vocals'],
+      playsInstrumentRaw: ['guitar', 'vocals'],
     });
     expect(session.close).toHaveBeenCalled();
   });
@@ -134,6 +140,8 @@ describe('resetArtistWikidataEnrichment', () => {
     expect(query).toContain('REMOVE a.wikidataFetchedAt');
     expect(query).toContain('a.wikidataQid');
     expect(query).toContain('a.awards');
+    expect(query).toContain('a.playsInstrument');
+    expect(query).toContain('a.playsInstrumentRaw');
   });
 
   it('returns 0 when no records are returned', async () => {

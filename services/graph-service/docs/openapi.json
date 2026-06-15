@@ -4495,6 +4495,18 @@
                             "type": "string"
                           }
                         },
+                        "playsInstrument": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "playsInstrumentRaw": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
                         "releases": {
                           "type": "array",
                           "items": {
@@ -4899,8 +4911,9 @@
     },
     "/api/v1/explore/instrument/{name}": {
       "get": {
-        "summary": "Musicians who play this instrument and the releases they play it on",
+        "summary": "Who plays this instrument — per-credit (credits) and person-level (players)",
         "tags": ["explore"],
+        "description": "Returns both instrument axes (#393): `credits` are musicians credited playing the instrument and the releases they play it on (the #333 per-credit axis), and `players` are artists Wikidata (P1303) documents as playing it (the person-level axis).",
         "parameters": [
           {
             "schema": {
@@ -4917,47 +4930,74 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "required": ["discogsId", "title", "musician"],
-                    "properties": {
-                      "discogsId": {
-                        "type": "integer"
-                      },
-                      "title": {
-                        "type": "string"
-                      },
-                      "artist": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "pressingYear": {
-                        "type": "integer",
-                        "nullable": true
-                      },
-                      "format": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "thumbUrl": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "musician": {
-                        "type": "string"
-                      },
-                      "instrument": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "displayRole": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "scope": {
-                        "type": "string",
-                        "nullable": true
+                  "type": "object",
+                  "required": ["credits", "players"],
+                  "properties": {
+                    "credits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["discogsId", "title", "musician"],
+                        "properties": {
+                          "discogsId": {
+                            "type": "integer"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "artist": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "pressingYear": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "format": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "thumbUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "musician": {
+                            "type": "string"
+                          },
+                          "instrument": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "displayRole": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "scope": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    },
+                    "players": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["discogsId", "name", "playsInstrument"],
+                        "properties": {
+                          "discogsId": {
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "playsInstrument": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
                       }
                     }
                   }
@@ -6200,6 +6240,7 @@
                             "artistsWithBirthDate",
                             "artistsWithImage",
                             "artistsWithAwards",
+                            "artistsWithInstruments",
                             "artistsWithNationality",
                             "musiciansWithNationality",
                             "producersWithNationality",
@@ -6335,6 +6376,22 @@
                               }
                             },
                             "artistsWithAwards": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "artistsWithInstruments": {
                               "type": "object",
                               "required": ["covered", "applicable", "pct"],
                               "properties": {

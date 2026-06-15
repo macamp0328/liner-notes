@@ -88,14 +88,32 @@ describe('explore routes', () => {
       instrument: string | null;
       displayRole: string | null;
     }
+    interface InstrumentPlayerBody {
+      discogsId: number;
+      name: string;
+      playsInstrument: string[];
+    }
+    interface InstrumentExplorationBody {
+      credits: InstrumentCreditBody[];
+      players: InstrumentPlayerBody[];
+    }
 
-    it('returns the musicians who play a normalized instrument', async () => {
+    it('returns per-credit musicians (credits) for a normalized instrument', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/v1/explore/instrument/bass' });
       expect(res.statusCode).toBe(200);
-      const body = JSON.parse(res.payload) as InstrumentCreditBody[];
-      expect(body.length).toBeGreaterThan(0);
-      expect(body.every((r) => r.instrument === 'bass')).toBe(true);
-      expect(body.some((r) => r.musician === 'Ron Carter')).toBe(true);
+      const body = JSON.parse(res.payload) as InstrumentExplorationBody;
+      expect(body.credits.length).toBeGreaterThan(0);
+      expect(body.credits.every((r) => r.instrument === 'bass')).toBe(true);
+      expect(body.credits.some((r) => r.musician === 'Ron Carter')).toBe(true);
+    });
+
+    it('returns person-level players from Wikidata P1303 (#393)', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/instrument/bass' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as InstrumentExplorationBody;
+      const player = body.players.find((p) => p.name === 'Multi Instrumentalist');
+      expect(player).toBeDefined();
+      expect(player!.playsInstrument).toContain('bass');
     });
 
     it('collapses a specific Discogs spelling onto its family', async () => {
@@ -103,22 +121,26 @@ describe('explore routes', () => {
       // instrument axis answers the broader "saxophone" query.
       const res = await app.inject({ method: 'GET', url: '/api/v1/explore/instrument/saxophone' });
       expect(res.statusCode).toBe(200);
-      const body = JSON.parse(res.payload) as InstrumentCreditBody[];
+      const body = JSON.parse(res.payload) as InstrumentExplorationBody;
       expect(
-        body.some((r) => r.musician === 'George Coleman' && r.displayRole === 'Tenor Saxophone'),
+        body.credits.some(
+          (r) => r.musician === 'George Coleman' && r.displayRole === 'Tenor Saxophone',
+        ),
       ).toBe(true);
     });
 
-    it('is case-insensitive on the instrument name', async () => {
+    it('is case-insensitive on the instrument name (both axes)', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/v1/explore/instrument/Bass' });
       expect(res.statusCode).toBe(200);
-      expect((JSON.parse(res.payload) as InstrumentCreditBody[]).length).toBeGreaterThan(0);
+      const body = JSON.parse(res.payload) as InstrumentExplorationBody;
+      expect(body.credits.length).toBeGreaterThan(0);
+      expect(body.players.some((p) => p.name === 'Multi Instrumentalist')).toBe(true);
     });
 
-    it('returns an empty array for an instrument nobody plays', async () => {
+    it('returns empty credits and players for an instrument nobody plays', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/v1/explore/instrument/harp' });
       expect(res.statusCode).toBe(200);
-      expect(JSON.parse(res.payload)).toEqual([]);
+      expect(JSON.parse(res.payload)).toEqual({ credits: [], players: [] });
     });
   });
 

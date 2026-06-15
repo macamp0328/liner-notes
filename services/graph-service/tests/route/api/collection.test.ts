@@ -113,6 +113,8 @@ const sampleArtistFull: ArtistFull = {
   diedDate: null,
   imageUrl: null,
   awards: [],
+  playsInstrument: [],
+  playsInstrumentRaw: [],
   releases: [
     {
       discogsId: 13570466,

@@ -14,6 +14,7 @@ type ArtistRowFields = {
   deathPrecision?: string;
   image?: string;
   awards?: string;
+  instruments?: string;
 };
 
 function makeArtistRow(fields: ArtistRowFields): Record<string, { type: string; value: string }> {
@@ -27,8 +28,9 @@ function makeArtistRow(fields: ArtistRowFields): Record<string, { type: string; 
   if (fields.deathPrecision)
     row['deathPrecision'] = { type: 'literal', value: fields.deathPrecision };
   if (fields.image) row['image'] = { type: 'uri', value: fields.image };
-  // GROUP_CONCAT always binds ?awards, even to an empty string.
+  // GROUP_CONCAT always binds ?awards / ?instruments, even to an empty string.
   row['awards'] = { type: 'literal', value: fields.awards ?? '' };
+  row['instruments'] = { type: 'literal', value: fields.instruments ?? '' };
   return row;
 }
 
@@ -403,6 +405,7 @@ describe('WikidataClient', () => {
             birthPrecision: '11',
             image: 'http://commons.wikimedia.org/wiki/Special:FilePath/Paul%20Simon.jpg',
             awards: 'Grammy Award||Mercury Prize',
+            instruments: 'guitar||bass guitar||piano',
           }),
         ),
       );
@@ -417,12 +420,20 @@ describe('WikidataClient', () => {
         diedDate: null,
         imageUrl: 'http://commons.wikimedia.org/wiki/Special:FilePath/Paul%20Simon.jpg',
         awards: ['Grammy Award', 'Mercury Prize'],
+        // raw labels preserved verbatim; normalized onto the #333 family vocab (bass guitar → bass), deduped + sorted.
+        playsInstrument: ['bass', 'guitar', 'piano'],
+        playsInstrumentRaw: ['guitar', 'bass guitar', 'piano'],
       });
       const url = fetchSpy.mock.calls[0]?.[0] as string;
       expect(url).toContain('query.wikidata.org/sparql');
       expect(url).toContain('470470');
       const decoded = decodeURIComponent(url);
       expect(decoded).toContain('wdt:P1953');
+      // #393: P1303 (instruments) is harvested in the same bundle, via its own GROUP_CONCAT.
+      expect(decoded).toContain('wdt:P1303');
+      expect(decoded).toContain(
+        '(GROUP_CONCAT(DISTINCT ?instrLabel; SEPARATOR="||") AS ?instruments)',
+      );
       // Awards-truncation guard: ?image is SAMPLE'd and NOT a GROUP BY key — otherwise an item with
       // multiple P18 images fans out into one row per image and LIMIT 1 truncates the GROUP_CONCAT
       // awards (and picks an arbitrary image). GROUP BY must contain only ?item + the date columns.
@@ -453,6 +464,8 @@ describe('WikidataClient', () => {
       expect(result?.diedYear).toBe(2001);
       expect(result?.diedDate).toBe('2001-05-11');
       expect(result?.awards).toEqual([]);
+      expect(result?.playsInstrument).toEqual([]);
+      expect(result?.playsInstrumentRaw).toEqual([]);
     });
 
     it('returns null when the Discogs ID is not in Wikidata (no bindings)', async () => {
@@ -500,6 +513,33 @@ describe('WikidataClient', () => {
     it('coerces an empty awards concat to []', () => {
       const result = parseArtistWikidataRow(makeArtistRow({ qid: 'Q5', awards: '' }));
       expect(result?.awards).toEqual([]);
+    });
+
+    it('coerces an empty instruments concat to [] for both raw and normalized', () => {
+      const result = parseArtistWikidataRow(makeArtistRow({ qid: 'Q5', instruments: '' }));
+      expect(result?.playsInstrument).toEqual([]);
+      expect(result?.playsInstrumentRaw).toEqual([]);
+    });
+
+    it('keeps raw labels verbatim and normalizes onto the #333 vocabulary (deduped + sorted)', () => {
+      const result = parseArtistWikidataRow(
+        makeArtistRow({ qid: 'Q5', instruments: 'electric guitar||acoustic guitar||drum kit' }),
+      );
+      // Two guitar variants collapse to one family; raw preserves both.
+      expect(result?.playsInstrument).toEqual(['drums', 'guitar']);
+      expect(result?.playsInstrumentRaw).toEqual([
+        'electric guitar',
+        'acoustic guitar',
+        'drum kit',
+      ]);
+    });
+
+    it('drops labels outside the vocabulary from normalized but keeps them in raw', () => {
+      const result = parseArtistWikidataRow(
+        makeArtistRow({ qid: 'Q5', instruments: 'theremin||piano' }),
+      );
+      expect(result?.playsInstrument).toEqual(['piano']);
+      expect(result?.playsInstrumentRaw).toEqual(['theremin', 'piano']);
     });
   });
 });

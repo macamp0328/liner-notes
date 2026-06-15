@@ -4,6 +4,7 @@ import {
   getReleasesByMusician,
   getReleasesByCredit,
   getReleasesByInstrument,
+  getArtistsByPersonLevelInstrument,
   getRecordingsByWork,
   getWorksBySongwriter,
   getReleasesByStudio,
@@ -21,6 +22,7 @@ import {
   type ExploreRelease,
   type MusicianRelease,
   type InstrumentCredit,
+  type InstrumentPlayer,
   type WorkRecording,
   type SongwriterWork,
   type ConnectionNode,
@@ -78,6 +80,30 @@ const instrumentCreditSchema = {
     instrument: { type: 'string', nullable: true },
     displayRole: { type: 'string', nullable: true },
     scope: { type: 'string', nullable: true },
+  },
+} as const;
+
+// A person-level player of an instrument (#393): an Artist whose Wikidata P1303 set (normalized onto
+// the #333 vocabulary) includes the queried family. `playsInstrument` is the artist's full list.
+const instrumentPlayerSchema = {
+  type: 'object',
+  required: ['discogsId', 'name', 'playsInstrument'],
+  properties: {
+    discogsId: { type: 'integer' },
+    name: { type: 'string' },
+    playsInstrument: { type: 'array', items: { type: 'string' } },
+  },
+} as const;
+
+// /explore/instrument/:name returns both axes (#393): `credits` is the per-credit axis (who is
+// credited playing it, and on which release); `players` is the person-level axis (artists Wikidata
+// documents as playing it). The one /explore route besides /connections that is not a bare array.
+const instrumentExplorationSchema = {
+  type: 'object',
+  required: ['credits', 'players'],
+  properties: {
+    credits: { type: 'array', items: instrumentCreditSchema },
+    players: { type: 'array', items: instrumentPlayerSchema },
   },
 } as const;
 
@@ -290,26 +316,40 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   // GET /api/v1/explore/instrument/:name
-  fastify.get<{ Params: NameParams; Reply: InstrumentCredit[] | ErrorReply }>(
+  fastify.get<{
+    Params: NameParams;
+    Reply: { credits: InstrumentCredit[]; players: InstrumentPlayer[] } | ErrorReply;
+  }>(
     '/api/v1/explore/instrument/:name',
     {
       schema: {
         tags: ['explore'],
-        summary: 'Musicians who play this instrument and the releases they play it on',
+        summary: 'Who plays this instrument — per-credit (credits) and person-level (players)',
+        description:
+          'Returns both instrument axes (#393): `credits` are musicians credited playing the ' +
+          'instrument and the releases they play it on (the #333 per-credit axis), and `players` ' +
+          'are artists Wikidata (P1303) documents as playing it (the person-level axis).',
         params: {
           type: 'object',
           required: ['name'],
           properties: { name: { type: 'string' } },
         },
         response: {
-          200: { type: 'array', items: instrumentCreditSchema },
+          200: instrumentExplorationSchema,
           400: errorResponseRef,
         },
       },
     },
-    async (request, reply): Promise<InstrumentCredit[] | ErrorReply> => {
-      const items = await getReleasesByInstrument(getDriver(), request.params.name);
-      return reply.send(items);
+    async (
+      request,
+      reply,
+    ): Promise<{ credits: InstrumentCredit[]; players: InstrumentPlayer[] } | ErrorReply> => {
+      const driver = getDriver();
+      const [credits, players] = await Promise.all([
+        getReleasesByInstrument(driver, request.params.name),
+        getArtistsByPersonLevelInstrument(driver, request.params.name),
+      ]);
+      return reply.send({ credits, players });
     },
   );
 

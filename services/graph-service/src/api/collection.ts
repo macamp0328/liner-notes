@@ -179,6 +179,9 @@ const artistFullSchema = {
     diedDate: { type: 'string', nullable: true },
     imageUrl: { type: 'string', nullable: true },
     awards: { type: 'array', items: { type: 'string' } },
+    // Person-level instruments from Wikidata P1303 (#393): normalized #333 families + raw labels.
+    playsInstrument: { type: 'array', items: { type: 'string' } },
+    playsInstrumentRaw: { type: 'array', items: { type: 'string' } },
     releases: { type: 'array', items: artistReleaseSchema },
     credits: { type: 'array', items: artistCreditSchema },
   },

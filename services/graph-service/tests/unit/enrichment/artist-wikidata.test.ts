@@ -21,6 +21,8 @@ const DATA: ArtistWikidataData = {
   diedDate: null,
   imageUrl: 'http://commons.wikimedia.org/wiki/Special:FilePath/Paul.jpg',
   awards: ['Grammy Award'],
+  playsInstrument: ['guitar', 'vocals'],
+  playsInstrumentRaw: ['guitar', 'vocals'],
 };
 
 function makeWdClient(

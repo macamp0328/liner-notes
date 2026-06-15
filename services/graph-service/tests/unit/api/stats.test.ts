@@ -37,6 +37,7 @@ const STATS = {
     artistsWithBirthDate: { covered: 8, applicable: 16, pct: 50 },
     artistsWithImage: { covered: 5, applicable: 16, pct: 31.3 },
     artistsWithAwards: { covered: 2, applicable: 16, pct: 12.5 },
+    artistsWithInstruments: { covered: 4, applicable: 16, pct: 25 },
     artistsWithNationality: sourcedNat,
     musiciansWithNationality: sourcedNat,
     producersWithNationality: sourcedNat,

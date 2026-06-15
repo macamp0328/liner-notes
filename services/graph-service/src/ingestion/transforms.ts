@@ -285,6 +285,24 @@ export function parseInstrument(role: string): Instrument | null {
 }
 
 /**
+ * Normalize a list of free-text instrument labels (e.g. Wikidata P1303 rdfs:labels like
+ * "bass guitar", "drum kit") onto the #333 controlled instrument vocabulary by running each through
+ * {@link parseInstrument}, dropping the ones that don't map, then deduping and sorting. The result is
+ * the person-level companion to the per-credit CREDITED_ON.instrument axis (#393): the same shared
+ * family vocabulary, so a query for "bass" lines up across both. Labels that fall outside the
+ * 30-family vocab (theremin, kalimba, ukulele) are dropped here but preserved verbatim by the caller
+ * (e.g. as playsInstrumentRaw) so nothing is silently lost.
+ */
+export function normalizeInstrumentFamilies(labels: readonly string[]): string[] {
+  const families = new Set<Instrument>();
+  for (const label of labels) {
+    const family = parseInstrument(label);
+    if (family !== null) families.add(family);
+  }
+  return [...families].sort();
+}
+
+/**
  * Filter a tracklist to only real song entries.
  * Discogs uses type_ === "heading" for side labels ("Side A") and
  * type_ === "index" for indexed non-display entries. Only "track" entries are real songs.
