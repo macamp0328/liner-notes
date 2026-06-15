@@ -66,3 +66,6 @@ coverage/
 
 # pnpm local store (created when PNPM_STORE_DIR points inside the repo)
 .pnpm-store/
+
+# schema-diagram Pages build output (uploaded as a Pages artifact, never committed)
+_site/

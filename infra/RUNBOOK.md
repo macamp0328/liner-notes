@@ -998,6 +998,15 @@ token that lets the bot PR trigger CI. Three one-time wirings:
    (`workflow_dispatch`) once the node is up; the AWS/OIDC path only works once the workflow is on
    `main` (a feature-branch dispatch has a different OIDC `sub` and is rejected).
 
+### Hosted page (GitHub Pages)
+
+The [`Schema Pages`](../.github/workflows/schema-pages.yml) workflow publishes the committed diagrams
+to a hosted page on every `push` to `main` touching `services/graph-service/docs/schema/**` — so the
+live page tracks **merged** state. It's **DB-free** (builds `_site/index.html` from the committed
+`.mmd` via `pnpm schema:page`, no AWS/secrets). One-time: **Settings → Pages → Source: GitHub
+Actions**. The repo is public, so Pages is free; the published page is world-visible (label/property
+names only — no secrets). The first deploy may need a manual `workflow_dispatch` of `Schema Pages`.
+
 ---
 
 ## Full reload from scratch

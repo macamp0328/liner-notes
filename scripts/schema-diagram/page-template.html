@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>liner-notes — data-model schema</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #1a1a1a;
+        --muted: #5f5e5a;
+        --border: rgba(0, 0, 0, 0.15);
+        --card: #faf9f5;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1a1a18;
+          --fg: #ecebe6;
+          --muted: #a3a299;
+          --border: rgba(255, 255, 255, 0.18);
+          --card: #232320;
+        }
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+        line-height: 1.6;
+      }
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 2rem 1.25rem 4rem;
+      }
+      h1 {
+        font-weight: 500;
+        font-size: 1.6rem;
+        margin: 0 0 0.25rem;
+      }
+      h2 {
+        font-weight: 500;
+        font-size: 1.2rem;
+        margin: 2rem 0 0.5rem;
+      }
+      .meta {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      .meta code {
+        font-size: 0.85em;
+      }
+      .viewport {
+        height: 72vh;
+        min-height: 420px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--card);
+        overflow: hidden;
+      }
+      .viewport svg {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 0.85rem;
+        margin: 0.4rem 0 0;
+      }
+      a {
+        color: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>liner-notes — data-model schema</h1>
+      <p class="meta">
+        Auto-generated from a live introspection of the production Neo4j graph. Last updated
+        <strong>{{LAST_UPDATED}}</strong>. Drift: {{DRIFT_STATUS}}. Source:
+        <a
+          href="https://github.com/macamp0328/liner-notes/blob/main/services/graph-service/docs/schema/SCHEMA.md"
+          >SCHEMA.md</a
+        >.
+      </p>
+
+      <h2>Graph overview</h2>
+      <div class="viewport"><pre class="mermaid" data-pz>{{GRAPH_DIAGRAM}}</pre></div>
+      <p class="hint">Drag to pan, scroll to zoom.</p>
+
+      <h2>Entity-relationship</h2>
+      <div class="viewport"><pre class="mermaid" data-pz>{{ER_DIAGRAM}}</pre></div>
+      <p class="hint">Drag to pan, scroll to zoom.</p>
+    </main>
+
+    <script
+      src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"
+      integrity="sha384-rbtjAdnIQE/aQJGEgXrVUlMibdfTSa4PQju4HDhN3sR2PmaKFzhEafuePsl9H/9I"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.2/dist/svg-pan-zoom.min.js"
+      integrity="sha384-GGX4llYprEPGp9w5caepn95YWAEflHnsA5ewt+Y+cBEb95og5cXKllnWKSELlzbx"
+      crossorigin="anonymous"
+    ></script>
+    <script>
+      const dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: dark ? 'dark' : 'neutral',
+        flowchart: { useMaxWidth: false },
+        er: { useMaxWidth: false },
+      });
+      window.addEventListener('DOMContentLoaded', async () => {
+        await mermaid.run({ querySelector: '.mermaid' });
+        for (const pre of document.querySelectorAll('pre[data-pz]')) {
+          const svg = pre.querySelector('svg');
+          if (!svg) continue;
+          svg.removeAttribute('style');
+          svgPanZoom(svg, {
+            zoomEnabled: true,
+            controlIconsEnabled: true,
+            fit: true,
+            center: true,
+            minZoom: 0.2,
+            maxZoom: 12,
+          });
+        }
+      });
+    </script>
+  </body>
+</html>

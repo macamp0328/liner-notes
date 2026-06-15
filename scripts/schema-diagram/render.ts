@@ -105,3 +105,28 @@ export function buildSchemaMarkdown(erBody: string, graphBody: string, driftLine
   md = inlineIntoMarkdown('graph', graphBody, md);
   return md;
 }
+
+/** HTML-escape before injecting code-controlled strings into the page: the .mmd
+ *  bodies land in <pre> and the meta strings inline, so a label/property containing
+ *  `<`/`&` must not break out of the markup. The browser decodes entities back to
+ *  text content before Mermaid reads it, so escaping is transparent to rendering. */
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** Fill the committed GitHub Pages template with the diagram bodies + metadata.
+ *  Pure: the build-page entry reads the committed `.mmd`/`page-template.html` and
+ *  writes `_site/index.html` (uploaded as a Pages artifact, never committed).
+ *  Function replacements avoid `$`-sequence interpretation in the bodies. */
+export function buildPageHtml(
+  template: string,
+  erBody: string,
+  graphBody: string,
+  meta: { lastUpdated: string; driftStatus: string },
+): string {
+  return template
+    .replace('{{GRAPH_DIAGRAM}}', () => escapeHtml(graphBody))
+    .replace('{{ER_DIAGRAM}}', () => escapeHtml(erBody))
+    .replace('{{LAST_UPDATED}}', () => escapeHtml(meta.lastUpdated))
+    .replace('{{DRIFT_STATUS}}', () => escapeHtml(meta.driftStatus));
+}
