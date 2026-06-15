@@ -29,16 +29,40 @@ export interface WikidataClientConfig {
   disableCircuitBreaker?: boolean;
 }
 
+type SparqlBinding = Record<string, { type: string; value: string } | undefined>;
+
 interface SparqlResponse {
   results: {
-    bindings: Array<Record<string, { type: string; value: string } | undefined>>;
+    bindings: SparqlBinding[];
   };
+}
+
+/**
+ * Structured biographical data harvested from a single Wikidata item (#341). All fields are
+ * best-effort: a clean P1953 (or Wikipedia-URL) match resolves the `qid`, and every other field
+ * is whatever that item happens to assert. `bornYear`/`diedYear` are always reliable (the year is
+ * trustworthy at any Wikidata date precision); `bornDate`/`diedDate` are populated ONLY at day
+ * precision, because Wikidata truncates a year/month-precision date to `YYYY-01-01` / `YYYY-MM-01`,
+ * which would masquerade as a real day. `awards` is `[]` (not null) when the item lists none.
+ */
+export interface ArtistWikidataData {
+  qid: string;
+  bornYear: number | null;
+  bornDate: string | null;
+  diedYear: number | null;
+  diedDate: string | null;
+  imageUrl: string | null;
+  awards: string[];
 }
 
 const SPARQL_ENDPOINT = 'https://query.wikidata.org/sparql';
 const MAX_RETRIES = 3;
 
 const DEFAULT_BACKOFF_BASE_MS = 2_000;
+
+// Wikidata `wikibase:timePrecision`: 11 = day, 10 = month, 9 = year. Below day, the truncated
+// value is not a real calendar day — see ArtistWikidataData.
+const TIME_PRECISION_DAY = 11;
 
 export class WikidataClient {
   private readonly userAgent: string;
@@ -140,14 +164,73 @@ export class WikidataClient {
     return this.executeSparql(query, `wikipedia-url="${url}"`);
   }
 
+  /**
+   * Resolve an artist's full Wikidata biographical bundle by Discogs artist ID (#341).
+   * Joins deterministically on P1953 → the QID, then harvests P569/P570 (lifespan), P18 (image),
+   * and P166 (awards, English labels) in one query. Returns null when the Discogs ID is not in
+   * Wikidata. Same soft-skip-to-null and retry semantics as the country lookups.
+   */
+  async getArtistDataByDiscogsId(discogsId: number): Promise<ArtistWikidataData | null> {
+    const query = this.buildArtistDataQuery(`?item wdt:P1953 "${discogsId}" .`);
+    const row = await this.fetchFirstRow(query, `artist-data discogsId=${discogsId}`);
+    return row ? parseArtistWikidataRow(row) : null;
+  }
+
+  /**
+   * Resolve an artist's Wikidata bundle by their English Wikipedia URL — the fallback for artists
+   * whose Discogs ID (P1953) is not in Wikidata but who have a Wikipedia article (mirrors the
+   * nationality fallback). The raw URL path is embedded directly into the SPARQL IRI; non-English
+   * Wikipedia URLs return null without a network call.
+   */
+  async getArtistDataByWikipediaUrl(url: string): Promise<ArtistWikidataData | null> {
+    const match = /^https:\/\/en\.wikipedia\.org\/wiki\/(.+)$/.exec(url);
+    if (!match?.[1]) return null;
+    const query = this.buildArtistDataQuery(
+      `?item schema:about <https://en.wikipedia.org/wiki/${match[1]}> .`,
+    );
+    const row = await this.fetchFirstRow(query, `artist-data wikipedia-url="${url}"`);
+    return row ? parseArtistWikidataRow(row) : null;
+  }
+
+  /**
+   * Build the artist-data SPARQL, parameterized only by the line that binds `?item` (P1953 match
+   * or a Wikipedia `schema:about` IRI). Dates go through `p:`/`psv:` so the `timePrecision`
+   * qualifier comes back alongside the value; only `awards` is multi-valued, so it is the sole
+   * field in the GROUP_CONCAT — `LIMIT 1` + GROUP BY collapse any multi-image/multi-birth item to
+   * one row. The `LANG="en"` filter is inside the P166 OPTIONAL so an unlabelled award never
+   * blanks the row. Wikidata's SPARQL endpoint pre-declares every prefix used here.
+   */
+  private buildArtistDataQuery(subjectLine: string): string {
+    return `
+      SELECT ?item ?birth ?birthPrecision ?death ?deathPrecision ?image
+             (GROUP_CONCAT(DISTINCT ?awardLabel; SEPARATOR="||") AS ?awards) WHERE {
+        ${subjectLine}
+        OPTIONAL { ?item p:P569/psv:P569 [ wikibase:timeValue ?birth ; wikibase:timePrecision ?birthPrecision ] . }
+        OPTIONAL { ?item p:P570/psv:P570 [ wikibase:timeValue ?death ; wikibase:timePrecision ?deathPrecision ] . }
+        OPTIONAL { ?item wdt:P18 ?image . }
+        OPTIONAL { ?item wdt:P166 ?award . ?award rdfs:label ?awardLabel . FILTER(LANG(?awardLabel) = "en") }
+      }
+      GROUP BY ?item ?birth ?birthPrecision ?death ?deathPrecision ?image
+      LIMIT 1
+    `;
+  }
+
   private async executeSparql(query: string, logLabel: string): Promise<string | null> {
+    const row = await this.fetchFirstRow(query, logLabel);
+    return row?.['countryCode']?.value?.trim() ?? null;
+  }
+
+  /**
+   * Run a SPARQL query and return its first result binding (or null on no rows / any failure).
+   * Unlike the other clients, Wikidata never throws — every failure soft-skips to null. The
+   * shared core throws on exhaustion (RetriesExhaustedError) or rethrows a transient network
+   * error that outlived its retry budget; both mean "give up on this lookup", so we catch and
+   * return null. A one-shot non-transient error (the core rethrows it immediately) is a
+   * plain network-error skip.
+   */
+  private async fetchFirstRow(query: string, logLabel: string): Promise<SparqlBinding | null> {
     const url = `${SPARQL_ENDPOINT}?query=${encodeURIComponent(query)}&format=json`;
 
-    // Unlike the other clients, Wikidata never throws — every failure soft-skips to null. The
-    // shared core throws on exhaustion (RetriesExhaustedError) or rethrows a transient network
-    // error that outlived its retry budget; both mean "give up on this lookup", so we catch and
-    // return null. A one-shot non-transient error (the core rethrows it immediately) is a
-    // plain network-error skip.
     try {
       const response = await this.rlFetch(url, {
         headers: {
@@ -162,9 +245,7 @@ export class WikidataClient {
       }
 
       const data = (await response.json()) as SparqlResponse;
-      const binding = data.results.bindings[0];
-      const code = binding?.['countryCode']?.value?.trim();
-      return code ?? null;
+      return data.results.bindings[0] ?? null;
     } catch (err) {
       // An open breaker already logged its single trip line — short-circuit silently to null.
       if (err instanceof CircuitBreakerOpenError) return null;
@@ -177,6 +258,65 @@ export class WikidataClient {
       return null;
     }
   }
+}
+
+/** Extract the bare QID (`Q1299`) from a Wikidata entity IRI. */
+function extractQid(itemIri: string | undefined): string | null {
+  if (!itemIri) return null;
+  const match = /\/(Q\d+)$/.exec(itemIri);
+  return match?.[1] ?? null;
+}
+
+/** Year from an `xsd:dateTime` like `1941-10-13T00:00:00Z` — reliable at any Wikidata precision. */
+function parseWikidataYear(value: string | undefined): number | null {
+  if (!value) return null;
+  const match = /^(-?\d+)-\d{2}-\d{2}T/.exec(value);
+  if (!match?.[1]) return null;
+  const year = Number.parseInt(match[1], 10);
+  return Number.isFinite(year) ? year : null;
+}
+
+function parsePrecision(value: string | undefined): number | null {
+  if (!value) return null;
+  const precision = Number.parseInt(value, 10);
+  return Number.isFinite(precision) ? precision : null;
+}
+
+/** Full `YYYY-MM-DD` date string ONLY at day precision; null otherwise (see ArtistWikidataData). */
+function parseWikidataDate(value: string | undefined, precision: number | null): string | null {
+  if (!value || precision === null || precision < TIME_PRECISION_DAY) return null;
+  const datePart = value.split('T')[0];
+  return datePart && datePart.length > 0 ? datePart : null;
+}
+
+function parseAwards(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split('||')
+    .map((label) => label.trim())
+    .filter((label) => label.length > 0);
+}
+
+/**
+ * Map a SPARQL result row from {@link WikidataClient.buildArtistDataQuery} onto
+ * {@link ArtistWikidataData}. Returns null when the row carries no resolvable QID (the join key) —
+ * the bundle is meaningless without it.
+ */
+export function parseArtistWikidataRow(row: SparqlBinding): ArtistWikidataData | null {
+  const qid = extractQid(row['item']?.value);
+  if (qid === null) return null;
+  const birthValue = row['birth']?.value;
+  const deathValue = row['death']?.value;
+  const image = row['image']?.value?.trim();
+  return {
+    qid,
+    bornYear: parseWikidataYear(birthValue),
+    bornDate: parseWikidataDate(birthValue, parsePrecision(row['birthPrecision']?.value)),
+    diedYear: parseWikidataYear(deathValue),
+    diedDate: parseWikidataDate(deathValue, parsePrecision(row['deathPrecision']?.value)),
+    imageUrl: image && image.length > 0 ? image : null,
+    awards: parseAwards(row['awards']?.value),
+  };
 }
 
 export function buildWikidataClientFromEnv(logger?: Logger): WikidataClient | null {
