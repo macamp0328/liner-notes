@@ -384,12 +384,14 @@ jobs:
 
   script-tests:
     name: Script Tests
-    # Runs the standalone scripts/ unit tests via node:test/tsx. No Neo4j, no
-    # secrets, fully offline — so it joins the t=0 fan-out with the static checks.
-    # Covers the changelog generator (scripts/changelog/*.test.ts) — the
-    # render/parse logic the per-merge, on-deploy, and weekly-reconcile changelog
-    # workflows depend on — and the prepare-time husky-install guard
-    # (scripts/prepare.test.ts). Both were previously local-only and never gated.
+    # Runs every standalone scripts/ unit test via node:test/tsx (one auto-
+    # discovering `scripts:test` glob, so new test files gate automatically). No
+    # Neo4j, no secrets, fully offline — so it joins the t=0 fan-out with the
+    # static checks. Covers the changelog generator (the render/parse logic the
+    # per-merge, on-deploy, and weekly-reconcile changelog workflows depend on),
+    # the prepare-time husky-install guard, the diagrams + insomnia generators,
+    # and the bash-guard PreToolUse hook. All were previously local-only or never
+    # tested at the logic level.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -403,10 +405,8 @@ jobs:
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Run changelog script tests
-        run: pnpm changelog:test
-      - name: Run prepare guard tests
-        run: pnpm prepare:test
+      - name: Run scripts/ unit tests
+        run: pnpm scripts:test
 
   terraform:
     name: Terraform Validate
