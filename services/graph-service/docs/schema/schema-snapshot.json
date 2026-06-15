@@ -802,6 +802,14 @@
       "owningConstraint": null
     },
     {
+      "name": "artist_wikidata_qid",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Artist"],
+      "properties": ["wikidataQid"],
+      "owningConstraint": null
+    },
+    {
       "name": "country_name",
       "indexType": "RANGE",
       "entityType": "NODE",
