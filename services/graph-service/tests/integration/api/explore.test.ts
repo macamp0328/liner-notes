@@ -266,6 +266,18 @@ describe('explore routes', () => {
       expect(res.statusCode).toBe(200);
       expect(JSON.parse(res.payload)).toEqual({ influencedBy: [], influenced: [] });
     });
+
+    it('unions both nodes when two distinct artists share a name (Artist.name is not unique)', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/influences/Influence%20Dup',
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as InfluencesBody;
+      // dup1 was influenced by Alpha, dup2 by Gamma — both nodes' edges must appear, not just one.
+      const names = body.influencedBy.map((x) => x.name).sort();
+      expect(names).toEqual(['Influence Alpha', 'Influence Gamma']);
+    });
   });
 
   describe('GET /api/v1/explore/studio/:name', () => {

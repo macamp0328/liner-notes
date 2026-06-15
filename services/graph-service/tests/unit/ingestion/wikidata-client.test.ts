@@ -570,6 +570,17 @@ describe('WikidataClient', () => {
       );
       expect(result?.influencedByQids).toEqual(['Q5383', 'Q1124']);
     });
+
+    it('dedupes repeated P737 QIDs so the stored list and the edge count stay exact (#391)', () => {
+      const result = parseArtistWikidataRow(
+        makeArtistRow({
+          qid: 'Q5',
+          influencers:
+            'http://www.wikidata.org/entity/Q5383||http://www.wikidata.org/entity/Q5383||http://www.wikidata.org/entity/Q1124',
+        }),
+      );
+      expect(result?.influencedByQids).toEqual(['Q5383', 'Q1124']);
+    });
   });
 });
 

@@ -329,15 +329,18 @@ function parseConcatLabels(value: string | undefined): string[] {
 }
 
 /**
- * Split a `||`-joined GROUP_CONCAT of Wikidata entity IRIs (P737 influences, #391) into bare QIDs,
- * dropping any segment that isn't a resolvable `Q\d+` IRI. `[]` when the binding is absent/empty.
+ * Split a `||`-joined GROUP_CONCAT of Wikidata entity IRIs (P737 influences, #391) into bare,
+ * deduped QIDs, dropping any segment that isn't a resolvable `Q\d+` IRI. `[]` when the binding is
+ * absent/empty. The SPARQL already `GROUP_CONCAT(DISTINCT …)`s, but deduping here keeps the stored
+ * `influencedByQids` clean independent of the query and makes the resolve pass's per-edge count exact.
  */
 function parseConcatQids(value: string | undefined): string[] {
   if (!value) return [];
-  return value
+  const qids = value
     .split('||')
     .map((iri) => extractQid(iri.trim()))
     .filter((qid): qid is string => qid !== null);
+  return [...new Set(qids)];
 }
 
 /**

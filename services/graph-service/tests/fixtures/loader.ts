@@ -294,6 +294,8 @@ export async function seedSongwriters(driver: Driver): Promise<void> {
  *     the unowned QID resolves to no node and is dropped.
  *   - "Influence Alpha" → influencedByQids [Q-inf-beta]: so beta is influenced-by gamma AND influences
  *     alpha — both traversal directions are non-empty for beta.
+ *   - two distinct artists BOTH named "Influence Dup" (different discogsIds/QIDs), each with its own
+ *     outgoing influence → the route must UNION both nodes' neighbours (Artist.name is not unique).
  */
 export async function seedInfluences(driver: Driver): Promise<void> {
   const session = driver.session();
@@ -307,7 +309,14 @@ export async function seedInfluences(driver: Driver): Promise<void> {
              beta.influencedByQids = ['Q-inf-gamma', 'Q-inf-unowned']
        MERGE (gamma:Artist {discogsId: 970003})
          SET gamma.name = 'Influence Gamma', gamma.wikidataQid = 'Q-inf-gamma',
-             gamma.influencedByQids = []`,
+             gamma.influencedByQids = []
+       // Two distinct artists sharing a name — the route must union both nodes' edges.
+       MERGE (dup1:Artist {discogsId: 970004})
+         SET dup1.name = 'Influence Dup', dup1.wikidataQid = 'Q-inf-dup1',
+             dup1.influencedByQids = ['Q-inf-alpha']
+       MERGE (dup2:Artist {discogsId: 970005})
+         SET dup2.name = 'Influence Dup', dup2.wikidataQid = 'Q-inf-dup2',
+             dup2.influencedByQids = ['Q-inf-gamma']`,
     );
   } finally {
     await session.close();

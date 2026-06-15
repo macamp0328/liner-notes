@@ -432,6 +432,12 @@ export async function getWorksBySongwriter(
  * influenced by); `influenced` traverses incoming (who they influenced). Only in-collection artists
  * appear — the edges only ever link two Artist nodes that share the QID join. Returns empty arrays
  * for an unknown name or one with no influence edges.
+ *
+ * `Artist.name` is not unique (two distinct Discogs artists can share a name), so both directions are
+ * aggregated with a single grouping-key-free `collect` that runs AFTER both OPTIONAL MATCHes — this
+ * unions every matched node's neighbours into one row. A per-node `WITH a, collect(...)` would split
+ * the result by node and the later regrouping would silently return only one node's slice. Each
+ * `collect(DISTINCT …)` dedupes both the OPTIONAL-MATCH cross-product and any overlap across roots.
  */
 export async function getArtistInfluences(driver: Driver, name: string): Promise<ArtistInfluences> {
   const session = driver.session();
@@ -440,9 +446,8 @@ export async function getArtistInfluences(driver: Driver, name: string): Promise
       `
       MATCH (a:Artist) WHERE toLower(a.name) = toLower($name)
       OPTIONAL MATCH (a)-[:INFLUENCED_BY]->(src:Artist)
-      WITH a, collect(DISTINCT src) AS influencedBy
       OPTIONAL MATCH (a)<-[:INFLUENCED_BY]-(dst:Artist)
-      WITH influencedBy, collect(DISTINCT dst) AS influenced
+      WITH collect(DISTINCT src) AS influencedBy, collect(DISTINCT dst) AS influenced
       RETURN
         [x IN influencedBy | { discogsId: x.discogsId, name: x.name, wikidataQid: x.wikidataQid }] AS influencedBy,
         [x IN influenced | { discogsId: x.discogsId, name: x.name, wikidataQid: x.wikidataQid }] AS influenced
