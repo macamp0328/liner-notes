@@ -34,7 +34,11 @@ export interface CoverageThreshold {
  * are best-effort external sources — gated for "populated" (silently-zero) only.
  *
  * Deliberately omitted: genres, styles, nationality, releaseEvents,
- * deezerGain. They are not in #178's scope; add a row here to start gating one.
+ * deezerGain, and Wikidata bio (#341). They are not in #178's scope; add a row here to start
+ * gating one. Wikidata bio is intentionally ungated like nationality: it is a best-effort external
+ * source that can legitimately resolve zero (transient outage, an obscure collection), so a
+ * silently-zero floor would false-fail an otherwise healthy reload. Coverage is a known number on
+ * `/stats`, not a gate.
  */
 export const RELOAD_COVERAGE_THRESHOLDS: readonly CoverageThreshold[] = [
   { metric: 'releasesWithOriginalYear', stage: 'master-data', minPct: 90 },
@@ -53,9 +57,6 @@ export const RELOAD_COVERAGE_THRESHOLDS: readonly CoverageThreshold[] = [
   // verify runs strictly last and no stage creates Musicians after reconciliation, so it's a clean
   // post-condition: any missing late-Artist link → covered<applicable → reload failed.
   { metric: 'samePersonLinks', stage: 'person-reconciliation', minPct: 100 },
-  // #341: Wikidata coverage is best-effort (not every artist is in Wikidata), so gate the QID join
-  // for "populated" (silently-zero) only — catches a stage that ran but wrote nothing, no floor.
-  { metric: 'artistsWithWikidataId', stage: 'artist-wikidata', minPct: 0 },
 ];
 
 /** Why a metric passed or failed — drives the human-readable failure summary. */
