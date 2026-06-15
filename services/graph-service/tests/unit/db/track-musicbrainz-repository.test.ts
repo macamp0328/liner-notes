@@ -160,7 +160,9 @@ describe('resetTrackMusicBrainzEnrichment', () => {
     const [removeQuery] = runSpy.mock.calls[0] as [string];
     expect(removeQuery).toContain('REMOVE t.musicBrainzFetchedAt, t.recordingMbid, t.isrc');
     expect(removeQuery).toContain('t.worksFetchedAt');
-    expect(removeQuery).toContain('t.acousticBrainzFetchedAt, t.tempo, t.musicalKey');
+    // The cascade must also clear the AcousticBrainz terminal marker, or a re-resolved recordingMbid
+    // would be permanently excluded from AB enrichment by the new IS NULL gate (#384).
+    expect(removeQuery).toContain('t.acousticBrainzFetchedAt, t.acousticBrainzExhausted, t.tempo');
     expect((runSpy.mock.calls[1] as [string])[0]).toContain('MATCH (w:Work) DETACH DELETE w');
   });
 

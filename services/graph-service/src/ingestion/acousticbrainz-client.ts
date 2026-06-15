@@ -6,7 +6,6 @@ import {
 import {
   buildCircuitBreaker,
   closedSnapshot,
-  CircuitBreakerOpenError,
   type CircuitBreaker,
   type CircuitBreakerSnapshot,
 } from './circuit-breaker.js';
@@ -138,7 +137,17 @@ export class AcousticBrainzClient {
    *
    * Issues one bulk `low-level` request and one bulk `high-level` request, then merges
    * the two by MBID. MBIDs that AcousticBrainz has no analysis for are simply absent
-   * from the returned map — the caller treats a missing entry as "all features null".
+   * from the returned map — and because AcousticBrainz is frozen/read-only, that absence
+   * is **permanent**, so the caller treats a missing entry from a SUCCESSFUL fetch as a
+   * confirmed terminal "no data ever" (issue #384).
+   *
+   * Any transient failure — a retry-exhausted 5xx, a timeout, or an **open circuit
+   * breaker** — throws. The breaker-open case deliberately does NOT collapse into an
+   * empty map: an empty map would be indistinguishable from genuine absence, and the
+   * caller now marks absences permanently terminal, so swallowing it would exhaust every
+   * in-flight track on a transient blip. Throwing keeps the invariant "getFeatures
+   * resolved ⇒ every absence is genuine & permanent"; the batch caller fails the whole
+   * batch and retries next run.
    */
   async getFeatures(mbids: string[]): Promise<Map<string, AcousticBrainzFeatures>> {
     const result = new Map<string, AcousticBrainzFeatures>();
@@ -150,20 +159,12 @@ export class AcousticBrainzClient {
     }
 
     const recordingIds = mbids.join(';');
-    let lowLevel: BulkResponse<LowLevelDocument>;
-    let highLevel: BulkResponse<HighLevelDocument>;
-    try {
-      lowLevel = await this.fetchWithBackoff<BulkResponse<LowLevelDocument>>(
-        `${BASE_URL}/low-level?recording_ids=${recordingIds}`,
-      );
-      highLevel = await this.fetchWithBackoff<BulkResponse<HighLevelDocument>>(
-        `${BASE_URL}/high-level?recording_ids=${recordingIds}`,
-      );
-    } catch (err) {
-      // An open breaker leaves every MBID absent from the result map (= all features null).
-      if (err instanceof CircuitBreakerOpenError) return result;
-      throw err;
-    }
+    const lowLevel = await this.fetchWithBackoff<BulkResponse<LowLevelDocument>>(
+      `${BASE_URL}/low-level?recording_ids=${recordingIds}`,
+    );
+    const highLevel = await this.fetchWithBackoff<BulkResponse<HighLevelDocument>>(
+      `${BASE_URL}/high-level?recording_ids=${recordingIds}`,
+    );
 
     for (const mbid of mbids) {
       // eslint-disable-next-line security/detect-object-injection

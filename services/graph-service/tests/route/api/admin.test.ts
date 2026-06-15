@@ -264,7 +264,8 @@ describe('Admin API', () => {
     mockEnrichLyrics.mockResolvedValue({ enriched: 10, skipped: 5, failed: 0, durationMs: 3000 });
     mockEnrichTrackAcousticBrainz.mockResolvedValue({
       tracksProcessed: 5,
-      tracksSkipped: 2,
+      tracksSkipped: 0,
+      tracksExhausted: 2,
       tracksFailed: 0,
       durationMs: 1200,
     });

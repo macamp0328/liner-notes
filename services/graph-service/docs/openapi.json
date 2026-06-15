@@ -1222,7 +1222,7 @@
       "post": {
         "summary": "Enrich Track nodes with AcousticBrainz audio features",
         "tags": ["admin"],
-        "description": "For each Track that carries a `recordingMbid` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), fetches Essentia acoustic analysis from AcousticBrainz in bulk and writes audio-feature properties onto the Track node. Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, and only after track-musicbrainz enrichment has populated `recordingMbid`.**\n\n**Physically measured (trustworthy):** `tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, `dynamicComplexity`.\n\n**Model-estimated:** `danceabilityEstimate`, `voiceInstrumental` are AcousticBrainz classifier outputs — a different model from Spotify/Echo Nest. They are this project’s own estimates and must never be presented as Spotify-equivalent values. No time signature is provided: AcousticBrainz does not expose a reliable categorical time signature.\n\nAll fields are nullable and best-effort — AcousticBrainz coverage is crowd-sourced and frozen at 2022. Re-selects a track that still has no features (null `tempo`) once its last attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `acousticBrainzFetchedAt` after each attempt — so a track with no AcousticBrainz data is retried at most once per window while already-featured tracks are skipped. Run `POST /api/v1/admin/track-acousticbrainz/reset` to force a full re-run.",
+        "description": "For each Track that carries a `recordingMbid` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), fetches Essentia acoustic analysis from AcousticBrainz in bulk and writes audio-feature properties onto the Track node. Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, and only after track-musicbrainz enrichment has populated `recordingMbid`.**\n\n**Physically measured (trustworthy):** `tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, `dynamicComplexity`.\n\n**Model-estimated:** `danceabilityEstimate`, `voiceInstrumental` are AcousticBrainz classifier outputs — a different model from Spotify/Echo Nest. They are this project’s own estimates and must never be presented as Spotify-equivalent values. No time signature is provided: AcousticBrainz does not expose a reliable categorical time signature.\n\nAll fields are nullable and best-effort — AcousticBrainz coverage is crowd-sourced and frozen at 2022. Because the source is frozen, a recording with no usable features is permanent: it is marked `acousticBrainzExhausted` (counted `tracksExhausted`) and never re-queried, rather than throttled (#384). Run `POST /api/v1/admin/track-acousticbrainz/reset` to force a full re-run.",
         "security": [
           {
             "bearerAuth": []
@@ -1281,7 +1281,7 @@
       "post": {
         "summary": "Reset AcousticBrainz track enrichment markers for a full re-run",
         "tags": ["admin"],
-        "description": "Removes the `acousticBrainzFetchedAt` marker and every audio-feature property (`tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, `dynamicComplexity`, `danceabilityEstimate`, `voiceInstrumental`) from all Track nodes, causing the next `POST /api/v1/admin/track-acousticbrainz/enrich` call to re-process every track from scratch.\n\nThis endpoint is blocked while enrichment is running.",
+        "description": "Removes the `acousticBrainzFetchedAt` marker, the terminal `acousticBrainzExhausted` marker, and every audio-feature property (`tempo`, `musicalKey`, `musicalScale`, `loudnessDb`, `dynamicComplexity`, `danceabilityEstimate`, `voiceInstrumental`) from all Track nodes, causing the next `POST /api/v1/admin/track-acousticbrainz/enrich` call to re-process every track from scratch.\n\nThis endpoint is blocked while enrichment is running.",
         "security": [
           {
             "bearerAuth": []
@@ -2947,6 +2947,9 @@
                               "type": "integer"
                             },
                             "tracksSkipped": {
+                              "type": "integer"
+                            },
+                            "tracksExhausted": {
                               "type": "integer"
                             },
                             "tracksFailed": {

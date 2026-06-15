@@ -136,11 +136,14 @@ export async function resetTrackMusicBrainzEnrichment(driver: Driver): Promise<n
   try {
     return await session.executeWrite(async (tx) => {
       const result = await tx.run(
+        // acousticBrainzExhausted (#384) must be cleared here too: clearing recordingMbid drops
+        // the AB features, so leaving the terminal marker set would permanently exclude the track
+        // from AB enrichment even after MusicBrainz re-resolves a new recordingMbid.
         `MATCH (t:Track) WHERE t.musicBrainzFetchedAt IS NOT NULL
          REMOVE t.musicBrainzFetchedAt, t.recordingMbid, t.isrc, t.worksFetchedAt,
-                t.acousticBrainzFetchedAt, t.tempo, t.musicalKey, t.musicalScale,
-                t.loudnessDb, t.dynamicComplexity, t.danceabilityEstimate, t.voiceInstrumental,
-                t.deezerFetchedAt, t.deezerBpm, t.deezerGain
+                t.acousticBrainzFetchedAt, t.acousticBrainzExhausted, t.tempo, t.musicalKey,
+                t.musicalScale, t.loudnessDb, t.dynamicComplexity, t.danceabilityEstimate,
+                t.voiceInstrumental, t.deezerFetchedAt, t.deezerBpm, t.deezerGain
          RETURN count(t) AS reset`,
       );
       // DETACH DELETE removes each Work together with its RECORDING_OF edges; recordingMbid is
