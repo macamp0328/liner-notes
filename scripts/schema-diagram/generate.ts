@@ -17,16 +17,31 @@
 // it logs and exits 0 without writing anything.
 
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { realpathSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DbUnreachableError, driverFromEnv, introspect } from './introspect.js';
-import { buildSnapshot, serializeSnapshot } from './snapshot.js';
+import { type SchemaSnapshot, buildSnapshot, serializeSnapshot } from './snapshot.js';
 import { buildSchemaMarkdown, renderErDiagram, renderGraphDiagram } from './render.js';
+import {
+  buildDriftReport,
+  driftSummaryLine,
+  extractDeclaredSchemaNames,
+  renderDriftMarkdown,
+} from './drift.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 const OUT_DIR = join(REPO_ROOT, 'services', 'graph-service', 'docs', 'schema');
+const SCHEMA_TS = join(REPO_ROOT, 'services', 'graph-service', 'src', 'db', 'schema.ts');
+
+/** The last committed snapshot is the model-drift baseline. ENOENT/unparseable → null. */
+function readPreviousSnapshot(path: string): SchemaSnapshot | null {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as SchemaSnapshot;
+  } catch {
+    return null;
+  }
+}
 
 // Prettier is the final formatting authority for the .json/.md artifacts so they
 // pass the repo-wide `prettier --check .` (the .mmd have no parser → auto-skipped).
@@ -59,20 +74,29 @@ async function main(): Promise<void> {
   const erBody = renderErDiagram(snapshot);
   const graphBody = renderGraphDiagram(snapshot);
 
-  mkdirSync(OUT_DIR, { recursive: true });
   const snapshotPath = join(OUT_DIR, 'schema-snapshot.json');
   const schemaMdPath = join(OUT_DIR, 'SCHEMA.md');
+  const driftMdPath = join(OUT_DIR, 'schema-drift.md');
+
+  // Drift is computed BEFORE overwriting the snapshot: model drift = current vs
+  // the last committed snapshot; code↔DB drift = prod vs schema.ts (read as text).
+  const previous = readPreviousSnapshot(snapshotPath);
+  const declared = extractDeclaredSchemaNames(readFileSync(SCHEMA_TS, 'utf8'));
+  const report = buildDriftReport(previous, snapshot, declared);
+
+  mkdirSync(OUT_DIR, { recursive: true });
   writeFileSync(snapshotPath, serializeSnapshot(snapshot));
   writeFileSync(join(OUT_DIR, 'schema-er.mmd'), `${erBody}\n`);
   writeFileSync(join(OUT_DIR, 'schema-graph.mmd'), `${graphBody}\n`);
-  writeFileSync(schemaMdPath, buildSchemaMarkdown(erBody, graphBody));
-  formatArtifacts([snapshotPath, schemaMdPath]);
+  writeFileSync(schemaMdPath, buildSchemaMarkdown(erBody, graphBody, driftSummaryLine(report)));
+  writeFileSync(driftMdPath, renderDriftMarkdown(report));
+  formatArtifacts([snapshotPath, schemaMdPath, driftMdPath]);
 
   console.log(
     `schema-diagram: ${snapshot.labels.length} labels, ` +
       `${snapshot.relationships.length} relationships, ` +
-      `${snapshot.constraints.length} constraints, ${snapshot.indexes.length} indexes ` +
-      `→ services/graph-service/docs/schema/`,
+      `${snapshot.constraints.length} constraints, ${snapshot.indexes.length} indexes; ` +
+      `drift: ${driftSummaryLine(report)} → services/graph-service/docs/schema/`,
   );
 }
 
