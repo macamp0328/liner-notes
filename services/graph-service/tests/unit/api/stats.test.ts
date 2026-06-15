@@ -62,6 +62,8 @@ const STATS = {
     tracksWithRecordingMbid: { covered: 70, applicable: 100, pct: 70 },
     tracksWithWork: { covered: 42, applicable: 70, pct: 60 },
     worksWithMultipleRecordings: 4,
+    worksWithWriterLinks: { covered: 18, applicable: 30, pct: 60 },
+    wroteEdges: 22,
     tracksWithIsrc: { covered: 60, applicable: 100, pct: 60 },
     tracksWithTempo: { covered: 35, applicable: 70, pct: 50 },
     tracksWithDeezerBpm: { covered: 30, applicable: 60, pct: 50 },
