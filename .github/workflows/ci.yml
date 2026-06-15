@@ -10,7 +10,7 @@ name: CI
 #   schema-validation (Neo4j container, started via composite action) │  t=0, in
 #   script-tests (changelog unit tests), terraform (fmt + validate) │  parallel
 #   hadolint (Dockerfile lint), kubeconform (k8s manifest validate)  │
-#   markdownlint (Markdown structure), yamllint (YAML semantics)     │
+#   markdownlint (Markdown), yamllint (YAML), tflint (Terraform lint) │
 #   audit, secrets-scan, codeql, actionlint (+ standalone shellcheck) ┘
 #
 #   lint, typecheck ──→ docker-build   (the ONLY gate: the multi-stage build
@@ -49,7 +49,7 @@ permissions:
   contents: read
 
 # Rapid agent push cadence means a PR head is often superseded within seconds —
-# cancel the obsolete run instead of letting the full 15-job fan-out finish for
+# cancel the obsolete run instead of letting the full 16-job fan-out finish for
 # nothing. Pushes to main never cancel (each merged commit keeps its CI record).
 concurrency:
   group: ci-${{ github.ref }}
@@ -570,3 +570,42 @@ jobs:
       - uses: actions/checkout@v6
       - name: Lint YAML (pinned yamllint via pipx)
         run: pipx run yamllint==1.38.0 --format github .
+
+  tflint:
+    name: TFLint
+    # Terraform anti-pattern + AWS misconfiguration linting, layered on top of the
+    # Terraform Validate job (which only checks syntax/references — not lint rules or
+    # AWS provider correctness). Rules + the pinned AWS plugin live in .tflint.hcl
+    # (terraform `recommended` preset + aws ruleset). Lints BOTH roots explicitly —
+    # NOT --recursive, which would wrongly descend into bootstrap/ and lambda/.
+    #
+    # Pin the binary + SHA256 like hadolint/kubeconform: download over HTTPS, verify
+    # BEFORE running. TFLINT_CONFIG_FILE is absolute so --chdir still finds the root
+    # config; GITHUB_TOKEN on --init avoids GitHub rate limits when fetching the AWS
+    # plugin. Bump TFLINT_VERSION + TFLINT_SHA256 (release checksums.txt) to update.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TFLINT_CONFIG_FILE: ${{ github.workspace }}/.tflint.hcl
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned tflint
+        env:
+          TFLINT_VERSION: 0.63.1
+          # From the release's checksums.txt (tflint_linux_amd64.zip).
+          TFLINT_SHA256: 8441a7d97df20431f19c9b9d27ff4c63e308c964e86660bc7cc0cf7bbe0725e8
+        run: |
+          curl -fsSL -o /tmp/tflint.zip \
+            "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_amd64.zip"
+          echo "${TFLINT_SHA256}  /tmp/tflint.zip" | sha256sum -c -
+          unzip -o /tmp/tflint.zip -d /tmp
+          sudo install -m 0755 /tmp/tflint /usr/local/bin/tflint
+          tflint --version
+      - name: Init plugins (downloads the pinned AWS ruleset)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: tflint --init
+      - name: Lint root module
+        run: tflint --chdir=infra/terraform
+      - name: Lint bootstrap module
+        run: tflint --chdir=infra/terraform/bootstrap
