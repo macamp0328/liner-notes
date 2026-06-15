@@ -29,6 +29,11 @@ export type TrackAcousticBrainzResult = AcousticBrainzFeatures & { elementId: st
  *
  * AcousticBrainz is keyed purely by recording MBID, so — unlike the MusicBrainz
  * identifier enrichment — no release context or tracklist alignment is needed.
+ *
+ * Tracks carrying the permanent `acousticBrainzExhausted` marker (issue #384) are excluded
+ * for good via a null-safe boolean gate. The marker is load-bearing: an exhausted track has
+ * no features, so the `coalesce(...) IS NULL` clause is true for it, and the staleness clause
+ * only throttles for one window — without the `IS NULL` gate it would re-qualify forever.
  */
 export async function getTracksForAcousticBrainzEnrichment(
   driver: Driver,
@@ -38,6 +43,7 @@ export async function getTracksForAcousticBrainzEnrichment(
     const result = await session.run(
       `MATCH (t:Track)
        WHERE t.recordingMbid IS NOT NULL
+         AND t.acousticBrainzExhausted IS NULL
          AND coalesce(t.tempo, t.musicalKey, t.musicalScale, t.loudnessDb,
                       t.dynamicComplexity, t.danceabilityEstimate, t.voiceInstrumental) IS NULL
          AND (t.acousticBrainzFetchedAt IS NULL
@@ -90,17 +96,49 @@ export async function setTrackAcousticBrainzFeatures(
 }
 
 /**
- * Remove all AcousticBrainz enrichment from Track nodes: clears `acousticBrainzFetchedAt`
- * and every feature property so the next enrichment run reprocesses every track.
- * Returns the number of tracks reset.
+ * Mark Tracks whose recording AcousticBrainz has no analysis for as permanently exhausted
+ * (issue #384). AcousticBrainz is frozen/read-only, so a recording absent from a successful
+ * bulk response will never gain features — re-querying it every staleness window is pure
+ * waste. Sets BOTH the terminal `acousticBrainzExhausted = true` marker (which drops the track
+ * out of `getTracksForAcousticBrainzEnrichment` for good) AND the `acousticBrainzFetchedAt`
+ * stamp (a staleness backstop should the boolean ever be partially cleared), mirroring
+ * `markNotAGroup`. Written in a single UNWIND like {@link setTrackAcousticBrainzFeatures}.
+ */
+export async function markTrackAcousticBrainzExhausted(
+  driver: Driver,
+  elementIds: string[],
+): Promise<void> {
+  if (elementIds.length === 0) return;
+
+  const session = driver.session();
+  try {
+    await session.run(
+      `UNWIND $elementIds AS eid
+       MATCH (t:Track) WHERE elementId(t) = eid
+       SET t.acousticBrainzExhausted = true, t.acousticBrainzFetchedAt = datetime()`,
+      { elementIds },
+    );
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Remove all AcousticBrainz enrichment from Track nodes: clears `acousticBrainzFetchedAt`, the
+ * terminal `acousticBrainzExhausted` marker, and every feature property so the next enrichment
+ * run reprocesses every track. Returns the number of tracks reset. An exhausted track always
+ * also carries `acousticBrainzFetchedAt`, so the broadened `OR ... IS NOT NULL` guard is
+ * defensive against any future state where the two markers diverge (mirrors `resetGroupMembers`).
  */
 export async function resetTrackAcousticBrainzEnrichment(driver: Driver): Promise<number> {
   const session = driver.session();
   try {
     const result = await session.run(
-      `MATCH (t:Track) WHERE t.acousticBrainzFetchedAt IS NOT NULL
-       REMOVE t.acousticBrainzFetchedAt, t.tempo, t.musicalKey, t.musicalScale,
-              t.loudnessDb, t.dynamicComplexity, t.danceabilityEstimate, t.voiceInstrumental
+      `MATCH (t:Track)
+       WHERE t.acousticBrainzFetchedAt IS NOT NULL OR t.acousticBrainzExhausted IS NOT NULL
+       REMOVE t.acousticBrainzFetchedAt, t.acousticBrainzExhausted, t.tempo, t.musicalKey,
+              t.musicalScale, t.loudnessDb, t.dynamicComplexity, t.danceabilityEstimate,
+              t.voiceInstrumental
        RETURN count(t) AS reset`,
     );
     return (result.records[0]?.get('reset') as Neo4jInt | undefined)?.toNumber() ?? 0;

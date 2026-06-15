@@ -8,6 +8,7 @@ import type { Logger } from '../ingestion/discogs-client.js';
 import {
   getTracksForAcousticBrainzEnrichment,
   setTrackAcousticBrainzFeatures,
+  markTrackAcousticBrainzExhausted,
 } from '../db/track-acousticbrainz-repository.js';
 import type { TrackAcousticBrainzResult } from '../db/track-acousticbrainz-repository.js';
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
@@ -16,22 +17,21 @@ import { getShutdownSignal } from '../lifecycle/shutdown.js';
 export interface TrackAcousticBrainzEnrichmentSummary {
   /** Tracks that received at least one non-null feature. */
   tracksProcessed: number;
-  /** Tracks queried successfully but for which AcousticBrainz had no data. */
+  /**
+   * Always 0 for this frozen source — there is no throttled-recheck path: a recording with no
+   * usable features is terminal, not retried. Retained for summary-shape parity with the
+   * throttled track-deezer summary (issue #384).
+   */
   tracksSkipped: number;
+  /**
+   * Tracks AcousticBrainz had no usable features for, marked permanently exhausted (issue #384).
+   * AcousticBrainz is frozen/read-only, so a confirmed absence never gains data — never re-queried.
+   */
+  tracksExhausted: number;
   /** Tracks in a batch whose AcousticBrainz fetch or write failed (left unmarked, will retry). */
   tracksFailed: number;
   durationMs: number;
 }
-
-const EMPTY_FEATURES: AcousticBrainzFeatures = {
-  tempo: null,
-  musicalKey: null,
-  musicalScale: null,
-  loudnessDb: null,
-  dynamicComplexity: null,
-  danceabilityEstimate: null,
-  voiceInstrumental: null,
-};
 
 function hasAnyFeature(features: AcousticBrainzFeatures): boolean {
   return Object.values(features).some((value) => value !== null);
@@ -42,12 +42,15 @@ function hasAnyFeature(features: AcousticBrainzFeatures): boolean {
  *
  * Reads every Track that carries a `recordingMbid` (set by the track-musicbrainz
  * enrichment) but still has no features, deduplicates by MBID — the same recording can
- * appear on multiple releases — and fetches features in bulk batches. A track with no
- * features is retried at most once per staleness window (see getTracksForAcousticBrainzEnrichment).
+ * appear on multiple releases — and fetches features in bulk batches.
  *
- * Every track in a successfully-processed batch is stamped `acousticBrainzFetchedAt`
- * even when AcousticBrainz had no data, throttling its retries. A batch whose fetch or
- * write throws leaves its tracks unstamped, so a later run retries them immediately.
+ * AcousticBrainz is frozen/read-only (#371/#377), so a recording with no usable features in a
+ * SUCCESSFUL bulk response will never gain any — it is **terminal**, not throttled. Such a track
+ * is marked permanently `acousticBrainzExhausted` (counted `exhausted`) and never re-queried
+ * (issue #384, the batch-local analog of the runner's TERMINAL_EMPTY / ADR 0003). A track that
+ * DOES get ≥1 feature is written + stamped (`processed`). Only a transient failure — a fetch or
+ * write throwing (retry-exhausted 5xx, timeout, open breaker) — leaves a batch's tracks unmarked
+ * so a later run retries them immediately (`failed`). There is therefore no `skipped` outcome.
  *
  * Deliberately NOT a runEnrichment stage (#222): the unit of work is a bulk batch of up to
  * {@link MAX_RECORDING_IDS_PER_CALL} deduplicated MBIDs per API call — resolve, write, and
@@ -65,7 +68,8 @@ export async function enrichTrackAcousticBrainz(
   const log: Logger = logger ?? console;
   const startTime = Date.now();
   let tracksProcessed = 0;
-  let tracksSkipped = 0;
+  const tracksSkipped = 0;
+  let tracksExhausted = 0;
   let tracksFailed = 0;
 
   log.info('[track-acousticbrainz] Starting AcousticBrainz audio feature enrichment');
@@ -79,6 +83,7 @@ export async function enrichTrackAcousticBrainz(
     return {
       tracksProcessed: 0,
       tracksSkipped: 0,
+      tracksExhausted: 0,
       tracksFailed: 1,
       durationMs: Date.now() - startTime,
     };
@@ -116,34 +121,46 @@ export async function enrichTrackAcousticBrainz(
 
     if (batchIndex > 0 && batchIndex % 10 === 0) {
       log.info(
-        `[track-acousticbrainz] Progress: batch ${batchIndex}/${batchCount} — processed=${tracksProcessed}, skipped=${tracksSkipped}, failed=${tracksFailed}`,
+        `[track-acousticbrainz] Progress: batch ${batchIndex}/${batchCount} — processed=${tracksProcessed}, exhausted=${tracksExhausted}, failed=${tracksFailed}`,
       );
     }
 
     try {
       const featuresByMbid = await abClient.getFeatures(batch);
 
-      const results: TrackAcousticBrainzResult[] = [];
+      // getFeatures resolved, so absence is genuine & permanent (frozen source). A recording with
+      // ≥1 usable feature is written; one with none (absent from the map, or present-but-all-null)
+      // is terminal — marked exhausted so it never re-qualifies as a candidate (#384).
+      const featureResults: TrackAcousticBrainzResult[] = [];
+      const exhaustedElementIds: string[] = [];
       let batchProcessed = 0;
-      let batchSkipped = 0;
+      let batchExhausted = 0;
       for (const mbid of batch) {
-        const features = featuresByMbid.get(mbid) ?? EMPTY_FEATURES;
-        const matched = hasAnyFeature(features);
-        for (const elementId of elementIdsByMbid.get(mbid) ?? []) {
-          results.push({ elementId, ...features });
-          if (matched) {
+        const features = featuresByMbid.get(mbid);
+        const elementIds = elementIdsByMbid.get(mbid) ?? [];
+        if (features !== undefined && hasAnyFeature(features)) {
+          for (const elementId of elementIds) {
+            featureResults.push({ elementId, ...features });
             batchProcessed++;
-          } else {
-            batchSkipped++;
+          }
+        } else {
+          for (const elementId of elementIds) {
+            exhaustedElementIds.push(elementId);
+            batchExhausted++;
           }
         }
       }
 
-      await setTrackAcousticBrainzFeatures(driver, results);
+      // Features first (the valuable, non-derivable data), then the terminal marker — so a
+      // mid-batch crash persists features before the re-derivable marker. Both are idempotent
+      // SETs keyed on elementId.
+      await setTrackAcousticBrainzFeatures(driver, featureResults);
+      await markTrackAcousticBrainzExhausted(driver, exhaustedElementIds);
 
-      // Count only after a successful write — failed writes leave tracks unmarked.
+      // Count only after BOTH writes succeed — a throw on either leaves the whole batch counted
+      // failed (catch below), never double-counted.
       tracksProcessed += batchProcessed;
-      tracksSkipped += batchSkipped;
+      tracksExhausted += batchExhausted;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error(`[track-acousticbrainz] Failed for batch ${batchIndex + 1}/${batchCount}: ${msg}`);
@@ -162,14 +179,14 @@ export async function enrichTrackAcousticBrainz(
     const attempted = Math.min(batchIndex * MAX_RECORDING_IDS_PER_CALL, total);
     onProgress(attempted, total);
     log.info(
-      `[track-acousticbrainz] Aborted at batch ${batchIndex}/${batchCount} (${attempted}/${total} recordings) — processed=${tracksProcessed}, skipped=${tracksSkipped}, failed=${tracksFailed}, duration=${durationMs}ms`,
+      `[track-acousticbrainz] Aborted at batch ${batchIndex}/${batchCount} (${attempted}/${total} recordings) — processed=${tracksProcessed}, exhausted=${tracksExhausted}, failed=${tracksFailed}, duration=${durationMs}ms`,
     );
   } else {
     onProgress(total, total);
     log.info(
-      `[track-acousticbrainz] Enrichment complete: processed=${tracksProcessed}, skipped=${tracksSkipped}, failed=${tracksFailed}, duration=${durationMs}ms`,
+      `[track-acousticbrainz] Enrichment complete: processed=${tracksProcessed}, exhausted=${tracksExhausted}, failed=${tracksFailed}, duration=${durationMs}ms`,
     );
   }
 
-  return { tracksProcessed, tracksSkipped, tracksFailed, durationMs };
+  return { tracksProcessed, tracksSkipped, tracksExhausted, tracksFailed, durationMs };
 }
