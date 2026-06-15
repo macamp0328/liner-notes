@@ -56,9 +56,12 @@ const statements = [
   'CREATE INDEX artist_mb_id_fetched_at IF NOT EXISTS FOR (a:Artist) ON (a.musicbrainzIdFetchedAt)',
   'CREATE INDEX musician_mb_id_fetched_at IF NOT EXISTS FOR (m:Musician) ON (m.musicbrainzIdFetchedAt)',
   // issue #341: Wikidata enrichment marker — backs the staleness-gated candidate scan
-  // (getUnenrichedArtistsForWikidata). The wikidataQid lookup index is deferred to the
-  // influence/relational follow-ups that actually query by it.
+  // (getUnenrichedArtistsForWikidata).
   'CREATE INDEX artist_wikidata_fetched_at IF NOT EXISTS FOR (a:Artist) ON (a.wikidataFetchedAt)',
+  // issue #391: the wikidataQid lookup index #341 deferred. Backs the `artist-influences` pass,
+  // which resolves each P737 target QID against `a.wikidataQid` to write in-collection INFLUENCED_BY
+  // edges (point lookups over what would otherwise be a full Artist scan per target).
+  'CREATE INDEX artist_wikidata_qid IF NOT EXISTS FOR (a:Artist) ON (a.wikidataQid)',
   'CREATE INDEX release_master_fetched_at IF NOT EXISTS FOR (r:Release) ON (r.masterFetchedAt)',
   'CREATE INDEX master_mb_release_events_fetched_at IF NOT EXISTS FOR (m:Master) ON (m.mbReleaseEventsFetchedAt)',
   'CREATE INDEX track_musicbrainz_fetched_at IF NOT EXISTS FOR (t:Track) ON (t.musicBrainzFetchedAt)',

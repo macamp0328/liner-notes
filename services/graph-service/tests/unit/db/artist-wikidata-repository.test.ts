@@ -54,6 +54,7 @@ const FULL_DATA: ArtistWikidataData = {
   awards: ['Grammy Award'],
   playsInstrument: ['guitar', 'vocals'],
   playsInstrumentRaw: ['guitar', 'vocals'],
+  influencedByQids: ['Q5383', 'Q1124'],
 };
 
 describe('getUnenrichedArtistsForWikidata', () => {
@@ -106,6 +107,7 @@ describe('setArtistWikidata', () => {
     expect(query).toContain('a.awards = $awards');
     expect(query).toContain('a.playsInstrument = $playsInstrument');
     expect(query).toContain('a.playsInstrumentRaw = $playsInstrumentRaw');
+    expect(query).toContain('a.influencedByQids = $influencedByQids');
     expect(query).toContain('a.wikidataFetchedAt = datetime()');
     expect(params).toMatchObject({
       qid: 'Q1299',
@@ -113,6 +115,7 @@ describe('setArtistWikidata', () => {
       awards: ['Grammy Award'],
       playsInstrument: ['guitar', 'vocals'],
       playsInstrumentRaw: ['guitar', 'vocals'],
+      influencedByQids: ['Q5383', 'Q1124'],
     });
     expect(session.close).toHaveBeenCalled();
   });
@@ -142,6 +145,7 @@ describe('resetArtistWikidataEnrichment', () => {
     expect(query).toContain('a.awards');
     expect(query).toContain('a.playsInstrument');
     expect(query).toContain('a.playsInstrumentRaw');
+    expect(query).toContain('a.influencedByQids');
   });
 
   it('returns 0 when no records are returned', async () => {
