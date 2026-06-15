@@ -6207,6 +6207,8 @@
                             "tracksWithWork",
                             "tracksWithMbRecordingArtists",
                             "worksWithMultipleRecordings",
+                            "worksWithWriterLinks",
+                            "wroteEdges",
                             "tracksWithIsrc",
                             "tracksWithTempo",
                             "tracksWithDeezerBpm",
@@ -6600,6 +6602,25 @@
                               }
                             },
                             "worksWithMultipleRecordings": {
+                              "type": "integer"
+                            },
+                            "worksWithWriterLinks": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "wroteEdges": {
                               "type": "integer"
                             },
                             "tracksWithIsrc": {
