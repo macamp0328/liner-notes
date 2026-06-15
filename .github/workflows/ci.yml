@@ -419,24 +419,61 @@ jobs:
     # the rest of ci.yml so it stays a required-eligible gate — unlike the
     # path-filtered, advisory diagrams/insomnia drift guards. terraform 1.15.3
     # matches .mise.toml; terraform_wrapper:false keeps fmt/validate exit codes clean.
+    #
+    # Registry resilience: `init` resolves providers from registry.terraform.io,
+    # which periodically times out (context-deadline-exceeded) and reds a whole batch
+    # of PRs at once. Three defences: the committed .terraform.lock.hcl pins exact
+    # provider versions + checksums; a TF_PLUGIN_CACHE_DIR cache (keyed on those lock
+    # files) skips the registry entirely on a cache hit; and the init steps retry with
+    # backoff to ride out a blip when a download IS needed (terraform's own 2 attempts
+    # aren't enough). Same retry-transient-pulls rationale as the start-neo4j action.
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform.d/plugin-cache
     steps:
       - uses: actions/checkout@v6
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: 1.15.3
           terraform_wrapper: false
+      - name: Cache Terraform providers
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tf-plugins-${{ runner.os }}-${{ hashFiles('infra/terraform/.terraform.lock.hcl', 'infra/terraform/bootstrap/.terraform.lock.hcl') }}
+          restore-keys: |
+            tf-plugins-${{ runner.os }}-
       - name: Format check (recursive)
         # Fix locally: terraform fmt -recursive infra/terraform
         run: terraform fmt -check -recursive infra/terraform
       - name: Validate root module
         run: |
-          terraform -chdir=infra/terraform init -backend=false
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          n=0
+          until terraform -chdir=infra/terraform init -backend=false; do
+            n=$((n + 1))
+            if [ "$n" -ge 3 ]; then
+              echo "terraform init failed for infra/terraform after $n attempts" >&2
+              exit 1
+            fi
+            echo "terraform init failed (attempt $n) — likely a registry blip; retrying in $((n * 15))s..." >&2
+            sleep $((n * 15))
+          done
           terraform -chdir=infra/terraform validate
       - name: Validate bootstrap module
         run: |
-          terraform -chdir=infra/terraform/bootstrap init -backend=false
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          n=0
+          until terraform -chdir=infra/terraform/bootstrap init -backend=false; do
+            n=$((n + 1))
+            if [ "$n" -ge 3 ]; then
+              echo "terraform init failed for infra/terraform/bootstrap after $n attempts" >&2
+              exit 1
+            fi
+            echo "terraform init failed (attempt $n) — likely a registry blip; retrying in $((n * 15))s..." >&2
+            sleep $((n * 15))
+          done
           terraform -chdir=infra/terraform/bootstrap validate
 
   hadolint:
@@ -601,10 +638,20 @@ jobs:
           unzip -o /tmp/tflint.zip -d /tmp
           sudo install -m 0755 /tmp/tflint /usr/local/bin/tflint
           tflint --version
-      - name: Init plugins (downloads the pinned AWS ruleset)
+      - name: Init plugins (downloads the pinned AWS ruleset, with retry)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: tflint --init
+        run: |
+          n=0
+          until tflint --init; do
+            n=$((n + 1))
+            if [ "$n" -ge 3 ]; then
+              echo "tflint --init failed after $n attempts" >&2
+              exit 1
+            fi
+            echo "tflint --init failed (attempt $n) — retrying in $((n * 10))s..." >&2
+            sleep $((n * 10))
+          done
       - name: Lint root module
         run: tflint --chdir=infra/terraform
       - name: Lint bootstrap module
