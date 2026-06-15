@@ -49,6 +49,11 @@ export const RELOAD_COVERAGE_THRESHOLDS: readonly CoverageThreshold[] = [
   // #336: MusicBrainz Work coverage is best-effort (not every recording has a work relationship),
   // so gate for "populated" (silently-zero) only, like lyrics/tempo.
   { metric: 'tracksWithWork', stage: 'track-works', minPct: 0 },
+  // #335: track credits pushed down from MB recording artist-rels are best-effort (not every
+  // recording has performance relations), so gate for "populated" (silently-zero) only, like
+  // tracksWithWork. applicable is the upstream gate (tracks with a recordingMbid), so a broken
+  // chain — no recordings fetched, or every performer unresolved — fails the reload loud.
+  { metric: 'tracksWithMbRecordingArtists', stage: 'track-recording-artists', minPct: 0 },
   { metric: 'tracksWithTempo', stage: 'track-acousticbrainz', minPct: 0 },
   { metric: 'tracksWithDeezerBpm', stage: 'track-deezer', minPct: 0 },
   // #330: reconciliation is deterministic + exhaustive (Artist.discogsId is unique), so after it

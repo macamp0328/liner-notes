@@ -197,10 +197,33 @@ collection:
               sortKey: 200
             url: '{{ _.base_url }}/api/v1/admin/track-works/status'
             method: GET
+      - name: track-recording-artists
+        meta:
+          id: fld_79e56fabb88ffa4d08962c832d16dcbf
+          sortKey: 800
+        children:
+          - name: Push MusicBrainz recording-level performance credits down to track-scoped CREDITED_ON edges
+            meta:
+              id: req_c79016a78fde3fd59662d5ef36c5103f
+              sortKey: 0
+            url: '{{ _.base_url }}/api/v1/admin/track-recording-artists/enrich'
+            method: POST
+          - name: Reset MusicBrainz recording-artist credit enrichment for a full re-run
+            meta:
+              id: req_6b3c65e49c00dddca8baba8f7b0aa5a0
+              sortKey: 100
+            url: '{{ _.base_url }}/api/v1/admin/track-recording-artists/reset'
+            method: POST
+          - name: Status of the most recent MusicBrainz recording-artist credit enrichment run
+            meta:
+              id: req_b7a2b7b5c2b441aaf46bda9046c8035b
+              sortKey: 200
+            url: '{{ _.base_url }}/api/v1/admin/track-recording-artists/status'
+            method: GET
       - name: track-acousticbrainz
         meta:
           id: fld_a5b20e870d6e814a58ab0606f4d340d0
-          sortKey: 800
+          sortKey: 900
         children:
           - name: Enrich Track nodes with AcousticBrainz audio features
             meta:
@@ -223,7 +246,7 @@ collection:
       - name: track-deezer
         meta:
           id: fld_2489505638a9fa3e5441b173bc2ec21b
-          sortKey: 900
+          sortKey: 1000
         children:
           - name: Enrich Track nodes with Deezer BPM and loudness
             meta:
@@ -246,7 +269,7 @@ collection:
       - name: artist-profiles
         meta:
           id: fld_7e77f2af1e01d2375a512e63c6a10f76
-          sortKey: 1000
+          sortKey: 1100
         children:
           - name: Enrich Artist nodes with realName and profile from the Discogs artist API
             meta:
@@ -269,7 +292,7 @@ collection:
       - name: artist-genres
         meta:
           id: fld_5515ef67fb5cd51c3edfd967d155a77d
-          sortKey: 1100
+          sortKey: 1200
         children:
           - name: Aggregate genres and styles from releases onto Artist nodes
             meta:
@@ -286,7 +309,7 @@ collection:
       - name: label-hierarchy
         meta:
           id: fld_083702ea93a8197853c12e4adb8ee28e
-          sortKey: 1200
+          sortKey: 1300
         children:
           - name: Enrich Label nodes with their parent label from the Discogs label API
             meta:
@@ -309,7 +332,7 @@ collection:
       - name: group-members
         meta:
           id: fld_8aab557e9325a1e70388e072e9945260
-          sortKey: 1300
+          sortKey: 1400
         children:
           - name: Link group members via MEMBER_OF from the Discogs artist API
             meta:
@@ -332,7 +355,7 @@ collection:
       - name: person-reconciliation
         meta:
           id: fld_03d54ba059816940e23ed9da3cc552e4
-          sortKey: 1400
+          sortKey: 1500
         children:
           - name: Reconcile Musician identities with Artist nodes (SAME_PERSON_AS)
             meta:
@@ -349,7 +372,7 @@ collection:
       - name: mb-artist-id
         meta:
           id: fld_d7e5fbc6092b092c39ab0baa0a215c9a
-          sortKey: 1500
+          sortKey: 1600
         children:
           - name: Resolve each Artist/Musician MusicBrainz artist MBID (musicbrainzId)
             meta:
@@ -372,7 +395,7 @@ collection:
       - name: songwriter-reconciliation
         meta:
           id: fld_59f1251beec52792d3fc6ab437a567c4
-          sortKey: 1600
+          sortKey: 1700
         children:
           - name: Promote Work writers to (:Artist|:Musician)-[:WROTE]->(:Work) edges
             meta:
@@ -389,7 +412,7 @@ collection:
       - name: artist-wikidata
         meta:
           id: fld_3ba8b93c32fb71336b9382394c58f8a6
-          sortKey: 1700
+          sortKey: 1800
         children:
           - name: Enrich Artist nodes with Wikidata biographical data (QID, lifespan, image, awards)
             meta:
@@ -412,7 +435,7 @@ collection:
       - name: reload
         meta:
           id: fld_5808d8d0499fb9db11f9d9870b1ff194
-          sortKey: 1800
+          sortKey: 1900
         children:
           - name: Trigger the orchestrated reload (ingest + every enrichment) with resume
             meta:

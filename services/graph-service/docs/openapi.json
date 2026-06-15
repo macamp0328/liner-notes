@@ -1093,6 +1093,131 @@
         }
       }
     },
+    "/api/v1/admin/track-recording-artists/enrich": {
+      "post": {
+        "summary": "Push MusicBrainz recording-level performance credits down to track-scoped CREDITED_ON edges",
+        "tags": ["admin"],
+        "description": "For each Track that carries a `recordingMbid` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), fetches the recording’s artist relationships and writes the performer/instrument/vocal credits as **track-scoped** `CREDITED_ON` edges (`source: \"musicbrainz\"`, `scope: \"track\"`), increasing track-credit coverage from a deterministic source (#335). Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, and only after `track-musicbrainz` has populated `recordingMbid` AND `mb-artist-id` has resolved each person’s `musicbrainzId`.**\n\nOnly recording-level performance roles are pushed down; production/engineering roles (producer, mix, mastering, …) are correctly left release-scoped. Each performer is resolved to our nodes by the MusicBrainz-artist-MBID join (the `mb-artist-id` mapping, #380) — never name/title matching; a performer we cannot resolve gets an MBID-keyed fallback `Musician` so provenance is preserved, never silently merged by name.\n\nRe-selects a Track while it still has no MB-sourced track credit (null `recordingArtistsFetchedAt`) once its last attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `recordingArtistsFetchedAt` after each attempt — so a recording MusicBrainz has no performance relations for is retried at most once per window. Run `POST /api/v1/admin/track-recording-artists/reset` to force a full re-run.\n\nRequires `MUSICBRAINZ_USER_AGENT` env var.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["message", "statusUrl"],
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "statusUrl": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-recording-artists/reset": {
+      "post": {
+        "summary": "Reset MusicBrainz recording-artist credit enrichment for a full re-run",
+        "tags": ["admin"],
+        "description": "Removes every MusicBrainz-sourced track credit (`CREDITED_ON` with `source: \"musicbrainz\"`, `scope: \"track\"`), deletes the MBID-keyed fallback `Musician` nodes this stage created (`musicbrainzId` set, no `discogsId`), and clears the `recordingArtistsFetchedAt` marker, causing the next `POST /api/v1/admin/track-recording-artists/enrich` call to re-process every recording from scratch.\n\nThis endpoint is blocked while enrichment is running.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["reset"],
+                      "properties": {
+                        "reset": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/track-acousticbrainz/enrich": {
       "post": {
         "summary": "Enrich Track nodes with AcousticBrainz audio features",
@@ -2650,6 +2775,95 @@
                               "type": "integer"
                             },
                             "recordingOfEdges": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-recording-artists/status": {
+      "get": {
+        "summary": "Status of the most recent MusicBrainz recording-artist credit enrichment run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult",
+                        "lastError"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "recordingsProcessed": {
+                              "type": "integer"
+                            },
+                            "recordingsSkipped": {
+                              "type": "integer"
+                            },
+                            "recordingsFailed": {
+                              "type": "integer"
+                            },
+                            "creditEdges": {
                               "type": "integer"
                             },
                             "durationMs": {
@@ -5991,6 +6205,7 @@
                             "lyricsFunnel",
                             "tracksWithRecordingMbid",
                             "tracksWithWork",
+                            "tracksWithMbRecordingArtists",
                             "worksWithMultipleRecordings",
                             "worksWithWriterLinks",
                             "wroteEdges",
@@ -6355,6 +6570,22 @@
                               }
                             },
                             "tracksWithWork": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "tracksWithMbRecordingArtists": {
                               "type": "object",
                               "required": ["covered", "applicable", "pct"],
                               "properties": {

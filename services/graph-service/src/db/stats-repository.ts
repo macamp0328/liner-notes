@@ -72,6 +72,9 @@ export interface StatsData {
     // recordingMbid — the upstream gate); worksWithMultipleRecordings is a raw count of cover/version
     // groups (no knowable denominator), so like memberOfEdges it is not a CoverageMetric.
     tracksWithWork: CoverageMetric;
+    // #335: track credits pushed down from MB recording artist-rels. Gateable: covered/applicable
+    // over tracks that have a recordingMbid (the upstream gate), mirroring tracksWithWork.
+    tracksWithMbRecordingArtists: CoverageMetric;
     worksWithMultipleRecordings: number;
     // Songwriter reconciliation (#380). worksWithWriterLinks IS gateable (covered/applicable over
     // Works whose writers were captured — those with ≥1 WROTE edge). wroteEdges is a raw count
@@ -175,6 +178,9 @@ const TRACK_QUERY = `
     count(CASE WHEN t.lyrics IS NULL AND t.lyricsStatus = 'low-confidence' THEN 1 END) AS lyricsLowConfidence,
     count(CASE WHEN t.recordingMbid IS NOT NULL THEN 1 END) AS mbidCovered,
     count(CASE WHEN EXISTS { (t)-[:RECORDING_OF]->(:Work) } THEN 1 END) AS worksCovered,
+    count(CASE WHEN EXISTS {
+      (t)<-[c:CREDITED_ON]-(:Musician) WHERE c.source = 'musicbrainz' AND c.scope = 'track'
+    } THEN 1 END) AS mbRecordingArtistsCovered,
     count(CASE WHEN t.isrc IS NOT NULL THEN 1 END) AS isrcCovered,
     count(CASE WHEN t.recordingMbid IS NOT NULL AND t.tempo IS NOT NULL THEN 1 END) AS tempoCovered,
     count(CASE WHEN t.isrc IS NOT NULL AND t.deezerBpm IS NOT NULL THEN 1 END) AS deezerCovered,
@@ -386,6 +392,9 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       // Applicable denominator is the upstream gate (a Work can only be resolved for a track that
       // has a recordingMbid), mirroring tracksWithTempo.
       tracksWithWork: coverage(n(track, 'worksCovered'), mbidCovered),
+      // Applicable denominator is the upstream gate (a credit can only be pushed down to a track that
+      // has a recordingMbid), mirroring tracksWithWork.
+      tracksWithMbRecordingArtists: coverage(n(track, 'mbRecordingArtistsCovered'), mbidCovered),
       worksWithMultipleRecordings: n(work, 'multiRecording'),
       // Applicable denominator is the upstream gate: a Work can only be linked if its writers were
       // captured (#336). covered = those Works with ≥1 WROTE edge (#380).
