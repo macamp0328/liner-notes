@@ -77,13 +77,25 @@ test('renderers are deterministic across calls', () => {
   assert.equal(renderGraphDiagram(snapshot), renderGraphDiagram(snapshot));
 });
 
-test('buildPageHtml substitutes all placeholders (and is $-safe)', () => {
+test('buildPageHtml substitutes all placeholders ($-safe + HTML-escaped)', () => {
   const template =
     '<a>{{GRAPH_DIAGRAM}}</a><b>{{ER_DIAGRAM}}</b><c>{{LAST_UPDATED}}</c><d>{{DRIFT_STATUS}}</d>';
   const html = buildPageHtml(template, 'ER$&BODY', 'GRAPH', {
     lastUpdated: '2026-06-15',
     driftStatus: 'in sync',
   });
-  assert.equal(html, '<a>GRAPH</a><b>ER$&BODY</b><c>2026-06-15</c><d>in sync</d>');
+  // $& stays literal (function replacer); the & is HTML-escaped
+  assert.equal(html, '<a>GRAPH</a><b>ER$&amp;BODY</b><c>2026-06-15</c><d>in sync</d>');
   assert.ok(!html.includes('{{'), 'no placeholder left unfilled');
+});
+
+test('buildPageHtml escapes HTML so a label cannot break out of the page', () => {
+  const html = buildPageHtml(
+    '<pre>{{GRAPH_DIAGRAM}}</pre>{{ER_DIAGRAM}}',
+    '</pre><script>x</script>',
+    'g',
+    { lastUpdated: 'd', driftStatus: 's' },
+  );
+  assert.ok(!html.includes('<script>'), 'raw <script> must not survive');
+  assert.ok(html.includes('&lt;script&gt;'), 'angle brackets are escaped');
 });
