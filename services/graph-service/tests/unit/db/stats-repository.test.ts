@@ -96,6 +96,7 @@ describe('getStats', () => {
         lyricsGeniusCovered: int(8),
         mbidCovered: int(70),
         worksCovered: int(42),
+        mbRecordingArtistsCovered: int(28),
         isrcCovered: int(60),
         tempoCovered: int(35),
         deezerCovered: int(30),
@@ -136,6 +137,12 @@ describe('getStats', () => {
     // plus the raw count of cover/version groups (works with >1 distinct recording).
     expect(stats.enrichment.tracksWithWork).toEqual({ covered: 42, applicable: 70, pct: 60 });
     expect(stats.enrichment.worksWithMultipleRecordings).toBe(4);
+    // #335 MB recording-artist credits: covered over the same recordingMbid-gated denominator (28/70).
+    expect(stats.enrichment.tracksWithMbRecordingArtists).toEqual({
+      covered: 28,
+      applicable: 70,
+      pct: 40,
+    });
     // #380 songwriter reconciliation: WROTE coverage over writer-bearing Works (30/40) + raw count.
     expect(stats.enrichment.worksWithWriterLinks).toEqual({ covered: 30, applicable: 40, pct: 75 });
     expect(stats.enrichment.wroteEdges).toBe(55);

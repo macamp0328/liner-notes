@@ -55,6 +55,20 @@ export interface MbWorkWriter {
   role: string;
 }
 
+/**
+ * A performance credit on a MusicBrainz recording (#335), with the performer's MB artist MBID. The
+ * MBID is what lets the credit be reconciled to our Discogs-keyed Musician nodes deterministically
+ * (the `mb-artist-id` join, #380) — never name-matching.
+ */
+export interface MbRecordingArtist {
+  mbid: string;
+  name: string;
+  /** The MB relation type: `performer` | `instrument` | `vocal`. */
+  role: string;
+  /** Instrument name(s) for `instrument`, vocal type(s) for `vocal`; empty for `performer`. */
+  attributes: string[];
+}
+
 export interface MusicBrainzClientConfig {
   userAgent: string;
   /** Milliseconds to sleep after every successful request. 1100ms keeps us safely under 1 req/sec. */
@@ -127,6 +141,16 @@ interface MbWorkArtistRelsResponse {
   }>;
 }
 
+interface MbRecordingArtistRelsResponse {
+  id: string;
+  relations?: Array<{
+    type: string;
+    'target-type'?: string;
+    attributes?: string[];
+    artist?: { id: string; name: string };
+  }>;
+}
+
 interface MbReleaseListResponse {
   'release-count': number;
   releases: Array<{
@@ -166,6 +190,12 @@ const DEFAULT_BACKOFF_BASE_MS = 2_000;
 const MIN_RECORDING_SEARCH_SCORE = 90;
 /** Work artist-relation types we treat as authorship (#336). */
 const WORK_WRITER_ROLES = new Set(['composer', 'lyricist', 'writer']);
+/**
+ * Recording artist-relation types we treat as track-attributable performance credits (#335).
+ * Production/engineering roles (producer, mix, recording, mastering, …) are correctly release-scoped
+ * and deliberately excluded — they are NOT pushed down to a track.
+ */
+const RECORDING_PERFORMANCE_ROLES = new Set(['performer', 'instrument', 'vocal']);
 
 /** Convert a MusicBrainz millisecond length to whole seconds; null for missing or non-positive values. */
 function msToSeconds(ms: number | null | undefined): number | null {
@@ -401,6 +431,47 @@ export class MusicBrainzClient {
       }
     }
     return writers;
+  }
+
+  /**
+   * Fetch the performance credits (performer / instrument / vocal) of a MusicBrainz recording from
+   * its artist relationships (#335). Uses `inc=artist-rels`; reads `relations[]` whose `type` is a
+   * performance role — production/engineering roles (producer, mix, recording, mastering, …) are
+   * release-scoped and deliberately excluded, so they are never pushed down to a track. The
+   * instrument/vocal name lives in `attributes`; `performer` carries none. Each performer's MB
+   * artist MBID is retained so the credit reconciles to our Discogs-keyed Musician nodes
+   * deterministically (the `mb-artist-id` join, #380) — never name-matching. Empty array on no
+   * performance credits, an open breaker, or a 404 (a known recordingMbid that no longer resolves is
+   * not retried until the staleness window expires).
+   */
+  async getArtistsByRecordingMbid(recordingMbid: string): Promise<MbRecordingArtist[]> {
+    const endpoint = `${BASE_URL}/recording/${encodeURIComponent(recordingMbid)}?inc=artist-rels&fmt=json`;
+
+    let response: MbRecordingArtistRelsResponse;
+    try {
+      response = await this.fetchWithBackoff<MbRecordingArtistRelsResponse>(endpoint);
+    } catch (err) {
+      if (err instanceof CircuitBreakerOpenError) return [];
+      if (err instanceof Error && err.message.includes('not found (404)')) return [];
+      throw err;
+    }
+
+    const artists: MbRecordingArtist[] = [];
+    for (const rel of response.relations ?? []) {
+      if (
+        RECORDING_PERFORMANCE_ROLES.has(rel.type) &&
+        rel['target-type'] === 'artist' &&
+        rel.artist?.id !== undefined
+      ) {
+        artists.push({
+          mbid: rel.artist.id,
+          name: rel.artist.name,
+          role: rel.type,
+          attributes: rel.attributes ?? [],
+        });
+      }
+    }
+    return artists;
   }
 
   /**

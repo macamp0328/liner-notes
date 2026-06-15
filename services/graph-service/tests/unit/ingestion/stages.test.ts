@@ -149,6 +149,7 @@ describe('RELOAD_STAGES order', () => {
       'track-acousticbrainz',
       'track-deezer',
       'mb-artist-id',
+      'track-recording-artists',
       'nationality',
       'artist-wikidata',
       'songwriter-reconciliation',
@@ -242,6 +243,7 @@ describe('RELOAD_STAGES resource lanes', () => {
     for (const name of [
       'track-musicbrainz',
       'track-works',
+      'track-recording-artists',
       'mb-release-events',
       'mb-artist-id',
       'nationality',
@@ -254,6 +256,7 @@ describe('RELOAD_STAGES resource lanes', () => {
     for (const name of [
       'track-musicbrainz',
       'track-works',
+      'track-recording-artists',
       'track-acousticbrainz',
       'track-deezer',
     ] as const) {

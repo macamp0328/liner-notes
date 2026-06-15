@@ -69,6 +69,8 @@ const statements = [
   'CREATE INDEX label_hierarchy_fetched_at IF NOT EXISTS FOR (l:Label) ON (l.labelHierarchyFetchedAt)',
   // issue #336: track-works enrichment marker (RECORDING_OF → Work).
   'CREATE INDEX track_works_fetched_at IF NOT EXISTS FOR (t:Track) ON (t.worksFetchedAt)',
+  // issue #335: track-recording-artists enrichment marker (MB recording → track-scoped CREDITED_ON).
+  'CREATE INDEX track_recording_artists_fetched_at IF NOT EXISTS FOR (t:Track) ON (t.recordingArtistsFetchedAt)',
 
   // One-time cleanup: remove the superseded boolean markers. The `*FetchedAt` queries
   // never read them, so this is cosmetic — but it keeps the graph free of vestigial
