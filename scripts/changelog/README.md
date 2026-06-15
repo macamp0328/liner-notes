@@ -1,15 +1,16 @@
 # Changelog — versioned, plain-English, self-healing, changelog-as-data
 
 A small system that turns merged pull requests into a readable, **versioned** changelog. Merged
-PRs accumulate in a rolling **`unreleased` draft**; when you've shipped a batch you **deliberately
-cut** a **published, tagged CalVer release** (`vYYYY.MM.DD`) that sweeps everything pending into one
+PRs accumulate in a rolling **`unreleased` draft**; every **successful Deploy** then cuts a
+**published, tagged CalVer release** (`vYYYY.MM.DD`) that sweeps everything pending into one
 version. Open the repo's **Releases** tab to read it — the latest version shows up as "Latest
 release" in the sidebar.
 
-> **Cutting is decoupled from deploying.** It used to auto-cut on every successful Deploy, which
-> swept the _whole_ backlog on any green deploy — including PRs that never deployed and PRs you
-> were batching. Cutting is now an explicit action (`changelog:release`, run from the Actions tab
-> or locally) so you control when and what gets released.
+> **Cutting is coupled to deploying.** A release is cut automatically when the `Deploy` workflow
+> succeeds (`workflow_run`). Because Deploy is gated by the `production` environment's manual
+> approval, **approving a deploy is what cuts the release** — of everything merged since the last
+> version, tagged at the deployed commit. A manual fallback (`changelog:release`, from the Actions
+> tab or locally) cuts on demand; a cut with nothing pending is a no-op.
 
 It is built around one idea: **a changelog is data, not prose.** There is a single structured
 store; everything human-facing is a deterministic _render_ of it. That buys idempotency,
@@ -48,9 +49,9 @@ string-appending bot can't have.
 - **Writer 1 — per-merge** ([`update.ts`](update.ts), [`changelog.yml`](../../.github/workflows/changelog.yml)):
   on every squash-merge to `main`, summarise the PR (`version: null`) and refresh the draft.
 - **Writer 2 — the cut** ([`release.ts`](release.ts), [`changelog-release.yml`](../../.github/workflows/changelog-release.yml)):
-  a **deliberate `workflow_dispatch`** (or local run) — sweep everything Unreleased into one
-  published CalVer release tagged at main HEAD (or an explicit `HEAD_SHA`), stamp those records, and
-  record the version.
+  fired **automatically on every successful Deploy** (`workflow_run`, tagging the deployed
+  `head_sha`), with `workflow_dispatch`/local run as a fallback — sweep everything Unreleased into
+  one published CalVer release, stamp those records, and record the version.
 - **Writer 3 — reconciler** ([`reconcile.ts`](reconcile.ts), [`changelog-reconcile.yml`](../../.github/workflows/changelog-reconcile.yml)):
   weekly, fill any gaps the per-merge path missed, back-fill version stamps, and **re-render every
   published release from the store with no new AI calls** — the release-world analog of the repo's
@@ -111,7 +112,7 @@ DRY_RUN=1 pnpm changelog:update 304                # ...preview only, no writes
 pnpm changelog:backfill                            # seed the store (run once after setup)
 pnpm changelog:backfill --refresh                  # re-summarise EVERY entry (e.g. after editing style.md)
 pnpm changelog:reconcile --since 2026-06-01        # heal a window + re-render releases on demand
-pnpm changelog:release                             # cut a version deliberately (tags main HEAD)
+pnpm changelog:release                             # manual fallback cut (auto-cuts on deploy; tags main HEAD)
 HEAD_SHA=$(git rev-parse HEAD) pnpm changelog:release   # ...or pin an explicit deployed commit
 pnpm changelog:baseline                            # one-shot: publish the v0.1.0 history baseline
 ```
@@ -131,19 +132,20 @@ gh secret set ANTHROPIC_API_KEY --repo <owner>/<repo>   # enables Claude summari
 # put ANTHROPIC_API_KEY in .env.local (gitignored) for local runs, then:
 pnpm changelog:backfill                                 # seed the project's history
 pnpm changelog:baseline                                 # publish v0.1.0 "Initial history", empty Unreleased
-# thereafter, cut a vYYYY.MM.DD release deliberately whenever you've shipped a batch.
+# thereafter, every successful Deploy cuts a vYYYY.MM.DD release of what's pending.
 ```
 
 ## How a version is cut
 
 1. A PR merges → `changelog.yml` summarises it into the store as `version: null` (Unreleased).
    Merged PRs accumulate in the Unreleased draft.
-2. You deploy a batch (`deploy.yml`) — or several. Deploying does **not** cut a release.
-3. When you want to declare the batch released, you **run the cut** — `changelog-release.yml`'s
-   "Run workflow" button (Actions tab), or `pnpm changelog:release` locally. It: ensures recent
-   merges are summarised (a short heal window), computes the CalVer tag + tier, writes headline /
-   narrative for Standard+ / Notable, **publishes** the release tagged at main HEAD (or an explicit
-   `HEAD_SHA`), then stamps the swept records and appends the `VersionRecord`.
+2. You approve + run a deploy (`deploy.yml`). When it **succeeds**, `changelog-release.yml` fires on
+   its `workflow_run` and cuts: it ensures recent merges are summarised (a short heal window),
+   computes the CalVer tag + tier, writes headline / narrative for Standard+ / Notable,
+   **publishes** the release tagged at the **deployed commit** (`workflow_run.head_sha`), then stamps
+   the swept records and appends the `VersionRecord`.
+3. Need to cut without a deploy? Use the manual fallback — `changelog-release.yml`'s "Run workflow"
+   button (Actions tab), or `pnpm changelog:release` locally (tags main HEAD, or pass `HEAD_SHA`).
 4. A cut with nothing pending is a no-op (**no empty release**).
 
 ## Forking / tuning

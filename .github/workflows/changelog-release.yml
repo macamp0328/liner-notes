@@ -1,34 +1,38 @@
 name: Changelog release
 
-# Cut a PUBLISHED, tagged CalVer release from everything currently Unreleased — a
-# DELIBERATE, batched action you run when you've shipped a batch of merged PRs and
-# want to declare them released. Sweeps every Unreleased record into one
-# `vYYYY.MM.DD` GitHub Release whose note richness ramps with the importance tier
-# (see scripts/changelog/release.ts), then stamps those records and records the
-# version in the versions.json asset on the rolling draft.
+# Cut a PUBLISHED, tagged CalVer release from everything currently Unreleased: sweep
+# every Unreleased record into one `vYYYY.MM.DD` GitHub Release whose note richness
+# ramps with the importance tier (see scripts/changelog/release.ts), then stamp those
+# records and record the version in the versions.json asset on the rolling draft.
 #
-# Run it from the Actions tab ("Run workflow"), or locally:
-#   HEAD_SHA=$(git rev-parse HEAD) pnpm changelog:release   # pin an explicit commit
-#   pnpm changelog:release                                  # default: current main HEAD
+# Triggered two ways:
+#  - AUTO, on every SUCCESSFUL Deploy (`workflow_run`). A deploy is gated by the
+#    `production` environment's manual approval, so "Deploy succeeded" already means
+#    "a human allowed this release to ship" — the cut tags the DEPLOYED commit
+#    (`workflow_run.head_sha`) and sweeps everything merged since the last version.
+#    Because main is linear, that is exactly "what is now in production."
+#  - MANUAL, via "Run workflow" (`workflow_dispatch`) — a fallback to cut on demand
+#    (optionally pinning `head_sha`). Locally: `pnpm changelog:release`
+#    (or `HEAD_SHA=$(git rev-parse HEAD) pnpm changelog:release` to pin a commit).
 #
-# This used to fire automatically on every successful Deploy (workflow_run). That
-# tied "cut a release" to "a deploy happened" and swept the WHOLE backlog on any
-# green deploy — including PRs that never deployed (docs/scripts) and PRs you were
-# deliberately batching. Cutting is now an explicit dispatch so merged PRs
-# accumulate in the Unreleased draft until you decide to release them.
+# A cut with nothing pending is a no-op (no empty release), so a deploy that ships no
+# new PRs since the last cut produces nothing.
 #
-# Why this is safe and loop-free: it creates a `refs/tags/*` ref, and every
-# workflow's `on: push` filters `branches: [main]` (no `tags:` trigger anywhere),
-# so a tag push cannot retrigger Deploy / CI / Changelog. Editing/creating a
-# release makes no commit, so this never touches protected main.
+# Why this is safe and loop-free: the cut creates a `refs/tags/*` ref, and every
+# workflow's `on: push` filters `branches: [main]` (no `tags:` trigger anywhere), so a
+# tag push cannot retrigger Deploy / CI / Changelog. Editing/creating a release makes
+# no commit, so this never touches protected main. The shared `changelog` concurrency
+# group serialises the cut against the per-merge updater and the reconciler.
 #
 # Gotchas:
-#  - `workflow_dispatch` runs THIS file from the DEFAULT branch — it only takes
-#    effect after merge to main; the PR that adds it cannot be dispatched yet.
-#    Validate first with: DRY_RUN=1 pnpm changelog:release
-#  - One-time, after merge, run `pnpm changelog:baseline` once before the first cut.
+#  - `workflow_run` only fires for the copy of THIS file on the default branch, so the
+#    auto-trigger takes effect after merge to main (the PR that adds it can't self-fire).
+#  - One-time, before the first cut on a fresh repo, run `pnpm changelog:baseline`.
 
 on:
+  workflow_run:
+    workflows: ['Deploy'] # must equal deploy.yml `name:`
+    types: [completed]
   workflow_dispatch:
     inputs:
       head_sha:
@@ -51,6 +55,9 @@ jobs:
   release:
     name: Cut changelog version
     runs-on: ubuntu-latest
+    # On the auto path, only cut after a SUCCESSFUL deploy (skip failed/cancelled
+    # runs). A manual dispatch has no workflow_run context, so always run then.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v6
 
@@ -67,10 +74,11 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Cut the version release
-        # HEAD_SHA is the tag's git target. Empty (the default) → release.ts falls
-        # back to current main HEAD. Passed as DATA, never checked out as code.
+        # HEAD_SHA is the tag's git target. Auto path → the deployed commit
+        # (workflow_run.head_sha); manual path → the optional input; empty → release.ts
+        # falls back to current main HEAD. Passed as DATA, never checked out as code.
         env:
-          HEAD_SHA: ${{ inputs.head_sha }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || inputs.head_sha }}
           GH_TOKEN: ${{ github.token }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: pnpm changelog:release
