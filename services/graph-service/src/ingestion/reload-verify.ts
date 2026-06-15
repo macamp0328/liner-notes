@@ -53,6 +53,11 @@ export const RELOAD_COVERAGE_THRESHOLDS: readonly CoverageThreshold[] = [
   // verify runs strictly last and no stage creates Musicians after reconciliation, so it's a clean
   // post-condition: any missing late-Artist link → covered<applicable → reload failed.
   { metric: 'samePersonLinks', stage: 'person-reconciliation', minPct: 100 },
+  // #380: WROTE coverage is best-effort (a Work's writers must also be in-collection nodes with a
+  // resolved MBID to link), so gate for "populated" (silently-zero) only, like tracksWithWork. A
+  // true zero is implausible for a real collection — self-penned songs guarantee covered>0 — so a
+  // silently-zero here flags a broken chain (no MBIDs stored, or reconciliation matching nothing).
+  { metric: 'worksWithWriterLinks', stage: 'songwriter-reconciliation', minPct: 0 },
 ];
 
 /** Why a metric passed or failed — drives the human-readable failure summary. */

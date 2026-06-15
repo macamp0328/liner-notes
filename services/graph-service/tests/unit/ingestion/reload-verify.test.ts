@@ -38,7 +38,9 @@ const ALL_STAGES: ReloadStageName[] = [
   'track-works',
   'track-acousticbrainz',
   'track-deezer',
+  'mb-artist-id',
   'nationality',
+  'songwriter-reconciliation',
   'verify',
 ];
 const ALL_RAN = new Set<ReloadStageName>(ALL_STAGES);
@@ -68,6 +70,9 @@ function makeStats(
     tracksWithRecordingMbid: cov(60, 100),
     tracksWithWork: cov(40, 60),
     worksWithMultipleRecordings: 8,
+    // #380: clears the minPct:0 (silently-zero) bar — covered>0 over writer-bearing Works.
+    worksWithWriterLinks: cov(25, 40),
+    wroteEdges: 30,
     tracksWithIsrc: cov(45, 100),
     tracksWithTempo: cov(30, 60),
     tracksWithDeezerBpm: cov(20, 45),
@@ -108,6 +113,8 @@ describe('RELOAD_COVERAGE_THRESHOLDS', () => {
     expect(byMetric['tracksWithLyrics']?.minPct).toBe(0);
     expect(byMetric['tracksWithTempo']?.minPct).toBe(0);
     expect(byMetric['tracksWithDeezerBpm']?.minPct).toBe(0);
+    // #380: WROTE coverage is best-effort → silently-zero protection only.
+    expect(byMetric['worksWithWriterLinks']?.minPct).toBe(0);
   });
 
   it('maps each metric to the stage that produces it', () => {
@@ -116,6 +123,7 @@ describe('RELOAD_COVERAGE_THRESHOLDS', () => {
     expect(byMetric['tracksWithRecordingMbid']).toBe('track-musicbrainz');
     expect(byMetric['tracksWithIsrc']).toBe('track-musicbrainz');
     expect(byMetric['tracksWithTempo']).toBe('track-acousticbrainz');
+    expect(byMetric['worksWithWriterLinks']).toBe('songwriter-reconciliation');
   });
 });
 
@@ -196,6 +204,31 @@ describe('evaluateCoverage — verdict matrix', () => {
     expect(verdict(report, 'tracksWithLyrics')).toMatchObject({
       pass: false,
       reason: 'silently-zero',
+    });
+  });
+
+  it('fails worksWithWriterLinks silently-zero (broken WROTE chain) when reconciliation ran (#380)', () => {
+    const report = evaluateCoverage(
+      makeStats({ enrichment: { worksWithWriterLinks: cov(0, 40) } }),
+      ALL_RAN,
+    );
+    expect(verdict(report, 'worksWithWriterLinks')).toMatchObject({
+      pass: false,
+      reason: 'silently-zero',
+      stage: 'songwriter-reconciliation',
+    });
+  });
+
+  it('exempts worksWithWriterLinks when songwriter-reconciliation did not run (#380)', () => {
+    const ran = new Set(ALL_RAN);
+    ran.delete('songwriter-reconciliation');
+    const report = evaluateCoverage(
+      makeStats({ enrichment: { worksWithWriterLinks: cov(0, 40) } }),
+      ran,
+    );
+    expect(verdict(report, 'worksWithWriterLinks')).toMatchObject({
+      pass: true,
+      reason: 'not-run',
     });
   });
 
