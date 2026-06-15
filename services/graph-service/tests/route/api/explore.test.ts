@@ -10,6 +10,7 @@ const mockVerifyConnectivity = vi.hoisted(() => vi.fn().mockResolvedValue(undefi
 const mockGetReleasesByMusician = vi.hoisted(() => vi.fn());
 const mockGetReleasesByCredit = vi.hoisted(() => vi.fn());
 const mockGetReleasesByInstrument = vi.hoisted(() => vi.fn());
+const mockGetArtistsByPersonLevelInstrument = vi.hoisted(() => vi.fn());
 const mockGetRecordingsByWork = vi.hoisted(() => vi.fn());
 const mockGetWorksBySongwriter = vi.hoisted(() => vi.fn());
 const mockGetReleasesByStudio = vi.hoisted(() => vi.fn());
@@ -48,6 +49,7 @@ vi.mock('../../../src/db/repositories/explore-repository.js', () => ({
   getReleasesByMusician: mockGetReleasesByMusician,
   getReleasesByCredit: mockGetReleasesByCredit,
   getReleasesByInstrument: mockGetReleasesByInstrument,
+  getArtistsByPersonLevelInstrument: mockGetArtistsByPersonLevelInstrument,
   getRecordingsByWork: mockGetRecordingsByWork,
   getWorksBySongwriter: mockGetWorksBySongwriter,
   getReleasesByStudio: mockGetReleasesByStudio,
@@ -89,6 +91,12 @@ const sampleInstrumentCredit = {
   instrument: 'bass',
   displayRole: 'Upright Bass',
   scope: 'release',
+};
+
+const sampleInstrumentPlayer = {
+  discogsId: 12345,
+  name: 'Paul McCartney',
+  playsInstrument: ['bass', 'guitar', 'piano'],
 };
 
 // ---------------------------------------------------------------------------
@@ -174,29 +182,39 @@ describe('explore routes', () => {
 
   // GET /api/v1/explore/instrument/:name
   describe('GET /api/v1/explore/instrument/:name', () => {
-    it('returns 200 with instrument credits and passes the name through', async () => {
+    type InstrumentExploration = {
+      credits: (typeof sampleInstrumentCredit)[];
+      players: (typeof sampleInstrumentPlayer)[];
+    };
+
+    it('returns 200 with both axes (credits + players) and passes the name through to each', async () => {
       mockGetReleasesByInstrument.mockResolvedValue([sampleInstrumentCredit]);
+      mockGetArtistsByPersonLevelInstrument.mockResolvedValue([sampleInstrumentPlayer]);
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/explore/instrument/bass',
       });
       expect(response.statusCode).toBe(200);
-      const body = JSON.parse(response.payload) as (typeof sampleInstrumentCredit)[];
-      expect(body).toHaveLength(1);
-      expect(body[0]!.musician).toBe('Ron Carter');
-      expect(body[0]!.instrument).toBe('bass');
-      expect(body[0]!.displayRole).toBe('Upright Bass');
+      const body = JSON.parse(response.payload) as InstrumentExploration;
+      expect(body.credits).toHaveLength(1);
+      expect(body.credits[0]!.musician).toBe('Ron Carter');
+      expect(body.credits[0]!.displayRole).toBe('Upright Bass');
+      expect(body.players).toHaveLength(1);
+      expect(body.players[0]!.name).toBe('Paul McCartney');
+      expect(body.players[0]!.playsInstrument).toContain('bass');
       expect(mockGetReleasesByInstrument).toHaveBeenCalledWith(expect.anything(), 'bass');
+      expect(mockGetArtistsByPersonLevelInstrument).toHaveBeenCalledWith(expect.anything(), 'bass');
     });
 
-    it('returns 200 with empty array when no results', async () => {
+    it('returns 200 with empty credits and players when nothing matches', async () => {
       mockGetReleasesByInstrument.mockResolvedValue([]);
+      mockGetArtistsByPersonLevelInstrument.mockResolvedValue([]);
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/explore/instrument/harp',
       });
       expect(response.statusCode).toBe(200);
-      expect(JSON.parse(response.payload)).toEqual([]);
+      expect(JSON.parse(response.payload)).toEqual({ credits: [], players: [] });
     });
   });
 

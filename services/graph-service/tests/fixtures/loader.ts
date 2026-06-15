@@ -136,6 +136,18 @@ export async function seedExploreEnrichment(driver: Driver): Promise<void> {
       `MATCH (t:Track {position: 'B1', releaseDiscogsId: 7000001})
        SET t.deezerFetched = true, t.deezerBpm = 120.0, t.deezerGain = -10.0`,
     );
+
+    // --- person-level instruments (#393) -------------------------------------
+    // An Artist whose Wikidata P1303 set, normalized onto the #333 family vocab and stored on
+    // playsInstrument, includes bass + guitar — so /explore/instrument/:name surfaces them in the
+    // person-level `players` axis independently of any per-credit CREDITED_ON edge.
+    await session.run(
+      `MERGE (a:Artist {discogsId: 950001})
+       SET a.name = 'Multi Instrumentalist', a.wikidataQid = 'Q-test-mi',
+           a.wikidataFetchedAt = datetime(),
+           a.playsInstrument = ['bass', 'guitar', 'piano'],
+           a.playsInstrumentRaw = ['bass guitar', 'guitar', 'piano']`,
+    );
   } finally {
     await session.close();
   }

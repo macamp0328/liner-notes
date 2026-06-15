@@ -4,6 +4,7 @@ import {
   parseDisplayRole,
   parseRoleCategory,
   parseInstrument,
+  normalizeInstrumentFamilies,
   filterTracks,
   extractStudios,
   extractBarcode,
@@ -264,6 +265,37 @@ describe('parseInstrument', () => {
     expect(parseInstrument('Photography By [Cover Photography]')).toBeNull();
     expect(parseInstrument('Other')).toBeNull();
     expect(parseInstrument('')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeInstrumentFamilies (#393, person-level Wikidata P1303 labels)
+// ---------------------------------------------------------------------------
+describe('normalizeInstrumentFamilies', () => {
+  it('maps Wikidata-style labels onto the #333 family vocabulary', () => {
+    expect(normalizeInstrumentFamilies(['bass guitar', 'drum kit', 'piano'])).toEqual([
+      'bass',
+      'drums',
+      'piano',
+    ]);
+  });
+
+  it('dedupes families and returns them sorted', () => {
+    // electric + acoustic guitar both collapse to "guitar"; output is a sorted set.
+    expect(normalizeInstrumentFamilies(['electric guitar', 'acoustic guitar', 'vocals'])).toEqual([
+      'guitar',
+      'vocals',
+    ]);
+  });
+
+  it('drops labels outside the controlled vocabulary', () => {
+    // theremin/kalimba/ukulele have no #333 family — the caller keeps them verbatim elsewhere.
+    expect(normalizeInstrumentFamilies(['theremin', 'kalimba', 'ukulele'])).toEqual([]);
+    expect(normalizeInstrumentFamilies(['theremin', 'piano'])).toEqual(['piano']);
+  });
+
+  it('returns an empty array for empty input', () => {
+    expect(normalizeInstrumentFamilies([])).toEqual([]);
   });
 });
 

@@ -88,6 +88,8 @@ describe('getStats', () => {
         bornYearCovered: int(8),
         imageCovered: int(5),
         awardsCovered: int(2),
+        // #393 person-level instruments (P1303), same profApplicable (16) denominator.
+        instrumentsCovered: int(4),
       },
       track: {
         total: int(100),
@@ -172,6 +174,12 @@ describe('getStats', () => {
     expect(stats.enrichment.artistsWithBirthDate).toEqual({ covered: 8, applicable: 16, pct: 50 });
     expect(stats.enrichment.artistsWithImage).toEqual({ covered: 5, applicable: 16, pct: 31.3 });
     expect(stats.enrichment.artistsWithAwards).toEqual({ covered: 2, applicable: 16, pct: 12.5 });
+    // #393 person-level instruments (P1303), same denominator.
+    expect(stats.enrichment.artistsWithInstruments).toEqual({
+      covered: 4,
+      applicable: 16,
+      pct: 25,
+    });
 
     // lyrics split by source; untagged absorbs covered − (lrclib + genius) = 2
     expect(stats.enrichment.tracksWithLyrics).toEqual({
