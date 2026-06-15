@@ -9,6 +9,7 @@ name: CI
 #   tests-and-coverage (unit + integration, Neo4j, 70% threshold) │  all start at
 #   schema-validation (Neo4j container, started via composite action) │  t=0, in
 #   script-tests (changelog unit tests), terraform (fmt + validate) │  parallel
+#   hadolint (Dockerfile lint), kubeconform (k8s manifest validate)  │
 #   audit, secrets-scan, codeql, actionlint (+ standalone shellcheck) ┘
 #
 #   lint, typecheck ──→ docker-build   (the ONLY gate: the multi-stage build
@@ -47,7 +48,7 @@ permissions:
   contents: read
 
 # Rapid agent push cadence means a PR head is often superseded within seconds —
-# cancel the obsolete run instead of letting the full 10-job fan-out finish for
+# cancel the obsolete run instead of letting the full 13-job fan-out finish for
 # nothing. Pushes to main never cancel (each merged commit keeps its CI record).
 concurrency:
   group: ci-${{ github.ref }}
@@ -436,3 +437,94 @@ jobs:
         run: |
           terraform -chdir=infra/terraform/bootstrap init -backend=false
           terraform -chdir=infra/terraform/bootstrap validate
+
+  hadolint:
+    name: Hadolint
+    # Lints services/graph-service/Dockerfile (structure, pinned versions, layer
+    # ordering, shell pitfalls). docker-build COMPILES the image but never lints it,
+    # so a regression like an unpinned base tag or a missing-WORKDIR COPY would ship
+    # silently. Runs unconditionally (no path filter) like the rest of ci.yml so it
+    # stays a required-eligible gate — same group as actionlint/terraform.
+    #
+    # Pin the binary + SHA256 like the actionlint/shellcheck install: download over
+    # HTTPS, verify the checksum BEFORE running, so a tampered/unexpected asset fails
+    # the gate. Bump HADOLINT_VERSION + HADOLINT_SHA256 (from the release's
+    # hadolint-linux-x86_64.sha256) to update.
+    runs-on: ubuntu-latest
+    # Backstop against wedged installs/pulls — GitHub default is 360 min.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run hadolint
+        env:
+          HADOLINT_VERSION: 2.14.0
+          # From the release asset hadolint-linux-x86_64.sha256.
+          HADOLINT_SHA256: 6bf226944684f56c84dd014e8b979d27425c0148f61b3bd99bcc6f39e9dc5a47
+        run: |
+          curl -fsSL -o /tmp/hadolint \
+            "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-linux-x86_64"
+          echo "${HADOLINT_SHA256}  /tmp/hadolint" | sha256sum -c -
+          chmod +x /tmp/hadolint
+          /tmp/hadolint --version
+          /tmp/hadolint services/graph-service/Dockerfile
+
+  kubeconform:
+    name: Kubeconform
+    # Statically validates the k8s manifests under infra/k8s/** against the upstream
+    # JSON schemas — catches a bad apiVersion / missing required field / typo'd kind
+    # that today only surfaces at `kubectl apply` against the live cluster. Runs
+    # unconditionally (no path filter) so it stays a required-eligible gate.
+    #
+    # -strict rejects unknown fields (catches typos). We -skip ONLY the two
+    # External-Secrets CRD kinds (ClusterSecretStore/ExternalSecret) by name rather
+    # than -ignore-missing-schemas: the latter skips ANY (kind, apiVersion) without a
+    # schema, so a typo'd apiVersion (apps/v9) or kind (Deploymnet) would be silently
+    # SKIPPED instead of failing — the exact regression this gate exists to catch.
+    # With an explicit -skip, every other resource still REQUIRES a schema; -summary
+    # prints the skipped count so the CRD gap stays visible. Default (master) schemas,
+    # NOT -kubernetes-version: every kind here is a stable GA apiVersion (apps/v1, v1,
+    # batch/v1, rbac.../v1), so a pinned cluster version would only risk a 404.
+    #
+    # Pin kustomize + kubeconform binaries + SHA256 (actionlint-style). Bump the
+    # *_VERSION + *_SHA256 envs (kustomize checksums.txt / kubeconform CHECKSUMS).
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned kustomize + kubeconform
+        env:
+          KUSTOMIZE_VERSION: 5.8.1
+          KUSTOMIZE_SHA256: 029a7f0f4e1932c52a0476cf02a0fd855c0bb85694b82c338fc648dcb53a819d
+          KUBECONFORM_VERSION: 0.8.0
+          KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+        run: |
+          # kustomize (the release tag URL-encodes the slash in kustomize/vX.Y.Z).
+          curl -fsSL -o /tmp/kustomize.tar.gz \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          echo "${KUSTOMIZE_SHA256}  /tmp/kustomize.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/kustomize.tar.gz -C /tmp kustomize
+          sudo install -m 0755 /tmp/kustomize /usr/local/bin/kustomize
+          kustomize version
+
+          # kubeconform.
+          curl -fsSL -o /tmp/kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  /tmp/kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          sudo install -m 0755 /tmp/kubeconform /usr/local/bin/kubeconform
+      - name: Validate graph-service stack (kustomize-built)
+        # Build to a FILE, not a pipe: a kustomize-build failure surfaces directly
+        # instead of being masked by kubeconform reading empty stdin. The build also
+        # validates kustomization.yaml parses and applies the namespace + image
+        # overlays, so what's checked matches what's deployed.
+        run: |
+          kustomize build infra/k8s/graph-service > /tmp/graph-service.yaml
+          kubeconform -strict -skip ClusterSecretStore,ExternalSecret -summary /tmp/graph-service.yaml
+      - name: Validate standalone manifests
+        # namespace.yaml + the out-of-band deployer identity aren't part of any
+        # kustomization. infra/k8s/aws-for-fluent-bit/values.yaml is a Helm values
+        # file, NOT a manifest — deliberately excluded (kubeconform would reject it).
+        run: |
+          kubeconform -strict -skip ClusterSecretStore,ExternalSecret -summary \
+            infra/k8s/namespace.yaml \
+            infra/k8s/deploy/github-deployer.yaml
