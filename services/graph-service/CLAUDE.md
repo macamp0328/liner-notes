@@ -66,6 +66,15 @@ Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At)
 
 > **Agent note:** Research Neo4j modeling best practices and validate against Task 2 API findings before implementing. Propose improvements explicitly.
 
+> **Authoritative model lives in [`docs/schema/SCHEMA.md`](docs/schema/SCHEMA.md).** The exact
+> labels/properties/relationships/constraints of the **running graph** are auto-generated from a live
+> introspection by `pnpm schema:diagram` (ADR 0004) — an ER + graph-of-labels diagram that render on
+> GitHub, plus a machine-readable `docs/schema/schema-snapshot.json`, with
+> [`docs/schema/schema-drift.md`](docs/schema/schema-drift.md) flagging any divergence from
+> `src/db/schema.ts`. The tables below are **hand-written commentary** — they add provenance the
+> generator can't (enrichment sourcing, nullability, `#issue` refs) but **drift on exact
+> properties**; trust the generated artifacts for the current shape.
+
 ### Nodes
 
 | Label         | Key Properties                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |

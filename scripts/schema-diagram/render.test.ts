@@ -63,9 +63,10 @@ test('inlineIntoMarkdown replaces between markers and throws when absent', () =>
   assert.throws(() => inlineIntoMarkdown('missing', 'x', md));
 });
 
-test('buildSchemaMarkdown inlines both diagrams', () => {
-  const md = buildSchemaMarkdown('ER_BODY', 'GRAPH_BODY');
+test('buildSchemaMarkdown inlines both diagrams and the drift line', () => {
+  const md = buildSchemaMarkdown('ER_BODY', 'GRAPH_BODY', 'DRIFT_STATUS');
   assert.match(md, /# Data-model schema/);
+  assert.match(md, /\*\*Drift:\*\* DRIFT_STATUS/);
   assert.match(md, /```mermaid\nER_BODY\n```/);
   assert.match(md, /```mermaid\nGRAPH_BODY\n```/);
 });
