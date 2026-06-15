@@ -37,7 +37,7 @@ export function driverFromEnv(): Driver {
 /** Narrowly classify connection/timeout failures as "unreachable" — auth/TLS and
  *  any other error must propagate (a broken prod credential should fail loud, not
  *  masquerade as "asleep"). */
-function isUnreachable(err: unknown): boolean {
+export function isUnreachable(err: unknown): boolean {
   const e = err as { code?: string; message?: string; cause?: { code?: string } };
   const code = e?.code ?? e?.cause?.code ?? '';
   const unreachableCodes = new Set([
