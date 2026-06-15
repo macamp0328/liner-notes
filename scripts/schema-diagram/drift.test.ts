@@ -36,6 +36,7 @@ test('diffModel: detects added/removed labels, properties, relationships', () =>
         label: 'Release',
         properties: [
           { name: 'title', types: ['String'], mandatory: true, unique: false, indexed: false },
+          { name: 'year', types: ['String'], mandatory: false, unique: false, indexed: false },
         ],
       },
       { label: 'Work', properties: [] },
@@ -49,6 +50,7 @@ test('diffModel: detects added/removed labels, properties, relationships', () =>
         properties: [
           { name: 'title', types: ['String'], mandatory: true, unique: false, indexed: false },
           { name: 'barcode', types: ['String'], mandatory: false, unique: false, indexed: false },
+          { name: 'year', types: ['Long'], mandatory: false, unique: false, indexed: false },
         ],
       },
     ],
@@ -61,6 +63,10 @@ test('diffModel: detects added/removed labels, properties, relationships', () =>
     { label: 'Release', property: 'barcode', types: ['String'] },
   ]);
   assert.deepEqual(m.removedProperties, []);
+  // year: String → Long is a type change, not add/remove
+  assert.deepEqual(m.changedProperties, [
+    { label: 'Release', property: 'year', from: ['String'], to: ['Long'] },
+  ]);
   assert.deepEqual(m.addedRelationships, [{ type: 'HAS_TRACK', from: 'Release', to: 'Track' }]);
   assert.deepEqual(m.removedRelationships, [{ type: 'RECORDING_OF', from: 'Track', to: 'Work' }]);
 });
@@ -70,12 +76,20 @@ test('extractDeclaredSchemaNames: classifies CREATE, ignores DROP/MATCH', () => 
     "'CREATE CONSTRAINT release_discogs_id IF NOT EXISTS FOR (r:Release) REQUIRE r.discogsId IS UNIQUE',",
     "'CREATE FULLTEXT INDEX lyricsSearch IF NOT EXISTS FOR (t:Track) ON EACH [t.lyrics]',",
     "'CREATE INDEX release_pressing_year IF NOT EXISTS FOR (r:Release) ON (r.pressingYear)',",
+    "'CREATE TEXT INDEX rel_text_idx IF NOT EXISTS FOR (r:Release) ON (r.notes)',",
+    "'CREATE VECTOR INDEX track_embedding IF NOT EXISTS FOR (t:Track) ON (t.embedding)',",
     "'DROP INDEX track_normalized_title IF EXISTS',",
     "'MATCH (r:Release) WHERE r.year IS NOT NULL SET r.pressingYear = r.year',",
   ].join('\n');
   const out = extractDeclaredSchemaNames(src);
   assert.deepEqual(out.constraints, ['release_discogs_id']);
-  assert.deepEqual(out.indexes, ['lyricsSearch', 'release_pressing_year']);
+  // FULLTEXT, plain, TEXT, and VECTOR index modifiers are all captured
+  assert.deepEqual(out.indexes, [
+    'lyricsSearch',
+    'rel_text_idx',
+    'release_pressing_year',
+    'track_embedding',
+  ]);
   assert.ok(!out.indexes.includes('track_normalized_title'), 'DROP lines ignored');
 });
 

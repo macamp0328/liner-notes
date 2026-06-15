@@ -9,15 +9,14 @@
 //
 // No I/O, no driver — unit-tested with canned input.
 
-import type { SchemaSnapshot } from './snapshot.js';
-
-const byString = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+import { type SchemaSnapshot, byString } from './snapshot.js';
 
 export interface ModelDrift {
   addedLabels: string[];
   removedLabels: string[];
   addedProperties: Array<{ label: string; property: string; types: string[] }>;
   removedProperties: Array<{ label: string; property: string }>;
+  changedProperties: Array<{ label: string; property: string; from: string[]; to: string[] }>;
   addedRelationships: Array<{ type: string; from: string; to: string }>;
   removedRelationships: Array<{ type: string; from: string; to: string }>;
 }
@@ -46,6 +45,7 @@ export function diffModel(previous: SchemaSnapshot | null, current: SchemaSnapsh
     removedLabels: [],
     addedProperties: [],
     removedProperties: [],
+    changedProperties: [],
     addedRelationships: [],
     removedRelationships: [],
   };
@@ -59,6 +59,7 @@ export function diffModel(previous: SchemaSnapshot | null, current: SchemaSnapsh
 
   const addedProperties: ModelDrift['addedProperties'] = [];
   const removedProperties: ModelDrift['removedProperties'] = [];
+  const changedProperties: ModelDrift['changedProperties'] = [];
   // Only diff properties for labels present in BOTH — a whole added/removed label
   // is already reported above, listing each of its props would be noise.
   for (const [label, curr] of currLabels) {
@@ -67,14 +68,27 @@ export function diffModel(previous: SchemaSnapshot | null, current: SchemaSnapsh
     const prevProps = new Map(prev.properties.map((p) => [p.name, p]));
     const currProps = new Map(curr.properties.map((p) => [p.name, p]));
     for (const [name, p] of currProps) {
-      if (!prevProps.has(name)) addedProperties.push({ label, property: name, types: p.types });
+      const prevP = prevProps.get(name);
+      if (prevP === undefined) {
+        addedProperties.push({ label, property: name, types: p.types });
+      } else if (prevP.types.join('|') !== p.types.join('|')) {
+        // A property whose type set changed (e.g. Long → String) — a real model
+        // regression that a name-only diff would silently miss. `types` is sorted
+        // in the snapshot, so the join comparison is order-stable.
+        changedProperties.push({ label, property: name, from: prevP.types, to: p.types });
+      }
     }
     for (const name of prevProps.keys()) {
       if (!currProps.has(name)) removedProperties.push({ label, property: name });
     }
   }
-  addedProperties.sort((a, b) => byString(a.label, b.label) || byString(a.property, b.property));
-  removedProperties.sort((a, b) => byString(a.label, b.label) || byString(a.property, b.property));
+  const byLabelProp = (
+    a: { label: string; property: string },
+    b: { label: string; property: string },
+  ): number => byString(a.label, b.label) || byString(a.property, b.property);
+  addedProperties.sort(byLabelProp);
+  removedProperties.sort(byLabelProp);
+  changedProperties.sort(byLabelProp);
 
   const prevRels = new Set(previous.relationships.map(relKey));
   const currRels = new Set(current.relationships.map(relKey));
@@ -90,6 +104,7 @@ export function diffModel(previous: SchemaSnapshot | null, current: SchemaSnapsh
     removedLabels,
     addedProperties,
     removedProperties,
+    changedProperties,
     addedRelationships,
     removedRelationships,
   };
@@ -103,8 +118,11 @@ export function extractDeclaredSchemaNames(schemaTsSource: string): {
   indexes: string[];
 } {
   // Literal single spaces (schema.ts is consistently single-spaced) — avoids a
-  // nested quantifier (\s+ under ?), which trips detect-unsafe-regex.
-  const re = /CREATE (?:FULLTEXT )?(CONSTRAINT|INDEX) (\w+) IF NOT EXISTS/g;
+  // nested quantifier (\s+ under ?), which trips detect-unsafe-regex. The optional
+  // group enumerates every Neo4j index modifier (literals, no quantifier) so a
+  // TEXT/POINT/VECTOR/RANGE/LOOKUP index isn't misread as un-declared → false drift.
+  const re =
+    /CREATE (?:(?:FULLTEXT|TEXT|POINT|VECTOR|RANGE|LOOKUP) )?(CONSTRAINT|INDEX) (\w+) IF NOT EXISTS/g;
   const constraints = new Set<string>();
   const indexes = new Set<string>();
   for (const m of schemaTsSource.matchAll(re)) {
@@ -162,6 +180,7 @@ export function buildDriftReport(
     model.removedLabels.length > 0 ||
     model.addedProperties.length > 0 ||
     model.removedProperties.length > 0 ||
+    model.changedProperties.length > 0 ||
     model.addedRelationships.length > 0 ||
     model.removedRelationships.length > 0;
   const hasCodeDbDrift =
@@ -181,8 +200,8 @@ export function driftSummaryLine(report: DriftReport): string {
       m.addedLabels.length + m.removedLabels.length
         ? `${m.addedLabels.length + m.removedLabels.length} label(s)`
         : '',
-      m.addedProperties.length + m.removedProperties.length
-        ? `${m.addedProperties.length + m.removedProperties.length} property(ies)`
+      m.addedProperties.length + m.removedProperties.length + m.changedProperties.length
+        ? `${m.addedProperties.length + m.removedProperties.length + m.changedProperties.length} property(ies)`
         : '',
       m.addedRelationships.length + m.removedRelationships.length
         ? `${m.addedRelationships.length + m.removedRelationships.length} relationship(s)`
@@ -224,6 +243,13 @@ export function renderDriftMarkdown(report: DriftReport): string {
     '',
     '**Removed properties**',
     bulletList(m.removedProperties.map((p) => `${p.label}.${p.property}`)),
+    '',
+    '**Changed property types**',
+    bulletList(
+      m.changedProperties.map(
+        (p) => `${p.label}.${p.property}: ${p.from.join('|')} → ${p.to.join('|')}`,
+      ),
+    ),
     '',
     '**Added relationships**',
     bulletList(m.addedRelationships.map((r) => `(${r.from})-[:${r.type}]->(${r.to})`)),

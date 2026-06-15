@@ -7,7 +7,7 @@
 > `pnpm schema:diagram` to refresh. Node/relationship names and properties below
 > are the authoritative model; the tables in the service handbook point here.
 
-**Drift:** ⚠️ code↔DB drift vs schema.ts (see schema-drift.md).
+**Drift:** ✅ In sync with the last snapshot and schema.ts.
 
 ## Entity-relationship diagram
 
