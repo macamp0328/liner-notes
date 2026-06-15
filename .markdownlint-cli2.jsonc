@@ -1,0 +1,20 @@
+{
+  // markdownlint-cli2 — semantic/structural Markdown checks only (issue #349).
+  // Prettier already owns *formatting* (line length, list/emphasis style, spacing),
+  // so every default rule is OFF and we enable ONLY the high-signal rules that catch
+  // real breakage Prettier can't see: heading hierarchy, duplicate headings, and
+  // broken in-repo links. Vendored/local skill docs (.agents, .claude) are out of scope.
+  "gitignore": true,
+  "globs": ["**/*.md"],
+  "ignores": [".agents/**", ".claude/**"],
+  "config": {
+    "default": false,
+    "MD001": true,
+    "MD011": true,
+    "MD024": { "siblings_only": true },
+    "MD042": true,
+    "MD051": true,
+    "MD052": true,
+    "MD053": true,
+  },
+}
