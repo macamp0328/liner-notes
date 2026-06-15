@@ -96,10 +96,14 @@ drift-gated generators. Concretely:
    is the maintainer's "see changes before accepting them" surface.
 
 6. **Credentials are pulled at runtime from Secrets Manager, never stored in GitHub.** The scheduled
-   workflow assumes the existing OIDC AWS role (`AWS_DEPLOY_ROLE_ARN`) and reads
-   `liner-notes/graph-service/prod` at run time. This requires granting that role
-   `secretsmanager:GetSecretValue` on that secret (a small terraform change). Caveat: Aura Free is
-   single-user, so the credential is write-capable; the script issues reads only.
+   workflow assumes a **dedicated, read-only OIDC role** (`aws_iam_role.github_schema_diagram`,
+   recorded as the `AWS_SCHEMA_DIAGRAM_ROLE_ARN` repo variable) and reads
+   `liner-notes/graph-service/prod` at run time. It is **not** the deploy role: that role's trust is
+   scoped to `:environment:production` (manual-approval gated), so a `schedule`/`workflow_run` job
+   could never assume it without tripping the approval. The new role's trust is scoped to
+   `ref:refs/heads/main` and its policy is `secretsmanager:GetSecretValue` + `DescribeSecret` on
+   exactly that one secret — nothing else. Caveat: Aura Free is single-user, so the credential is
+   write-capable; the script issues reads only.
 
 7. **The job skips cleanly when the database is asleep.** Prod Aura auto-pauses when the k3s node is
    down (the stats-snapshot keep-warm only runs while the pod is up), and the instance can be

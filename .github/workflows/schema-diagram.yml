@@ -1,0 +1,118 @@
+name: Schema Diagram
+
+# Refreshes the committed data-model diagrams by introspecting the LIVE prod graph
+# and opening a PR with any changes (ADR 0004). Non-deterministic + needs prod
+# creds, so it is NOT a fail-on-drift gate — it's a scheduled producer, like the
+# changelog. The bot PR is opened with a GitHub App token (not GITHUB_TOKEN) so
+# its required CI checks actually run; a human still merges it.
+
+on:
+  schedule:
+    - cron: '0 7 * * 1' # Mondays 07:00 UTC — catches data-driven model changes
+  workflow_dispatch: {}
+  workflow_run:
+    workflows: ['Deploy'] # a successful deploy means the DB is awake + schema.ts changes have landed
+    types: [completed]
+
+permissions:
+  id-token: write # assume the read-only OIDC role
+  contents: read # checkout (the PR push/commit uses the App token, not GITHUB_TOKEN)
+
+concurrency:
+  group: schema-diagram
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Refresh schema diagrams
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # On the workflow_run path, only run after a SUCCESSFUL deploy of main (mirror
+    # changelog-release.yml). schedule/workflow_dispatch always run.
+    if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Mandatory: without this, create-pull-request pushes via the persisted
+          # GITHUB_TOKEN and the PR won't trigger CI — silently un-mergeable.
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v6
+        with:
+          role-to-assume: ${{ vars.AWS_SCHEMA_DIAGRAM_ROLE_ARN }}
+          role-session-name: schema-diagram
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Load prod Neo4j credentials from Secrets Manager
+        run: |
+          set -euo pipefail
+          json="$(aws secretsmanager get-secret-value --secret-id liner-notes/graph-service/prod --query SecretString --output text)"
+          echo "::add-mask::$json"
+          for k in NEO4J_URI NEO4J_USER NEO4J_PASSWORD; do
+            v="$(printf '%s' "$json" | jq -r --arg k "$k" '.[$k] // empty')"
+            if [ -z "$v" ]; then echo "::error::prod secret is missing key $k"; exit 1; fi
+            echo "::add-mask::$v"
+            # Heredoc form so a value containing newlines can't corrupt $GITHUB_ENV.
+            {
+              echo "$k<<SCHEMA_DIAGRAM_SECRET_EOF"
+              printf '%s\n' "$v"
+              echo "SCHEMA_DIAGRAM_SECRET_EOF"
+            } >> "$GITHUB_ENV"
+          done
+
+      - name: Generate schema diagrams
+        run: pnpm schema:diagram
+
+      - name: Detect changes
+        id: drift
+        run: |
+          if [ -n "$(git status --porcelain -- services/graph-service/docs/schema)" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No schema changes (or DB asleep) — nothing to PR."
+          fi
+
+      - name: Build PR body
+        if: steps.drift.outputs.changed == 'true'
+        run: |
+          {
+            echo "Auto-generated refresh of the data-model schema diagrams from a live prod introspection."
+            echo "Review the diff to accept the new baseline. See \`services/graph-service/docs/schema/SCHEMA.md\`."
+            echo
+            cat services/graph-service/docs/schema/schema-drift.md
+          } > "${RUNNER_TEMP}/pr-body.md"
+
+      - name: Mint GitHub App token
+        if: steps.drift.outputs.changed == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.SCHEMA_DIAGRAM_APP_ID }}
+          private-key: ${{ secrets.SCHEMA_DIAGRAM_APP_PRIVATE_KEY }}
+
+      - name: Open or update refresh PR
+        if: steps.drift.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@d4f3be6ce6f4083b7ac7490ab98b48a62db1ee41 # v7.0.10
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: automation/schema-diagram
+          base: main
+          title: 'chore(schema): refresh data-model diagrams'
+          body-path: ${{ runner.temp }}/pr-body.md
+          commit-message: 'chore(schema): refresh data-model diagrams from live introspection'
+          add-paths: services/graph-service/docs/schema/**
+          labels: 'area:docs,chore'
+          delete-branch: true

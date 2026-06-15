@@ -79,3 +79,8 @@ output "github_deploy_role_arn" {
   description = "ARN of the role the CD workflow (#120) assumes via GitHub OIDC. Record as the AWS_DEPLOY_ROLE_ARN GitHub Actions variable — see the 'CD — IAM bootstrap' section of infra/RUNBOOK.md."
   value       = aws_iam_role.github_deploy.arn
 }
+
+output "github_schema_diagram_role_arn" {
+  description = "ARN of the read-only role the schema-diagram refresh workflow (ADR 0004) assumes via GitHub OIDC. Record as the AWS_SCHEMA_DIAGRAM_ROLE_ARN GitHub Actions variable — see the 'Schema diagram refresh' section of infra/RUNBOOK.md."
+  value       = aws_iam_role.github_schema_diagram.arn
+}

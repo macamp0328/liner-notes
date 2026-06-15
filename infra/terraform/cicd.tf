@@ -174,3 +174,57 @@ resource "aws_iam_role_policy" "github_deploy" {
   role   = aws_iam_role.github_deploy.id
   policy = data.aws_iam_policy_document.github_deploy.json
 }
+
+# --- Schema-diagram refresh role (ADR 0004) ---------------------------------
+# Assumed by the scheduled / workflow_dispatch / workflow_run schema-diagram
+# workflow to read the prod Neo4j credentials from Secrets Manager at run time
+# and render the committed data-model diagrams. Unlike github_deploy, trust is
+# scoped to the MAIN BRANCH ref (not the production environment) so schedule +
+# workflow_dispatch + workflow_run (which run in the default-branch context) all
+# assume it WITHOUT the manual-approval gate. Read-only: GetSecretValue +
+# DescribeSecret on exactly the one graph-service secret, nothing else — the DB
+# queries it then runs are read-only Cypher.
+data "aws_iam_policy_document" "github_schema_diagram_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [local.github_oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${var.github_repository}:ref:refs/heads/main"]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_schema_diagram" {
+  name               = "${local.name_prefix}-github-schema-diagram"
+  description        = "Assumed by the schema-diagram refresh workflow (ADR 0004) via GitHub OIDC to read prod Neo4j creds read-only."
+  assume_role_policy = data.aws_iam_policy_document.github_schema_diagram_assume.json
+}
+
+data "aws_iam_policy_document" "github_schema_diagram" {
+  # Read NEO4J_URI/USER/PASSWORD from the runtime secret to introspect prod.
+  # Scoped to exactly the graph-service secret — no other AWS access.
+  statement {
+    sid       = "ReadGraphServiceSecret"
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [aws_secretsmanager_secret.graph_service.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "github_schema_diagram" {
+  name   = "${local.name_prefix}-github-schema-diagram"
+  role   = aws_iam_role.github_schema_diagram.id
+  policy = data.aws_iam_policy_document.github_schema_diagram.json
+}
