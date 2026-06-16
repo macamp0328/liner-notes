@@ -26,7 +26,7 @@ vi.mock('../../../src/enrichment/artist-profiles.js', () => ({
   enrichArtistProfiles: mockEnrichArtistProfiles,
 }));
 
-import { runIngestion } from '../../../src/ingestion/ingest.js';
+import { runIngestion, ingestReleases } from '../../../src/ingestion/ingest.js';
 import type { DiscogsClient } from '../../../src/ingestion/discogs-client.js';
 
 // ---------------------------------------------------------------------------
@@ -160,6 +160,30 @@ describe('runIngestion', () => {
     expect(mockMergeReleaseGraph).toHaveBeenCalledOnce();
     // Enrichment still runs after per-release failures.
     expect(mockEnrichLyrics).toHaveBeenCalledOnce();
+  });
+
+  it('captures the Discogs ids of failed releases, in collection order (#417)', async () => {
+    // releases 2 and 3 fail; 1 and 4 succeed. failedReleaseIds must identify exactly 2 and 3.
+    const client = makeClient({
+      getCollectionReleases: vi.fn().mockResolvedValue({
+        pagination: { pages: 1 },
+        releases: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }],
+      }),
+      getRelease: vi
+        .fn()
+        .mockResolvedValueOnce({ id: 1 })
+        .mockRejectedValueOnce(new Error('Discogs 500'))
+        .mockRejectedValueOnce(new Error('Discogs 502'))
+        .mockResolvedValueOnce({ id: 4 }),
+    });
+
+    const summary = await ingestReleases(client, fakeDriver, 'tester', log);
+
+    expect(summary.releasesProcessed).toBe(2);
+    expect(summary.releasesFailed).toBe(2);
+    expect(summary.failedReleaseIds).toEqual([2, 3]);
+    // The per-release failure is logged at error level with the id (acceptance criterion).
+    expect(log.error).toHaveBeenCalledWith(expect.stringContaining('release 2'));
   });
 
   // -------------------------------------------------------------------------

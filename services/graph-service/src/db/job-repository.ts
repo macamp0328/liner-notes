@@ -17,13 +17,20 @@ export type ReloadJobStatus = 'running' | 'complete' | 'failed';
  */
 export type ReloadStageStatus = 'pending' | 'running' | 'complete' | 'failed' | 'skipped';
 
+/**
+ * A stage's persisted counts. Numeric, except the `releases` stage's bounded `failedReleaseIds`
+ * array (#417). Structurally identical to `stages.ts`'s `StageCounts`; redeclared locally so this
+ * `db` module needs no upward import from `ingestion` (same rationale as {@link CheckpointLogger}).
+ */
+type StageCounts = Record<string, number | number[]>;
+
 export interface PersistedStage {
   stage: string;
   ordinal: number;
   status: ReloadStageStatus;
   startedAt: string | null;
   completedAt: string | null;
-  counts: Record<string, number>;
+  counts: StageCounts;
   error: string | null;
 }
 
@@ -74,11 +81,11 @@ function toIso(raw: unknown): string | null {
   return raw === null || raw === undefined ? null : String(raw);
 }
 
-function parseCounts(raw: unknown): Record<string, number> {
+function parseCounts(raw: unknown): StageCounts {
   if (typeof raw !== 'string' || raw.length === 0) return {};
   try {
     const parsed: unknown = JSON.parse(raw);
-    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, number>) : {};
+    return typeof parsed === 'object' && parsed !== null ? (parsed as StageCounts) : {};
   } catch {
     return {};
   }
@@ -202,7 +209,7 @@ export async function markStageComplete(
   driver: Driver,
   jobId: string,
   stage: string,
-  counts: Record<string, number>,
+  counts: StageCounts,
   skipped = false,
   log?: CheckpointLogger,
 ): Promise<void> {
@@ -237,7 +244,7 @@ export async function markStageFailed(
   jobId: string,
   stage: string,
   error: string,
-  counts?: Record<string, number>,
+  counts?: StageCounts,
   log?: CheckpointLogger,
 ): Promise<void> {
   const session = driver.session();
