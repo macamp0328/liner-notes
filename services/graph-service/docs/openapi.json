@@ -6840,6 +6840,7 @@
                             "tracksWithWork",
                             "tracksWithMbRecordingArtists",
                             "tracksWithMbProductionCredits",
+                            "tracksWithMbArrangers",
                             "tracksWithMbStudio",
                             "worksWithMultipleRecordings",
                             "worksWithWriterLinks",
@@ -7256,6 +7257,22 @@
                               }
                             },
                             "tracksWithMbProductionCredits": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "tracksWithMbArrangers": {
                               "type": "object",
                               "required": ["covered", "applicable", "pct"],
                               "properties": {

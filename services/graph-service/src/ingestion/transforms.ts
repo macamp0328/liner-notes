@@ -94,7 +94,18 @@ const ROLE_CATEGORY_RULES: ReadonlyArray<readonly [RoleCategory, readonly string
   ],
   [
     'composer',
-    ['written-by', 'composed by', 'songwriter', 'music by', 'lyrics by', 'arranged by', 'arranger'],
+    // 'orchestrat' matches 'orchestrator' / 'orchestrated by' — the orchestration end of the
+    // arranging family (MB recording-level `orchestrator`, #339; and Discogs "Orchestrated By").
+    [
+      'written-by',
+      'composed by',
+      'songwriter',
+      'music by',
+      'lyrics by',
+      'arranged by',
+      'arranger',
+      'orchestrat',
+    ],
   ],
   ['producer', ['producer']],
   [

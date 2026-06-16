@@ -117,6 +117,7 @@ describe('getStats', () => {
         worksCovered: int(42),
         mbRecordingArtistsCovered: int(28),
         mbProductionCreditsCovered: int(14),
+        mbArrangersCovered: int(21),
         mbStudioCovered: int(7),
         isrcCovered: int(60),
         tempoCovered: int(35),
@@ -172,6 +173,12 @@ describe('getStats', () => {
       covered: 14,
       applicable: 70,
       pct: 20,
+    });
+    // #339 MB arranger subset (composer-bucket track credits): same recordingMbid-gated denominator (21/70).
+    expect(stats.enrichment.tracksWithMbArrangers).toEqual({
+      covered: 21,
+      applicable: 70,
+      pct: 30,
     });
     // #339 (slice 2) MB studio coverage: same recordingMbid-gated denominator (7/70).
     expect(stats.enrichment.tracksWithMbStudio).toEqual({ covered: 7, applicable: 70, pct: 10 });

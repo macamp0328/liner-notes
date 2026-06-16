@@ -111,6 +111,15 @@ describe('parseRoleCategory', () => {
     expect(parseRoleCategory('Arranged By')).toBe('composer');
   });
 
+  // composer — arranging family (#339): MB recording-level arranger/orchestrator and the Discogs
+  // equivalents bucket here, the same axis as written-by/composed-by.
+  it('categorizes the arranging family as composer', () => {
+    expect(parseRoleCategory('Arranger')).toBe('composer');
+    expect(parseRoleCategory('Vocal Arranger')).toBe('composer');
+    expect(parseRoleCategory('Orchestrator')).toBe('composer');
+    expect(parseRoleCategory('Orchestrated By')).toBe('composer');
+  });
+
   // producer
   it('categorizes producer credits', () => {
     expect(parseRoleCategory('Producer')).toBe('producer');

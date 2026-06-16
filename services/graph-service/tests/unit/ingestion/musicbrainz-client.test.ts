@@ -983,7 +983,7 @@ describe('MusicBrainzClient', () => {
       ]);
     });
 
-    it('keeps mastering / remixer / arranger release-scoped — they are NOT pushed down to a track (#339)', async () => {
+    it('keeps mastering / remixer release-scoped — they are NOT pushed down to a track (#339)', async () => {
       fetchSpy.mockResolvedValueOnce(
         makeOkResponse({
           id: 'rec-1',
@@ -1006,12 +1006,6 @@ describe('MusicBrainzClient', () => {
               attributes: [],
               artist: { id: 'r-1', name: 'Remixer' },
             },
-            {
-              type: 'arranger',
-              'target-type': 'artist',
-              attributes: [],
-              artist: { id: 'ar-1', name: 'Arranger' },
-            },
           ],
         }),
       );
@@ -1019,6 +1013,74 @@ describe('MusicBrainzClient', () => {
       expect(await client.getArtistsByRecordingMbid('rec-1')).toEqual([
         { mbid: 'a-1', name: 'Performer', role: 'instrument', attributes: ['piano'] },
       ]);
+    });
+
+    it('maps arranging roles down to track scope with their canonical role (#339)', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            {
+              type: 'arranger',
+              'target-type': 'artist',
+              attributes: [],
+              artist: { id: 'ar-1', name: 'Arranger' },
+            },
+            {
+              type: 'instrument arranger',
+              'target-type': 'artist',
+              attributes: [],
+              artist: { id: 'ar-2', name: 'Horn Arranger' },
+            },
+            {
+              type: 'vocal arranger',
+              'target-type': 'artist',
+              attributes: [],
+              artist: { id: 'ar-3', name: 'Vocal Arranger' },
+            },
+            {
+              // Qualifier attributes are dropped, same as production credits.
+              type: 'orchestrator',
+              'target-type': 'artist',
+              attributes: ['additional'],
+              artist: { id: 'ar-4', name: 'Orchestrator' },
+            },
+          ],
+        }),
+      );
+
+      expect(await client.getArtistsByRecordingMbid('rec-1')).toEqual([
+        { mbid: 'ar-1', name: 'Arranger', role: 'arranger', attributes: [] },
+        { mbid: 'ar-2', name: 'Horn Arranger', role: 'instrument arranger', attributes: [] },
+        { mbid: 'ar-3', name: 'Vocal Arranger', role: 'vocal arranger', attributes: [] },
+        { mbid: 'ar-4', name: 'Orchestrator', role: 'orchestrator', attributes: [] },
+      ]);
+    });
+
+    it('every mapped arranging role buckets to composer via parseRoleCategory (#339)', async () => {
+      // Same load-bearing coupling as the production guard: /stats.tracksWithMbArrangers
+      // (roleCategory = 'composer') and the arranger surfacing depend on each arranging map value
+      // categorizing as composer. A future value parseRoleCategory buckets as 'other' would be written
+      // but never counted — a silent drift this test fails loudly on.
+      const ARRANGING_SLUGS = ['arranger', 'instrument arranger', 'vocal arranger', 'orchestrator'];
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: ARRANGING_SLUGS.map((type, i) => ({
+            type,
+            'target-type': 'artist',
+            attributes: [],
+            artist: { id: `ar-${i}`, name: type },
+          })),
+        }),
+      );
+
+      const artists = await client.getArtistsByRecordingMbid('rec-1');
+
+      expect(artists).toHaveLength(ARRANGING_SLUGS.length);
+      for (const a of artists) {
+        expect(parseRoleCategory(a.role)).toBe('composer');
+      }
     });
 
     it('ignores performance relations without an artist id or with a non-artist target', async () => {
