@@ -162,7 +162,14 @@ const reloadJobShape = {
           },
           startedAt: { type: 'string', nullable: true },
           completedAt: { type: 'string', nullable: true },
-          counts: { type: 'object', additionalProperties: { type: 'number' } },
+          // Counts are numeric, except the releases stage's bounded `failedReleaseIds` array (#417):
+          // the `anyOf` is required so fast-json-stringify serializes the array instead of stripping it.
+          counts: {
+            type: 'object',
+            additionalProperties: {
+              anyOf: [{ type: 'number' }, { type: 'array', items: { type: 'integer' } }],
+            },
+          },
           error: { type: 'string', nullable: true },
           // Live overlay (#179): present only on the stage currently running, sourced from the
           // in-memory progress registry. `etaMs` is a rough linear extrapolation for that stage.
@@ -327,7 +334,7 @@ interface PipelineEntry {
 // Status (`lastResult`) summary shapes — no `required`, matching the original status routes.
 // `exhausted` (#367) is the terminal-empty counter; without it here, response serialization would
 // strip it from /admin/<stage>/status (it surfaces in /admin/reload/status for free, since that
-// route's `counts` schema allows additional numeric properties).
+// route's `counts` schema allows additional numeric or integer-array properties).
 const standardSummarySchema = {
   type: 'object',
   properties: {
