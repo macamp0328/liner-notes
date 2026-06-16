@@ -847,7 +847,7 @@ describe('MusicBrainzClient', () => {
       expect(url).toContain('inc=artist-rels');
     });
 
-    it('excludes production/engineering roles — they are NOT pushed down to a track', async () => {
+    it('maps production/engineering roles down to track scope with their canonical role (#339)', async () => {
       fetchSpy.mockResolvedValueOnce(
         makeOkResponse({
           id: 'rec-1',
@@ -858,7 +858,7 @@ describe('MusicBrainzClient', () => {
               attributes: ['piano'],
               artist: { id: 'a-1', name: 'Performer' },
             },
-            // album-level production credits — correctly left release-scoped (#335 acceptance case)
+            // recording-level production credits — now pushed to track scope (#339)
             {
               type: 'producer',
               'target-type': 'artist',
@@ -877,6 +877,30 @@ describe('MusicBrainzClient', () => {
               attributes: [],
               artist: { id: 'e-2', name: 'Engineer' },
             },
+            {
+              type: 'engineer',
+              'target-type': 'artist',
+              attributes: [],
+              artist: { id: 'e-3', name: 'General Engineer' },
+            },
+            {
+              type: 'audio',
+              'target-type': 'artist',
+              attributes: [],
+              artist: { id: 'e-4', name: 'Audio Engineer' },
+            },
+            {
+              type: 'sound',
+              'target-type': 'artist',
+              attributes: [],
+              artist: { id: 'e-5', name: 'Sound Engineer' },
+            },
+            {
+              type: 'balance',
+              'target-type': 'artist',
+              attributes: [],
+              artist: { id: 'e-6', name: 'Balance Engineer' },
+            },
           ],
         }),
       );
@@ -884,6 +908,79 @@ describe('MusicBrainzClient', () => {
       const artists = await client.getArtistsByRecordingMbid('rec-1');
 
       expect(artists).toEqual([
+        { mbid: 'a-1', name: 'Performer', role: 'instrument', attributes: ['piano'] },
+        { mbid: 'p-1', name: 'Producer', role: 'producer', attributes: [] },
+        { mbid: 'e-1', name: 'Mixer', role: 'mixing engineer', attributes: [] },
+        { mbid: 'e-2', name: 'Engineer', role: 'recording engineer', attributes: [] },
+        { mbid: 'e-3', name: 'General Engineer', role: 'engineer', attributes: [] },
+        { mbid: 'e-4', name: 'Audio Engineer', role: 'audio engineer', attributes: [] },
+        { mbid: 'e-5', name: 'Sound Engineer', role: 'sound engineer', attributes: [] },
+        { mbid: 'e-6', name: 'Balance Engineer', role: 'balance engineer', attributes: [] },
+      ]);
+    });
+
+    it('drops production qualifier attributes (co/executive/…) — the credit token is the role (#339)', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            {
+              type: 'producer',
+              'target-type': 'artist',
+              attributes: ['co'],
+              artist: { id: 'p-1', name: 'Co-Producer' },
+            },
+            {
+              type: 'mix',
+              'target-type': 'artist',
+              attributes: ['additional'],
+              artist: { id: 'e-1', name: 'Additional Mixer' },
+            },
+          ],
+        }),
+      );
+
+      // Attributes are dropped so grouping tokenizes on the canonical role, not 'co'/'additional'.
+      expect(await client.getArtistsByRecordingMbid('rec-1')).toEqual([
+        { mbid: 'p-1', name: 'Co-Producer', role: 'producer', attributes: [] },
+        { mbid: 'e-1', name: 'Additional Mixer', role: 'mixing engineer', attributes: [] },
+      ]);
+    });
+
+    it('keeps mastering / remixer / arranger release-scoped — they are NOT pushed down to a track (#339)', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            {
+              type: 'instrument',
+              'target-type': 'artist',
+              attributes: ['piano'],
+              artist: { id: 'a-1', name: 'Performer' },
+            },
+            {
+              type: 'mastering',
+              'target-type': 'artist',
+              attributes: [],
+              artist: { id: 'm-1', name: 'Masterer' },
+            },
+            {
+              type: 'remixer',
+              'target-type': 'artist',
+              attributes: [],
+              artist: { id: 'r-1', name: 'Remixer' },
+            },
+            {
+              type: 'arranger',
+              'target-type': 'artist',
+              attributes: [],
+              artist: { id: 'ar-1', name: 'Arranger' },
+            },
+          ],
+        }),
+      );
+
+      expect(await client.getArtistsByRecordingMbid('rec-1')).toEqual([
         { mbid: 'a-1', name: 'Performer', role: 'instrument', attributes: ['piano'] },
       ]);
     });

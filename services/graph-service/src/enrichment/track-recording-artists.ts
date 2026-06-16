@@ -19,16 +19,17 @@ export interface TrackRecordingArtistsEnrichmentSummary {
   durationMs: number;
 }
 
-/** The performance credits for a recording, one per distinct performer, ready to MERGE. */
+/** The track-attributable credits for a recording, one per distinct person, ready to MERGE. */
 type ResolvedCredits = { credits: RecordingArtistCredit[] };
 
 /**
- * Collapse a recording's raw performance relations into one credit per performer (#335). MusicBrainz
- * emits a separate relation per instrument/vocal/performer role, so one person can appear several
- * times; we group by their MB artist MBID and join their distinct role tokens into a single `role`
- * string — matching the one-`CREDITED_ON`-per-(person,track) model rather than collapsing
- * multi-instrument credits arbitrarily. A relation's token is each of its `attributes` (the
- * instrument/vocal name), or the bare relation type when it carries none (`performer`).
+ * Collapse a recording's raw relations into one credit per person (#335, #339). MusicBrainz emits a
+ * separate relation per instrument/vocal/performer role (and per production role), so one person can
+ * appear several times; we group by their MB artist MBID and join their distinct role tokens into a
+ * single `role` string — matching the one-`CREDITED_ON`-per-(person,track) model rather than
+ * collapsing a multi-role credit arbitrarily. A relation's token is each of its `attributes` (the
+ * instrument/vocal name), or the bare `role` when it carries none — which is every production credit,
+ * whose canonical role string the client already resolved with attributes dropped (#339).
  */
 function groupCreditsByArtist(relations: MbRecordingArtist[]): RecordingArtistCredit[] {
   const byMbid = new Map<string, { name: string; tokens: string[] }>();
@@ -48,13 +49,14 @@ function groupCreditsByArtist(relations: MbRecordingArtist[]): RecordingArtistCr
 }
 
 /**
- * Push MusicBrainz recording-level performance credits down to the specific Track (#335), increasing
- * track-credit coverage from a deterministic source. For each distinct `recordingMbid` (resolved
- * earlier by `track-musicbrainz`):
- *   1. `GET /recording/{mbid}?inc=artist-rels` → its performer/instrument/vocal relations (each
- *      provably tied to that exact recording; production roles are excluded by the client).
- *   2. Group them per performer and write track-scoped `CREDITED_ON` edges, resolving each person by
- *      the MB-artist-MBID join the `mb-artist-id` pass established (#380) — never name/title matching.
+ * Push MusicBrainz recording-level performance and production credits down to the specific Track
+ * (#335, #339), increasing track-credit coverage from a deterministic source. For each distinct
+ * `recordingMbid` (resolved earlier by `track-musicbrainz`):
+ *   1. `GET /recording/{mbid}?inc=artist-rels` → its performer/instrument/vocal relations plus the
+ *      producer + engineer-family production relations (each provably tied to that exact recording;
+ *      mastering/lacquer/cover-art and other non-production roles are excluded by the client).
+ *   2. Group them per person and write track-scoped `CREDITED_ON` edges, resolving each person by the
+ *      MB-artist-MBID join the `mb-artist-id` pass established (#380) — never name/title matching.
  *
  * Stamp-on-attempt (#89): every candidate Track is stamped `recordingArtistsFetchedAt` even when a
  * recording has no performance relations, so it is retried at most once per staleness window; a thrown
