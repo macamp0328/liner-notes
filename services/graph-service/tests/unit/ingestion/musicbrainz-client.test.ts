@@ -1047,6 +1047,119 @@ describe('MusicBrainzClient', () => {
   });
 
   // -------------------------------------------------------------------------
+  // getPlacesByRecordingMbid (#339, slice 2)
+  // -------------------------------------------------------------------------
+  describe('getPlacesByRecordingMbid', () => {
+    it('maps recorded-at / mixed-at places with parsed coordinates, area, and Place MBID', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            {
+              type: 'recorded at',
+              'target-type': 'place',
+              place: {
+                id: 'place-1',
+                name: 'Abbey Road Studios',
+                coordinates: { latitude: '51.53192', longitude: '-0.17835' },
+                area: { name: "St John's Wood" },
+              },
+            },
+            {
+              type: 'mixed at',
+              'target-type': 'place',
+              place: { id: 'place-2', name: 'Olympic Studios' },
+            },
+          ],
+        }),
+      );
+
+      const places = await client.getPlacesByRecordingMbid('rec-1');
+
+      expect(places).toEqual([
+        {
+          placeMbid: 'place-1',
+          name: 'Abbey Road Studios',
+          relation: 'recorded at',
+          latitude: 51.53192,
+          longitude: -0.17835,
+          area: "St John's Wood",
+        },
+        {
+          placeMbid: 'place-2',
+          name: 'Olympic Studios',
+          relation: 'mixed at',
+          latitude: null,
+          longitude: null,
+          area: null,
+        },
+      ]);
+      const url = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(url).toContain('/recording/rec-1');
+      expect(url).toContain('inc=place-rels');
+    });
+
+    it('drops non-place targets, unmapped relation types, and places without an id', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            // non-place target
+            { type: 'recorded at', 'target-type': 'artist', artist: { id: 'a-1', name: 'X' } },
+            // place target but an unmapped relation type (not recorded/mixed at)
+            { type: 'engineered at', 'target-type': 'place', place: { id: 'place-9', name: 'Y' } },
+            // place relation but the place carries no id
+            { type: 'recorded at', 'target-type': 'place', place: { name: 'No Id' } },
+          ],
+        }),
+      );
+
+      expect(await client.getPlacesByRecordingMbid('rec-1')).toEqual([]);
+    });
+
+    it('treats non-numeric or missing coordinates as null', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            {
+              type: 'recorded at',
+              'target-type': 'place',
+              place: {
+                id: 'place-1',
+                name: 'Garbled Coords',
+                coordinates: { latitude: 'not-a-number', longitude: '' },
+                area: { name: '  ' },
+              },
+            },
+          ],
+        }),
+      );
+
+      expect(await client.getPlacesByRecordingMbid('rec-1')).toEqual([
+        {
+          placeMbid: 'place-1',
+          name: 'Garbled Coords',
+          relation: 'recorded at',
+          latitude: null,
+          longitude: null,
+          area: null,
+        },
+      ]);
+    });
+
+    it('returns an empty array when the recording has no relations', async () => {
+      fetchSpy.mockResolvedValueOnce(makeOkResponse({ id: 'rec-1' }));
+      expect(await client.getPlacesByRecordingMbid('rec-1')).toEqual([]);
+    });
+
+    it('returns an empty array on a 404 (recording no longer resolves)', async () => {
+      fetchSpy.mockResolvedValueOnce(makeErrorResponse(404, 'Not Found'));
+      expect(await client.getPlacesByRecordingMbid('gone')).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // searchRecording
   // -------------------------------------------------------------------------
   describe('searchRecording', () => {

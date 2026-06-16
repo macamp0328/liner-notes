@@ -80,6 +80,27 @@ export interface MbRecordingArtist {
   attributes: string[];
 }
 
+/**
+ * A studio a MusicBrainz recording was made at, from its `place-rels` (#339, slice 2). MusicBrainz
+ * links a recording to a `Place` with a `recorded at` / `mixed at` relationship — a deterministic,
+ * per-track studio attribution that Discogs (which only credits studios at the album level) cannot
+ * give. The `name` is the join key onto our existing name-keyed `Studio` nodes; the Place's
+ * `coordinates` + `area` ride along as clean location data (feeds the recording-location map, #342),
+ * and `placeMbid` records provenance even though `name` stays the merge key.
+ */
+export interface MbRecordingPlace {
+  /** MusicBrainz Place MBID — provenance only; Studio nodes merge by `name`, not this. */
+  placeMbid: string;
+  name: string;
+  /** The MB relation type, `recorded at` or `mixed at` — kept on the edge for provenance. */
+  relation: string;
+  /** Decimal degrees; null when the Place carries no coordinates. */
+  latitude: number | null;
+  longitude: number | null;
+  /** The Place's area name (city/region), e.g. "St John's Wood"; null when absent. */
+  area: string | null;
+}
+
 export interface MusicBrainzClientConfig {
   userAgent: string;
   /** Milliseconds to sleep after every successful request. 1100ms keeps us safely under 1 req/sec. */
@@ -162,6 +183,21 @@ interface MbRecordingArtistRelsResponse {
   }>;
 }
 
+interface MbRecordingPlaceRelsResponse {
+  id: string;
+  relations?: Array<{
+    type: string;
+    'target-type'?: string;
+    // MusicBrainz returns coordinates as strings (e.g. "51.53192"), so parse defensively.
+    place?: {
+      id: string;
+      name: string;
+      coordinates?: { latitude?: string; longitude?: string };
+      area?: { name?: string };
+    };
+  }>;
+}
+
 interface MbReleaseListResponse {
   'release-count': number;
   releases: Array<{
@@ -207,6 +243,15 @@ const WORK_WRITER_ROLES = new Set(['composer', 'lyricist', 'writer']);
 const RECORDING_PERFORMANCE_ROLES = new Set(['performer', 'instrument', 'vocal']);
 
 /**
+ * Recording place-relation types we treat as "this track was made at this studio" (#339, slice 2).
+ * Mirrors the Discogs Studio path, which collapses `entity_type` 23 (*Recorded At*) + 27 (*Mixed At*)
+ * into one `RECORDED_AT` edge — so both map to a single `(:Track)-[:RECORDED_AT]->(:Studio)`, with the
+ * specific MB type kept on the edge's `relation` property. Other recording↔place types (if any) are
+ * not pushed down to a track in this slice; add to this set to broaden.
+ */
+const RECORDING_PLACE_RELATIONS = new Set(['recorded at', 'mixed at']);
+
+/**
  * Recording-level production/engineering artist-relation types we now push down to track scope (#339),
  * each mapped to a canonical role string. MusicBrainz models these at the recording level — genuinely
  * track-attributable, unlike Discogs's album-level production credits. The mapping is chosen so the
@@ -241,6 +286,13 @@ function msToSeconds(ms: number | null | undefined): number | null {
 /** Strip double quotes so a value can be embedded inside a Lucene phrase query. */
 function escapeLucenePhrase(value: string): string {
   return value.replace(/"/g, ' ').trim();
+}
+
+/** Parse a MusicBrainz coordinate string (e.g. "51.53192") to a number; null for absent/non-numeric. */
+function parseCoordinate(value: string | undefined): number | null {
+  if (value === undefined) return null;
+  const parsed = Number.parseFloat(value);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 export class MusicBrainzClient {
@@ -519,6 +571,46 @@ export class MusicBrainzClient {
       }
     }
     return artists;
+  }
+
+  /**
+   * Fetch the studios a MusicBrainz recording was made at, from its place relationships (#339, slice
+   * 2). Uses `inc=place-rels`; reads `relations[]` whose `target-type` is `place` and whose `type` is
+   * `recorded at` / `mixed at` (`RECORDING_PLACE_RELATIONS`). MusicBrainz models this at the recording
+   * level, so it is a deterministic per-track studio attribution — unlike Discogs, which only credits
+   * studios at the album level. Each Place's `name` joins onto our name-keyed `Studio` nodes; its
+   * `coordinates` (strings → parsed to decimal degrees) and `area` ride along as clean location data,
+   * with the Place MBID retained as provenance. Empty array on no place relations, an open breaker, or
+   * a 404 (a known recordingMbid that no longer resolves is not retried until the staleness window
+   * expires).
+   */
+  async getPlacesByRecordingMbid(recordingMbid: string): Promise<MbRecordingPlace[]> {
+    const endpoint = `${BASE_URL}/recording/${encodeURIComponent(recordingMbid)}?inc=place-rels&fmt=json`;
+
+    let response: MbRecordingPlaceRelsResponse;
+    try {
+      response = await this.fetchWithBackoff<MbRecordingPlaceRelsResponse>(endpoint);
+    } catch (err) {
+      if (err instanceof CircuitBreakerOpenError) return [];
+      if (err instanceof Error && err.message.includes('not found (404)')) return [];
+      throw err;
+    }
+
+    const places: MbRecordingPlace[] = [];
+    for (const rel of response.relations ?? []) {
+      if (rel['target-type'] !== 'place' || rel.place?.id === undefined) continue;
+      if (!RECORDING_PLACE_RELATIONS.has(rel.type)) continue;
+
+      places.push({
+        placeMbid: rel.place.id,
+        name: rel.place.name,
+        relation: rel.type,
+        latitude: parseCoordinate(rel.place.coordinates?.latitude),
+        longitude: parseCoordinate(rel.place.coordinates?.longitude),
+        area: rel.place.area?.name?.trim() || null,
+      });
+    }
+    return places;
   }
 
   /**
