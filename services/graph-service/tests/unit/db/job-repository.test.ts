@@ -127,14 +127,14 @@ describe('stage transition writes', () => {
     const { session, runSpy } = makeMockSession();
     await markStageComplete(makeMockDriver(session), 'job-1', 'releases', {
       releasesProcessed: 3,
-      releasesFailed: 1,
+      releasesFailed: 2,
       failedReleaseIds: [9, 12],
     });
 
     const params = (runSpy.mock.calls[0] as [string, Record<string, unknown>])[1];
     // The array survives JSON serialization into countsJson — it is not stripped at the persistence layer.
     expect(params['countsJson']).toBe(
-      '{"releasesProcessed":3,"releasesFailed":1,"failedReleaseIds":[9,12]}',
+      '{"releasesProcessed":3,"releasesFailed":2,"failedReleaseIds":[9,12]}',
     );
   });
 

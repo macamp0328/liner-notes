@@ -73,7 +73,7 @@ const sampleJob = {
       status: 'complete' as const,
       startedAt: '2026-06-05T00:00:01Z',
       completedAt: '2026-06-05T00:00:09Z',
-      counts: { releasesProcessed: 3, releasesFailed: 1, failedReleaseIds: [9, 12] },
+      counts: { releasesProcessed: 3, releasesFailed: 2, failedReleaseIds: [9, 12] },
       error: null,
     },
     {
@@ -222,7 +222,7 @@ describe('Reload admin API', () => {
       // which releases failed, not just how many (#417).
       expect(body.data.stages[0]?.counts).toEqual({
         releasesProcessed: 3,
-        releasesFailed: 1,
+        releasesFailed: 2,
         failedReleaseIds: [9, 12],
       });
     });

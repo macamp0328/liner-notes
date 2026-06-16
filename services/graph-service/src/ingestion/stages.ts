@@ -128,6 +128,14 @@ export interface StageDescriptor {
 }
 
 /**
+ * Cap on the failed-release-id sample persisted to the `releases` stage counts (#417). A pathological
+ * mass-failure (e.g. a Discogs outage failing the whole collection) shouldn't bloat the `ReloadStage`
+ * node / `/admin/reload/status` payload; `releasesFailed` is the authoritative total, so an array
+ * shorter than `releasesFailed` simply means it was truncated to this sample.
+ */
+const MAX_FAILED_RELEASE_IDS = 50;
+
+/**
  * Every stage except `verify`, in priority order — when several stages are eligible for one free
  * slot the earlier one wins. Ordering is governed by `deps` (not array position), so this list is
  * tuned for *priority*: cheap + #165-gate stages (`master-data`, `artist-profiles`, the pure-Cypher
@@ -144,14 +152,6 @@ export interface StageDescriptor {
  * Each `run` forwards the orchestrator's optional `onProgress` reporter to its enrich function
  * (#179); `artist-genres` has no per-item loop, so it takes none.
  */
-/**
- * Cap on the failed-release-id sample persisted to the `releases` stage counts (#417). A pathological
- * mass-failure (e.g. a Discogs outage failing the whole collection) shouldn't bloat the `ReloadStage`
- * node / `/admin/reload/status` payload; `releasesFailed` is the authoritative total, so an array
- * shorter than `releasesFailed` simply means it was truncated to this sample.
- */
-const MAX_FAILED_RELEASE_IDS = 50;
-
 const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
   {
     name: 'releases',

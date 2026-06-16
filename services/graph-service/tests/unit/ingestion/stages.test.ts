@@ -7,6 +7,7 @@ import {
 import type {
   ReloadContext,
   ReloadStageName,
+  StageCounts,
   StageDescriptor,
 } from '../../../src/ingestion/stages.js';
 import type { CircuitBreakerSnapshot } from '../../../src/ingestion/circuit-breaker.js';
@@ -318,7 +319,7 @@ describe('stage run() delegates to the right enrich function', () => {
       errors: failed.map((id) => `Release ${id}: boom`),
       failedReleaseIds: failed,
     });
-    const result = (await stage('releases').run(makeCtx())) as Record<string, number[]>;
+    const result = (await stage('releases').run(makeCtx())) as StageCounts;
     // releasesFailed stays the authoritative total; the persisted id sample is bounded.
     expect(result['releasesFailed']).toBe(60);
     expect(result['failedReleaseIds']).toHaveLength(50);
