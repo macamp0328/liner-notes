@@ -136,13 +136,22 @@ export async function setArtistNationality(
  *
  * Identity precedence (#426): discogsId → musicbrainzId → name. A node carrying a
  * `musicbrainzId` (the MBID-keyed fallback Musicians track-recording-artists introduces,
- * #420/#418) is matched by that unique, index-backed key — the same determinism the read
- * side already uses (`getCountryByMbid`) — so the write never spills onto a same-named,
+ * #420/#418) is matched by that index-backed key — the same determinism the read side
+ * already uses (`getCountryByMbid`) — so the write never spills onto a same-named,
  * distinct-MBID node. The name-only match is reserved for the genuine `id===0` Discogs
- * population (no discogsId, no musicbrainzId); it is the ONE arm that can touch multiple
- * nodes, hence its `m.discogsId IS NULL` guard. The MBID arm needs no such guard: the
- * discogsId arm already wins for any discogsId-bearing row, so this arm is only reached for
- * `discogsId === null` rows, and `musicbrainzId` lands exactly one node.
+ * population (no discogsId, no musicbrainzId).
+ *
+ * Both no-discogsId arms carry the `m.discogsId IS NULL` guard. The candidate row's
+ * discogsId is null, so the write must land only on a discogsId-null node. The guard is
+ * load-bearing on the MBID arm too: `musicbrainzId` has only an index, NOT a uniqueness
+ * constraint, and `mb-artist-id` (`setMusicianMusicbrainzId`) can `SET` an MBID onto a
+ * discogsId-bearing node that a fallback node already holds — the two writers run in
+ * arbitrary order across standalone enrichments / reloads, so two nodes can share one MBID.
+ * Without the guard, `MATCH (m:Musician {musicbrainzId})` would spill the country (and the
+ * `nationalityFetchedAt` stamp) onto that discogsId node — the same contamination class on
+ * the MBID-collision axis. Guarded, the MBID arm lands exactly the one discogsId-null
+ * fallback node (MBID is unique among discogsId-null nodes); the discogsId node is resolved
+ * by its own discogsId arm.
  *
  * The `musicbrainzId` check is truthy (not `!== null`) to mirror the caller's resolve-side
  * predicate, so absent/`null`/`''` all fall through to the name path consistently — a `!== null`
@@ -164,7 +173,7 @@ export async function setMusicianNationality(
       musician.discogsId !== null
         ? `MATCH (m:Musician {discogsId: $discogsId})`
         : musician.musicbrainzId
-          ? `MATCH (m:Musician {musicbrainzId: $musicbrainzId})`
+          ? `MATCH (m:Musician {musicbrainzId: $musicbrainzId}) WHERE m.discogsId IS NULL`
           : `MATCH (m:Musician {name: $name}) WHERE m.discogsId IS NULL`;
 
     if (countryCode !== null) {

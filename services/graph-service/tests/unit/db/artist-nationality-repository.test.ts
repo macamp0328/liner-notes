@@ -202,7 +202,9 @@ describe('setMusicianNationality', () => {
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(query).toContain('musicbrainzId: $musicbrainzId');
     expect(query).not.toContain('name: $name');
-    expect(query).not.toContain('m.discogsId IS NULL');
+    // The MBID arm carries the same discogsId-null guard as the name arm: musicbrainzId is
+    // not uniqueness-constrained, so the guard keeps the write off a colliding discogsId node.
+    expect(query).toContain('m.discogsId IS NULL');
     expect(params).toMatchObject({ musicbrainzId: 'mb-uuid' });
   });
 

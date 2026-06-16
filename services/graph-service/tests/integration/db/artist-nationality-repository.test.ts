@@ -145,4 +145,40 @@ describe('setMusicianNationality identity precedence (#426, integration)', () =>
     ).toBe(true);
     expect(await countriedCount()).toBe(0);
   });
+
+  it('does not spill onto a discogsId node that collides on musicbrainzId (#426)', async () => {
+    // musicbrainzId is indexed but NOT uniqueness-constrained, and mb-artist-id can stamp an
+    // MBID onto a discogsId node that a fallback already holds (writers run in arbitrary order
+    // across standalone enrichments). The discogsId-null guard on the MBID arm must keep the
+    // write off that discogsId node — the MBID-collision axis of the same contamination class.
+    await clearGraph(getDriver());
+    const SHARED = 'mbid-shared';
+    await write(
+      `CREATE (:Musician {name: 'Shared Name', musicbrainzId: '${SHARED}'})
+       CREATE (:Musician {discogsId: 7777, name: 'Shared Name', musicbrainzId: '${SHARED}'})`,
+    );
+
+    await setMusicianNationality(
+      getDriver(),
+      { discogsId: null, name: 'Shared Name', musicbrainzId: SHARED },
+      'US',
+      'musicbrainz',
+    );
+
+    // The discogsId-null fallback got its country.
+    expect(
+      await bool(
+        `MATCH (m:Musician {musicbrainzId: '${SHARED}'}) WHERE m.discogsId IS NULL
+         RETURN EXISTS { (m)-[:ORIGIN_COUNTRY]->(:Country {name: 'US'}) } AS v`,
+      ),
+    ).toBe(true);
+    // The colliding discogsId node is untouched: no country, no contaminating stamp — it
+    // resolves via its own discogsId arm later.
+    expect(
+      await bool(
+        `MATCH (m:Musician {discogsId: 7777})
+         RETURN (NOT EXISTS { (m)-[:ORIGIN_COUNTRY]->() } AND m.nationalityFetchedAt IS NULL) AS v`,
+      ),
+    ).toBe(true);
+  });
 });
