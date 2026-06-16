@@ -136,6 +136,7 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
                       'memberOfEdges',
                       'groupsWithMembers',
                       'influencedByEdges',
+                      'membershipEdges',
                     ],
                     properties: {
                       releasesWithOriginalYear: coverageSchema,
@@ -168,6 +169,7 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
                       memberOfEdges: { type: 'integer' },
                       groupsWithMembers: { type: 'integer' },
                       influencedByEdges: { type: 'integer' },
+                      membershipEdges: { type: 'integer' },
                     },
                   },
                 },

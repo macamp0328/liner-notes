@@ -94,6 +94,8 @@ function makeStats(
     groupsWithMembers: 4,
     // #391: ungated raw count (surfaced in /stats only, like memberOfEdges).
     influencedByEdges: 6,
+    // #392: ungated raw count — the Wikidata band-membership graph.
+    membershipEdges: 5,
   };
   return {
     counts: {

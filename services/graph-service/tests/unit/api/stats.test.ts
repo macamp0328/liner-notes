@@ -75,6 +75,7 @@ const STATS = {
     memberOfEdges: 9,
     groupsWithMembers: 3,
     influencedByEdges: 7,
+    membershipEdges: 5,
   },
 };
 

@@ -49,10 +49,14 @@ export async function getUnenrichedArtistsForWikidata(driver: Driver): Promise<U
  *
  * On a successful resolve every field is overwritten with Wikidata's current truth, including
  * `SET prop = null` for an absent field (Neo4j removes the property) — so a re-run replaces stale
- * values rather than accumulating them. `awards`, `playsInstrument`, `playsInstrumentRaw`, and
- * `influencedByQids` are each stored as a list (possibly empty), never null. `influencedByQids` (P737,
- * #391) is the raw target-QID list the `artist-influences` pass later resolves into `INFLUENCED_BY`
- * edges.
+ * values rather than accumulating them. `awards`, `playsInstrument`, `playsInstrumentRaw`,
+ * `influencedByQids`, and the three `memberOf*` arrays are each stored as a list (possibly empty),
+ * never null. `influencedByQids` (P737, #391) is the raw target-QID list the `artist-influences` pass
+ * later resolves into `INFLUENCED_BY` edges; the index-aligned `memberOfQids`/`memberOfSinceYears`/
+ * `memberOfUntilYears` (P463 + P580/P582, #392) are what the `band-membership` pass resolves into dated
+ * `MEMBER_OF {source:"wikidata"}` edges. The year arrays are stored as Neo4j integers (per-element
+ * `neo4j.int`, like `bornYear`) so the `band-membership` pass can index them and compare the `0`
+ * sentinel cleanly.
  */
 export async function setArtistWikidata(
   driver: Driver,
@@ -74,6 +78,9 @@ export async function setArtistWikidata(
              a.playsInstrument = $playsInstrument,
              a.playsInstrumentRaw = $playsInstrumentRaw,
              a.influencedByQids = $influencedByQids,
+             a.memberOfQids = $memberOfQids,
+             a.memberOfSinceYears = $memberOfSinceYears,
+             a.memberOfUntilYears = $memberOfUntilYears,
              a.wikidataFetchedAt = datetime()`,
         {
           discogsId: neo4j.int(discogsId),
@@ -87,6 +94,9 @@ export async function setArtistWikidata(
           playsInstrument: data.playsInstrument,
           playsInstrumentRaw: data.playsInstrumentRaw,
           influencedByQids: data.influencedByQids,
+          memberOfQids: data.memberOfQids,
+          memberOfSinceYears: data.memberOfSinceYears.map((y) => neo4j.int(y)),
+          memberOfUntilYears: data.memberOfUntilYears.map((y) => neo4j.int(y)),
         },
       );
     } else {
@@ -103,10 +113,11 @@ export async function setArtistWikidata(
 
 /**
  * Clear every Wikidata-sourced property + the `wikidataFetchedAt` marker from all Artist nodes so
- * the next enrichment run re-resolves them from scratch. Also drops `influencedByQids` (#391) — the
- * raw P737 list the `artist-influences` pass reads; the derived `INFLUENCED_BY` edges are left as-is
- * (re-MERGEd exhaustively each run, like the other reconciliation passes — a from-scratch wipe is
- * `POST /reset?confirm=wipe-all`).
+ * the next enrichment run re-resolves them from scratch. Also drops `influencedByQids` (#391) and the
+ * three `memberOf*` arrays (#392) — the raw P737 / P463 lists the `artist-influences` and
+ * `band-membership` passes read; the derived `INFLUENCED_BY` and wikidata `MEMBER_OF` edges are left
+ * as-is (re-MERGEd exhaustively each run, like the other reconciliation passes — a from-scratch wipe
+ * is `POST /reset?confirm=wipe-all`).
  */
 export async function resetArtistWikidataEnrichment(driver: Driver): Promise<number> {
   const session = driver.session();
@@ -115,7 +126,8 @@ export async function resetArtistWikidataEnrichment(driver: Driver): Promise<num
       `MATCH (a:Artist) WHERE a.wikidataFetchedAt IS NOT NULL
        REMOVE a.wikidataFetchedAt, a.wikidataQid, a.bornYear, a.bornDate,
               a.diedYear, a.diedDate, a.imageUrl, a.awards,
-              a.playsInstrument, a.playsInstrumentRaw, a.influencedByQids
+              a.playsInstrument, a.playsInstrumentRaw, a.influencedByQids,
+              a.memberOfQids, a.memberOfSinceYears, a.memberOfUntilYears
        RETURN count(a) AS reset`,
     );
     return (result.records[0]?.get('reset') as Neo4jInt | null)?.toNumber() ?? 0;

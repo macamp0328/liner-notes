@@ -449,10 +449,27 @@ collection:
               sortKey: 100
             url: '{{ _.base_url }}/api/v1/admin/artist-influences/status'
             method: GET
+      - name: band-membership
+        meta:
+          id: fld_734e152be840cf1ace563955af0ff353
+          sortKey: 2000
+        children:
+          - name: Project Wikidata P463 memberships into dated MEMBER_OF edges
+            meta:
+              id: req_154dbe1d2b38437a1ebe5b7a902cee08
+              sortKey: 0
+            url: '{{ _.base_url }}/api/v1/admin/band-membership/enrich'
+            method: POST
+          - name: Status of the most recent band membership projection run
+            meta:
+              id: req_b6de602255ef7d03260792bcd719cf76
+              sortKey: 100
+            url: '{{ _.base_url }}/api/v1/admin/band-membership/status'
+            method: GET
       - name: reload
         meta:
           id: fld_5808d8d0499fb9db11f9d9870b1ff194
-          sortKey: 2000
+          sortKey: 2100
         children:
           - name: Trigger the orchestrated reload (ingest + every enrichment) with resume
             meta:

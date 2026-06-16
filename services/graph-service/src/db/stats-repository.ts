@@ -102,6 +102,10 @@ export interface StatsData {
     // not a CoverageMetric and the verify gate skips it (Wikidata-derived data is ungated; it can
     // legitimately resolve zero for an obscure collection).
     influencedByEdges: number;
+    // Wikidata band-membership graph (#392). The dated Artist→Artist MEMBER_OF {source:"wikidata"}
+    // edge — distinct from the Discogs Musician→Musician memberOfEdges above. Same rationale as
+    // influencedByEdges: a raw count, no knowable denominator, ungated (can legitimately be zero).
+    membershipEdges: number;
   };
 }
 
@@ -251,6 +255,14 @@ const INFLUENCED_BY_QUERY = `
   MATCH (:Artist)-[r:INFLUENCED_BY]->(:Artist)
   RETURN count(r) AS influencedByEdges`;
 
+// Wikidata band-membership edge count (#392) — the dated Artist→Artist MEMBER_OF {source:"wikidata"}
+// graph. The `source` predicate + the Artist→Artist labels keep it disjoint from MEMBER_OF_QUERY's
+// Discogs Musician→Musician scan, so the two counts never overlap. Empty-graph safe (mirrors
+// INFLUENCED_BY_QUERY).
+const MEMBERSHIP_EDGE_QUERY = `
+  MATCH (:Artist)-[r:MEMBER_OF {source: 'wikidata'}]->(:Artist)
+  RETURN count(r) AS membershipEdges`;
+
 // Nationality (ORIGIN_COUNTRY) coverage for one people-label, split by the
 // `source` stored on the relationship. One scan per label; the applicable gate
 // mirrors that label's enrichment selector. `label` and `applicableExpr` are
@@ -323,6 +335,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
     memberOf,
     wrote,
     influencedBy,
+    membership,
   ] = await Promise.all([
     runCounts(driver, RELEASE_QUERY),
     runCounts(driver, ARTIST_QUERY),
@@ -337,6 +350,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
     runCounts(driver, MEMBER_OF_QUERY),
     runCounts(driver, WROTE_EDGE_QUERY),
     runCounts(driver, INFLUENCED_BY_QUERY),
+    runCounts(driver, MEMBERSHIP_EDGE_QUERY),
   ]);
 
   const n = (m: Map<string, number>, key: string): number => m.get(key) ?? 0;
@@ -438,6 +452,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       memberOfEdges: n(memberOf, 'memberOfEdges'),
       groupsWithMembers: n(musician, 'groupsWithMembers'),
       influencedByEdges: n(influencedBy, 'influencedByEdges'),
+      membershipEdges: n(membership, 'membershipEdges'),
     },
   };
 }
