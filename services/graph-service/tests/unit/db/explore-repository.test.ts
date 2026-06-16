@@ -7,6 +7,7 @@ import {
   getRecordingsByWork,
   getWorksBySongwriter,
   getReleasesByStudio,
+  getRecordingLocations,
   getReleasesByLabel,
   getReleasesByGenre,
   getReleasesByStyle,
@@ -415,6 +416,83 @@ describe('getReleasesByStudio', () => {
     // Track edges roll up to their release; DISTINCT avoids dup rows for both-level credits.
     expect(query).toContain('(rTrack:Release)-[:HAS_TRACK]->(target)');
     expect(query).toContain('WITH DISTINCT');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getRecordingLocations
+// ---------------------------------------------------------------------------
+
+describe('getRecordingLocations', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('maps a studio row, coercing counts and preserving coordinates', async () => {
+    const rec = makeRecord({
+      name: 'Abbey Road Studios',
+      // Neo4j returns floats as plain JS numbers; counts as Integer objects.
+      latitude: 51.53192,
+      longitude: -0.17835,
+      area: "St John's Wood",
+      musicbrainzPlaceId: 'place-1',
+      releaseCount: makeNeo4jInt(3),
+      trackCount: makeNeo4jInt(8),
+    });
+    const { session } = makeMockSession([makeResult([rec])]);
+    const results = await getRecordingLocations(makeMockDriver(session));
+    expect(results).toEqual([
+      {
+        name: 'Abbey Road Studios',
+        latitude: 51.53192,
+        longitude: -0.17835,
+        area: "St John's Wood",
+        musicbrainzPlaceId: 'place-1',
+        releaseCount: 3,
+        trackCount: 8,
+      },
+    ]);
+  });
+
+  it('maps null area / musicbrainzPlaceId to null without dropping the studio', async () => {
+    const rec = makeRecord({
+      name: 'Sound City',
+      latitude: 34.1808,
+      longitude: -118.4065,
+      area: null,
+      musicbrainzPlaceId: null,
+      releaseCount: makeNeo4jInt(0),
+      trackCount: makeNeo4jInt(0),
+    });
+    const { session } = makeMockSession([makeResult([rec])]);
+    const [studio] = await getRecordingLocations(makeMockDriver(session));
+    expect(studio).toEqual({
+      name: 'Sound City',
+      latitude: 34.1808,
+      longitude: -118.4065,
+      area: null,
+      musicbrainzPlaceId: null,
+      releaseCount: 0,
+      trackCount: 0,
+    });
+  });
+
+  it('returns an empty array when no studios have coordinates', async () => {
+    const { session } = makeMockSession([makeResult([])]);
+    const results = await getRecordingLocations(makeMockDriver(session));
+    expect(results).toHaveLength(0);
+  });
+
+  it('filters on coordinates and rolls track-level edges up to the release (#342)', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    await getRecordingLocations(makeMockDriver(session));
+
+    const [query] = runSpy.mock.calls[0] as [string];
+    // Only studios that actually have a location are pinned.
+    expect(query).toContain('s.latitude IS NOT NULL AND s.longitude IS NOT NULL');
+    // Track-level MB studio edges roll up to their release via HAS_TRACK, like getReleasesByStudio.
+    expect(query).toContain('(rTrack:Release)-[:HAS_TRACK]->(target)');
+    expect(query).toContain('ORDER BY releaseCount DESC');
   });
 });
 
