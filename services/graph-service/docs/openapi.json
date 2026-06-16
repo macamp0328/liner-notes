@@ -5829,6 +5829,62 @@
         }
       }
     },
+    "/api/v1/explore/recording-locations": {
+      "get": {
+        "summary": "Studios with known coordinates, for the recording-location map",
+        "tags": ["explore"],
+        "description": "Every Studio whose MusicBrainz Place coordinates are known (#339 slice 2), with per-studio release/track counts for marker sizing. Studios without confident coordinates are omitted — an honest map has no pin for an unplaced studio. Ordered by releaseCount descending.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "latitude",
+                      "longitude",
+                      "area",
+                      "musicbrainzPlaceId",
+                      "releaseCount",
+                      "trackCount"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "latitude": {
+                        "type": "number"
+                      },
+                      "longitude": {
+                        "type": "number"
+                      },
+                      "area": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "musicbrainzPlaceId": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "releaseCount": {
+                        "type": "integer"
+                      },
+                      "trackCount": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/explore/label/{name}": {
       "get": {
         "summary": "Releases on this label",
@@ -6795,7 +6851,8 @@
                             "tracks",
                             "masters",
                             "musicians",
-                            "works"
+                            "works",
+                            "studios"
                           ],
                           "properties": {
                             "releases": {
@@ -6814,6 +6871,9 @@
                               "type": "integer"
                             },
                             "works": {
+                              "type": "integer"
+                            },
+                            "studios": {
                               "type": "integer"
                             }
                           }
@@ -6842,6 +6902,7 @@
                             "tracksWithMbProductionCredits",
                             "tracksWithMbArrangers",
                             "tracksWithMbStudio",
+                            "studiosWithCoordinates",
                             "worksWithMultipleRecordings",
                             "worksWithWriterLinks",
                             "wroteEdges",
@@ -7289,6 +7350,22 @@
                               }
                             },
                             "tracksWithMbStudio": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "studiosWithCoordinates": {
                               "type": "object",
                               "required": ["covered", "applicable", "pct"],
                               "properties": {

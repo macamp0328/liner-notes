@@ -50,6 +50,7 @@ export interface StatsData {
     masters: number;
     musicians: number;
     works: number;
+    studios: number;
   };
   enrichment: {
     releasesWithOriginalYear: CoverageMetric;
@@ -96,6 +97,11 @@ export interface StatsData {
     // false-fail a healthy reload whose collection legitimately has no MB studio data (see
     // reload-verify.ts).
     tracksWithMbStudio: CoverageMetric;
+    // #342: studios with known coordinates (the recording-location-map denominator). Covered = studios
+    // with lat+long (from MB Place data, #339 slice 2), applicable = all studios. Like tracksWithMbStudio,
+    // a CoverageMetric so it reads on /stats but intentionally NOT verify-gated — MB place coverage is
+    // sparse, so a floor would false-fail a healthy reload whose collection lacks MB studio data.
+    studiosWithCoordinates: CoverageMetric;
     worksWithMultipleRecordings: number;
     // Songwriter reconciliation (#380). worksWithWriterLinks IS gateable (covered/applicable over
     // Works whose writers were captured — those with ≥1 WROTE edge). wroteEdges is a raw count
@@ -243,6 +249,15 @@ const MASTER_QUERY = `
     count(m) AS total,
     count(CASE WHEN EXISTS { (m)-[:MB_RELEASED_IN]->() } THEN 1 END) AS releaseEventsCovered`;
 
+// Studio coordinate coverage (#342) — the recording-location-map denominator. total = all studios,
+// withCoordinates = studios carrying MB Place lat+long (#339 slice 2). An empty graph returns one row
+// of zeros (count() over zero rows is 0).
+const STUDIO_QUERY = `
+  MATCH (s:Studio)
+  RETURN
+    count(s) AS total,
+    count(CASE WHEN s.latitude IS NOT NULL AND s.longitude IS NOT NULL THEN 1 END) AS withCoordinates`;
+
 // Work coverage (#336, #380). One row per Work that has ≥1 RECORDING_OF, grouped to count distinct
 // recordings; the bare final aggregation returns one row of zeros on an empty graph (no Work
 // nodes → no rows into the grouping → count() over zero rows is 0). `multiRecording` counts Works
@@ -384,6 +399,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
     influencedBy,
     influencedByCand,
     membership,
+    studio,
   ] = await Promise.all([
     runCounts(driver, RELEASE_QUERY),
     runCounts(driver, ARTIST_QUERY),
@@ -400,6 +416,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
     runCounts(driver, INFLUENCED_BY_QUERY),
     runCounts(driver, INFLUENCED_BY_CANDIDATES_QUERY),
     runCounts(driver, MEMBERSHIP_EDGE_QUERY),
+    runCounts(driver, STUDIO_QUERY),
   ]);
 
   const n = (m: Map<string, number>, key: string): number => m.get(key) ?? 0;
@@ -443,6 +460,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       masters: n(master, 'total'),
       musicians: n(musician, 'total'),
       works: n(work, 'total'),
+      studios: n(studio, 'total'),
     },
     enrichment: {
       releasesWithOriginalYear: coverage(n(release, 'oyCovered'), n(release, 'oyApplicable')),
@@ -485,6 +503,8 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       tracksWithMbProductionCredits: coverage(n(track, 'mbProductionCreditsCovered'), mbidCovered),
       tracksWithMbArrangers: coverage(n(track, 'mbArrangersCovered'), mbidCovered),
       tracksWithMbStudio: coverage(n(track, 'mbStudioCovered'), mbidCovered),
+      // #342 studio-level coordinate coverage (all studios denominator), un-gated like tracksWithMbStudio.
+      studiosWithCoordinates: coverage(n(studio, 'withCoordinates'), n(studio, 'total')),
       worksWithMultipleRecordings: n(work, 'multiRecording'),
       // Applicable denominator is the upstream gate: a Work can only be linked if its writers were
       // captured (#336). covered = those Works with ≥1 WROTE edge (#380).

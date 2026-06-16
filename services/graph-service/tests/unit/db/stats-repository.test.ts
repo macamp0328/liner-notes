@@ -50,6 +50,8 @@ function makeDriver(byLabel: {
   influencedByCand?: Record<string, unknown>;
   // #392: optional so existing cases need no change.
   membership?: Record<string, unknown>;
+  // #342: optional so existing cases need no change.
+  studio?: Record<string, unknown>;
 }): Driver {
   const musician = byLabel.musician ?? { total: int(0), groupsWithMembers: int(0) };
   const memberOf = byLabel.memberOf ?? { memberOfEdges: int(0) };
@@ -58,6 +60,7 @@ function makeDriver(byLabel: {
   const influencedBy = byLabel.influencedBy ?? { influencedByEdges: int(0) };
   const influencedByCand = byLabel.influencedByCand ?? { influencedByCandidates: int(0) };
   const membership = byLabel.membership ?? { membershipEdges: int(0) };
+  const studio = byLabel.studio ?? { total: int(0), withCoordinates: int(0) };
   const run = vi.fn(async (cypher: string) => {
     let fields: Record<string, unknown>;
     if (cypher.includes('(p:Artist)')) fields = byLabel.natArtist;
@@ -81,6 +84,8 @@ function makeDriver(byLabel: {
     // #336: WORK_QUERY also references (t:Track), so it must be routed before the Track route.
     else if (cypher.includes('(w:Work)')) fields = work;
     else if (cypher.includes('(t:Track)')) fields = byLabel.track;
+    // #342: STUDIO_QUERY — route before the master default fallthrough.
+    else if (cypher.includes('(s:Studio)')) fields = studio;
     else fields = byLabel.master;
     return { records: [makeRecord(fields)] };
   });
@@ -146,6 +151,7 @@ describe('getStats', () => {
       influencedBy: { influencedByEdges: int(13) },
       influencedByCand: { influencedByCandidates: int(140) },
       membership: { membershipEdges: int(6) },
+      studio: { total: int(12), withCoordinates: int(5) },
     });
 
     const stats = await getStats(driver);
@@ -157,6 +163,13 @@ describe('getStats', () => {
       masters: 7,
       musicians: 40,
       works: 50,
+      studios: 12,
+    });
+    // #342 studio coordinate coverage: 5/12 studios have lat+long → 41.7%.
+    expect(stats.enrichment.studiosWithCoordinates).toEqual({
+      covered: 5,
+      applicable: 12,
+      pct: 41.7,
     });
     // #336 Work coverage: tracksWithWork over the recordingMbid-gated denominator (42/70),
     // plus the raw count of cover/version groups (works with >1 distinct recording).
@@ -368,12 +381,19 @@ describe('getStats', () => {
       masters: 0,
       musicians: 0,
       works: 0,
+      studios: 0,
     });
     expect(stats.enrichment.releasesWithOriginalYear.pct).toBeNull();
     expect(stats.enrichment.artistsWithGenres.pct).toBeNull();
     expect(stats.enrichment.tracksWithLyrics.pct).toBeNull();
     expect(stats.enrichment.mastersWithReleaseEvents.pct).toBeNull();
     expect(stats.enrichment.tracksWithDeezerGain).toEqual({ covered: 0, applicable: 0, pct: null });
+    // #342: no studios → coverage applicable 0, pct null (not 0).
+    expect(stats.enrichment.studiosWithCoordinates).toEqual({
+      covered: 0,
+      applicable: 0,
+      pct: null,
+    });
     // a sourced metric still has every bucket, each with pct null on an empty graph
     expect(stats.enrichment.artistsWithNationality.sources.musicbrainz!.pct).toBeNull();
     expect(stats.enrichment.artistsWithNationality.sources.untagged!.pct).toBeNull();
