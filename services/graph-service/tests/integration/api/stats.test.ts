@@ -144,6 +144,15 @@ describe('GET /api/v1/stats', () => {
       enrichment.tracksWithMbRecordingArtists.covered,
     );
 
+    // #339: arranger subset (composer-bucket MB track credits) — same recordingMbid-gated denominator,
+    // covered never exceeds the parent MB-track-credit count.
+    expect(enrichment.tracksWithMbArrangers.applicable).toBe(
+      enrichment.tracksWithMbRecordingArtists.applicable,
+    );
+    expect(enrichment.tracksWithMbArrangers.covered).toBeLessThanOrEqual(
+      enrichment.tracksWithMbRecordingArtists.covered,
+    );
+
     // #339 (slice 2): MB studio coverage shares the recordingMbid-gated denominator; this seed has no
     // MB studio edges, so a well-formed CoverageMetric reads covered 0 over that denominator (not a
     // crash, not null) — proving the metric is wired even when legitimately empty.

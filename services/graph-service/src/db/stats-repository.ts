@@ -83,6 +83,12 @@ export interface StatsData {
     // with a recordingMbid), but intentionally NOT verify-gated (recording-level production can
     // legitimately be near-zero — see reload-verify.ts).
     tracksWithMbProductionCredits: CoverageMetric;
+    // #339: the arranger subset — tracks with an MB-sourced track credit that buckets `composer`.
+    // Recording-scope MB credits only ever bucket `composer` via the arranger family (producer/engineer
+    // bucket separately, performers as performer), so `roleCategory = 'composer'` is exactly the arranger
+    // subset. A CoverageMetric for /stats (denominator = tracks with a recordingMbid), intentionally NOT
+    // verify-gated, like tracksWithMbProductionCredits.
+    tracksWithMbArrangers: CoverageMetric;
     // #339 (slice 2): tracks with an MB-sourced studio (`(:Track)-[:RECORDED_AT {source:'musicbrainz'}]
     // ->(:Studio)`, from recording place-rels). A CoverageMetric so it reads on /stats (denominator =
     // tracks with a recordingMbid), but intentionally NOT verify-gated: MB place relations are even
@@ -216,6 +222,12 @@ const TRACK_QUERY = `
       (t)<-[c:CREDITED_ON]-(:Musician)
       WHERE c.source = 'musicbrainz' AND c.scope = 'track' AND c.roleCategory IN ['producer', 'engineer']
     } THEN 1 END) AS mbProductionCreditsCovered,
+    // #339: the arranger subset — an MB track credit categorized composer (only the arranger family
+    // buckets composer at recording scope).
+    count(CASE WHEN EXISTS {
+      (t)<-[c:CREDITED_ON]-(:Musician)
+      WHERE c.source = 'musicbrainz' AND c.scope = 'track' AND c.roleCategory = 'composer'
+    } THEN 1 END) AS mbArrangersCovered,
     // #339 (slice 2): tracks with an MB-sourced studio from recording place-rels.
     count(CASE WHEN EXISTS {
       (t)-[ra:RECORDED_AT]->(:Studio) WHERE ra.source = 'musicbrainz'
@@ -471,6 +483,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       // has a recordingMbid), mirroring tracksWithWork.
       tracksWithMbRecordingArtists: coverage(n(track, 'mbRecordingArtistsCovered'), mbidCovered),
       tracksWithMbProductionCredits: coverage(n(track, 'mbProductionCreditsCovered'), mbidCovered),
+      tracksWithMbArrangers: coverage(n(track, 'mbArrangersCovered'), mbidCovered),
       tracksWithMbStudio: coverage(n(track, 'mbStudioCovered'), mbidCovered),
       worksWithMultipleRecordings: n(work, 'multiRecording'),
       // Applicable denominator is the upstream gate: a Work can only be linked if its writers were

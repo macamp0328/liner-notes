@@ -262,10 +262,10 @@ const RECORDING_PLACE_RELATIONS = new Set(['recorded at', 'mixed at']);
  *
  * Deliberately EXCLUDED (kept release-scoped or out of this slice): `mastering`/lacquer/cover-art
  * (inherently whole-release; `mastering` is also deprecated at recording level in MB), `remixer` (a
- * derivative recording — Slice 3 lineage), the `arranger` family (maps to the composer/songwriter
- * axis, #380), and the niche `programming`/`editor`/`sound effects`. MB production attributes
- * (`additional`/`co`/`executive`/…) are qualifiers, not credit tokens, and are dropped (see
- * `getArtistsByRecordingMbid`).
+ * derivative recording — the lineage epic), and the niche `programming`/`editor`/`sound effects`. The
+ * `arranger` family IS pushed down — recording-level arranging is track-attributable — via the separate
+ * `RECORDING_ARRANGER_ROLE_MAP` below. MB production attributes (`additional`/`co`/`executive`/…) are
+ * qualifiers, not credit tokens, and are dropped (see `getArtistsByRecordingMbid`).
  */
 const RECORDING_PRODUCTION_ROLE_MAP: ReadonlyMap<string, string> = new Map([
   ['producer', 'producer'],
@@ -275,6 +275,22 @@ const RECORDING_PRODUCTION_ROLE_MAP: ReadonlyMap<string, string> = new Map([
   ['audio', 'audio engineer'],
   ['sound', 'sound engineer'],
   ['balance', 'balance engineer'],
+]);
+
+/**
+ * Recording-level arranging artist-relation types, also pushed down to track scope (#339). MusicBrainz
+ * models arranging at the recording level — the person who arranged THIS recording — so it is genuinely
+ * track-attributable, exactly like the production credits above (and unlike a whole-composition writing
+ * credit, which the #336/#380 Work axis owns). Each maps to a canonical role string chosen so
+ * `parseRoleCategory` buckets it `composer`: the three `*arranger` slugs match the existing
+ * `arranger`/`arranged by` keyword, and `orchestrator` is covered by the `orchestrat` keyword added to
+ * the composer bucket in `transforms.ts`. Qualifier attributes are dropped, same as production.
+ */
+const RECORDING_ARRANGER_ROLE_MAP: ReadonlyMap<string, string> = new Map([
+  ['arranger', 'arranger'],
+  ['instrument arranger', 'instrument arranger'],
+  ['vocal arranger', 'vocal arranger'],
+  ['orchestrator', 'orchestrator'],
 ]);
 
 /** Convert a MusicBrainz millisecond length to whole seconds; null for missing or non-positive values. */
@@ -522,11 +538,12 @@ export class MusicBrainzClient {
 
   /**
    * Fetch the track-attributable credits of a MusicBrainz recording from its artist relationships.
-   * Uses `inc=artist-rels`; reads `relations[]` whose `type` is either a **performance** role
-   * (#335: `performer`/`instrument`/`vocal`, instrument/vocal name in `attributes`) or a
-   * **production** role (#339: `RECORDING_PRODUCTION_ROLE_MAP` — producer + engineer family, mapped
-   * to a canonical role string with attributes dropped). Roles outside both sets (`mastering`,
-   * `remixer`, `arranger`, …) are not pushed down to a track. Each person's MB artist MBID is retained
+   * Uses `inc=artist-rels`; reads `relations[]` whose `type` is a **performance** role
+   * (#335: `performer`/`instrument`/`vocal`, instrument/vocal name in `attributes`), a **production**
+   * role (#339: `RECORDING_PRODUCTION_ROLE_MAP` — producer + engineer family) or an **arranging** role
+   * (#339: `RECORDING_ARRANGER_ROLE_MAP` — arranger family + orchestrator); the latter two are mapped to
+   * a canonical role string with attributes dropped. Roles outside all three sets (`mastering`,
+   * `remixer`, …) are not pushed down to a track. Each person's MB artist MBID is retained
    * so the credit reconciles to our Discogs-keyed Musician nodes deterministically (the `mb-artist-id`
    * join, #380) — never name-matching. Empty array on no track-attributable credits, an open breaker,
    * or a 404 (a known recordingMbid that no longer resolves is not retried until the staleness window
@@ -566,6 +583,19 @@ export class MusicBrainzClient {
           mbid: rel.artist.id,
           name: rel.artist.name,
           role: productionRole,
+          attributes: [],
+        });
+        continue;
+      }
+
+      const arrangerRole = RECORDING_ARRANGER_ROLE_MAP.get(rel.type);
+      if (arrangerRole !== undefined) {
+        // Recording-level arranging is track-attributable (#339); like production, the credit token is
+        // the canonical role and qualifier attributes are dropped.
+        artists.push({
+          mbid: rel.artist.id,
+          name: rel.artist.name,
+          role: arrangerRole,
           attributes: [],
         });
       }
