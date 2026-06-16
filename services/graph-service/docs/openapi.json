@@ -1218,6 +1218,131 @@
         }
       }
     },
+    "/api/v1/admin/track-recording-places/enrich": {
+      "post": {
+        "summary": "Attribute MusicBrainz recording-level studios to the specific Track as RECORDED_AT edges",
+        "tags": ["admin"],
+        "description": "For each Track that carries a `recordingMbid` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), fetches the recording’s place relationships (`recorded at` / `mixed at`) and writes a **track-scoped** `(:Track)-[:RECORDED_AT {source: \"musicbrainz\"}]->(:Studio)` edge (#339). MusicBrainz models the studio at the recording level, so unlike Discogs (album-level only) this is a deterministic per-track studio attribution. Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, and only after `track-musicbrainz` has populated `recordingMbid`.**\n\nThe Studio is MERGEd by name onto the existing name-keyed nodes, so a track’s MusicBrainz studio lines up with the album’s Discogs studio of the same name. The Place’s coordinates and area enrich the Studio node (feeding the recording-location map) via `coalesce`, so they only ever fill a gap.\n\n**MusicBrainz place relations are genuinely sparse — zero studios across a collection is legitimate, not an error.**\n\nRe-selects a Track while it still has no MB-sourced studio (null `recordingPlacesFetchedAt`) once its last attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `recordingPlacesFetchedAt` after each attempt — so a recording MusicBrainz has no place relations for is retried at most once per window. Run `POST /api/v1/admin/track-recording-places/reset` to force a full re-run.\n\nRequires `MUSICBRAINZ_USER_AGENT` env var.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["message", "statusUrl"],
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "statusUrl": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-recording-places/reset": {
+      "post": {
+        "summary": "Reset MusicBrainz recording-studio enrichment for a full re-run",
+        "tags": ["admin"],
+        "description": "Removes every MusicBrainz-sourced track studio edge (`RECORDED_AT` with `source: \"musicbrainz\"`) and clears the `recordingPlacesFetchedAt` marker, causing the next `POST /api/v1/admin/track-recording-places/enrich` call to re-process every recording from scratch. Studio nodes — and their coordinates — are deliberately LEFT INTACT: they are facts about the physical studio (shared with the Discogs path) and feed the recording-location map.\n\nThis endpoint is blocked while enrichment is running.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["reset"],
+                      "properties": {
+                        "reset": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/track-acousticbrainz/enrich": {
       "post": {
         "summary": "Enrich Track nodes with AcousticBrainz audio features",
@@ -2982,6 +3107,95 @@
                               "type": "integer"
                             },
                             "creditEdges": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-recording-places/status": {
+      "get": {
+        "summary": "Status of the most recent MusicBrainz recording-studio (place) enrichment run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult",
+                        "lastError"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "recordingsProcessed": {
+                              "type": "integer"
+                            },
+                            "recordingsSkipped": {
+                              "type": "integer"
+                            },
+                            "recordingsFailed": {
+                              "type": "integer"
+                            },
+                            "studioEdges": {
                               "type": "integer"
                             },
                             "durationMs": {
@@ -6626,6 +6840,7 @@
                             "tracksWithWork",
                             "tracksWithMbRecordingArtists",
                             "tracksWithMbProductionCredits",
+                            "tracksWithMbStudio",
                             "worksWithMultipleRecordings",
                             "worksWithWriterLinks",
                             "wroteEdges",
@@ -7041,6 +7256,22 @@
                               }
                             },
                             "tracksWithMbProductionCredits": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "tracksWithMbStudio": {
                               "type": "object",
                               "required": ["covered", "applicable", "pct"],
                               "properties": {

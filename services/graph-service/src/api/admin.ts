@@ -29,6 +29,8 @@ import { enrichTrackWorks } from '../enrichment/track-works.js';
 import { resetTrackWorksEnrichment } from '../db/track-works-repository.js';
 import { enrichTrackRecordingArtists } from '../enrichment/track-recording-artists.js';
 import { resetRecordingArtistsEnrichment } from '../db/track-recording-artists-repository.js';
+import { enrichTrackRecordingPlaces } from '../enrichment/track-recording-places.js';
+import { resetRecordingPlacesEnrichment } from '../db/track-recording-places-repository.js';
 import { buildAcousticBrainzClientFromEnv } from '../ingestion/acousticbrainz-client.js';
 import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
 import { resetTrackAcousticBrainzEnrichment } from '../db/track-acousticbrainz-repository.js';
@@ -418,6 +420,17 @@ const trackRecordingArtistsSummarySchema = {
   },
 };
 
+const trackRecordingPlacesSummarySchema = {
+  type: 'object',
+  properties: {
+    recordingsProcessed: { type: 'integer' },
+    recordingsSkipped: { type: 'integer' },
+    recordingsFailed: { type: 'integer' },
+    studioEdges: { type: 'integer' },
+    durationMs: { type: 'integer' },
+  },
+};
+
 const artistGenresSummarySchema = {
   type: 'object',
   properties: {
@@ -772,6 +785,60 @@ const PIPELINES: PipelineEntry[] = [
       runningMessage:
         'MusicBrainz recording-artist credit enrichment is currently running — wait for it to finish before resetting',
       run: (driver) => resetRecordingArtistsEnrichment(driver),
+    },
+    state: makePipelineState(),
+  },
+  {
+    name: 'track-recording-places',
+    statusLabel: 'MusicBrainz recording-studio (place) enrichment',
+    runningMessage: 'MusicBrainz recording-studio enrichment already in progress',
+    enrichSummary:
+      'Attribute MusicBrainz recording-level studios to the specific Track as RECORDED_AT edges',
+    enrichDescription:
+      'For each Track that carries a `recordingMbid` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), ' +
+      'fetches the recording’s place relationships (`recorded at` / `mixed at`) and writes a ' +
+      '**track-scoped** `(:Track)-[:RECORDED_AT {source: "musicbrainz"}]->(:Studio)` edge (#339). ' +
+      'MusicBrainz models the studio at the recording level, so unlike Discogs (album-level only) this ' +
+      'is a deterministic per-track studio attribution. Blocks until complete.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, and ' +
+      'only after `track-musicbrainz` has populated `recordingMbid`.**\n\n' +
+      'The Studio is MERGEd by name onto the existing name-keyed nodes, so a track’s MusicBrainz studio ' +
+      'lines up with the album’s Discogs studio of the same name. The Place’s coordinates and area ' +
+      'enrich the Studio node (feeding the recording-location map) via `coalesce`, so they only ever ' +
+      'fill a gap.\n\n' +
+      '**MusicBrainz place relations are genuinely sparse — zero studios across a collection is ' +
+      'legitimate, not an error.**\n\n' +
+      'Re-selects a Track while it still has no MB-sourced studio (null `recordingPlacesFetchedAt`) once ' +
+      'its last attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping ' +
+      '`recordingPlacesFetchedAt` after each attempt — so a recording MusicBrainz has no place relations ' +
+      'for is retried at most once per window. Run ' +
+      '`POST /api/v1/admin/track-recording-places/reset` to force a full re-run.\n\n' +
+      'Requires `MUSICBRAINZ_USER_AGENT` env var.',
+    statusSummarySchema: trackRecordingPlacesSummarySchema,
+    schemaHas503: true,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => {
+      const mbClient = buildMusicBrainzClientFromEnv(log);
+      if (!mbClient) return { ok: false, message: 'MUSICBRAINZ_USER_AGENT not configured' };
+      return {
+        ok: true,
+        run: async (driver) => ({
+          ...(await enrichTrackRecordingPlaces(mbClient, driver, log)),
+        }),
+      };
+    },
+    reset: {
+      summary: 'Reset MusicBrainz recording-studio enrichment for a full re-run',
+      description:
+        'Removes every MusicBrainz-sourced track studio edge (`RECORDED_AT` with ' +
+        '`source: "musicbrainz"`) and clears the `recordingPlacesFetchedAt` marker, causing the next ' +
+        '`POST /api/v1/admin/track-recording-places/enrich` call to re-process every recording from ' +
+        'scratch. Studio nodes — and their coordinates — are deliberately LEFT INTACT: they are facts ' +
+        'about the physical studio (shared with the Discogs path) and feed the recording-location map.\n\n' +
+        'This endpoint is blocked while enrichment is running.',
+      runningMessage:
+        'MusicBrainz recording-studio enrichment is currently running — wait for it to finish before resetting',
+      run: (driver) => resetRecordingPlacesEnrichment(driver),
     },
     state: makePipelineState(),
   },
