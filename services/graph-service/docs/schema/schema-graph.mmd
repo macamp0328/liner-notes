@@ -12,11 +12,13 @@ flowchart LR
     Studio["Studio"]
     Style["Style"]
     Track["Track"]
+    Work["Work"]
     Musician -->|"CREDITED_ON"| Release
     Musician -->|"CREDITED_ON"| Track
     Release -->|"FROM_COUNTRY"| Country
     ReloadJob -->|"HAS_STAGE"| ReloadStage
     Release -->|"HAS_TRACK"| Track
+    Artist -->|"INFLUENCED_BY"| Artist
     Release -->|"IN_GENRE"| Genre
     Release -->|"IN_STYLE"| Style
     Master -->|"MB_RELEASED_IN"| Country
@@ -26,6 +28,9 @@ flowchart LR
     Musician -->|"ORIGIN_COUNTRY"| Country
     Label -->|"PARENT_LABEL"| Label
     Release -->|"RECORDED_AT"| Studio
+    Track -->|"RECORDING_OF"| Work
     Release -->|"RELEASED_BY"| Artist
     Master -->|"RELEASED_IN"| Country
     Musician -->|"SAME_PERSON_AS"| Artist
+    Artist -->|"WROTE"| Work
+    Musician -->|"WROTE"| Work
