@@ -94,6 +94,8 @@ function makeStats(
     groupsWithMembers: 4,
     // #391: ungated raw count (surfaced in /stats only, like memberOfEdges).
     influencedByEdges: 6,
+    // #419: ungated raw count — the resolution denominator for influencedByEdges.
+    influencedByCandidates: 60,
   };
   return {
     counts: {
