@@ -191,6 +191,13 @@ describe('RELOAD_STAGES dependency graph', () => {
     expect(stage('track-deezer').deps).toContain('track-musicbrainz');
   });
 
+  it('runs nationality after track-recording-artists so its new fallback performers are in scope (#418)', () => {
+    // track-recording-artists introduces MBID-keyed fallback Musicians; nationality must run after it
+    // (not just be mutually exclusive via the shared musicbrainz lane) so those nodes are enriched in
+    // the same reload rather than left as a fresh tail.
+    expect(stage('nationality').deps).toContain('track-recording-artists');
+  });
+
   it('runs person-reconciliation after both single-axis batched writers (#330 deadlock avoidance)', () => {
     // The dual-axis writer must not overlap artist-genres (Artist) or group-members (Musician).
     expect(stage('person-reconciliation').deps).toEqual(

@@ -122,6 +122,21 @@ async function resolveCountryByName(
 }
 
 /**
+ * Resolve nationality for a person node that has a `musicbrainzId` but no Discogs ID, via a direct
+ * MB-artist lookup (#418). This is the deterministic path for the MBID-keyed fallback Musicians the
+ * `track-recording-artists` pass introduces (musicbrainzId set, no discogsId) — joining on their
+ * exact MBID rather than the fuzzy name search a no-Discogs-ID node would otherwise fall back to.
+ */
+async function resolveCountryByMbid(
+  mbClient: MusicBrainzClient,
+  musicbrainzId: string,
+): Promise<ResolvedNationality | null> {
+  const mbCountry = await mbClient.getCountryByMbid(musicbrainzId);
+  if (mbCountry !== null) return { country: mbCountry, source: 'musicbrainz' };
+  return null;
+}
+
+/**
  * Enrich Artist and Musician nodes with ORIGIN_COUNTRY relationships.
  *
  * For nodes with a Discogs ID, sources are tried in order:
@@ -129,7 +144,9 @@ async function resolveCountryByName(
  * 2. Wikidata via Wikipedia URL from Discogs artist page
  *
  * For nodes without a Discogs ID:
- * 1. MusicBrainz name search (score ≥ 90)
+ * 1. Direct MB-artist lookup by `musicbrainzId` when present (#418 — the deterministic path for the
+ *    MBID-keyed fallback Musicians track-recording-artists introduces)
+ * 2. MusicBrainz name search (score ≥ 90)
  *
  * Runs as two sequential runEnrichment stages — Artists, then Musicians (producers and
  * engineers are Musician nodes too; the role lives on CREDITED_ON, not the label, so the
@@ -209,19 +226,27 @@ export async function enrichNationality(
   const musicianStage: EnrichmentStage<UnenrichedMusician, ResolvedNationality> = {
     name: 'artist-nationality',
     selectCandidates: (d) => getUnenrichedMusiciansForNationality(d),
-    resolve: (person) =>
-      person.discogsId !== null
-        ? resolveCountry(
-            mbClient,
-            wd,
-            dc,
-            person.discogsId,
-            person.name,
-            'musician',
-            log,
-            person.musicbrainzId,
-          )
-        : resolveCountryByName(mbClient, person.name),
+    // #418: a no-Discogs-ID node carrying a musicbrainzId (the MBID-keyed fallback Musicians
+    // track-recording-artists introduces) resolves deterministically by that MBID rather than the
+    // fuzzy name search the no-ID path would otherwise use. The truthy check (not `!== null`) mirrors
+    // the #380 reuse check above — a resolved MBID is always a non-empty UUID — so absent/`null`/`''`
+    // all fall through to name search, keeping name-only credits on their original path.
+    resolve: (person) => {
+      if (person.discogsId !== null) {
+        return resolveCountry(
+          mbClient,
+          wd,
+          dc,
+          person.discogsId,
+          person.name,
+          'musician',
+          log,
+          person.musicbrainzId,
+        );
+      }
+      if (person.musicbrainzId) return resolveCountryByMbid(mbClient, person.musicbrainzId);
+      return resolveCountryByName(mbClient, person.name);
+    },
     async write(d, person, resolved) {
       await setMusicianNationality(d, person, resolved.country, resolved.source);
       recordSource(resolved.source);

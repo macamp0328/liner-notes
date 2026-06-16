@@ -292,6 +292,56 @@ describe('enrichNationality', () => {
   // ---------------------------------------------------------------------------
 
   describe('No-Discogs-ID nodes', () => {
+    it('resolves a no-ID musician carrying a musicbrainzId via getCountryByMbid, not name search (#418)', async () => {
+      // The MBID-keyed fallback Musicians track-recording-artists introduces (no discogsId, but a
+      // musicbrainzId) must resolve deterministically by that MBID rather than the fuzzy name search.
+      mockGetUnenrichedMusicians.mockResolvedValue([
+        { discogsId: null, name: 'MB Fallback Performer', musicbrainzId: 'mb-fallback' },
+      ]);
+      const client = makeMbClient(
+        async () => null, // getCountryByDiscogsId — must NOT be used (no discogsId)
+        async () => 'GB', // getCountryByName — must NOT be used (MBID present)
+        async () => 'JP', // getCountryByMbid
+      );
+
+      const summary = await enrichNationality(client, fakeDriver);
+
+      expect(client.getCountryByMbid).toHaveBeenCalledWith('mb-fallback');
+      expect(client.getCountryByName).not.toHaveBeenCalled();
+      expect(mockSetMusicianNationality).toHaveBeenCalledWith(
+        fakeDriver,
+        { discogsId: null, name: 'MB Fallback Performer', musicbrainzId: 'mb-fallback' },
+        'JP',
+        'musicbrainz',
+      );
+      expect(summary.enriched).toBe(1);
+      expect(summary.resolvedByMusicbrainz).toBe(1);
+    });
+
+    it('skips a no-ID musician with a musicbrainzId when MB has no country for that MBID (#418)', async () => {
+      mockGetUnenrichedMusicians.mockResolvedValue([
+        { discogsId: null, name: 'Countryless Fallback', musicbrainzId: 'mb-none' },
+      ]);
+      const client = makeMbClient(
+        async () => 'XX',
+        async () => 'GB',
+        async () => null, // getCountryByMbid — no country
+      );
+
+      const summary = await enrichNationality(client, fakeDriver);
+
+      expect(client.getCountryByMbid).toHaveBeenCalledWith('mb-none');
+      // Does NOT fall through to name search — the MBID path is authoritative for these nodes.
+      expect(client.getCountryByName).not.toHaveBeenCalled();
+      expect(mockSetMusicianNationality).toHaveBeenCalledWith(
+        fakeDriver,
+        { discogsId: null, name: 'Countryless Fallback', musicbrainzId: 'mb-none' },
+        null,
+        null,
+      );
+      expect(summary.skipped).toBe(1);
+    });
+
     it('resolves a no-ID musician via MB name search and tags it musicbrainz', async () => {
       mockGetUnenrichedMusicians.mockResolvedValue([
         { discogsId: null, name: 'No ID Musician Found by MB' },

@@ -347,8 +347,16 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     // lane (never overlap); the dep only pins the order so the reuse actually kicks in.
     // #341: also holds the `wikidata` lane — it drives the one shared `ctx.wikidata` client, which
     // the `artist-wikidata` stage also uses, so the lane serialises that limiter across both.
+    // #418: also deps track-recording-artists. That stage introduces MBID-keyed fallback Musician
+    // nodes (musicbrainzId set, no discogsId) for performers MusicBrainz has no Discogs link for. The
+    // shared `musicbrainz` lane already keeps the two from overlapping, but without this dep their
+    // order is a race — so the new performers could land just after nationality selected candidates
+    // and sit unenriched until the next reload. The dep pins nationality to run after them, so they
+    // are in scope this run and resolve deterministically by their MBID (see resolveCountryByMbid in
+    // artist-nationality.ts). Acyclic: track-recording-artists deps only track-musicbrainz +
+    // mb-artist-id, neither of which reaches nationality.
     name: 'nationality',
-    deps: ['releases', 'mb-artist-id'],
+    deps: ['releases', 'mb-artist-id', 'track-recording-artists'],
     resources: ['discogs', 'musicbrainz', 'wikidata'],
     sources: ['musicbrainz', 'wikidata', 'discogs'],
     run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
