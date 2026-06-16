@@ -7,6 +7,7 @@ import {
 import type {
   ReloadContext,
   ReloadStageName,
+  StageCounts,
   StageDescriptor,
 } from '../../../src/ingestion/stages.js';
 import type { CircuitBreakerSnapshot } from '../../../src/ingestion/circuit-breaker.js';
@@ -95,6 +96,7 @@ beforeEach(() => {
     releasesProcessed: 3,
     releasesFailed: 1,
     errors: ['Release 9: boom'],
+    failedReleaseIds: [9],
   });
   for (const fn of [
     enrichLyrics,
@@ -284,7 +286,7 @@ describe('RELOAD_STAGES resource lanes', () => {
 });
 
 describe('stage run() delegates to the right enrich function', () => {
-  it('releases → ingestReleases, forwarding onProgress and returning numeric counts only', async () => {
+  it('releases → ingestReleases, forwarding onProgress and surfacing failed release ids (#417)', async () => {
     const onProgress = vi.fn();
     const result = await stage('releases').run(makeCtx(), onProgress);
     expect(ingestReleases).toHaveBeenCalledOnce();
@@ -296,7 +298,39 @@ describe('stage run() delegates to the right enrich function', () => {
       ctx.log,
       onProgress,
     );
-    expect(result).toEqual({ releasesProcessed: 3, releasesFailed: 1, releaseErrors: 1 });
+    expect(result).toEqual({
+      releasesProcessed: 3,
+      releasesFailed: 1,
+      releaseErrors: 1,
+      failedReleaseIds: [9],
+    });
+  });
+
+  it('releases omits failedReleaseIds entirely on a clean reload (#417)', async () => {
+    vi.mocked(ingestReleases).mockResolvedValue({
+      releasesProcessed: 3,
+      releasesFailed: 0,
+      errors: [],
+      failedReleaseIds: [],
+    });
+    const result = await stage('releases').run(makeCtx());
+    expect(result).toEqual({ releasesProcessed: 3, releasesFailed: 0, releaseErrors: 0 });
+    expect(result).not.toHaveProperty('failedReleaseIds');
+  });
+
+  it('releases caps the failedReleaseIds sample at 50 (#417)', async () => {
+    const failed = Array.from({ length: 60 }, (_, i) => i + 1);
+    vi.mocked(ingestReleases).mockResolvedValue({
+      releasesProcessed: 0,
+      releasesFailed: 60,
+      errors: failed.map((id) => `Release ${id}: boom`),
+      failedReleaseIds: failed,
+    });
+    const result = (await stage('releases').run(makeCtx())) as StageCounts;
+    // releasesFailed stays the authoritative total; the persisted id sample is bounded.
+    expect(result['releasesFailed']).toBe(60);
+    expect(result['failedReleaseIds']).toHaveLength(50);
+    expect(result['failedReleaseIds']).toEqual(failed.slice(0, 50));
   });
 
   it('lyrics → enrichLyrics(driver, log, onProgress) with the reload concurrency (#372)', async () => {
@@ -577,6 +611,32 @@ describe('breaker count surfacing (#242)', () => {
       releasesProcessed: 3,
       musicbrainzBreakerOpen: 1,
       musicbrainzFatals: 7,
+    });
+  });
+
+  it('preserves an array-valued count (failedReleaseIds) alongside folded breaker keys (#417)', () => {
+    // The releases stage declares sources:['discogs'], so its failedReleaseIds array flows through
+    // foldBreakerCounts — Object.assign must not clobber it when adding the breaker keys.
+    const ctx = makeCtx({
+      discogs: clientStub(snap('discogs', false, 0)) as unknown as ReloadContext['discogs'],
+    });
+    const descriptor = {
+      name: 'releases',
+      sources: ['discogs'],
+    } as unknown as StageDescriptor;
+
+    const counts = foldBreakerCounts(ctx, descriptor, {
+      releasesProcessed: 195,
+      releasesFailed: 1,
+      failedReleaseIds: [12345],
+    });
+
+    expect(counts).toEqual({
+      releasesProcessed: 195,
+      releasesFailed: 1,
+      failedReleaseIds: [12345],
+      discogsBreakerOpen: 0,
+      discogsFatals: 0,
     });
   });
 

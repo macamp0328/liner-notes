@@ -4077,7 +4077,17 @@
                               "counts": {
                                 "type": "object",
                                 "additionalProperties": {
-                                  "type": "number"
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "integer"
+                                      }
+                                    }
+                                  ]
                                 }
                               },
                               "error": {

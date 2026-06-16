@@ -84,6 +84,13 @@ export interface ReleasesIngestSummary {
   releasesProcessed: number;
   releasesFailed: number;
   errors: string[];
+  /**
+   * Discogs ids of the releases that failed to ingest (#417), in collection-iteration order — so a
+   * non-fatal per-release failure can be identified and reconciled from `/admin/reload/status`, not
+   * just counted. The full list; the `releases` stage caps the sample it persists (see
+   * `MAX_FAILED_RELEASE_IDS` in stages.ts). `releasesFailed` stays the authoritative total.
+   */
+  failedReleaseIds: number[];
 }
 
 /**
@@ -104,6 +111,7 @@ export async function ingestReleases(
   signal: AbortSignal = getShutdownSignal(),
 ): Promise<ReleasesIngestSummary> {
   const errors: string[] = [];
+  const failedReleaseIds: number[] = [];
   let releasesProcessed = 0;
   let releasesFailed = 0;
 
@@ -147,6 +155,7 @@ export async function ingestReleases(
       }
     } catch (err) {
       releasesFailed++;
+      failedReleaseIds.push(releaseId);
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`Release ${releaseId}: ${msg}`);
       log.error(`[ingest] Failed to process release ${releaseId}: ${msg}`);
@@ -156,7 +165,7 @@ export async function ingestReleases(
   // On abort, report the REAL processed count, not total, so live progress / shutdown logs don't
   // read 100% for a run that checkpoint-exited early (#291).
   onProgress(signal.aborted ? releasesProcessed : total, total);
-  return { releasesProcessed, releasesFailed, errors };
+  return { releasesProcessed, releasesFailed, errors, failedReleaseIds };
 }
 
 export async function runIngestion(
