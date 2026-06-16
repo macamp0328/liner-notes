@@ -7,7 +7,7 @@
 > `pnpm schema:diagram` to refresh. Node/relationship names and properties below
 > are the authoritative model; the tables in the service handbook point here.
 
-**Drift:** ✅ In sync with the last snapshot and schema.ts.
+**Drift:** ⚠️ model changed vs last snapshot (5 property(ies), 1 relationship(s)).
 
 ## Entity-relationship diagram
 
@@ -102,6 +102,10 @@ erDiagram
         String status
     }
     Studio {
+        String area
+        Double latitude
+        Double longitude
+        String musicbrainzPlaceId
         String name "indexed"
     }
     Style {
@@ -133,6 +137,7 @@ erDiagram
         String position
         DateTime recordingArtistsFetchedAt "indexed"
         String recordingMbid "indexed"
+        DateTime recordingPlacesFetchedAt "indexed"
         Long releaseDiscogsId
         Double tempo "indexed"
         String title "indexed"
@@ -162,6 +167,7 @@ erDiagram
     Musician }o--o{ Country : "ORIGIN_COUNTRY"
     Label }o--o{ Label : "PARENT_LABEL"
     Release }o--o{ Studio : "RECORDED_AT"
+    Track }o--o{ Studio : "RECORDED_AT"
     Track }o--o{ Work : "RECORDING_OF"
     Release }o--o{ Artist : "RELEASED_BY"
     Master }o--o{ Country : "RELEASED_IN"
@@ -209,6 +215,7 @@ flowchart LR
     Musician -->|"ORIGIN_COUNTRY"| Country
     Label -->|"PARENT_LABEL"| Label
     Release -->|"RECORDED_AT"| Studio
+    Track -->|"RECORDED_AT"| Studio
     Track -->|"RECORDING_OF"| Work
     Release -->|"RELEASED_BY"| Artist
     Master -->|"RELEASED_IN"| Country

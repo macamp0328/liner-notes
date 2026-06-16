@@ -498,6 +498,34 @@
       "label": "Studio",
       "properties": [
         {
+          "name": "area",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "latitude",
+          "types": ["Double"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "longitude",
+          "types": ["Double"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "musicbrainzPlaceId",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
           "name": "name",
           "types": ["String"],
           "mandatory": false,
@@ -697,6 +725,13 @@
           "indexed": true
         },
         {
+          "name": "recordingPlacesFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
           "name": "releaseDiscogsId",
           "types": ["Long"],
           "mandatory": false,
@@ -855,6 +890,11 @@
     {
       "type": "RECORDED_AT",
       "from": "Release",
+      "to": "Studio"
+    },
+    {
+      "type": "RECORDED_AT",
+      "from": "Track",
       "to": "Studio"
     },
     {
