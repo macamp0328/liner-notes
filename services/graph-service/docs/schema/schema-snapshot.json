@@ -5,6 +5,41 @@
       "label": "Artist",
       "properties": [
         {
+          "name": "awards",
+          "types": ["StringArray"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "bornDate",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "bornYear",
+          "types": ["Long"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "diedDate",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "diedYear",
+          "types": ["Long"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
           "name": "discogsId",
           "types": ["Long"],
           "mandatory": false,
@@ -19,6 +54,34 @@
           "indexed": false
         },
         {
+          "name": "imageUrl",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "influencedByQids",
+          "types": ["StringArray"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "musicbrainzId",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "musicbrainzIdFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
           "name": "name",
           "types": ["String"],
           "mandatory": false,
@@ -31,6 +94,20 @@
           "mandatory": false,
           "unique": false,
           "indexed": true
+        },
+        {
+          "name": "playsInstrument",
+          "types": ["StringArray"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "playsInstrumentRaw",
+          "types": ["StringArray"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
         },
         {
           "name": "profile",
@@ -59,6 +136,20 @@
           "mandatory": false,
           "unique": false,
           "indexed": false
+        },
+        {
+          "name": "wikidataFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "wikidataQid",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
         }
       ]
     },
@@ -157,6 +248,20 @@
         },
         {
           "name": "membersFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "musicbrainzId",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "musicbrainzIdFetchedAt",
           "types": ["DateTime"],
           "mandatory": false,
           "unique": false,
@@ -417,6 +522,13 @@
       "label": "Track",
       "properties": [
         {
+          "name": "acousticBrainzExhausted",
+          "types": ["Boolean"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
           "name": "acousticBrainzFetchedAt",
           "types": ["DateTime"],
           "mandatory": false,
@@ -571,6 +683,13 @@
           "indexed": false
         },
         {
+          "name": "recordingArtistsFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        },
+        {
           "name": "recordingMbid",
           "types": ["String"],
           "mandatory": false,
@@ -604,6 +723,60 @@
           "mandatory": false,
           "unique": false,
           "indexed": false
+        },
+        {
+          "name": "worksFetchedAt",
+          "types": ["DateTime"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": true
+        }
+      ]
+    },
+    {
+      "label": "Work",
+      "properties": [
+        {
+          "name": "mbid",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": true,
+          "indexed": true
+        },
+        {
+          "name": "title",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "type",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "writerMbids",
+          "types": ["StringArray"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "writerRoles",
+          "types": ["StringArray"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "writers",
+          "types": ["StringArray"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
         }
       ]
     }
@@ -633,6 +806,11 @@
       "type": "HAS_TRACK",
       "from": "Release",
       "to": "Track"
+    },
+    {
+      "type": "INFLUENCED_BY",
+      "from": "Artist",
+      "to": "Artist"
     },
     {
       "type": "IN_GENRE",
@@ -680,6 +858,11 @@
       "to": "Studio"
     },
     {
+      "type": "RECORDING_OF",
+      "from": "Track",
+      "to": "Work"
+    },
+    {
       "type": "RELEASED_BY",
       "from": "Release",
       "to": "Artist"
@@ -693,6 +876,16 @@
       "type": "SAME_PERSON_AS",
       "from": "Musician",
       "to": "Artist"
+    },
+    {
+      "type": "WROTE",
+      "from": "Artist",
+      "to": "Work"
+    },
+    {
+      "type": "WROTE",
+      "from": "Musician",
+      "to": "Work"
     }
   ],
   "constraints": [
