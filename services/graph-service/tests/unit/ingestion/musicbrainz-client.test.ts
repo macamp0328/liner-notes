@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { MusicBrainzClient } from '../../../src/ingestion/musicbrainz-client.js';
+import { parseRoleCategory } from '../../../src/ingestion/transforms.js';
 import { snapshotEnv } from '../../helpers/env.js';
 
 function makeOkResponse(body: unknown): Response {
@@ -917,6 +918,41 @@ describe('MusicBrainzClient', () => {
         { mbid: 'e-5', name: 'Sound Engineer', role: 'sound engineer', attributes: [] },
         { mbid: 'e-6', name: 'Balance Engineer', role: 'balance engineer', attributes: [] },
       ]);
+    });
+
+    it('every mapped production role buckets to producer/engineer via parseRoleCategory (#339)', async () => {
+      // Guards the load-bearing coupling: the canonical role strings the client maps each production
+      // slug to MUST still categorize as producer/engineer, because /stats.tracksWithMbProductionCredits
+      // (roleCategory IN ['producer','engineer']) and /explore/producer|engineer silently depend on it.
+      // A future map value that parseRoleCategory buckets as 'other' would be written but never counted
+      // or surfaced — a silent drift this test fails loudly on.
+      const PRODUCTION_SLUGS = [
+        'producer',
+        'engineer',
+        'recording',
+        'mix',
+        'audio',
+        'sound',
+        'balance',
+      ];
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: PRODUCTION_SLUGS.map((type, i) => ({
+            type,
+            'target-type': 'artist',
+            attributes: [],
+            artist: { id: `p-${i}`, name: type },
+          })),
+        }),
+      );
+
+      const artists = await client.getArtistsByRecordingMbid('rec-1');
+
+      expect(artists).toHaveLength(PRODUCTION_SLUGS.length);
+      for (const a of artists) {
+        expect(['producer', 'engineer']).toContain(parseRoleCategory(a.role));
+      }
     });
 
     it('drops production qualifier attributes (co/executive/…) — the credit token is the role (#339)', async () => {
