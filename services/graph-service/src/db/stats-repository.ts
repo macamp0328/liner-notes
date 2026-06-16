@@ -97,11 +97,14 @@ export interface StatsData {
     memberOfEdges: number;
     groupsWithMembers: number;
     // Wikidata influence graph (#391). A derived "influence within my collection" graph, sparse by
-    // design (only edges between two in-collection artists survive the QID join). A raw count — like
-    // memberOfEdges/wroteEdges, INFLUENCED_BY has no knowable denominator — so it is intentionally
-    // not a CoverageMetric and the verify gate skips it (Wikidata-derived data is ungated; it can
-    // legitimately resolve zero for an obscure collection).
+    // design (only edges between two in-collection artists survive the QID join). Both are raw counts
+    // — like memberOfEdges/wroteEdges, neither is a CoverageMetric and the verify gate skips them
+    // (Wikidata-derived data is ungated; it can legitimately resolve zero for an obscure collection).
+    // influencedByCandidates (#419) is the resolution denominator: total captured P737 references
+    // (the join's input), so influencedByEdges/influencedByCandidates is the in-collection hit rate —
+    // surfaced so a low influencedByEdges no longer needs a manual prod query to explain.
     influencedByEdges: number;
+    influencedByCandidates: number;
     // Wikidata band-membership graph (#392). The dated Artist→Artist MEMBER_OF {source:"wikidata"}
     // edge — distinct from the Discogs Musician→Musician memberOfEdges above. Same rationale as
     // influencedByEdges: a raw count, no knowable denominator, ungated (can legitimately be zero).
@@ -255,6 +258,17 @@ const INFLUENCED_BY_QUERY = `
   MATCH (:Artist)-[r:INFLUENCED_BY]->(:Artist)
   RETURN count(r) AS influencedByEdges`;
 
+// INFLUENCED_BY candidate denominator (#419) — total captured P737 "influenced by" references across
+// all Artists (the resolution input; a QID repeated across artists counts each time). The
+// artist-influences join turns these into influencedByEdges when the target is an in-collection
+// artist, dropping the rest by design — surfaced here so that resolution ratio is self-evident
+// without a manual prod query. A raw count with no coverage gate, like influencedByEdges; coalesce
+// keeps it 0 over an empty graph (sum over zero matched rows would otherwise be null).
+const INFLUENCED_BY_CANDIDATES_QUERY = `
+  MATCH (a:Artist)
+  WHERE a.influencedByQids IS NOT NULL
+  RETURN coalesce(sum(size(a.influencedByQids)), 0) AS influencedByCandidates`;
+
 // Wikidata band-membership edge count (#392) — the dated Artist→Artist MEMBER_OF {source:"wikidata"}
 // graph. The `source` predicate + the Artist→Artist labels keep it disjoint from MEMBER_OF_QUERY's
 // Discogs Musician→Musician scan, so the two counts never overlap. Empty-graph safe (mirrors
@@ -335,6 +349,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
     memberOf,
     wrote,
     influencedBy,
+    influencedByCand,
     membership,
   ] = await Promise.all([
     runCounts(driver, RELEASE_QUERY),
@@ -350,6 +365,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
     runCounts(driver, MEMBER_OF_QUERY),
     runCounts(driver, WROTE_EDGE_QUERY),
     runCounts(driver, INFLUENCED_BY_QUERY),
+    runCounts(driver, INFLUENCED_BY_CANDIDATES_QUERY),
     runCounts(driver, MEMBERSHIP_EDGE_QUERY),
   ]);
 
@@ -452,6 +468,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       memberOfEdges: n(memberOf, 'memberOfEdges'),
       groupsWithMembers: n(musician, 'groupsWithMembers'),
       influencedByEdges: n(influencedBy, 'influencedByEdges'),
+      influencedByCandidates: n(influencedByCand, 'influencedByCandidates'),
       membershipEdges: n(membership, 'membershipEdges'),
     },
   };

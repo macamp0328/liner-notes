@@ -46,6 +46,8 @@ function makeDriver(byLabel: {
   wrote?: Record<string, unknown>;
   // #391: optional so existing cases need no change.
   influencedBy?: Record<string, unknown>;
+  // #419: optional so existing cases need no change.
+  influencedByCand?: Record<string, unknown>;
   // #392: optional so existing cases need no change.
   membership?: Record<string, unknown>;
 }): Driver {
@@ -54,6 +56,7 @@ function makeDriver(byLabel: {
   const work = byLabel.work ?? { total: int(0), multiRecording: int(0) };
   const wrote = byLabel.wrote ?? { wroteEdges: int(0) };
   const influencedBy = byLabel.influencedBy ?? { influencedByEdges: int(0) };
+  const influencedByCand = byLabel.influencedByCand ?? { influencedByCandidates: int(0) };
   const membership = byLabel.membership ?? { membershipEdges: int(0) };
   const run = vi.fn(async (cypher: string) => {
     let fields: Record<string, unknown>;
@@ -71,6 +74,9 @@ function makeDriver(byLabel: {
     else if (cypher.includes('[r:INFLUENCED_BY]')) fields = influencedBy;
     else if (cypher.includes('(m:Musician)')) fields = musician;
     else if (cypher.includes('(r:Release)')) fields = byLabel.release;
+    // #419: the candidate-denominator scan references (a:Artist) too — route by its unique
+    // influencedByQids property gate before the generic (a:Artist) ARTIST_QUERY branch.
+    else if (cypher.includes('influencedByQids')) fields = influencedByCand;
     else if (cypher.includes('(a:Artist)')) fields = byLabel.artist;
     // #336: WORK_QUERY also references (t:Track), so it must be routed before the Track route.
     else if (cypher.includes('(w:Work)')) fields = work;
@@ -135,6 +141,7 @@ describe('getStats', () => {
       },
       memberOf: { memberOfEdges: int(9) },
       influencedBy: { influencedByEdges: int(13) },
+      influencedByCand: { influencedByCandidates: int(140) },
       membership: { membershipEdges: int(6) },
     });
 
@@ -166,6 +173,8 @@ describe('getStats', () => {
     expect(stats.enrichment.memberOfEdges).toBe(9);
     expect(stats.enrichment.groupsWithMembers).toBe(3);
     expect(stats.enrichment.influencedByEdges).toBe(13);
+    // #419 resolution denominator: raw count of captured P737 references (155 in prod; 140 here).
+    expect(stats.enrichment.influencedByCandidates).toBe(140);
     // #392 Wikidata band-membership: raw count, disjoint from the Discogs memberOfEdges above.
     expect(stats.enrichment.membershipEdges).toBe(6);
 

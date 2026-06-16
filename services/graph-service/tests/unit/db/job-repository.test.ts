@@ -123,6 +123,21 @@ describe('stage transition writes', () => {
     expect(params['countsJson']).toBe('{"enriched":5,"skipped":1}');
   });
 
+  it('markStageComplete serializes an array-valued count (failedReleaseIds, #417)', async () => {
+    const { session, runSpy } = makeMockSession();
+    await markStageComplete(makeMockDriver(session), 'job-1', 'releases', {
+      releasesProcessed: 3,
+      releasesFailed: 2,
+      failedReleaseIds: [9, 12],
+    });
+
+    const params = (runSpy.mock.calls[0] as [string, Record<string, unknown>])[1];
+    // The array survives JSON serialization into countsJson — it is not stripped at the persistence layer.
+    expect(params['countsJson']).toBe(
+      '{"releasesProcessed":3,"releasesFailed":2,"failedReleaseIds":[9,12]}',
+    );
+  });
+
   it('markStageComplete with skipped=true records the skipped status', async () => {
     const { session, runSpy } = makeMockSession();
     await markStageComplete(makeMockDriver(session), 'job-1', 'track-deezer', {}, true);
@@ -405,7 +420,7 @@ describe('getReloadJob', () => {
           status: 'complete',
           startedAt: '2026-06-05T00:00:01Z',
           completedAt: '2026-06-05T00:00:02Z',
-          countsJson: '{"releasesProcessed":3}',
+          countsJson: '{"releasesProcessed":3,"failedReleaseIds":[9,12]}',
           error: null,
         },
         {
@@ -432,7 +447,8 @@ describe('getReloadJob', () => {
       stage: 'releases',
       ordinal: 0,
       status: 'complete',
-      counts: { releasesProcessed: 3 },
+      // The array-valued count is reconstructed by parseCounts, not coerced/dropped (#417).
+      counts: { releasesProcessed: 3, failedReleaseIds: [9, 12] },
     });
     // null/empty countsJson → {}
     expect(job?.stages[1]?.counts).toEqual({});

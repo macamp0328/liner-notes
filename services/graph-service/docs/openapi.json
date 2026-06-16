@@ -3939,6 +3939,9 @@
                             "influencedByLinks": {
                               "type": "integer"
                             },
+                            "influencedByCandidates": {
+                              "type": "integer"
+                            },
                             "failed": {
                               "type": "integer"
                             },
@@ -4219,7 +4222,17 @@
                               "counts": {
                                 "type": "object",
                                 "additionalProperties": {
-                                  "type": "number"
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "integer"
+                                      }
+                                    }
+                                  ]
                                 }
                               },
                               "error": {
@@ -6624,6 +6637,7 @@
                             "memberOfEdges",
                             "groupsWithMembers",
                             "influencedByEdges",
+                            "influencedByCandidates",
                             "membershipEdges"
                           ],
                           "properties": {
@@ -7150,6 +7164,9 @@
                               "type": "integer"
                             },
                             "influencedByEdges": {
+                              "type": "integer"
+                            },
+                            "influencedByCandidates": {
                               "type": "integer"
                             },
                             "membershipEdges": {
