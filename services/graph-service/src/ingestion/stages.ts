@@ -90,6 +90,15 @@ export interface ReloadContext {
  */
 export type ReloadResource = 'discogs' | 'musicbrainz' | 'wikidata' | 'track';
 
+/**
+ * A stage's persisted `counts` map. Values are numbers, with one deliberate exception: the
+ * `releases` stage's `failedReleaseIds` is a bounded `number[]` (#417) — the lone non-numeric count,
+ * so a non-fatal per-release failure can be identified from `/admin/reload/status`, not just counted.
+ * The whole map is `JSON.stringify`d into `ReloadStage.countsJson`, so arrays persist fine.
+ * (`job-repository.ts` redeclares a structurally identical local alias to avoid a db→ingestion import.)
+ */
+export type StageCounts = Record<string, number | number[]>;
+
 export interface StageDescriptor {
   name: ReloadStageName;
   /**
@@ -115,10 +124,7 @@ export interface StageDescriptor {
    * `onProgress` is optional: the orchestrator passes a reporter that feeds the live
    * reload-progress registry (#179); stages with no per-item loop ignore it.
    */
-  run: (
-    ctx: ReloadContext,
-    onProgress?: ProgressReporter,
-  ) => Promise<Record<string, number> | null>;
+  run: (ctx: ReloadContext, onProgress?: ProgressReporter) => Promise<StageCounts | null>;
 }
 
 /**
@@ -138,19 +144,31 @@ export interface StageDescriptor {
  * Each `run` forwards the orchestrator's optional `onProgress` reporter to its enrich function
  * (#179); `artist-genres` has no per-item loop, so it takes none.
  */
+/**
+ * Cap on the failed-release-id sample persisted to the `releases` stage counts (#417). A pathological
+ * mass-failure (e.g. a Discogs outage failing the whole collection) shouldn't bloat the `ReloadStage`
+ * node / `/admin/reload/status` payload; `releasesFailed` is the authoritative total, so an array
+ * shorter than `releasesFailed` simply means it was truncated to this sample.
+ */
+const MAX_FAILED_RELEASE_IDS = 50;
+
 const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
   {
     name: 'releases',
     deps: [],
     resources: ['discogs'],
     sources: ['discogs'],
-    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
+    run: async (ctx, onProgress): Promise<StageCounts | null> => {
       if (!ctx.discogs) return null;
       const s = await ingestReleases(ctx.discogs, ctx.driver, ctx.username, ctx.log, onProgress);
       return {
         releasesProcessed: s.releasesProcessed,
         releasesFailed: s.releasesFailed,
         releaseErrors: s.errors.length,
+        // Surface *which* releases failed (#417), bounded — omitted entirely on a clean reload.
+        ...(s.failedReleaseIds.length > 0
+          ? { failedReleaseIds: s.failedReleaseIds.slice(0, MAX_FAILED_RELEASE_IDS) }
+          : {}),
       };
     },
   },
@@ -455,8 +473,8 @@ export function clientBreakerSnapshot(
 export function foldBreakerCounts(
   ctx: ReloadContext,
   descriptor: StageDescriptor,
-  counts: Record<string, number>,
-): Record<string, number> {
+  counts: StageCounts,
+): StageCounts {
   for (const source of descriptor.sources ?? []) {
     const snap = clientBreakerSnapshot(ctx, source);
     if (snap === null) continue;
