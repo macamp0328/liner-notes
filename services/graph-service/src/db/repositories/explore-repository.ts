@@ -488,15 +488,25 @@ export async function getArtistInfluences(driver: Driver, name: string): Promise
 export async function getReleasesByStudio(driver: Driver, name: string): Promise<ExploreRelease[]> {
   const session = driver.session();
   try {
+    // A studio is credited at BOTH levels: album-level via Discogs `(:Release)-[:RECORDED_AT]->`,
+    // and track-level via MusicBrainz `(:Track)-[:RECORDED_AT {source:'musicbrainz'}]->` (#339 slice
+    // 2). Roll the track edges up to their Release (track→release via HAS_TRACK) and DISTINCT per
+    // release, mirroring getReleasesByCredit — so a release whose *track* was recorded at the studio
+    // surfaces even when its album-level credit didn't name it, without duplicate rows.
     const result = await session.run(
       `
-      MATCH (r:Release)-[:RECORDED_AT]->(s:Studio)
+      MATCH (target)-[:RECORDED_AT]->(s:Studio)
       WHERE toLower(s.name) = toLower($name)
+        AND (target:Release OR target:Track)
+      OPTIONAL MATCH (rTrack:Release)-[:HAS_TRACK]->(target)
+      WITH DISTINCT (CASE WHEN target:Release THEN target ELSE rTrack END) AS r
+      WHERE r IS NOT NULL
       OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
-      RETURN r.discogsId AS discogsId, r.title AS title, a.name AS artist,
+      WITH r, min(a.name) AS artist
+      RETURN r.discogsId AS discogsId, r.title AS title, artist,
              coalesce(r.originalYear, r.pressingYear) AS pressingYear,
              r.format AS format, r.thumbUrl AS thumbUrl
-      ORDER BY pressingYear
+      ORDER BY pressingYear, discogsId
       `,
       { name },
     );

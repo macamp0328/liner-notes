@@ -81,6 +81,8 @@ function makeStats(
     tracksWithMbRecordingArtists: cov(35, 60),
     // #339: production subset, measured but ungated (not in RELOAD_COVERAGE_THRESHOLDS).
     tracksWithMbProductionCredits: cov(18, 60),
+    // #339 (slice 2): MB studio coverage, measured but ungated (sparse + own fetch, no sibling guard).
+    tracksWithMbStudio: cov(4, 60),
     worksWithMultipleRecordings: 8,
     // #380: clears the minPct:0 (silently-zero) bar — covered>0 over writer-bearing Works.
     worksWithWriterLinks: cov(25, 40),
@@ -138,6 +140,11 @@ describe('RELOAD_COVERAGE_THRESHOLDS', () => {
   it('does NOT gate tracksWithMbProductionCredits — it can legitimately be near-zero (#339)', () => {
     const metrics = RELOAD_COVERAGE_THRESHOLDS.map((t) => t.metric);
     expect(metrics).not.toContain('tracksWithMbProductionCredits');
+  });
+
+  it('does NOT gate tracksWithMbStudio — MB place relations are sparse, own fetch, no sibling guard (#339)', () => {
+    const metrics = RELOAD_COVERAGE_THRESHOLDS.map((t) => t.metric);
+    expect(metrics).not.toContain('tracksWithMbStudio');
   });
 
   it('maps each metric to the stage that produces it', () => {

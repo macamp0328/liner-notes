@@ -34,15 +34,20 @@ export interface CoverageThreshold {
  * are best-effort external sources — gated for "populated" (silently-zero) only.
  *
  * Deliberately omitted: genres, styles, nationality, releaseEvents,
- * deezerGain, Wikidata bio (#341), and tracksWithMbProductionCredits (#339). They are not in #178's
- * scope; add a row here to start gating one. Wikidata bio is intentionally ungated like nationality:
- * it is a best-effort external source that can legitimately resolve zero (transient outage, an
- * obscure collection), so a silently-zero floor would false-fail an otherwise healthy reload.
- * tracksWithMbProductionCredits is the same case: recording-level production credits can legitimately
- * be near-zero (MusicBrainz frequently models production at the release level), and the shared
- * MB-track-credit chain is already silently-zero-guarded by tracksWithMbRecordingArtists (same fetch
- * + write path), so a production floor would only add false-failure risk. Coverage is a known number
- * on `/stats`, not a gate.
+ * deezerGain, Wikidata bio (#341), tracksWithMbProductionCredits (#339), and tracksWithMbStudio
+ * (#339 slice 2). They are not in #178's scope; add a row here to start gating one. Wikidata bio is
+ * intentionally ungated like nationality: it is a best-effort external source that can legitimately
+ * resolve zero (transient outage, an obscure collection), so a silently-zero floor would false-fail
+ * an otherwise healthy reload. tracksWithMbProductionCredits is the same case: recording-level
+ * production credits can legitimately be near-zero (MusicBrainz frequently models production at the
+ * release level), and the shared MB-track-credit chain is already silently-zero-guarded by
+ * tracksWithMbRecordingArtists (same fetch + write path), so a production floor would only add
+ * false-failure risk. tracksWithMbStudio is the most extreme case: MusicBrainz recording→place
+ * relations are genuinely rare, and — unlike the production subset — this stage has its OWN
+ * `inc=place-rels` fetch, so there is no sibling silently-zero guard to ride. A minPct:0 floor would
+ * therefore false-fail any healthy reload whose collection simply has no MB studio data; its
+ * broken-fetch tripwire is the client parse unit test instead (a wrong JSON path can't extract a
+ * studio). Coverage is a known number on `/stats`, not a gate.
  */
 export const RELOAD_COVERAGE_THRESHOLDS: readonly CoverageThreshold[] = [
   { metric: 'releasesWithOriginalYear', stage: 'master-data', minPct: 90 },

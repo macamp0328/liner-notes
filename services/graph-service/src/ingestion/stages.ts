@@ -17,6 +17,7 @@ import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
 import { enrichTrackMusicBrainz } from '../enrichment/track-musicbrainz.js';
 import { enrichTrackWorks } from '../enrichment/track-works.js';
 import { enrichTrackRecordingArtists } from '../enrichment/track-recording-artists.js';
+import { enrichTrackRecordingPlaces } from '../enrichment/track-recording-places.js';
 import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
 import { enrichTrackDeezer } from '../enrichment/track-deezer.js';
 import { enrichNationality } from '../enrichment/artist-nationality.js';
@@ -44,6 +45,7 @@ export type ReloadStageName =
   | 'track-musicbrainz'
   | 'track-works'
   | 'track-recording-artists'
+  | 'track-recording-places'
   | 'track-acousticbrainz'
   | 'track-deezer'
   | 'mb-artist-id'
@@ -338,6 +340,25 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
       if (!ctx.musicbrainz) return null;
       return {
         ...(await enrichTrackRecordingArtists(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)),
+      };
+    },
+  },
+  {
+    // #339 (slice 2): attribute MusicBrainz recording-level studios to the specific Track from its
+    // place-rels (`recorded at` / `mixed at` → a Place). Deps ONLY track-musicbrainz (for the
+    // recordingMbid it queries) — unlike track-recording-artists it needs no mb-artist-id, because
+    // studios MERGE by name (not a person-MBID join) and the Place's coordinates come straight off the
+    // relation. Holds `musicbrainz` (shared rate limiter) and `track` (its batched write touches ≥2
+    // Track nodes plus a Studio per tx — the same deadlock class as the other batched Track writers,
+    // so it serialises with them on the node-lock lane). A scheduler leaf: nothing deps it.
+    name: 'track-recording-places',
+    deps: ['track-musicbrainz'],
+    resources: ['musicbrainz', 'track'],
+    sources: ['musicbrainz'],
+    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
+      if (!ctx.musicbrainz) return null;
+      return {
+        ...(await enrichTrackRecordingPlaces(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)),
       };
     },
   },
