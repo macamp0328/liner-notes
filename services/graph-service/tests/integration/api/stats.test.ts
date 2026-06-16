@@ -144,6 +144,14 @@ describe('GET /api/v1/stats', () => {
       enrichment.tracksWithMbRecordingArtists.covered,
     );
 
+    // #339 (slice 2): MB studio coverage shares the recordingMbid-gated denominator; this seed has no
+    // MB studio edges, so a well-formed CoverageMetric reads covered 0 over that denominator (not a
+    // crash, not null) — proving the metric is wired even when legitimately empty.
+    expect(enrichment.tracksWithMbStudio.applicable).toBe(
+      enrichment.tracksWithRecordingMbid.covered,
+    );
+    expect(enrichment.tracksWithMbStudio.covered).toBe(0);
+
     // tempo/deezer denominators are the upstream mbid/isrc gates (1 each here).
     expect(enrichment.tracksWithTempo).toEqual({ covered: 1, applicable: 1, pct: 100 });
     expect(enrichment.tracksWithDeezerBpm).toEqual({ covered: 1, applicable: 1, pct: 100 });
