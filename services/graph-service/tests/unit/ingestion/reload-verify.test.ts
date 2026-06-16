@@ -79,6 +79,8 @@ function makeStats(
     tracksWithWork: cov(40, 60),
     // #335: clears the minPct:0 (silently-zero) bar — covered>0 over recordingMbid-bearing tracks.
     tracksWithMbRecordingArtists: cov(35, 60),
+    // #339: production subset, measured but ungated (not in RELOAD_COVERAGE_THRESHOLDS).
+    tracksWithMbProductionCredits: cov(18, 60),
     worksWithMultipleRecordings: 8,
     // #380: clears the minPct:0 (silently-zero) bar — covered>0 over writer-bearing Works.
     worksWithWriterLinks: cov(25, 40),
@@ -94,6 +96,10 @@ function makeStats(
     groupsWithMembers: 4,
     // #391: ungated raw count (surfaced in /stats only, like memberOfEdges).
     influencedByEdges: 6,
+    // #419: ungated raw count — the resolution denominator for influencedByEdges.
+    influencedByCandidates: 60,
+    // #392: ungated raw count — the Wikidata band-membership graph.
+    membershipEdges: 5,
   };
   return {
     counts: {
@@ -127,6 +133,11 @@ describe('RELOAD_COVERAGE_THRESHOLDS', () => {
     expect(byMetric['tracksWithDeezerBpm']?.minPct).toBe(0);
     // #380: WROTE coverage is best-effort → silently-zero protection only.
     expect(byMetric['worksWithWriterLinks']?.minPct).toBe(0);
+  });
+
+  it('does NOT gate tracksWithMbProductionCredits — it can legitimately be near-zero (#339)', () => {
+    const metrics = RELOAD_COVERAGE_THRESHOLDS.map((t) => t.metric);
+    expect(metrics).not.toContain('tracksWithMbProductionCredits');
   });
 
   it('maps each metric to the stage that produces it', () => {

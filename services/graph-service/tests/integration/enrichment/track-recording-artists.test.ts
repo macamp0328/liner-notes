@@ -5,6 +5,7 @@ import { clearGraph } from '../../fixtures/loader.js';
 import { getDriver } from '../../../src/db/client.js';
 import { enrichTrackRecordingArtists } from '../../../src/enrichment/track-recording-artists.js';
 import { resetRecordingArtistsEnrichment } from '../../../src/db/track-recording-artists-repository.js';
+import { getReleasesByCredit } from '../../../src/db/repositories/explore-repository.js';
 import type {
   MbRecordingArtist,
   MusicBrainzClient,
@@ -171,6 +172,40 @@ describe('track-recording-artists enrichment (#335, real Neo4j)', () => {
        RETURN count(c) AS c`,
     );
     expect(discogsEdge).toBe(1);
+  });
+
+  it('pushes a recording-level production credit to track scope and surfaces it via /explore/producer (#339)', async () => {
+    // Own Release + Track + recording, independent of the shared seed's counts.
+    const session = getDriver().session();
+    try {
+      await session.run(
+        `CREATE (r:Release {discogsId: 9100, title: 'Prod Album'})
+         CREATE (t:Track {position: 'A1', releaseDiscogsId: 9100, title: 'Prod Track', recordingMbid: 'rec-producer'})
+         CREATE (r)-[:HAS_TRACK]->(t)`,
+      );
+    } finally {
+      await session.close();
+    }
+    const prodClient = makeMbClient({
+      'rec-producer': [
+        { mbid: 'mb-prod', name: 'Studio Producer', role: 'producer', attributes: [] },
+      ],
+    });
+
+    await enrichTrackRecordingArtists(prodClient, getDriver(), silentLogger);
+
+    // The credit lands track-scoped, MB-sourced, categorized 'producer' by parseRoleCategory.
+    const producerEdge = await scalar(
+      `MATCH (:Musician {musicbrainzId: 'mb-prod'})
+             -[c:CREDITED_ON {scope: 'track', source: 'musicbrainz', roleCategory: 'producer'}]->
+             (:Track {recordingMbid: 'rec-producer'})
+       WHERE c.role = 'producer' RETURN count(c) AS c`,
+    );
+    expect(producerEdge).toBe(1);
+
+    // And it surfaces through the (broadened) producer route, rolled up to its Release.
+    const releases = await getReleasesByCredit(getDriver(), 'Studio Producer', 'producer');
+    expect(releases.map((r) => r.discogsId)).toContain(9100);
   });
 
   it('reset removes MB credits and fallback Musicians but keeps the resolved person', async () => {

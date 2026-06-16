@@ -63,6 +63,7 @@ const STATS = {
     tracksWithRecordingMbid: { covered: 70, applicable: 100, pct: 70 },
     tracksWithWork: { covered: 42, applicable: 70, pct: 60 },
     tracksWithMbRecordingArtists: { covered: 28, applicable: 70, pct: 40 },
+    tracksWithMbProductionCredits: { covered: 14, applicable: 70, pct: 20 },
     worksWithMultipleRecordings: 4,
     worksWithWriterLinks: { covered: 18, applicable: 30, pct: 60 },
     wroteEdges: 22,
@@ -75,6 +76,10 @@ const STATS = {
     memberOfEdges: 9,
     groupsWithMembers: 3,
     influencedByEdges: 7,
+    // #419 resolution denominator — the full-payload toEqual below also proves the response schema
+    // serialises it (a field absent from the schema would be stripped and diverge from STATS).
+    influencedByCandidates: 95,
+    membershipEdges: 5,
   },
 };
 

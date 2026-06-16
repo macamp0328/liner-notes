@@ -219,9 +219,11 @@ export async function getReleasesByMusician(
 
 /**
  * Releases where this person is credited in a specific role category (e.g.
- * 'producer', 'engineer'). Same shape as getReleasesByMusician — producers and
- * engineers are Musician nodes too — but filtered by CREDITED_ON.roleCategory,
- * which is exactly what parseRoleCategory() tags each credit with at ingest.
+ * 'producer', 'engineer'), filtered by CREDITED_ON.roleCategory — exactly what
+ * parseRoleCategory() tags each credit with at ingest. Includes both release-scoped
+ * credits AND track-scoped ones (track→release via HAS_TRACK), deduped per release,
+ * mirroring getReleasesByMusician: MusicBrainz pushes producer/engineer credits down
+ * to the Track (#339), so a release-only match would miss them.
  */
 export async function getReleasesByCredit(
   driver: Driver,
@@ -232,14 +234,23 @@ export async function getReleasesByCredit(
   try {
     const result = await session.run(
       `
-      MATCH (m:Musician)-[c:CREDITED_ON]->(r:Release)
-      WHERE toLower(m.name) = toLower($name) AND c.roleCategory = $roleCategory
+      MATCH (m:Musician)-[c:CREDITED_ON]->(target)
+      WHERE toLower(m.name) = toLower($name)
+        AND c.roleCategory = $roleCategory
+        AND (target:Release OR target:Track)
+      OPTIONAL MATCH (rTrack:Release)-[:HAS_TRACK]->(target)
+      WITH (CASE WHEN target:Release THEN target ELSE rTrack END) AS r, c
+      WHERE r IS NOT NULL
+      // One representative credit per release so displayRole + roleCategory come from the SAME edge.
+      WITH r, c ORDER BY c.displayRole, c.roleCategory
+      WITH r, head(collect({instrument: c.displayRole, role: c.roleCategory})) AS credit
       OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
-      RETURN r.discogsId AS discogsId, r.title AS title, a.name AS artist,
+      WITH r, credit, min(a.name) AS artist
+      RETURN r.discogsId AS discogsId, r.title AS title, artist,
              coalesce(r.originalYear, r.pressingYear) AS pressingYear,
              r.format AS format, r.thumbUrl AS thumbUrl,
-             c.displayRole AS instrument, c.roleCategory AS role
-      ORDER BY pressingYear
+             credit.instrument AS instrument, credit.role AS role
+      ORDER BY pressingYear, discogsId
       `,
       { name, roleCategory },
     );

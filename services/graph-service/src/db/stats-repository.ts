@@ -78,6 +78,11 @@ export interface StatsData {
     // #335: track credits pushed down from MB recording artist-rels. Gateable: covered/applicable
     // over tracks that have a recordingMbid (the upstream gate), mirroring tracksWithWork.
     tracksWithMbRecordingArtists: CoverageMetric;
+    // #339: the production subset of the above — tracks with an MB-sourced track credit whose
+    // roleCategory is producer/engineer. A CoverageMetric so it reads on /stats (denominator = tracks
+    // with a recordingMbid), but intentionally NOT verify-gated (recording-level production can
+    // legitimately be near-zero — see reload-verify.ts).
+    tracksWithMbProductionCredits: CoverageMetric;
     worksWithMultipleRecordings: number;
     // Songwriter reconciliation (#380). worksWithWriterLinks IS gateable (covered/applicable over
     // Works whose writers were captured — those with ≥1 WROTE edge). wroteEdges is a raw count
@@ -97,11 +102,18 @@ export interface StatsData {
     memberOfEdges: number;
     groupsWithMembers: number;
     // Wikidata influence graph (#391). A derived "influence within my collection" graph, sparse by
-    // design (only edges between two in-collection artists survive the QID join). A raw count — like
-    // memberOfEdges/wroteEdges, INFLUENCED_BY has no knowable denominator — so it is intentionally
-    // not a CoverageMetric and the verify gate skips it (Wikidata-derived data is ungated; it can
-    // legitimately resolve zero for an obscure collection).
+    // design (only edges between two in-collection artists survive the QID join). Both are raw counts
+    // — like memberOfEdges/wroteEdges, neither is a CoverageMetric and the verify gate skips them
+    // (Wikidata-derived data is ungated; it can legitimately resolve zero for an obscure collection).
+    // influencedByCandidates (#419) is the resolution denominator: total captured P737 references
+    // (the join's input), so influencedByEdges/influencedByCandidates is the in-collection hit rate —
+    // surfaced so a low influencedByEdges no longer needs a manual prod query to explain.
     influencedByEdges: number;
+    influencedByCandidates: number;
+    // Wikidata band-membership graph (#392). The dated Artist→Artist MEMBER_OF {source:"wikidata"}
+    // edge — distinct from the Discogs Musician→Musician memberOfEdges above. Same rationale as
+    // influencedByEdges: a raw count, no knowable denominator, ungated (can legitimately be zero).
+    membershipEdges: number;
   };
 }
 
@@ -192,6 +204,11 @@ const TRACK_QUERY = `
     count(CASE WHEN EXISTS {
       (t)<-[c:CREDITED_ON]-(:Musician) WHERE c.source = 'musicbrainz' AND c.scope = 'track'
     } THEN 1 END) AS mbRecordingArtistsCovered,
+    // #339: the production subset — an MB track credit categorized producer/engineer.
+    count(CASE WHEN EXISTS {
+      (t)<-[c:CREDITED_ON]-(:Musician)
+      WHERE c.source = 'musicbrainz' AND c.scope = 'track' AND c.roleCategory IN ['producer', 'engineer']
+    } THEN 1 END) AS mbProductionCreditsCovered,
     count(CASE WHEN t.isrc IS NOT NULL THEN 1 END) AS isrcCovered,
     count(CASE WHEN t.recordingMbid IS NOT NULL AND t.tempo IS NOT NULL THEN 1 END) AS tempoCovered,
     count(CASE WHEN t.isrc IS NOT NULL AND t.deezerBpm IS NOT NULL THEN 1 END) AS deezerCovered,
@@ -250,6 +267,25 @@ const MEMBER_OF_QUERY = `
 const INFLUENCED_BY_QUERY = `
   MATCH (:Artist)-[r:INFLUENCED_BY]->(:Artist)
   RETURN count(r) AS influencedByEdges`;
+
+// INFLUENCED_BY candidate denominator (#419) — total captured P737 "influenced by" references across
+// all Artists (the resolution input; a QID repeated across artists counts each time). The
+// artist-influences join turns these into influencedByEdges when the target is an in-collection
+// artist, dropping the rest by design — surfaced here so that resolution ratio is self-evident
+// without a manual prod query. A raw count with no coverage gate, like influencedByEdges; coalesce
+// keeps it 0 over an empty graph (sum over zero matched rows would otherwise be null).
+const INFLUENCED_BY_CANDIDATES_QUERY = `
+  MATCH (a:Artist)
+  WHERE a.influencedByQids IS NOT NULL
+  RETURN coalesce(sum(size(a.influencedByQids)), 0) AS influencedByCandidates`;
+
+// Wikidata band-membership edge count (#392) — the dated Artist→Artist MEMBER_OF {source:"wikidata"}
+// graph. The `source` predicate + the Artist→Artist labels keep it disjoint from MEMBER_OF_QUERY's
+// Discogs Musician→Musician scan, so the two counts never overlap. Empty-graph safe (mirrors
+// INFLUENCED_BY_QUERY).
+const MEMBERSHIP_EDGE_QUERY = `
+  MATCH (:Artist)-[r:MEMBER_OF {source: 'wikidata'}]->(:Artist)
+  RETURN count(r) AS membershipEdges`;
 
 // Nationality (ORIGIN_COUNTRY) coverage for one people-label, split by the
 // `source` stored on the relationship. One scan per label; the applicable gate
@@ -323,6 +359,8 @@ export async function getStats(driver: Driver): Promise<StatsData> {
     memberOf,
     wrote,
     influencedBy,
+    influencedByCand,
+    membership,
   ] = await Promise.all([
     runCounts(driver, RELEASE_QUERY),
     runCounts(driver, ARTIST_QUERY),
@@ -337,6 +375,8 @@ export async function getStats(driver: Driver): Promise<StatsData> {
     runCounts(driver, MEMBER_OF_QUERY),
     runCounts(driver, WROTE_EDGE_QUERY),
     runCounts(driver, INFLUENCED_BY_QUERY),
+    runCounts(driver, INFLUENCED_BY_CANDIDATES_QUERY),
+    runCounts(driver, MEMBERSHIP_EDGE_QUERY),
   ]);
 
   const n = (m: Map<string, number>, key: string): number => m.get(key) ?? 0;
@@ -419,6 +459,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       // Applicable denominator is the upstream gate (a credit can only be pushed down to a track that
       // has a recordingMbid), mirroring tracksWithWork.
       tracksWithMbRecordingArtists: coverage(n(track, 'mbRecordingArtistsCovered'), mbidCovered),
+      tracksWithMbProductionCredits: coverage(n(track, 'mbProductionCreditsCovered'), mbidCovered),
       worksWithMultipleRecordings: n(work, 'multiRecording'),
       // Applicable denominator is the upstream gate: a Work can only be linked if its writers were
       // captured (#336). covered = those Works with ≥1 WROTE edge (#380).
@@ -438,6 +479,8 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       memberOfEdges: n(memberOf, 'memberOfEdges'),
       groupsWithMembers: n(musician, 'groupsWithMembers'),
       influencedByEdges: n(influencedBy, 'influencedByEdges'),
+      influencedByCandidates: n(influencedByCand, 'influencedByCandidates'),
+      membershipEdges: n(membership, 'membershipEdges'),
     },
   };
 }

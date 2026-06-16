@@ -69,6 +69,18 @@ describe('explore routes', () => {
       expect(res.statusCode).toBe(200);
       expect(JSON.parse(res.payload)).toEqual([]);
     });
+
+    it('surfaces a track-scoped MB production credit via the HAS_TRACK roll-up (#339)', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/producer/Track%20Producer%20Person',
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as { discogsId: number; role: string | null }[];
+      // Credited only at TRACK scope on a track of 7000001 — release-only matching would drop it.
+      expect(body.map((r) => r.discogsId)).toContain(7000001);
+      expect(body.every((r) => r.role === 'producer')).toBe(true);
+    });
   });
 
   describe('GET /api/v1/explore/engineer/:name', () => {
@@ -84,6 +96,17 @@ describe('explore routes', () => {
       const res = await app.inject({ method: 'GET', url: '/api/v1/explore/engineer/__nobody__' });
       expect(res.statusCode).toBe(200);
       expect(JSON.parse(res.payload)).toEqual([]);
+    });
+
+    it('surfaces a track-scoped MB engineer credit via the HAS_TRACK roll-up (#339)', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/engineer/Track%20Engineer%20Person',
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as { discogsId: number; role: string | null }[];
+      expect(body.map((r) => r.discogsId)).toContain(7000001);
+      expect(body.every((r) => r.role === 'engineer')).toBe(true);
     });
   });
 

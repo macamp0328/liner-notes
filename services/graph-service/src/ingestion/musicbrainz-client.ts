@@ -56,16 +56,27 @@ export interface MbWorkWriter {
 }
 
 /**
- * A performance credit on a MusicBrainz recording (#335), with the performer's MB artist MBID. The
- * MBID is what lets the credit be reconciled to our Discogs-keyed Musician nodes deterministically
- * (the `mb-artist-id` join, #380) — never name-matching.
+ * A track-attributable credit on a MusicBrainz recording, with the person's MB artist MBID. Covers
+ * both **performance** credits (#335: `performer`/`instrument`/`vocal`) and **production** credits
+ * (#339: producer + engineer family, mapped to a canonical role string — see
+ * `RECORDING_PRODUCTION_ROLE_MAP`). The MBID is what lets the credit be reconciled to our
+ * Discogs-keyed Musician nodes deterministically (the `mb-artist-id` join, #380) — never name-matching.
  */
 export interface MbRecordingArtist {
   mbid: string;
   name: string;
-  /** The MB relation type: `performer` | `instrument` | `vocal`. */
+  /**
+   * The role token. For performance relations this is the raw MB relation type
+   * (`performer` | `instrument` | `vocal`); for production relations it is the canonical role string
+   * the MB type maps to (e.g. `producer`, `recording engineer`).
+   */
   role: string;
-  /** Instrument name(s) for `instrument`, vocal type(s) for `vocal`; empty for `performer`. */
+  /**
+   * Performance: instrument name(s) for `instrument`, vocal type(s) for `vocal`, empty for
+   * `performer`. Production: always empty — MB production attributes are qualifiers
+   * (`additional`/`co`/`executive`/…), not credit tokens, so they are dropped to keep the grouping's
+   * `attributes ?? [role]` tokenization on the canonical role (#339).
+   */
   attributes: string[];
 }
 
@@ -192,10 +203,34 @@ const MIN_RECORDING_SEARCH_SCORE = 90;
 const WORK_WRITER_ROLES = new Set(['composer', 'lyricist', 'writer']);
 /**
  * Recording artist-relation types we treat as track-attributable performance credits (#335).
- * Production/engineering roles (producer, mix, recording, mastering, …) are correctly release-scoped
- * and deliberately excluded — they are NOT pushed down to a track.
  */
 const RECORDING_PERFORMANCE_ROLES = new Set(['performer', 'instrument', 'vocal']);
+
+/**
+ * Recording-level production/engineering artist-relation types we now push down to track scope (#339),
+ * each mapped to a canonical role string. MusicBrainz models these at the recording level — genuinely
+ * track-attributable, unlike Discogs's album-level production credits. The mapping is chosen so the
+ * existing `parseRoleCategory` buckets each as `producer`/`engineer` (every engineer-family value
+ * contains the substring `engineer`) and `parseDisplayRole` reads well. The bare `engineer` umbrella
+ * is included on purpose — many recordings credit a generic engineer with no sub-role, and omitting it
+ * would silently drop real data.
+ *
+ * Deliberately EXCLUDED (kept release-scoped or out of this slice): `mastering`/lacquer/cover-art
+ * (inherently whole-release; `mastering` is also deprecated at recording level in MB), `remixer` (a
+ * derivative recording — Slice 3 lineage), the `arranger` family (maps to the composer/songwriter
+ * axis, #380), and the niche `programming`/`editor`/`sound effects`. MB production attributes
+ * (`additional`/`co`/`executive`/…) are qualifiers, not credit tokens, and are dropped (see
+ * `getArtistsByRecordingMbid`).
+ */
+const RECORDING_PRODUCTION_ROLE_MAP: ReadonlyMap<string, string> = new Map([
+  ['producer', 'producer'],
+  ['engineer', 'engineer'],
+  ['recording', 'recording engineer'],
+  ['mix', 'mixing engineer'],
+  ['audio', 'audio engineer'],
+  ['sound', 'sound engineer'],
+  ['balance', 'balance engineer'],
+]);
 
 /** Convert a MusicBrainz millisecond length to whole seconds; null for missing or non-positive values. */
 function msToSeconds(ms: number | null | undefined): number | null {
@@ -434,15 +469,16 @@ export class MusicBrainzClient {
   }
 
   /**
-   * Fetch the performance credits (performer / instrument / vocal) of a MusicBrainz recording from
-   * its artist relationships (#335). Uses `inc=artist-rels`; reads `relations[]` whose `type` is a
-   * performance role — production/engineering roles (producer, mix, recording, mastering, …) are
-   * release-scoped and deliberately excluded, so they are never pushed down to a track. The
-   * instrument/vocal name lives in `attributes`; `performer` carries none. Each performer's MB
-   * artist MBID is retained so the credit reconciles to our Discogs-keyed Musician nodes
-   * deterministically (the `mb-artist-id` join, #380) — never name-matching. Empty array on no
-   * performance credits, an open breaker, or a 404 (a known recordingMbid that no longer resolves is
-   * not retried until the staleness window expires).
+   * Fetch the track-attributable credits of a MusicBrainz recording from its artist relationships.
+   * Uses `inc=artist-rels`; reads `relations[]` whose `type` is either a **performance** role
+   * (#335: `performer`/`instrument`/`vocal`, instrument/vocal name in `attributes`) or a
+   * **production** role (#339: `RECORDING_PRODUCTION_ROLE_MAP` — producer + engineer family, mapped
+   * to a canonical role string with attributes dropped). Roles outside both sets (`mastering`,
+   * `remixer`, `arranger`, …) are not pushed down to a track. Each person's MB artist MBID is retained
+   * so the credit reconciles to our Discogs-keyed Musician nodes deterministically (the `mb-artist-id`
+   * join, #380) — never name-matching. Empty array on no track-attributable credits, an open breaker,
+   * or a 404 (a known recordingMbid that no longer resolves is not retried until the staleness window
+   * expires).
    */
   async getArtistsByRecordingMbid(recordingMbid: string): Promise<MbRecordingArtist[]> {
     const endpoint = `${BASE_URL}/recording/${encodeURIComponent(recordingMbid)}?inc=artist-rels&fmt=json`;
@@ -458,16 +494,27 @@ export class MusicBrainzClient {
 
     const artists: MbRecordingArtist[] = [];
     for (const rel of response.relations ?? []) {
-      if (
-        RECORDING_PERFORMANCE_ROLES.has(rel.type) &&
-        rel['target-type'] === 'artist' &&
-        rel.artist?.id !== undefined
-      ) {
+      if (rel['target-type'] !== 'artist' || rel.artist?.id === undefined) continue;
+
+      if (RECORDING_PERFORMANCE_ROLES.has(rel.type)) {
         artists.push({
           mbid: rel.artist.id,
           name: rel.artist.name,
           role: rel.type,
           attributes: rel.attributes ?? [],
+        });
+        continue;
+      }
+
+      const productionRole = RECORDING_PRODUCTION_ROLE_MAP.get(rel.type);
+      if (productionRole !== undefined) {
+        // Qualifier attributes (additional/co/executive/…) are dropped: the credit token is the
+        // canonical role, so the grouping must tokenize on `role`, not on `attributes` (#339).
+        artists.push({
+          mbid: rel.artist.id,
+          name: rel.artist.name,
+          role: productionRole,
+          attributes: [],
         });
       }
     }

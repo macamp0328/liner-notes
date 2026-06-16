@@ -135,6 +135,31 @@ describe('mergeRecordingArtistCredits', () => {
     expect(params.credits[0]!.instrument).toBe('guitar');
   });
 
+  it('buckets production credits into producer/engineer roleCategory with a null instrument (#339)', async () => {
+    const { session, runSpy } = makeMockSession();
+    const productionCredits: RecordingArtistCredit[] = [
+      { mbid: 'mb-p', name: 'A Producer', role: 'producer' },
+      { mbid: 'mb-e', name: 'An Engineer', role: 'recording engineer' },
+    ];
+
+    await mergeRecordingArtistCredits(makeMockDriver(session), 'rec-1', ['e1'], productionCredits);
+
+    const [, params] = runSpy.mock.calls[0] as [
+      string,
+      { credits: Array<Record<string, unknown>> },
+    ];
+    expect(params.credits[0]).toMatchObject({
+      role: 'producer',
+      roleCategory: 'producer',
+      instrument: null,
+    });
+    expect(params.credits[1]).toMatchObject({
+      role: 'recording engineer',
+      roleCategory: 'engineer',
+      instrument: null,
+    });
+  });
+
   it('skips the query when there are no credits', async () => {
     const { session, runSpy } = makeMockSession();
     await mergeRecordingArtistCredits(makeMockDriver(session), 'rec-1', ['e1'], []);
