@@ -34,11 +34,15 @@ export interface CoverageThreshold {
  * are best-effort external sources — gated for "populated" (silently-zero) only.
  *
  * Deliberately omitted: genres, styles, nationality, releaseEvents,
- * deezerGain, and Wikidata bio (#341). They are not in #178's scope; add a row here to start
- * gating one. Wikidata bio is intentionally ungated like nationality: it is a best-effort external
- * source that can legitimately resolve zero (transient outage, an obscure collection), so a
- * silently-zero floor would false-fail an otherwise healthy reload. Coverage is a known number on
- * `/stats`, not a gate.
+ * deezerGain, Wikidata bio (#341), and tracksWithMbProductionCredits (#339). They are not in #178's
+ * scope; add a row here to start gating one. Wikidata bio is intentionally ungated like nationality:
+ * it is a best-effort external source that can legitimately resolve zero (transient outage, an
+ * obscure collection), so a silently-zero floor would false-fail an otherwise healthy reload.
+ * tracksWithMbProductionCredits is the same case: recording-level production credits can legitimately
+ * be near-zero (MusicBrainz frequently models production at the release level), and the shared
+ * MB-track-credit chain is already silently-zero-guarded by tracksWithMbRecordingArtists (same fetch
+ * + write path), so a production floor would only add false-failure risk. Coverage is a known number
+ * on `/stats`, not a gate.
  */
 export const RELOAD_COVERAGE_THRESHOLDS: readonly CoverageThreshold[] = [
   { metric: 'releasesWithOriginalYear', stage: 'master-data', minPct: 90 },

@@ -104,6 +104,7 @@ describe('getStats', () => {
         mbidCovered: int(70),
         worksCovered: int(42),
         mbRecordingArtistsCovered: int(28),
+        mbProductionCreditsCovered: int(14),
         isrcCovered: int(60),
         tempoCovered: int(35),
         deezerCovered: int(30),
@@ -150,6 +151,12 @@ describe('getStats', () => {
       covered: 28,
       applicable: 70,
       pct: 40,
+    });
+    // #339 MB production-credit subset: same recordingMbid-gated denominator (14/70).
+    expect(stats.enrichment.tracksWithMbProductionCredits).toEqual({
+      covered: 14,
+      applicable: 70,
+      pct: 20,
     });
     // #380 songwriter reconciliation: WROTE coverage over writer-bearing Works (30/40) + raw count.
     expect(stats.enrichment.worksWithWriterLinks).toEqual({ covered: 30, applicable: 40, pct: 75 });
