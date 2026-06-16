@@ -161,13 +161,18 @@ describe('getReleasesByCredit', () => {
     });
   });
 
-  it('filters by name and roleCategory', async () => {
+  it('filters by name and roleCategory, and rolls up track-scoped credits via HAS_TRACK (#339)', async () => {
     const { session, runSpy } = makeMockSession([makeResult([])]);
     const driver = makeMockDriver(session);
     await getReleasesByCredit(driver, 'Andrew Sarlo', 'producer');
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(query).toContain('c.roleCategory = $roleCategory');
     expect(query).toContain('toLower(m.name) = toLower($name)');
+    // Track-scoped MB production credits (#339) are included: match Release|Track, roll a Track up to
+    // its Release via HAS_TRACK, and dedupe to one representative credit per release.
+    expect(query).toContain('target:Release OR target:Track');
+    expect(query).toContain('(rTrack:Release)-[:HAS_TRACK]->(target)');
+    expect(query).toContain('head(collect(');
     expect(params).toEqual({ name: 'Andrew Sarlo', roleCategory: 'producer' });
   });
 

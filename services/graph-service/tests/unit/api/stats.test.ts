@@ -63,6 +63,7 @@ const STATS = {
     tracksWithRecordingMbid: { covered: 70, applicable: 100, pct: 70 },
     tracksWithWork: { covered: 42, applicable: 70, pct: 60 },
     tracksWithMbRecordingArtists: { covered: 28, applicable: 70, pct: 40 },
+    tracksWithMbProductionCredits: { covered: 14, applicable: 70, pct: 20 },
     worksWithMultipleRecordings: 4,
     worksWithWriterLinks: { covered: 18, applicable: 30, pct: 60 },
     wroteEdges: 22,

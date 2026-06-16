@@ -12,11 +12,12 @@ export interface RecordingForArtists {
 }
 
 /**
- * One performance credit ready to write: a person keyed by their MB artist MBID, with a single
+ * One track-attributable credit ready to write: a person keyed by their MB artist MBID, with a single
  * combined `role` string (the enrichment aggregates a person's instrument/vocal/performer relations
- * into one credit, matching the one-`CREDITED_ON`-per-(person,track) model). The derived
- * display/category/instrument props are computed here from `role`, reusing the same transforms as
- * the Discogs credit path so MB credits stay queryable via `/explore/instrument/:name`.
+ * and any production relations into one credit, matching the one-`CREDITED_ON`-per-(person,track)
+ * model). The derived display/category/instrument props are computed here from `role`, reusing the
+ * same transforms as the Discogs credit path so MB performance credits stay queryable via
+ * `/explore/instrument/:name` and MB production credits via `/explore/producer|engineer/:name` (#339).
  */
 export interface RecordingArtistCredit {
   mbid: string;
@@ -60,8 +61,8 @@ export async function getTracksForRecordingArtistsEnrichment(
 }
 
 /**
- * Write track-scoped `CREDITED_ON` edges for a recording's performance credits, stamping
- * `recordingArtistsFetchedAt` on every candidate Track.
+ * Write track-scoped `CREDITED_ON` edges for a recording's performance and production credits (#339),
+ * stamping `recordingArtistsFetchedAt` on every candidate Track.
  *
  * Person identity is a deterministic MB-artist-MBID join (#380), never name-matching: a Musician is
  * MERGEd by `musicbrainzId`, so an in-collection person already carrying that MBID (stamped by the

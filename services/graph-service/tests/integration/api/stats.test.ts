@@ -135,6 +135,15 @@ describe('GET /api/v1/stats', () => {
     expect(enrichment.tracksWithRecordingMbid.covered).toBe(1);
     expect(enrichment.tracksWithIsrc.covered).toBe(1);
 
+    // #339: production-credit subset of the MB track credits — a well-formed CoverageMetric over the
+    // same recordingMbid-gated denominator as tracksWithMbRecordingArtists (covered never exceeds it).
+    expect(enrichment.tracksWithMbProductionCredits.applicable).toBe(
+      enrichment.tracksWithMbRecordingArtists.applicable,
+    );
+    expect(enrichment.tracksWithMbProductionCredits.covered).toBeLessThanOrEqual(
+      enrichment.tracksWithMbRecordingArtists.covered,
+    );
+
     // tempo/deezer denominators are the upstream mbid/isrc gates (1 each here).
     expect(enrichment.tracksWithTempo).toEqual({ covered: 1, applicable: 1, pct: 100 });
     expect(enrichment.tracksWithDeezerBpm).toEqual({ covered: 1, applicable: 1, pct: 100 });

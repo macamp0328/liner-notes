@@ -102,6 +102,29 @@ describe('enrichTrackRecordingArtists', () => {
     );
   });
 
+  it('combines a person’s performance + production relations into one credit; a pure producer stays clean (#339)', async () => {
+    mockGetTracks.mockResolvedValue([{ recordingMbid: 'rec-1', trackElementIds: ['e1'] }]);
+    const client = makeMbClient(async () => [
+      // same person plays bass AND produces → one combined credit (one CREDITED_ON per person/track)
+      { mbid: 'a-1', name: 'Multi', role: 'instrument', attributes: ['bass'] },
+      { mbid: 'a-1', name: 'Multi', role: 'producer', attributes: [] },
+      // a distinct pure-producer keeps a clean 'producer' role token
+      { mbid: 'a-2', name: 'Just Producer', role: 'producer', attributes: [] },
+    ]);
+
+    await enrichTrackRecordingArtists(client, fakeDriver, silentLogger);
+
+    expect(mockMergeCredits).toHaveBeenCalledWith(
+      fakeDriver,
+      'rec-1',
+      ['e1'],
+      [
+        { mbid: 'a-1', name: 'Multi', role: 'bass, producer' },
+        { mbid: 'a-2', name: 'Just Producer', role: 'producer' },
+      ],
+    );
+  });
+
   it('skips and stamps fetched when the recording has no performance relations', async () => {
     mockGetTracks.mockResolvedValue([{ recordingMbid: 'rec-x', trackElementIds: ['e1'] }]);
     const client = makeMbClient(async () => []);

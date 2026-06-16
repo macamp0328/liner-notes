@@ -137,6 +137,25 @@ export async function seedExploreEnrichment(driver: Driver): Promise<void> {
        SET t.deezerFetched = true, t.deezerBpm = 120.0, t.deezerGain = -10.0`,
     );
 
+    // --- track-scoped MB production credits (#339) ---------------------------
+    // Producer/engineer credits MusicBrainz attributes at the RECORDING level, written track-scoped
+    // (source: 'musicbrainz') on a track of 7000001. Distinct people not release-credited as
+    // producer/engineer, so /explore/producer|engineer can only surface them via the HAS_TRACK
+    // roll-up the #339 broadening added. Mirrors mergeRecordingArtistCredits' edge shape.
+    await session.run(
+      `UNWIND [
+         {mbid: 'mb-prod-1', name: 'Track Producer Person', role: 'producer', roleCategory: 'producer'},
+         {mbid: 'mb-eng-1', name: 'Track Engineer Person', role: 'recording engineer', roleCategory: 'engineer'}
+       ] AS cr
+       MATCH (t:Track {position: 'A1', releaseDiscogsId: 7000001})
+       MERGE (m:Musician {musicbrainzId: cr.mbid})
+         ON CREATE SET m.name = cr.name
+       MERGE (m)-[co:CREDITED_ON]->(t)
+       SET co.role = cr.role, co.displayRole = cr.role, co.roleCategory = cr.roleCategory,
+           co.instrument = null, co.scope = 'track', co.source = 'musicbrainz',
+           co.recordingMbid = 'rec-a1'`,
+    );
+
     // --- person-level instruments (#393) -------------------------------------
     // An Artist whose Wikidata P1303 set, normalized onto the #333 family vocab and stored on
     // playsInstrument, includes bass + guitar — so /explore/instrument/:name surfaces them in the

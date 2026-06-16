@@ -78,6 +78,11 @@ export interface StatsData {
     // #335: track credits pushed down from MB recording artist-rels. Gateable: covered/applicable
     // over tracks that have a recordingMbid (the upstream gate), mirroring tracksWithWork.
     tracksWithMbRecordingArtists: CoverageMetric;
+    // #339: the production subset of the above — tracks with an MB-sourced track credit whose
+    // roleCategory is producer/engineer. A CoverageMetric so it reads on /stats (denominator = tracks
+    // with a recordingMbid), but intentionally NOT verify-gated (recording-level production can
+    // legitimately be near-zero — see reload-verify.ts).
+    tracksWithMbProductionCredits: CoverageMetric;
     worksWithMultipleRecordings: number;
     // Songwriter reconciliation (#380). worksWithWriterLinks IS gateable (covered/applicable over
     // Works whose writers were captured — those with ≥1 WROTE edge). wroteEdges is a raw count
@@ -199,6 +204,11 @@ const TRACK_QUERY = `
     count(CASE WHEN EXISTS {
       (t)<-[c:CREDITED_ON]-(:Musician) WHERE c.source = 'musicbrainz' AND c.scope = 'track'
     } THEN 1 END) AS mbRecordingArtistsCovered,
+    // #339: the production subset — an MB track credit categorized producer/engineer.
+    count(CASE WHEN EXISTS {
+      (t)<-[c:CREDITED_ON]-(:Musician)
+      WHERE c.source = 'musicbrainz' AND c.scope = 'track' AND c.roleCategory IN ['producer', 'engineer']
+    } THEN 1 END) AS mbProductionCreditsCovered,
     count(CASE WHEN t.isrc IS NOT NULL THEN 1 END) AS isrcCovered,
     count(CASE WHEN t.recordingMbid IS NOT NULL AND t.tempo IS NOT NULL THEN 1 END) AS tempoCovered,
     count(CASE WHEN t.isrc IS NOT NULL AND t.deezerBpm IS NOT NULL THEN 1 END) AS deezerCovered,
@@ -449,6 +459,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       // Applicable denominator is the upstream gate (a credit can only be pushed down to a track that
       // has a recordingMbid), mirroring tracksWithWork.
       tracksWithMbRecordingArtists: coverage(n(track, 'mbRecordingArtistsCovered'), mbidCovered),
+      tracksWithMbProductionCredits: coverage(n(track, 'mbProductionCreditsCovered'), mbidCovered),
       worksWithMultipleRecordings: n(work, 'multiRecording'),
       // Applicable denominator is the upstream gate: a Work can only be linked if its writers were
       // captured (#336). covered = those Works with ≥1 WROTE edge (#380).
