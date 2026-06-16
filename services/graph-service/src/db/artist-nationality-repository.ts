@@ -133,15 +133,28 @@ export async function setArtistNationality(
 
 /**
  * Set the ORIGIN_COUNTRY relationship on a Musician node.
- * Identifies by discogsId when available; falls back to name-only match.
- * Always stamps nationalityFetchedAt = datetime() (throttles retries of still-uncountried nodes).
  *
- * Deletes any existing ORIGIN_COUNTRY relationship before creating the new one
- * so that re-runs replace stale values rather than accumulating duplicates.
+ * Identity precedence (#426): discogsId → musicbrainzId → name. A node carrying a
+ * `musicbrainzId` (the MBID-keyed fallback Musicians track-recording-artists introduces,
+ * #420/#418) is matched by that unique, index-backed key — the same determinism the read
+ * side already uses (`getCountryByMbid`) — so the write never spills onto a same-named,
+ * distinct-MBID node. The name-only match is reserved for the genuine `id===0` Discogs
+ * population (no discogsId, no musicbrainzId); it is the ONE arm that can touch multiple
+ * nodes, hence its `m.discogsId IS NULL` guard. The MBID arm needs no such guard: the
+ * discogsId arm already wins for any discogsId-bearing row, so this arm is only reached for
+ * `discogsId === null` rows, and `musicbrainzId` lands exactly one node.
+ *
+ * The `musicbrainzId` check is truthy (not `!== null`) to mirror the caller's resolve-side
+ * predicate, so absent/`null`/`''` all fall through to the name path consistently — a `!== null`
+ * check would write to `{musicbrainzId: ''}` (matches nothing → silent no-op, never stamped).
+ *
+ * Always stamps nationalityFetchedAt = datetime() (throttles retries of still-uncountried nodes).
+ * Deletes any existing ORIGIN_COUNTRY relationship before creating the new one so that re-runs
+ * replace stale values rather than accumulating duplicates.
  */
 export async function setMusicianNationality(
   driver: Driver,
-  musician: Pick<UnenrichedMusician, 'discogsId' | 'name'>,
+  musician: UnenrichedMusician,
   countryCode: string | null,
   source: NationalitySource | null,
 ): Promise<void> {
@@ -150,7 +163,9 @@ export async function setMusicianNationality(
     const matchClause =
       musician.discogsId !== null
         ? `MATCH (m:Musician {discogsId: $discogsId})`
-        : `MATCH (m:Musician {name: $name}) WHERE m.discogsId IS NULL`;
+        : musician.musicbrainzId
+          ? `MATCH (m:Musician {musicbrainzId: $musicbrainzId})`
+          : `MATCH (m:Musician {name: $name}) WHERE m.discogsId IS NULL`;
 
     if (countryCode !== null) {
       await session.run(
@@ -163,6 +178,7 @@ export async function setMusicianNationality(
          SET rel.source = $source, m.nationalityFetchedAt = datetime()`,
         {
           discogsId: musician.discogsId !== null ? neo4j.int(musician.discogsId) : null,
+          musicbrainzId: musician.musicbrainzId,
           name: musician.name,
           countryCode,
           source,
@@ -174,6 +190,7 @@ export async function setMusicianNationality(
          SET m.nationalityFetchedAt = datetime()`,
         {
           discogsId: musician.discogsId !== null ? neo4j.int(musician.discogsId) : null,
+          musicbrainzId: musician.musicbrainzId,
           name: musician.name,
         },
       );
