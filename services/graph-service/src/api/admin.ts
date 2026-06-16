@@ -443,6 +443,7 @@ const artistInfluencesSummarySchema = {
   type: 'object',
   properties: {
     influencedByLinks: { type: 'integer' },
+    influencedByCandidates: { type: 'integer' },
     failed: { type: 'integer' },
     durationMs: { type: 'integer' },
   },
