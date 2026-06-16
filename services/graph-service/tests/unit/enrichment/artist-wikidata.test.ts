@@ -24,6 +24,9 @@ const DATA: ArtistWikidataData = {
   playsInstrument: ['guitar', 'vocals'],
   playsInstrumentRaw: ['guitar', 'vocals'],
   influencedByQids: ['Q5383'],
+  memberOfQids: ['Q1299'],
+  memberOfSinceYears: [1960],
+  memberOfUntilYears: [1970],
 };
 
 function makeWdClient(

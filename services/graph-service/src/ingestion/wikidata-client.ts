@@ -55,6 +55,16 @@ interface SparqlResponse {
  * ("influenced by"), #391. We keep the QIDs (not labels) because the `artist-influences` pass resolves
  * each one against the stored `Artist.wikidataQid` to write an in-collection `INFLUENCED_BY` edge —
  * a deterministic QID join, never a name match. `[]` (not null) when the item lists no influences.
+ *
+ * `memberOfQids`/`memberOfSinceYears`/`memberOfUntilYears` are the P463 ("member of") band
+ * memberships with their P580 (start) / P582 (end) tenure (#392). Three index-aligned arrays:
+ * `memberOfQids[i]` is the bare group QID, `memberOfSinceYears[i]`/`memberOfUntilYears[i]` its
+ * start/end year (`0` = unknown — Neo4j list properties can't hold null). The `band-membership` pass
+ * resolves each group QID against another `Artist.wikidataQid` to write a dated, provenance-tagged
+ * `(:Artist)-[:MEMBER_OF {source:"wikidata", since, until}]->(:Artist)` edge (a deterministic QID
+ * join, never a name match) — distinct from the Discogs `(:Musician)-[:MEMBER_OF {active}]` edge.
+ * Year only (not full date) because, like `bornYear`, the year is reliable at any Wikidata precision.
+ * All three are `[]` (not null) when the item lists no memberships.
  */
 export interface ArtistWikidataData {
   qid: string;
@@ -67,6 +77,20 @@ export interface ArtistWikidataData {
   playsInstrument: string[];
   playsInstrumentRaw: string[];
   influencedByQids: string[];
+  memberOfQids: string[];
+  memberOfSinceYears: number[];
+  memberOfUntilYears: number[];
+}
+
+/**
+ * One P463 band membership parsed from a `groupIri@startYear@endYear` GROUP_CONCAT token (#392).
+ * `sinceYear`/`untilYear` are `0` when the qualifier is absent (the unknown sentinel — the stored
+ * Neo4j list can't hold null, and no real membership year is 0).
+ */
+export interface ParsedMembership {
+  qid: string;
+  sinceYear: number;
+  untilYear: number;
 }
 
 const SPARQL_ENDPOINT = 'https://query.wikidata.org/sparql';
@@ -223,15 +247,29 @@ export class WikidataClient {
    * person). P737 (influences, #391) is fetched the same way — a third `GROUP_CONCAT(DISTINCT …)`,
    * but over the raw `?influencer` entity IRI (no `rdfs:label` join): the `artist-influences` pass
    * resolves each by QID, not by name. Three multi-valued OPTIONALs make the cross-product larger
-   * still, yet the per-column `DISTINCT` keeps each concat independent and complete. Wikidata's SPARQL
-   * endpoint pre-declares every prefix used here.
+   * still, yet the per-column `DISTINCT` keeps each concat independent and complete. P463 (band
+   * memberships, #392) is the fourth — but unlike the others its dates are STATEMENT QUALIFIERS, so it
+   * needs the reification path (`p:P463` → statement → `ps:P463` group value + `pq:P580`/`pq:P582`
+   * tenure) rather than a truthy `wdt:`. Each statement is bundled into a single `groupIri@since@until`
+   * token via `BIND`/`CONCAT` (the `@` never appears in a Wikidata IRI or a year), then
+   * `GROUP_CONCAT(DISTINCT …)`d like the rest — so the start/end stay paired to their group and two
+   * tenures in one band survive as two distinct tokens. `YEAR()` reads the qualifier `xsd:dateTime`;
+   * the year is reliable at any Wikidata precision (mirrors `bornYear`), so no `psv:`/precision path
+   * is needed and `COALESCE(…, "")` yields an empty year segment for an undated tenure. A fourth
+   * multi-valued OPTIONAL enlarges the pre-group cross-product again; the per-column `DISTINCT` still
+   * collapses each concat independently (validated live: prolific artists return complete, uncorrupted
+   * columns in well under a second). A malformed qualifier date would make `YEAR()` raise inside the
+   * `BIND`, leaving `?membership` unbound for just that statement — that one tenure drops, the row
+   * survives (fail-soft, matching the client's soft-skip philosophy). Wikidata's SPARQL endpoint
+   * pre-declares every prefix used here.
    */
   private buildArtistDataQuery(subjectLine: string): string {
     return `
       SELECT ?item ?birth ?birthPrecision ?death ?deathPrecision (SAMPLE(?img) AS ?image)
              (GROUP_CONCAT(DISTINCT ?awardLabel; SEPARATOR="||") AS ?awards)
              (GROUP_CONCAT(DISTINCT ?instrLabel; SEPARATOR="||") AS ?instruments)
-             (GROUP_CONCAT(DISTINCT ?influencer; SEPARATOR="||") AS ?influencers) WHERE {
+             (GROUP_CONCAT(DISTINCT ?influencer; SEPARATOR="||") AS ?influencers)
+             (GROUP_CONCAT(DISTINCT ?membership; SEPARATOR="||") AS ?memberships) WHERE {
         ${subjectLine}
         OPTIONAL { ?item p:P569/psv:P569 [ wikibase:timeValue ?birth ; wikibase:timePrecision ?birthPrecision ] . }
         OPTIONAL { ?item p:P570/psv:P570 [ wikibase:timeValue ?death ; wikibase:timePrecision ?deathPrecision ] . }
@@ -239,6 +277,13 @@ export class WikidataClient {
         OPTIONAL { ?item wdt:P166 ?award . ?award rdfs:label ?awardLabel . FILTER(LANG(?awardLabel) = "en") }
         OPTIONAL { ?item wdt:P1303 ?instr . ?instr rdfs:label ?instrLabel . FILTER(LANG(?instrLabel) = "en") }
         OPTIONAL { ?item wdt:P737 ?influencer . }
+        OPTIONAL {
+          ?item p:P463 ?memberStmt .
+          ?memberStmt ps:P463 ?group .
+          OPTIONAL { ?memberStmt pq:P580 ?start . }
+          OPTIONAL { ?memberStmt pq:P582 ?end . }
+          BIND(CONCAT(STR(?group), "@", COALESCE(STR(YEAR(?start)), ""), "@", COALESCE(STR(YEAR(?end)), "")) AS ?membership)
+        }
       }
       GROUP BY ?item ?birth ?birthPrecision ?death ?deathPrecision
       LIMIT 1
@@ -343,6 +388,39 @@ function parseConcatQids(value: string | undefined): string[] {
   return [...new Set(qids)];
 }
 
+/** Parse a `||`-joined GROUP_CONCAT segment's year part: a non-empty integer, else `0` (unknown). */
+function parseMembershipYear(segment: string | undefined): number {
+  if (!segment) return 0;
+  const year = Number.parseInt(segment, 10);
+  return Number.isFinite(year) ? year : 0;
+}
+
+/**
+ * Split a `||`-joined GROUP_CONCAT of `groupIri@startYear@endYear` tokens (P463 + P580/P582, #392)
+ * into deduped memberships. Drops any token whose group segment isn't a resolvable Q-IRI; an empty
+ * or non-numeric year segment becomes `0` (unknown — the stored Neo4j list can't hold null). Dedupes
+ * on the full `(qid, sinceYear, untilYear)` triple, so two distinct tenures in the same band survive
+ * as two while a duplicated identical statement collapses to one. `[]` when the binding is
+ * absent/empty.
+ */
+export function parseConcatMemberships(value: string | undefined): ParsedMembership[] {
+  if (!value) return [];
+  const seen = new Set<string>();
+  const memberships: ParsedMembership[] = [];
+  for (const token of value.split('||')) {
+    const [iri, startSeg, endSeg] = token.trim().split('@');
+    const qid = extractQid(iri?.trim());
+    if (qid === null) continue;
+    const sinceYear = parseMembershipYear(startSeg);
+    const untilYear = parseMembershipYear(endSeg);
+    const key = `${qid}@${sinceYear}@${untilYear}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    memberships.push({ qid, sinceYear, untilYear });
+  }
+  return memberships;
+}
+
 /**
  * Map a SPARQL result row from {@link WikidataClient.buildArtistDataQuery} onto
  * {@link ArtistWikidataData}. Returns null when the row carries no resolvable QID (the join key) —
@@ -355,6 +433,7 @@ export function parseArtistWikidataRow(row: SparqlBinding): ArtistWikidataData |
   const deathValue = row['death']?.value;
   const image = row['image']?.value?.trim();
   const playsInstrumentRaw = parseConcatLabels(row['instruments']?.value);
+  const memberships = parseConcatMemberships(row['memberships']?.value);
   return {
     qid,
     bornYear: parseWikidataYear(birthValue),
@@ -366,6 +445,9 @@ export function parseArtistWikidataRow(row: SparqlBinding): ArtistWikidataData |
     playsInstrument: normalizeInstrumentFamilies(playsInstrumentRaw),
     playsInstrumentRaw,
     influencedByQids: parseConcatQids(row['influencers']?.value),
+    memberOfQids: memberships.map((m) => m.qid),
+    memberOfSinceYears: memberships.map((m) => m.sinceYear),
+    memberOfUntilYears: memberships.map((m) => m.untilYear),
   };
 }
 

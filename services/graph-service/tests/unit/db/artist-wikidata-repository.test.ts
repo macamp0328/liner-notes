@@ -55,6 +55,9 @@ const FULL_DATA: ArtistWikidataData = {
   playsInstrument: ['guitar', 'vocals'],
   playsInstrumentRaw: ['guitar', 'vocals'],
   influencedByQids: ['Q5383', 'Q1124'],
+  memberOfQids: ['Q1299', 'Q622988'],
+  memberOfSinceYears: [1960, 1971],
+  memberOfUntilYears: [1970, 0],
 };
 
 describe('getUnenrichedArtistsForWikidata', () => {
@@ -108,6 +111,9 @@ describe('setArtistWikidata', () => {
     expect(query).toContain('a.playsInstrument = $playsInstrument');
     expect(query).toContain('a.playsInstrumentRaw = $playsInstrumentRaw');
     expect(query).toContain('a.influencedByQids = $influencedByQids');
+    expect(query).toContain('a.memberOfQids = $memberOfQids');
+    expect(query).toContain('a.memberOfSinceYears = $memberOfSinceYears');
+    expect(query).toContain('a.memberOfUntilYears = $memberOfUntilYears');
     expect(query).toContain('a.wikidataFetchedAt = datetime()');
     expect(params).toMatchObject({
       qid: 'Q1299',
@@ -116,7 +122,16 @@ describe('setArtistWikidata', () => {
       playsInstrument: ['guitar', 'vocals'],
       playsInstrumentRaw: ['guitar', 'vocals'],
       influencedByQids: ['Q5383', 'Q1124'],
+      memberOfQids: ['Q1299', 'Q622988'],
     });
+    // Year arrays are wrapped per-element in neo4j.int (so the band-membership pass can index +
+    // compare the 0 sentinel) — assert the unwrapped values rather than the Integer objects.
+    const params2 = runSpy.mock.calls[0]?.[1] as {
+      memberOfSinceYears: { toNumber(): number }[];
+      memberOfUntilYears: { toNumber(): number }[];
+    };
+    expect(params2.memberOfSinceYears.map((y) => y.toNumber())).toEqual([1960, 1971]);
+    expect(params2.memberOfUntilYears.map((y) => y.toNumber())).toEqual([1970, 0]);
     expect(session.close).toHaveBeenCalled();
   });
 
@@ -146,6 +161,9 @@ describe('resetArtistWikidataEnrichment', () => {
     expect(query).toContain('a.playsInstrument');
     expect(query).toContain('a.playsInstrumentRaw');
     expect(query).toContain('a.influencedByQids');
+    expect(query).toContain('a.memberOfQids');
+    expect(query).toContain('a.memberOfSinceYears');
+    expect(query).toContain('a.memberOfUntilYears');
   });
 
   it('returns 0 when no records are returned', async () => {

@@ -31,3 +31,25 @@ export async function linkInfluencedBy(driver: Driver): Promise<number> {
     await session.close();
   }
 }
+
+/**
+ * Count the total captured Wikidata P737 "influenced by" references across all Artists (issue #419) —
+ * the resolution input {@link linkInfluencedBy} projects from. A QID repeated across artists counts
+ * each time, so this is the true denominator for the resolved `INFLUENCED_BY` edge count: a low edge
+ * count reads as "N of M references were in-collection" instead of needing a manual prod query. Pure
+ * read; `coalesce` keeps it 0 over an empty graph (sum over zero matched rows would otherwise be
+ * null). Mirrors `INFLUENCED_BY_CANDIDATES_QUERY` in stats-repository — both compute the same #419
+ * denominator, one for `/stats`, this one for the stage's reload output.
+ */
+export async function countInfluenceCandidates(driver: Driver): Promise<number> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `MATCH (a:Artist) WHERE a.influencedByQids IS NOT NULL
+       RETURN coalesce(sum(size(a.influencedByQids)), 0) AS candidates`,
+    );
+    return (result.records[0]?.get('candidates') as Neo4jInt | undefined)?.toNumber() ?? 0;
+  } finally {
+    await session.close();
+  }
+}

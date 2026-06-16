@@ -2198,7 +2198,7 @@
       "post": {
         "summary": "Reset artist Wikidata enrichment markers for a full re-run",
         "tags": ["admin"],
-        "description": "Removes the `wikidataFetchedAt` marker and every Wikidata-sourced property (`wikidataQid`, `bornYear`/`bornDate`, `diedYear`/`diedDate`, `imageUrl`, `awards`, instruments, and the P737 `influencedByQids` list) from all Artist nodes, causing the next `POST /api/v1/admin/artist-wikidata/enrich` call to re-resolve every node from scratch. The derived `INFLUENCED_BY` edges are left in place — they are re-MERGEd exhaustively by `POST /api/v1/admin/artist-influences/enrich`.\n\nThis endpoint is blocked while `POST /api/v1/admin/artist-wikidata/enrich` is running.",
+        "description": "Removes the `wikidataFetchedAt` marker and every Wikidata-sourced property (`wikidataQid`, `bornYear`/`bornDate`, `diedYear`/`diedDate`, `imageUrl`, `awards`, instruments, the P737 `influencedByQids` list, and the P463 `memberOfQids`/`memberOfSinceYears`/`memberOfUntilYears` arrays) from all Artist nodes, causing the next `POST /api/v1/admin/artist-wikidata/enrich` call to re-resolve every node from scratch. The derived `INFLUENCED_BY` and wikidata `MEMBER_OF` edges are left in place — they are re-MERGEd exhaustively by `POST /api/v1/admin/artist-influences/enrich` and `POST /api/v1/admin/band-membership/enrich`.\n\nThis endpoint is blocked while `POST /api/v1/admin/artist-wikidata/enrich` is running.",
         "security": [
           {
             "bearerAuth": []
@@ -2255,6 +2255,65 @@
         "summary": "Project Wikidata P737 influences into INFLUENCED_BY edges",
         "tags": ["admin"],
         "description": "Resolves each Artist's captured `influencedByQids` (the raw Wikidata P737 target QIDs the `artist-wikidata` pass stored) against the `wikidataQid` on other Artist nodes and MERGEs a `(:Artist)-[:INFLUENCED_BY {source:\"wikidata\"}]->(:Artist)` edge for each in-collection match (#391). Deterministic QID join — a target QID we do not own resolves to no node and is dropped (no name matching). No external API and **no new Wikidata calls**: the QIDs are already on the Artist nodes. Idempotent and safe to re-run; picks up newly-resolved targets without a re-ingest. Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest`** — run it after `artist-wikidata`, or rely on the orchestrated reload (`POST /api/v1/admin/reload`), which includes it.\n\n**No reset endpoint:** the pass re-links exhaustively every run, so it is inherently idempotent and there is nothing to reset (a full wipe is `POST /api/v1/admin/reset?confirm=wipe-all`).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["message", "statusUrl"],
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "statusUrl": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/band-membership/enrich": {
+      "post": {
+        "summary": "Project Wikidata P463 memberships into dated MEMBER_OF edges",
+        "tags": ["admin"],
+        "description": "Resolves each Artist's captured `memberOfQids` (the raw Wikidata P463 group QIDs the `artist-wikidata` pass stored, with their P580/P582 begin/end years) against the `wikidataQid` on other Artist nodes and MERGEs a `(:Artist)-[:MEMBER_OF {source:\"wikidata\", since, until}]->(:Artist)` edge for each in-collection match (#392). This Artist→Artist edge is **distinct from and additive to** the Discogs `(:Musician)-[:MEMBER_OF {active}]->(:Musician)` edge — both survive with provenance. Deterministic QID join — a group QID we do not own resolves to no node and is dropped (no name matching). No external API and **no new Wikidata calls**: the data is already on the Artist nodes. Idempotent and safe to re-run; picks up newly-resolved groups without a re-ingest. Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest`** — run it after `artist-wikidata`, or rely on the orchestrated reload (`POST /api/v1/admin/reload`), which includes it.\n\n**No reset endpoint:** the pass re-links exhaustively every run, so it is inherently idempotent and there is nothing to reset (a full wipe is `POST /api/v1/admin/reset?confirm=wipe-all`).",
         "security": [
           {
             "bearerAuth": []
@@ -3880,6 +3939,92 @@
                             "influencedByLinks": {
                               "type": "integer"
                             },
+                            "influencedByCandidates": {
+                              "type": "integer"
+                            },
+                            "failed": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/band-membership/status": {
+      "get": {
+        "summary": "Status of the most recent band membership projection run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult",
+                        "lastError"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "membershipLinks": {
+                              "type": "integer"
+                            },
                             "failed": {
                               "type": "integer"
                             },
@@ -4077,7 +4222,17 @@
                               "counts": {
                                 "type": "object",
                                 "additionalProperties": {
-                                  "type": "number"
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "integer"
+                                      }
+                                    }
+                                  ]
                                 }
                               },
                               "error": {
@@ -6482,7 +6637,9 @@
                             "samePersonLinks",
                             "memberOfEdges",
                             "groupsWithMembers",
-                            "influencedByEdges"
+                            "influencedByEdges",
+                            "influencedByCandidates",
+                            "membershipEdges"
                           ],
                           "properties": {
                             "releasesWithOriginalYear": {
@@ -7024,6 +7181,12 @@
                               "type": "integer"
                             },
                             "influencedByEdges": {
+                              "type": "integer"
+                            },
+                            "influencedByCandidates": {
+                              "type": "integer"
+                            },
+                            "membershipEdges": {
                               "type": "integer"
                             }
                           }

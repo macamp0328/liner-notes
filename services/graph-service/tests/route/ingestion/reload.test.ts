@@ -73,7 +73,7 @@ const sampleJob = {
       status: 'complete' as const,
       startedAt: '2026-06-05T00:00:01Z',
       completedAt: '2026-06-05T00:00:09Z',
-      counts: { releasesProcessed: 3 },
+      counts: { releasesProcessed: 3, releasesFailed: 2, failedReleaseIds: [9, 12] },
       error: null,
     },
     {
@@ -217,7 +217,14 @@ describe('Reload admin API', () => {
       const body = JSON.parse(res.payload) as { data: typeof sampleJob };
       expect(body.data.jobId).toBe('job-1');
       expect(body.data.stages).toHaveLength(2);
-      expect(body.data.stages[0]?.counts).toEqual({ releasesProcessed: 3 });
+      // The array-valued failedReleaseIds survives the response schema serialization — Fastify does
+      // NOT strip it (the counts schema's anyOf permits an integer array), so /reload/status reports
+      // which releases failed, not just how many (#417).
+      expect(body.data.stages[0]?.counts).toEqual({
+        releasesProcessed: 3,
+        releasesFailed: 2,
+        failedReleaseIds: [9, 12],
+      });
     });
 
     it('flags a running job with no live pod past the threshold as stale (#326)', async () => {

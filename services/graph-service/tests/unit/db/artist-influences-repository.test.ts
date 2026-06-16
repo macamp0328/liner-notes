@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Driver, Session } from 'neo4j-driver';
-import { linkInfluencedBy } from '../../../src/db/artist-influences-repository.js';
+import {
+  linkInfluencedBy,
+  countInfluenceCandidates,
+} from '../../../src/db/artist-influences-repository.js';
 
 function makeNeo4jInt(n: number) {
   return { toNumber: () => n, low: n, high: 0 };
@@ -51,5 +54,27 @@ describe('linkInfluencedBy', () => {
   it('returns 0 when nothing resolves to an in-collection target', async () => {
     const { session } = makeMockSession([{ records: [] }]);
     expect(await linkInfluencedBy(makeDriver(session))).toBe(0);
+  });
+});
+
+describe('countInfluenceCandidates', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('sums the captured P737 references across all artists (the resolution denominator)', async () => {
+    const { session, runSpy } = makeMockSession([
+      { records: [{ get: (k: string) => (k === 'candidates' ? makeNeo4jInt(155) : null) }] },
+    ]);
+    const count = await countInfluenceCandidates(makeDriver(session));
+    expect(count).toBe(155);
+    const [query] = runSpy.mock.calls[0] as [string];
+    // It sums list sizes over every artist carrying influencedByQids — the join's input count.
+    expect(query).toContain('a.influencedByQids IS NOT NULL');
+    expect(query).toContain('sum(size(a.influencedByQids))');
+    expect(session.close).toHaveBeenCalledOnce();
+  });
+
+  it('returns 0 over an empty graph (no record / coalesced sum)', async () => {
+    const { session } = makeMockSession([{ records: [] }]);
+    expect(await countInfluenceCandidates(makeDriver(session))).toBe(0);
   });
 });
