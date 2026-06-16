@@ -7,7 +7,7 @@
 > `pnpm schema:diagram` to refresh. Node/relationship names and properties below
 > are the authoritative model; the tables in the service handbook point here.
 
-**Drift:** ⚠️ model changed vs last snapshot (1 label(s), 18 property(ies), 4 relationship(s)).
+**Drift:** ✅ In sync with the last snapshot and schema.ts.
 
 ## Entity-relationship diagram
 
