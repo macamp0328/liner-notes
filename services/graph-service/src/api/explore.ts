@@ -9,6 +9,7 @@ import {
   getWorksBySongwriter,
   getArtistInfluences,
   getReleasesByStudio,
+  getRecordingLocations,
   getReleasesByLabel,
   getReleasesByGenre,
   getReleasesByStyle,
@@ -31,6 +32,7 @@ import {
   type SharedMusiciansResult,
   type InternationalTrack,
   type MostPressedRelease,
+  type RecordingLocation,
   type AudioFeatureFilters,
   type AudioFeatureTrack,
 } from '../db/repositories/explore-repository.js';
@@ -471,6 +473,51 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request, reply): Promise<ExploreRelease[] | ErrorReply> => {
       const items = await getReleasesByStudio(getDriver(), request.params.name);
+      return reply.send(items);
+    },
+  );
+
+  // GET /api/v1/explore/recording-locations — the recording-location map data (#342)
+  fastify.get<{ Reply: RecordingLocation[] | ErrorReply }>(
+    '/api/v1/explore/recording-locations',
+    {
+      schema: {
+        tags: ['explore'],
+        summary: 'Studios with known coordinates, for the recording-location map',
+        description:
+          'Every Studio whose MusicBrainz Place coordinates are known (#339 slice 2), with per-studio ' +
+          'release/track counts for marker sizing. Studios without confident coordinates are omitted — ' +
+          'an honest map has no pin for an unplaced studio. Ordered by releaseCount descending.',
+        response: {
+          200: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: [
+                'name',
+                'latitude',
+                'longitude',
+                'area',
+                'musicbrainzPlaceId',
+                'releaseCount',
+                'trackCount',
+              ],
+              properties: {
+                name: { type: 'string' },
+                latitude: { type: 'number' },
+                longitude: { type: 'number' },
+                area: { type: 'string', nullable: true },
+                musicbrainzPlaceId: { type: 'string', nullable: true },
+                releaseCount: { type: 'integer' },
+                trackCount: { type: 'integer' },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (_request, reply): Promise<RecordingLocation[] | ErrorReply> => {
+      const items = await getRecordingLocations(getDriver());
       return reply.send(items);
     },
   );

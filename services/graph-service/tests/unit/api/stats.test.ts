@@ -27,7 +27,15 @@ const sourcedNat = {
 };
 
 const STATS = {
-  counts: { releases: 10, artists: 20, tracks: 100, masters: 7, musicians: 40, works: 50 },
+  counts: {
+    releases: 10,
+    artists: 20,
+    tracks: 100,
+    masters: 7,
+    musicians: 40,
+    works: 50,
+    studios: 12,
+  },
   enrichment: {
     releasesWithOriginalYear: { covered: 6, applicable: 8, pct: 75 },
     artistsWithProfile: { covered: 12, applicable: 16, pct: 75 },
@@ -65,6 +73,7 @@ const STATS = {
     tracksWithMbRecordingArtists: { covered: 28, applicable: 70, pct: 40 },
     tracksWithMbProductionCredits: { covered: 14, applicable: 70, pct: 20 },
     tracksWithMbStudio: { covered: 7, applicable: 70, pct: 10 },
+    studiosWithCoordinates: { covered: 5, applicable: 12, pct: 41.7 },
     worksWithMultipleRecordings: 4,
     worksWithWriterLinks: { covered: 18, applicable: 30, pct: 60 },
     wroteEdges: 22,

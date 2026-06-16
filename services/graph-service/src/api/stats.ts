@@ -93,7 +93,15 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
                 properties: {
                   counts: {
                     type: 'object',
-                    required: ['releases', 'artists', 'tracks', 'masters', 'musicians', 'works'],
+                    required: [
+                      'releases',
+                      'artists',
+                      'tracks',
+                      'masters',
+                      'musicians',
+                      'works',
+                      'studios',
+                    ],
                     properties: {
                       releases: { type: 'integer' },
                       artists: { type: 'integer' },
@@ -101,6 +109,7 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
                       masters: { type: 'integer' },
                       musicians: { type: 'integer' },
                       works: { type: 'integer' },
+                      studios: { type: 'integer' },
                     },
                   },
                   enrichment: {
@@ -126,6 +135,7 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
                       'tracksWithMbRecordingArtists',
                       'tracksWithMbProductionCredits',
                       'tracksWithMbStudio',
+                      'studiosWithCoordinates',
                       'worksWithMultipleRecordings',
                       'worksWithWriterLinks',
                       'wroteEdges',
@@ -162,6 +172,7 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
                       tracksWithMbRecordingArtists: coverageSchema,
                       tracksWithMbProductionCredits: coverageSchema,
                       tracksWithMbStudio: coverageSchema,
+                      studiosWithCoordinates: coverageSchema,
                       worksWithMultipleRecordings: { type: 'integer' },
                       worksWithWriterLinks: coverageSchema,
                       wroteEdges: { type: 'integer' },

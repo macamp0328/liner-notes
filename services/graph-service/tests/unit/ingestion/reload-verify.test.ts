@@ -83,6 +83,8 @@ function makeStats(
     tracksWithMbProductionCredits: cov(18, 60),
     // #339 (slice 2): MB studio coverage, measured but ungated (sparse + own fetch, no sibling guard).
     tracksWithMbStudio: cov(4, 60),
+    // #342: studio coordinate coverage, measured but ungated (sparse, like tracksWithMbStudio).
+    studiosWithCoordinates: cov(3, 20),
     worksWithMultipleRecordings: 8,
     // #380: clears the minPct:0 (silently-zero) bar — covered>0 over writer-bearing Works.
     worksWithWriterLinks: cov(25, 40),
@@ -111,6 +113,7 @@ function makeStats(
       masters: 50,
       musicians: 100,
       works: 50,
+      studios: 20,
     },
     enrichment: { ...enrichment, ...overrides.enrichment },
   };

@@ -14,6 +14,7 @@ const mockGetArtistsByPersonLevelInstrument = vi.hoisted(() => vi.fn());
 const mockGetRecordingsByWork = vi.hoisted(() => vi.fn());
 const mockGetWorksBySongwriter = vi.hoisted(() => vi.fn());
 const mockGetReleasesByStudio = vi.hoisted(() => vi.fn());
+const mockGetRecordingLocations = vi.hoisted(() => vi.fn());
 const mockGetReleasesByLabel = vi.hoisted(() => vi.fn());
 const mockGetReleasesByGenre = vi.hoisted(() => vi.fn());
 const mockGetReleasesByStyle = vi.hoisted(() => vi.fn());
@@ -53,6 +54,7 @@ vi.mock('../../../src/db/repositories/explore-repository.js', () => ({
   getRecordingsByWork: mockGetRecordingsByWork,
   getWorksBySongwriter: mockGetWorksBySongwriter,
   getReleasesByStudio: mockGetReleasesByStudio,
+  getRecordingLocations: mockGetRecordingLocations,
   getReleasesByLabel: mockGetReleasesByLabel,
   getReleasesByGenre: mockGetReleasesByGenre,
   getReleasesByStyle: mockGetReleasesByStyle,
@@ -311,6 +313,41 @@ describe('explore routes', () => {
       const body = JSON.parse(response.payload) as (typeof sampleRelease)[];
       expect(body).toHaveLength(1);
       expect(body[0]!.title).toBe('U.F.O.F.');
+    });
+  });
+
+  // GET /api/v1/explore/recording-locations
+  describe('GET /api/v1/explore/recording-locations', () => {
+    const sampleLocation = {
+      name: 'Abbey Road Studios',
+      latitude: 51.53192,
+      longitude: -0.17835,
+      area: "St John's Wood",
+      musicbrainzPlaceId: 'place-1',
+      releaseCount: 3,
+      trackCount: 8,
+    };
+
+    it('returns 200 with a bare array of studios that have coordinates', async () => {
+      mockGetRecordingLocations.mockResolvedValue([sampleLocation]);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/recording-locations',
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as (typeof sampleLocation)[];
+      expect(body).toEqual([sampleLocation]);
+      expect(mockGetRecordingLocations).toHaveBeenCalledWith(expect.anything());
+    });
+
+    it('serialises null area / musicbrainzPlaceId and returns an empty array when none', async () => {
+      mockGetRecordingLocations.mockResolvedValue([]);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/recording-locations',
+      });
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.payload)).toEqual([]);
     });
   });
 

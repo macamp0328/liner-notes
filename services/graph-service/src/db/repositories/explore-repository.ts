@@ -135,6 +135,23 @@ export interface MostPressedRelease {
   countries: string[];
 }
 
+/**
+ * One pin on the recording-location map (#342): a Studio whose MusicBrainz Place coordinates are known
+ * (#339 slice 2). `releaseCount`/`trackCount` size the marker — `releaseCount` rolls track-level MB
+ * studio edges up to their Release (like {@link getReleasesByStudio}), `trackCount` is the distinct
+ * track-level edges. Studios without coordinates are excluded — an honest map has no pin for an
+ * unplaced studio. `latitude`/`longitude` are always present (the query filters on them).
+ */
+export interface RecordingLocation {
+  name: string;
+  latitude: number;
+  longitude: number;
+  area: string | null;
+  musicbrainzPlaceId: string | null;
+  releaseCount: number;
+  trackCount: number;
+}
+
 function mapExploreRelease(record: { get: (key: string) => unknown }): ExploreRelease {
   return {
     discogsId: toInt(record.get('discogsId')) ?? 0,
@@ -511,6 +528,55 @@ export async function getReleasesByStudio(driver: Driver, name: string): Promise
       { name },
     );
     return result.records.map(mapExploreRelease);
+  } finally {
+    await session.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// getRecordingLocations
+// ---------------------------------------------------------------------------
+
+/**
+ * Every Studio with known coordinates, for the recording-location map (#342). The coordinates come from
+ * MusicBrainz Place data (#339 slice 2) — deterministic, never geocoded from ambiguous free-text — so a
+ * studio with no confident location simply has no pin. Per-studio `releaseCount` rolls track-level MB
+ * `RECORDED_AT` edges up to their Release via `HAS_TRACK` (mirroring {@link getReleasesByStudio}), so a
+ * studio attributed only at the track level still counts its album; `trackCount` is the distinct
+ * track-level edges. The filter is coordinates-only, not edge-count: a `/track-recording-places/reset`
+ * leaves Studio coordinates intact, so a (temporarily) edgeless studio still pins with `releaseCount: 0`.
+ */
+export async function getRecordingLocations(driver: Driver): Promise<RecordingLocation[]> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `
+      MATCH (s:Studio)
+      WHERE s.latitude IS NOT NULL AND s.longitude IS NOT NULL
+      OPTIONAL MATCH (target)-[:RECORDED_AT]->(s)
+        WHERE target:Release OR target:Track
+      OPTIONAL MATCH (rTrack:Release)-[:HAS_TRACK]->(target)
+      WITH s,
+           collect(DISTINCT CASE WHEN target:Release THEN target
+                                 WHEN target:Track   THEN rTrack END) AS releases,
+           count(DISTINCT CASE WHEN target:Track THEN target END) AS trackCount
+      RETURN s.name AS name, s.latitude AS latitude, s.longitude AS longitude,
+             s.area AS area, s.musicbrainzPlaceId AS musicbrainzPlaceId,
+             size([r IN releases WHERE r IS NOT NULL]) AS releaseCount,
+             trackCount
+      ORDER BY releaseCount DESC, name
+      `,
+    );
+    return result.records.map((record) => ({
+      name: toStr(record.get('name')) ?? '',
+      // The WHERE filter guarantees both are present; the ?? 0 only satisfies the non-null type.
+      latitude: toFloat(record.get('latitude')) ?? 0,
+      longitude: toFloat(record.get('longitude')) ?? 0,
+      area: toStr(record.get('area')),
+      musicbrainzPlaceId: toStr(record.get('musicbrainzPlaceId')),
+      releaseCount: toInt(record.get('releaseCount')) ?? 0,
+      trackCount: toInt(record.get('trackCount')) ?? 0,
+    }));
   } finally {
     await session.close();
   }

@@ -636,10 +636,16 @@ collection:
         pathParameters:
           - name: name
             value: Abbey Road Studios
+      - name: Studios with known coordinates, for the recording-location map
+        meta:
+          id: req_78dd5afab6817528e8bda7154ef2646a
+          sortKey: 800
+        url: '{{ _.base_url }}/api/v1/explore/recording-locations'
+        method: GET
       - name: Releases on this label
         meta:
           id: req_2a90c46248fd11d9ba25bcccd928b767
-          sortKey: 800
+          sortKey: 900
         url: '{{ _.base_url }}/api/v1/explore/label/:name'
         method: GET
         parameters:
@@ -652,7 +658,7 @@ collection:
       - name: Releases in this genre
         meta:
           id: req_a7dbd4bd9edbf82e9fae43fb6e6744ce
-          sortKey: 900
+          sortKey: 1000
         url: '{{ _.base_url }}/api/v1/explore/genre/:name'
         method: GET
         pathParameters:
@@ -661,7 +667,7 @@ collection:
       - name: Releases in this style
         meta:
           id: req_8d65cc5ae2ae4ec5dad3d75b888ebe93
-          sortKey: 1000
+          sortKey: 1100
         url: '{{ _.base_url }}/api/v1/explore/style/:name'
         method: GET
         pathParameters:
@@ -670,7 +676,7 @@ collection:
       - name: Releases from this country
         meta:
           id: req_5b12ee7287324e0a922493aa2a388c26
-          sortKey: 1100
+          sortKey: 1200
         url: '{{ _.base_url }}/api/v1/explore/country/:name'
         method: GET
         pathParameters:
@@ -679,7 +685,7 @@ collection:
       - name: Releases from this decade — accepts 1970s format
         meta:
           id: req_183fb1c1e68ba589c49007b17eacad69
-          sortKey: 1200
+          sortKey: 1300
         url: '{{ _.base_url }}/api/v1/explore/decade/:decade'
         method: GET
         pathParameters:
@@ -688,7 +694,7 @@ collection:
       - name: Releases from this exact year
         meta:
           id: req_aa30336c726783f229b1f5217cb4cb87
-          sortKey: 1300
+          sortKey: 1400
         url: '{{ _.base_url }}/api/v1/explore/year/:year'
         method: GET
         pathParameters:
@@ -697,7 +703,7 @@ collection:
       - name: Graph traversal from a release — returns nodes reachable within depth hops (max 3)
         meta:
           id: req_29e7edcf6984d82dd0c777ab5095cd25
-          sortKey: 1400
+          sortKey: 1500
         url: '{{ _.base_url }}/api/v1/explore/connections/:discogsId'
         method: GET
         parameters:
@@ -710,13 +716,13 @@ collection:
       - name: Release pairs that share one or more session musicians
         meta:
           id: req_80287ce4b9c1d41e34e0e03d6f38dae7
-          sortKey: 1500
+          sortKey: 1600
         url: '{{ _.base_url }}/api/v1/explore/shared-musicians'
         method: GET
       - name: Tracks with the most distinct countries of origin among their credited musicians. Requires nationality enrichment to have been run.
         meta:
           id: req_780d18450bf98dc564e75aaa926a3850
-          sortKey: 1600
+          sortKey: 1700
         url: '{{ _.base_url }}/api/v1/explore/tracks/most-international'
         method: GET
         parameters:
@@ -726,7 +732,7 @@ collection:
       - name: Albums in this collection with the widest global pressing reach. Requires master data enrichment to have been run.
         meta:
           id: req_ecd44bf255eb79f5ef72d9cc205be97b
-          sortKey: 1700
+          sortKey: 1800
         url: '{{ _.base_url }}/api/v1/explore/releases/most-pressed'
         method: GET
         parameters:
@@ -736,7 +742,7 @@ collection:
       - name: Find tracks by audio features
         meta:
           id: req_08162dc68e9b3133701494d2eef98130
-          sortKey: 1800
+          sortKey: 1900
         url: '{{ _.base_url }}/api/v1/explore/tracks/by-audio-features'
         method: GET
         parameters:

@@ -321,6 +321,60 @@ describe('explore routes', () => {
     });
   });
 
+  describe('GET /api/v1/explore/recording-locations', () => {
+    interface MapStudio {
+      name: string;
+      latitude: number;
+      longitude: number;
+      area: string | null;
+      musicbrainzPlaceId: string | null;
+      releaseCount: number;
+      trackCount: number;
+    }
+
+    beforeAll(async () => {
+      // Give one studio MB-style coordinates and a release-level RECORDED_AT edge to the seeded
+      // release, so it pins with releaseCount >= 1. The seeded "Van Gelder Studio" stays
+      // coordinate-less, so it must be ABSENT from the map — the honest-no-pin behaviour.
+      const session = getDriver().session();
+      try {
+        await session.run(
+          `MATCH (r:Release {discogsId: $rid})
+           MERGE (s:Studio { name: 'Abbey Road Studios' })
+             SET s.latitude = $lat, s.longitude = $lon,
+                 s.area = $area, s.musicbrainzPlaceId = $placeId
+           MERGE (r)-[:RECORDED_AT]->(s)`,
+          {
+            rid: SEED_RELEASE_ID,
+            lat: 51.53192,
+            lon: -0.17835,
+            area: "St John's Wood",
+            placeId: 'place-itest-342',
+          },
+        );
+      } finally {
+        await session.close();
+      }
+    });
+
+    it('returns studios with coordinates, sized by release count, omitting unplaced studios', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/recording-locations' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as MapStudio[];
+
+      const abbeyRoad = body.find((s) => s.name === 'Abbey Road Studios');
+      expect(abbeyRoad).toBeDefined();
+      expect(abbeyRoad!.latitude).toBeCloseTo(51.53192, 4);
+      expect(abbeyRoad!.longitude).toBeCloseTo(-0.17835, 4);
+      expect(abbeyRoad!.area).toBe("St John's Wood");
+      expect(abbeyRoad!.releaseCount).toBeGreaterThanOrEqual(1);
+
+      // Every pin has coordinates; the coordinate-less Van Gelder Studio is omitted.
+      expect(body.every((s) => s.latitude !== null && s.longitude !== null)).toBe(true);
+      expect(body.some((s) => s.name === 'Van Gelder Studio')).toBe(false);
+    });
+  });
+
   describe('GET /api/v1/explore/label/:name', () => {
     it('returns releases on a known label', async () => {
       const res = await app.inject({
