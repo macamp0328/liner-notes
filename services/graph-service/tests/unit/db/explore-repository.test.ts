@@ -403,6 +403,19 @@ describe('getReleasesByStudio', () => {
     const results = await getReleasesByStudio(driver, 'Unknown Studio');
     expect(results).toHaveLength(0);
   });
+
+  it('rolls track-level studios up to the release via HAS_TRACK, deduped (#339 slice 2)', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    await getReleasesByStudio(makeMockDriver(session), 'Muscle Shoals Sound Studio');
+
+    const [query] = runSpy.mock.calls[0] as [string];
+    // Matches both the album-level Discogs edge and the track-level MB edge.
+    expect(query).toContain('(target)-[:RECORDED_AT]->(s:Studio)');
+    expect(query).toContain('target:Release OR target:Track');
+    // Track edges roll up to their release; DISTINCT avoids dup rows for both-level credits.
+    expect(query).toContain('(rTrack:Release)-[:HAS_TRACK]->(target)');
+    expect(query).toContain('WITH DISTINCT');
+  });
 });
 
 // ---------------------------------------------------------------------------
