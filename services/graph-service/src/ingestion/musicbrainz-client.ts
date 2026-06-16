@@ -598,6 +598,7 @@ export class MusicBrainzClient {
           role: arrangerRole,
           attributes: [],
         });
+        continue;
       }
     }
     return artists;
