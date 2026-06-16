@@ -178,7 +178,7 @@ describe('setMusicianNationality', () => {
     const { session, runSpy } = makeMockSession();
     await setMusicianNationality(
       makeMockDriver(session),
-      { discogsId: 10, name: 'Ron Carter' },
+      { discogsId: 10, name: 'Ron Carter', musicbrainzId: null },
       'US',
       'wikidata',
     );
@@ -188,11 +188,50 @@ describe('setMusicianNationality', () => {
     expect(runSpy.mock.calls[0]?.[1]).toMatchObject({ source: 'wikidata' });
   });
 
-  it('matches by name when discogsId is null', async () => {
+  // #426: a no-discogsId node carrying a musicbrainzId is matched by that unique key,
+  // not by name — so the write can never spill onto a same-named, distinct-MBID node.
+  it('matches by musicbrainzId when discogsId is null and an MBID is present (#426)', async () => {
     const { session, runSpy } = makeMockSession();
     await setMusicianNationality(
       makeMockDriver(session),
-      { discogsId: null, name: 'Anon' },
+      { discogsId: null, name: 'John Williams', musicbrainzId: 'mb-uuid' },
+      'US',
+      'musicbrainz',
+    );
+
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('musicbrainzId: $musicbrainzId');
+    expect(query).not.toContain('name: $name');
+    // The MBID arm carries the same discogsId-null guard as the name arm: musicbrainzId is
+    // not uniqueness-constrained, so the guard keeps the write off a colliding discogsId node.
+    expect(query).toContain('m.discogsId IS NULL');
+    expect(params).toMatchObject({ musicbrainzId: 'mb-uuid' });
+  });
+
+  // The null-country (markAttempted) path shares the same match clause, so the MBID key
+  // also keeps the nationalityFetchedAt stamp from contaminating same-named nodes (#426).
+  it('matches by musicbrainzId on the null-country path too (#426)', async () => {
+    const { session, runSpy } = makeMockSession();
+    await setMusicianNationality(
+      makeMockDriver(session),
+      { discogsId: null, name: 'John Williams', musicbrainzId: 'mb-uuid' },
+      null,
+      null,
+    );
+
+    const query = runSpy.mock.calls[0]?.[0] as string;
+    expect(query).toContain('musicbrainzId: $musicbrainzId');
+    expect(query).not.toContain('MERGE (c:Country');
+    expect(query).toContain('nationalityFetchedAt = datetime()');
+  });
+
+  // Truthy check (not `!== null`): an empty-string MBID falls through to the name path,
+  // mirroring the caller's resolve-side predicate.
+  it('falls through to name match when musicbrainzId is an empty string', async () => {
+    const { session, runSpy } = makeMockSession();
+    await setMusicianNationality(
+      makeMockDriver(session),
+      { discogsId: null, name: 'Anon', musicbrainzId: '' },
       'FR',
       'wikidata',
     );
@@ -201,11 +240,38 @@ describe('setMusicianNationality', () => {
     expect(runSpy.mock.calls[0]?.[0]).toContain('m.discogsId IS NULL');
   });
 
+  it('matches by name when discogsId and musicbrainzId are both null', async () => {
+    const { session, runSpy } = makeMockSession();
+    await setMusicianNationality(
+      makeMockDriver(session),
+      { discogsId: null, name: 'Anon', musicbrainzId: null },
+      'FR',
+      'wikidata',
+    );
+
+    expect(runSpy.mock.calls[0]?.[0]).toContain('name: $name');
+    expect(runSpy.mock.calls[0]?.[0]).toContain('m.discogsId IS NULL');
+  });
+
+  // discogsId wins over a present MBID — the discogsId arm is evaluated first.
+  it('prefers discogsId over musicbrainzId when both are present', async () => {
+    const { session, runSpy } = makeMockSession();
+    await setMusicianNationality(
+      makeMockDriver(session),
+      { discogsId: 5, name: 'Ron Carter', musicbrainzId: 'mb-uuid' },
+      'US',
+      'wikidata',
+    );
+
+    expect(runSpy.mock.calls[0]?.[0]).toContain('discogsId: $discogsId');
+    expect(runSpy.mock.calls[0]?.[0]).not.toContain('musicbrainzId: $musicbrainzId');
+  });
+
   it('sets null country without merging Country node', async () => {
     const { session, runSpy } = makeMockSession();
     await setMusicianNationality(
       makeMockDriver(session),
-      { discogsId: 10, name: 'Someone' },
+      { discogsId: 10, name: 'Someone', musicbrainzId: null },
       null,
       null,
     );
