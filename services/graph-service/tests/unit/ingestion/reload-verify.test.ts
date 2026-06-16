@@ -96,6 +96,8 @@ function makeStats(
     influencedByEdges: 6,
     // #419: ungated raw count — the resolution denominator for influencedByEdges.
     influencedByCandidates: 60,
+    // #392: ungated raw count — the Wikidata band-membership graph.
+    membershipEdges: 5,
   };
   return {
     counts: {

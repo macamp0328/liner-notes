@@ -3,6 +3,7 @@ import {
   WikidataClient,
   buildWikidataClientFromEnv,
   parseArtistWikidataRow,
+  parseConcatMemberships,
 } from '../../../src/ingestion/wikidata-client.js';
 import { snapshotEnv } from '../../helpers/env.js';
 
@@ -16,6 +17,7 @@ type ArtistRowFields = {
   awards?: string;
   instruments?: string;
   influencers?: string;
+  memberships?: string;
 };
 
 function makeArtistRow(fields: ArtistRowFields): Record<string, { type: string; value: string }> {
@@ -34,6 +36,8 @@ function makeArtistRow(fields: ArtistRowFields): Record<string, { type: string; 
   row['instruments'] = { type: 'literal', value: fields.instruments ?? '' };
   // #391: P737 GROUP_CONCATs the raw influence entity IRIs (not labels), joined by "||".
   row['influencers'] = { type: 'literal', value: fields.influencers ?? '' };
+  // #392: P463 GROUP_CONCATs `groupIri@startYear@endYear` membership tokens, joined by "||".
+  row['memberships'] = { type: 'literal', value: fields.memberships ?? '' };
   return row;
 }
 
@@ -411,6 +415,8 @@ describe('WikidataClient', () => {
             instruments: 'guitar||bass guitar||piano',
             influencers:
               'http://www.wikidata.org/entity/Q5383||http://www.wikidata.org/entity/Q1124',
+            memberships:
+              'http://www.wikidata.org/entity/Q1299@1960@1970||http://www.wikidata.org/entity/Q622988@1971@',
           }),
         ),
       );
@@ -430,6 +436,11 @@ describe('WikidataClient', () => {
         playsInstrumentRaw: ['guitar', 'bass guitar', 'piano'],
         // #391: P737 target IRIs reduced to bare QIDs for the in-collection influence join.
         influencedByQids: ['Q5383', 'Q1124'],
+        // #392: P463 membership tokens unzipped into index-aligned arrays; the missing end year
+        // (Q622988@1971@) becomes the 0 sentinel.
+        memberOfQids: ['Q1299', 'Q622988'],
+        memberOfSinceYears: [1960, 1971],
+        memberOfUntilYears: [1970, 0],
       });
       const url = fetchSpy.mock.calls[0]?.[0] as string;
       expect(url).toContain('query.wikidata.org/sparql');
@@ -445,6 +456,15 @@ describe('WikidataClient', () => {
       expect(decoded).toContain('wdt:P737');
       expect(decoded).toContain(
         '(GROUP_CONCAT(DISTINCT ?influencer; SEPARATOR="||") AS ?influencers)',
+      );
+      // #392: P463 (memberships) is harvested in the same bundle via the reification path (qualifiers
+      // P580/P582 live on the statement), bundled into one groupIri@since@until token per statement.
+      expect(decoded).toContain('p:P463 ?memberStmt');
+      expect(decoded).toContain('?memberStmt ps:P463 ?group');
+      expect(decoded).toContain('pq:P580 ?start');
+      expect(decoded).toContain('pq:P582 ?end');
+      expect(decoded).toContain(
+        '(GROUP_CONCAT(DISTINCT ?membership; SEPARATOR="||") AS ?memberships)',
       );
       // Awards-truncation guard: ?image is SAMPLE'd and NOT a GROUP BY key — otherwise an item with
       // multiple P18 images fans out into one row per image and LIMIT 1 truncates the GROUP_CONCAT
@@ -479,6 +499,9 @@ describe('WikidataClient', () => {
       expect(result?.playsInstrument).toEqual([]);
       expect(result?.playsInstrumentRaw).toEqual([]);
       expect(result?.influencedByQids).toEqual([]);
+      expect(result?.memberOfQids).toEqual([]);
+      expect(result?.memberOfSinceYears).toEqual([]);
+      expect(result?.memberOfUntilYears).toEqual([]);
     });
 
     it('returns null when the Discogs ID is not in Wikidata (no bindings)', async () => {
@@ -580,6 +603,70 @@ describe('WikidataClient', () => {
         }),
       );
       expect(result?.influencedByQids).toEqual(['Q5383', 'Q1124']);
+    });
+
+    it('coerces an empty memberships concat to three [] arrays (#392)', () => {
+      const result = parseArtistWikidataRow(makeArtistRow({ qid: 'Q5', memberships: '' }));
+      expect(result?.memberOfQids).toEqual([]);
+      expect(result?.memberOfSinceYears).toEqual([]);
+      expect(result?.memberOfUntilYears).toEqual([]);
+    });
+
+    it('unzips P463 membership tokens into index-aligned arrays with the 0 sentinel (#392)', () => {
+      const result = parseArtistWikidataRow(
+        makeArtistRow({
+          qid: 'Q5',
+          memberships:
+            'http://www.wikidata.org/entity/Q1299@1960@1970||http://www.wikidata.org/entity/Q622988@1971@||http://www.wikidata.org/entity/Q3@@',
+        }),
+      );
+      expect(result?.memberOfQids).toEqual(['Q1299', 'Q622988', 'Q3']);
+      expect(result?.memberOfSinceYears).toEqual([1960, 1971, 0]);
+      expect(result?.memberOfUntilYears).toEqual([1970, 0, 0]);
+    });
+  });
+
+  describe('parseConcatMemberships (#392)', () => {
+    it('returns [] for an absent or empty binding', () => {
+      expect(parseConcatMemberships(undefined)).toEqual([]);
+      expect(parseConcatMemberships('')).toEqual([]);
+    });
+
+    it('parses a fully-dated membership token', () => {
+      expect(parseConcatMemberships('http://www.wikidata.org/entity/Q1299@1960@1970')).toEqual([
+        { qid: 'Q1299', sinceYear: 1960, untilYear: 1970 },
+      ]);
+    });
+
+    it('treats a missing start, end, or both year segment as the 0 sentinel', () => {
+      expect(parseConcatMemberships('http://www.wikidata.org/entity/Q1@1962@')).toEqual([
+        { qid: 'Q1', sinceYear: 1962, untilYear: 0 },
+      ]);
+      expect(parseConcatMemberships('http://www.wikidata.org/entity/Q1@@1970')).toEqual([
+        { qid: 'Q1', sinceYear: 0, untilYear: 1970 },
+      ]);
+      expect(parseConcatMemberships('http://www.wikidata.org/entity/Q1@@')).toEqual([
+        { qid: 'Q1', sinceYear: 0, untilYear: 0 },
+      ]);
+    });
+
+    it('drops a token whose group segment is not a resolvable Q-IRI', () => {
+      expect(
+        parseConcatMemberships(
+          'not-an-entity@1962@1970||http://www.wikidata.org/entity/Q2@1971@1980',
+        ),
+      ).toEqual([{ qid: 'Q2', sinceYear: 1971, untilYear: 1980 }]);
+    });
+
+    it('dedupes identical statements but keeps two distinct tenures in the same band', () => {
+      expect(
+        parseConcatMemberships(
+          'http://www.wikidata.org/entity/Q1@1962@1970||http://www.wikidata.org/entity/Q1@1962@1970||http://www.wikidata.org/entity/Q1@1975@1980',
+        ),
+      ).toEqual([
+        { qid: 'Q1', sinceYear: 1962, untilYear: 1970 },
+        { qid: 'Q1', sinceYear: 1975, untilYear: 1980 },
+      ]);
     });
   });
 });

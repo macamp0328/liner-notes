@@ -39,6 +39,7 @@ import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
 import { resetArtistProfilesEnrichment } from '../db/artist-profiles-repository.js';
 import { enrichArtistWikidata } from '../enrichment/artist-wikidata.js';
 import { enrichArtistInfluences } from '../enrichment/artist-influences.js';
+import { enrichBandMemberships } from '../enrichment/band-membership.js';
 import { resetArtistWikidataEnrichment } from '../db/artist-wikidata-repository.js';
 import { enrichArtistGenres } from '../enrichment/artist-genres.js';
 import { enrichLabelHierarchy } from '../enrichment/label-hierarchy.js';
@@ -451,6 +452,15 @@ const artistInfluencesSummarySchema = {
   properties: {
     influencedByLinks: { type: 'integer' },
     influencedByCandidates: { type: 'integer' },
+    failed: { type: 'integer' },
+    durationMs: { type: 'integer' },
+  },
+};
+
+const bandMembershipSummarySchema = {
+  type: 'object',
+  properties: {
+    membershipLinks: { type: 'integer' },
     failed: { type: 'integer' },
     durationMs: { type: 'integer' },
   },
@@ -1133,11 +1143,13 @@ const PIPELINES: PipelineEntry[] = [
       summary: 'Reset artist Wikidata enrichment markers for a full re-run',
       description:
         'Removes the `wikidataFetchedAt` marker and every Wikidata-sourced property (`wikidataQid`, ' +
-        '`bornYear`/`bornDate`, `diedYear`/`diedDate`, `imageUrl`, `awards`, instruments, and the ' +
-        'P737 `influencedByQids` list) from all Artist nodes, causing the next ' +
+        '`bornYear`/`bornDate`, `diedYear`/`diedDate`, `imageUrl`, `awards`, instruments, the ' +
+        'P737 `influencedByQids` list, and the P463 `memberOfQids`/`memberOfSinceYears`/' +
+        '`memberOfUntilYears` arrays) from all Artist nodes, causing the next ' +
         '`POST /api/v1/admin/artist-wikidata/enrich` call to re-resolve every node from scratch. The ' +
-        'derived `INFLUENCED_BY` edges are left in place — they are re-MERGEd exhaustively by ' +
-        '`POST /api/v1/admin/artist-influences/enrich`.\n\n' +
+        'derived `INFLUENCED_BY` and wikidata `MEMBER_OF` edges are left in place — they are re-MERGEd ' +
+        'exhaustively by `POST /api/v1/admin/artist-influences/enrich` and ' +
+        '`POST /api/v1/admin/band-membership/enrich`.\n\n' +
         'This endpoint is blocked while `POST /api/v1/admin/artist-wikidata/enrich` is running.',
       runningMessage:
         'Artist Wikidata enrichment is currently running — wait for it to finish before resetting',
@@ -1168,6 +1180,35 @@ const PIPELINES: PipelineEntry[] = [
     prepare: (log): PreparedRun => ({
       ok: true,
       run: async (driver) => ({ ...(await enrichArtistInfluences(driver, log)) }),
+    }),
+    state: makePipelineState(),
+  },
+  {
+    name: 'band-membership',
+    statusLabel: 'band membership projection',
+    runningMessage: 'Band membership projection already in progress',
+    enrichSummary: 'Project Wikidata P463 memberships into dated MEMBER_OF edges',
+    enrichDescription:
+      "Resolves each Artist's captured `memberOfQids` (the raw Wikidata P463 group QIDs the " +
+      '`artist-wikidata` pass stored, with their P580/P582 begin/end years) against the `wikidataQid` ' +
+      'on other Artist nodes and MERGEs a ' +
+      '`(:Artist)-[:MEMBER_OF {source:"wikidata", since, until}]->(:Artist)` edge for each ' +
+      'in-collection match (#392). This Artist→Artist edge is **distinct from and additive to** the ' +
+      'Discogs `(:Musician)-[:MEMBER_OF {active}]->(:Musician)` edge — both survive with provenance. ' +
+      'Deterministic QID join — a group QID we do not own resolves to no node and is dropped (no name ' +
+      'matching). No external API and **no new Wikidata calls**: the data is already on the Artist ' +
+      'nodes. Idempotent and safe to re-run; picks up newly-resolved groups without a re-ingest. ' +
+      'Blocks until complete.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest`** — run it after `artist-wikidata`, or ' +
+      'rely on the orchestrated reload (`POST /api/v1/admin/reload`), which includes it.\n\n' +
+      '**No reset endpoint:** the pass re-links exhaustively every run, so it is inherently ' +
+      'idempotent and there is nothing to reset (a full wipe is `POST /api/v1/admin/reset?confirm=wipe-all`).',
+    statusSummarySchema: bandMembershipSummarySchema,
+    schemaHas503: false,
+    clientCheckFirst: false,
+    prepare: (log): PreparedRun => ({
+      ok: true,
+      run: async (driver) => ({ ...(await enrichBandMemberships(driver, log)) }),
     }),
     state: makePipelineState(),
   },

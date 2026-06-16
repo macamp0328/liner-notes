@@ -24,6 +24,7 @@ import { enrichArtistMusicbrainzIds } from '../enrichment/artist-musicbrainz-id.
 import { enrichSongwriterReconciliation } from '../enrichment/songwriter-reconciliation.js';
 import { enrichArtistWikidata } from '../enrichment/artist-wikidata.js';
 import { enrichArtistInfluences } from '../enrichment/artist-influences.js';
+import { enrichBandMemberships } from '../enrichment/band-membership.js';
 import type { ProgressReporter } from '../enrichment/progress.js';
 
 /**
@@ -50,6 +51,7 @@ export type ReloadStageName =
   | 'songwriter-reconciliation'
   | 'artist-wikidata'
   | 'artist-influences'
+  | 'band-membership'
   | 'verify';
 
 /**
@@ -397,6 +399,19 @@ const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
     deps: ['artist-wikidata'],
     resources: [],
     run: async (ctx) => ({ ...(await enrichArtistInfluences(ctx.driver, ctx.log)) }),
+  },
+  {
+    // #392: project each Artist's captured P463 memberships (the index-aligned memberOfQids +
+    // memberOfSinceYears/memberOfUntilYears artist-wikidata stored) into dated in-collection
+    // (:Artist)-[:MEMBER_OF {source:"wikidata", since, until}]->(:Artist) edges, resolving each group
+    // QID against `a.wikidataQid` (deterministic QID join; unowned groups dropped). Distinct from the
+    // Discogs (:Musician)-[:MEMBER_OF {active}] edge (different label-pair + props). Deps
+    // `artist-wikidata` so every QID is stored before resolution. Pure Cypher, no external client:
+    // resources [] (ordering via deps), no `sources`.
+    name: 'band-membership',
+    deps: ['artist-wikidata'],
+    resources: [],
+    run: async (ctx) => ({ ...(await enrichBandMemberships(ctx.driver, ctx.log)) }),
   },
   {
     // #380: promote each Work's captured writerMbids to (:Artist|:Musician)-[:WROTE]->(:Work) edges

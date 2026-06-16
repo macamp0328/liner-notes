@@ -78,6 +78,7 @@ const STATS = {
     // #419 resolution denominator — the full-payload toEqual below also proves the response schema
     // serialises it (a field absent from the schema would be stripped and diverge from STATS).
     influencedByCandidates: 95,
+    membershipEdges: 5,
   },
 };
 
