@@ -1267,6 +1267,14 @@
       "owningConstraint": null
     },
     {
+      "name": "track_recording_places_fetched_at",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Track"],
+      "properties": ["recordingPlacesFetchedAt"],
+      "owningConstraint": null
+    },
+    {
       "name": "track_tempo",
       "indexType": "RANGE",
       "entityType": "NODE",
