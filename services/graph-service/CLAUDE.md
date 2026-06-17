@@ -75,6 +75,11 @@ Studio data comes from `companies[]` where `entity_type` is `"23"` (Recorded At)
 > generator can't (enrichment sourcing, nullability, `#issue` refs) but **drift on exact
 > properties**; trust the generated artifacts for the current shape.
 
+> **Why the keys are what they are** — the Discogs `discogsId` spine, ISO-3166-keyed `Country` (+ a
+> separate `:Region` concept), MBID/ISRC/QID as crosswalk attributes rather than spine keys, and the
+> "one canonical write path per multi-writer entity" + uniform edge-`source` enforcement laws — is
+> recorded in [ADR 0005](../../docs/adr/0005-entity-identity-and-write-paths.md).
+
 ### Nodes
 
 | Label         | Key Properties                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
