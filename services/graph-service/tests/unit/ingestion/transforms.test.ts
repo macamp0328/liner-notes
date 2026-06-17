@@ -561,32 +561,52 @@ describe('isInstrumental', () => {
 // normalizeCountry
 // ---------------------------------------------------------------------------
 describe('normalizeCountry', () => {
-  it('normalises US aliases to ["US"]', () => {
-    expect(normalizeCountry('US')).toEqual(['US']);
-    expect(normalizeCountry('USA')).toEqual(['US']);
+  it('normalises US/UK aliases to their ISO country code', () => {
+    expect(normalizeCountry('US')).toEqual({ countries: ['US'], regions: [] });
+    expect(normalizeCountry('USA')).toEqual({ countries: ['US'], regions: [] });
+    expect(normalizeCountry('UK')).toEqual({ countries: ['GB'], regions: [] });
+    expect(normalizeCountry('England')).toEqual({ countries: ['GB'], regions: [] });
+    expect(normalizeCountry('Scotland')).toEqual({ countries: ['GB'], regions: [] });
   });
 
-  it('normalises UK aliases to ["GB"]', () => {
-    expect(normalizeCountry('UK')).toEqual(['GB']);
-    expect(normalizeCountry('England')).toEqual(['GB']);
-    expect(normalizeCountry('Scotland')).toEqual(['GB']);
+  it('maps single English country names to ISO alpha-2', () => {
+    expect(normalizeCountry('Germany')).toEqual({ countries: ['DE'], regions: [] });
+    expect(normalizeCountry('Japan')).toEqual({ countries: ['JP'], regions: [] });
+    expect(normalizeCountry('South Korea')).toEqual({ countries: ['KR'], regions: [] });
   });
 
-  it('normalises Europe to ["EU"]', () => {
-    expect(normalizeCountry('Europe')).toEqual(['EU']);
+  it('passes already-ISO two-letter codes through as countries (MB/nationality emitters)', () => {
+    expect(normalizeCountry('GB')).toEqual({ countries: ['GB'], regions: [] });
+    expect(normalizeCountry('JP')).toEqual({ countries: ['JP'], regions: [] });
   });
 
-  it('normalises Worldwide to ["WW"]', () => {
-    expect(normalizeCountry('Worldwide')).toEqual(['WW']);
+  it('maps supranational market codes/names to regions, keeping :Country pure ISO', () => {
+    expect(normalizeCountry('Europe')).toEqual({ countries: [], regions: ['EU'] });
+    expect(normalizeCountry('XE')).toEqual({ countries: [], regions: ['EU'] });
+    expect(normalizeCountry('Worldwide')).toEqual({ countries: [], regions: ['WW'] });
+    expect(normalizeCountry('XW')).toEqual({ countries: [], regions: ['WW'] });
+    expect(normalizeCountry('Scandinavia')).toEqual({ countries: [], regions: ['Scandinavia'] });
   });
 
-  it('expands compound values to multiple codes', () => {
-    expect(normalizeCountry('USA & Canada')).toEqual(['US', 'CA']);
-    expect(normalizeCountry('UK & Europe')).toEqual(['GB', 'EU']);
+  it('splits compound markets into concrete countries + region tokens', () => {
+    expect(normalizeCountry('USA & Canada')).toEqual({ countries: ['US', 'CA'], regions: [] });
+    expect(normalizeCountry('UK & Europe')).toEqual({ countries: ['GB'], regions: ['EU'] });
+    expect(normalizeCountry('UK, Europe & US')).toEqual({
+      countries: ['GB', 'US'],
+      regions: ['EU'],
+    });
+    expect(normalizeCountry('France & Benelux')).toEqual({
+      countries: ['FR'],
+      regions: ['Benelux'],
+    });
+    expect(normalizeCountry('North America (inc Mexico)')).toEqual({
+      countries: [],
+      regions: ['North America'],
+    });
   });
 
-  it('falls back to [raw] for unmapped values', () => {
-    expect(normalizeCountry('Atlantis')).toEqual(['Atlantis']);
-    expect(normalizeCountry('Unknown Market')).toEqual(['Unknown Market']);
+  it('falls back to a name-keyed country for unmapped/defunct values (never drops data)', () => {
+    expect(normalizeCountry('Yugoslavia')).toEqual({ countries: ['Yugoslavia'], regions: [] });
+    expect(normalizeCountry('Atlantis')).toEqual({ countries: ['Atlantis'], regions: [] });
   });
 });

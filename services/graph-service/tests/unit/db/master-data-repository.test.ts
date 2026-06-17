@@ -5,6 +5,7 @@ import {
   mergeMasterData,
   setMasterFetchedAndOriginalYear,
   setMasterFetched,
+  buildReleasedInRows,
 } from '../../../src/db/master-data-repository.js';
 
 vi.mock('neo4j-driver', async (importOriginal) => {
@@ -138,6 +139,25 @@ describe('mergeMasterData', () => {
     expect(relQuery).toContain('SET rel.formats');
   });
 
+  it('fans out a compound market to both RELEASED_IN and RELEASED_IN_REGION (#441)', async () => {
+    const { session, runSpy } = makeMockSession({ records: [] });
+    const driver = makeMockDriver(session);
+
+    // "UK & Europe" → Country GB + Region EU.
+    await mergeMasterData(driver, 100, 'Hejira', 1976, [
+      { country: 'UK & Europe', formats: ['Vinyl'] },
+    ]);
+
+    // Master MERGE + country UNWIND + region UNWIND = 3.
+    expect(runSpy).toHaveBeenCalledTimes(3);
+    const countryQuery: string = runSpy.mock.calls[1]?.[0] ?? '';
+    const regionQuery: string = runSpy.mock.calls[2]?.[0] ?? '';
+    expect(countryQuery).toContain('RELEASED_IN]');
+    expect((runSpy.mock.calls[1]?.[1] as { rows: { code: string }[] }).rows[0]?.code).toBe('GB');
+    expect(regionQuery).toContain('RELEASED_IN_REGION]');
+    expect((runSpy.mock.calls[2]?.[1] as { rows: { code: string }[] }).rows[0]?.code).toBe('EU');
+  });
+
   it('runs only the Master MERGE when countriesWithFormats is empty', async () => {
     const { session, runSpy } = makeMockSession({ records: [] });
     const driver = makeMockDriver(session);
@@ -158,6 +178,32 @@ describe('mergeMasterData', () => {
 
     await expect(mergeMasterData(driver, 100, 'Title', 1976, [])).rejects.toThrow('DB error');
     expect(session.close).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildReleasedInRows
+// ---------------------------------------------------------------------------
+
+describe('buildReleasedInRows', () => {
+  it('normalises to ISO and unions formats when raws collapse onto one code', () => {
+    // UK + England both → GB; their formats must union onto the single GB row (no clobber).
+    const { countryRows, regionRows } = buildReleasedInRows([
+      { country: 'UK', formats: ['LP'] },
+      { country: 'England', formats: ['CD'] },
+    ]);
+    expect(regionRows).toEqual([]);
+    expect(countryRows).toHaveLength(1);
+    expect(countryRows[0]?.code).toBe('GB');
+    expect([...countryRows[0]!.formats].sort()).toEqual(['CD', 'LP']);
+  });
+
+  it('splits a compound market into country and region rows', () => {
+    const { countryRows, regionRows } = buildReleasedInRows([
+      { country: 'UK & Europe', formats: ['Vinyl'] },
+    ]);
+    expect(countryRows).toEqual([{ code: 'GB', formats: ['Vinyl'] }]);
+    expect(regionRows).toEqual([{ code: 'EU', formats: ['Vinyl'] }]);
   });
 });
 

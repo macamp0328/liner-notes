@@ -247,7 +247,8 @@ const MASTER_QUERY = `
   MATCH (m:Master)
   RETURN
     count(m) AS total,
-    count(CASE WHEN EXISTS { (m)-[:MB_RELEASED_IN]->() } THEN 1 END) AS releaseEventsCovered`;
+    count(CASE WHEN EXISTS { (m)-[:MB_RELEASED_IN|MB_RELEASED_IN_REGION]->() } THEN 1 END)
+      AS releaseEventsCovered`;
 
 // Studio coordinate coverage (#342) — the recording-location-map denominator. total = all studios,
 // withCoordinates = studios carrying MB Place lat+long (#339 slice 2). An empty graph returns one row

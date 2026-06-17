@@ -8,6 +8,9 @@ const statements = [
   'CREATE CONSTRAINT genre_name IF NOT EXISTS FOR (g:Genre) REQUIRE g.name IS UNIQUE',
   'CREATE CONSTRAINT style_name IF NOT EXISTS FOR (s:Style) REQUIRE s.name IS UNIQUE',
   'CREATE CONSTRAINT country_name IF NOT EXISTS FOR (c:Country) REQUIRE c.name IS UNIQUE',
+  // #441 (ADR 0005): Region is the non-country market vocabulary (EU/WW/Scandinavia/compound markets)
+  // split off so Country stays pure ISO 3166-1 alpha-2. Same name-keyed uniqueness as Country.
+  'CREATE CONSTRAINT region_name IF NOT EXISTS FOR (g:Region) REQUIRE g.name IS UNIQUE',
   'CREATE FULLTEXT INDEX trackLyrics IF NOT EXISTS FOR (t:Track) ON EACH [t.lyrics, t.title]',
   'CREATE INDEX release_pressing_year IF NOT EXISTS FOR (r:Release) ON (r.pressingYear)',
   // One-time migration: copy r.year → r.pressingYear for existing nodes created before the rename.

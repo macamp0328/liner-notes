@@ -101,14 +101,14 @@ export async function seedExploreEnrichment(driver: Driver): Promise<void> {
     // master (800001) released in three countries via RELEASED_IN (the rel the
     // route matches — not MB_RELEASED_IN). m.year is the master's original year
     // (1965, when the album first came out), deliberately distinct from the 1966
-    // pressing carried by the release fixture. Unlike ORIGIN_COUNTRY above,
-    // RELEASED_IN countries are Discogs version.country strings (e.g. 'US', 'UK',
-    // 'Japan'), which are not ISO alpha-2 codes.
+    // pressing carried by the release fixture. Country nodes are now keyed on ISO
+    // 3166-1 alpha-2 (#441) — the production master-data writer normalises raw
+    // Discogs strings (UK→GB, Japan→JP) before MERGE, so the seed uses the codes.
     await session.run(
       `MERGE (m:Master {discogsId: 800001})
        SET m.title = 'Maiden Voyage', m.year = 1965
        WITH m
-       UNWIND ['US', 'UK', 'Japan'] AS country
+       UNWIND ['US', 'GB', 'JP'] AS country
        MERGE (c:Country {name: country})
        MERGE (m)-[rel:RELEASED_IN]->(c)
        SET rel.formats = ['Vinyl']`,

@@ -5,6 +5,7 @@ import {
   mergeMbReleaseEvents,
   setMbReleaseEventsFetched,
   resetMbReleaseEventsEnrichment,
+  splitReleaseEventsByPlace,
 } from '../../../src/db/mb-release-events-repository.js';
 import type { MbReleaseEvent } from '../../../src/ingestion/musicbrainz-client.js';
 
@@ -63,13 +64,16 @@ describe('getMastersForReleaseEventEnrichment', () => {
     expect(masters).toEqual([]);
   });
 
-  it('selects masters with no MB_RELEASED_IN, gated by the staleness window', async () => {
+  it('selects masters with no MB_RELEASED_IN(_REGION), gated by the staleness window', async () => {
     const { session, runSpy } = makeMockSession({ records: [] } as unknown as Result);
 
     await getMastersForReleaseEventEnrichment(makeMockDriver(session));
 
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(query).toContain('NOT EXISTS { (m)-[:MB_RELEASED_IN]->() }');
+    // #441: a master whose only events are XE/XW (→ MB_RELEASED_IN_REGION) must still count as
+    // enriched, else it is re-fetched every window forever.
+    expect(query).toContain('NOT EXISTS { (m)-[:MB_RELEASED_IN_REGION]->() }');
     expect(query).toContain('m.mbReleaseEventsFetchedAt IS NULL');
     expect(query).toContain('duration({ days: $stalenessDays })');
     expect(params).toHaveProperty('stalenessDays');
@@ -116,7 +120,7 @@ describe('mergeMbReleaseEvents', () => {
     expect(session.close).not.toHaveBeenCalled();
   });
 
-  it('passes only events with countryCode to the query', async () => {
+  it('passes only events with a resolved country code to the country query', async () => {
     const mixed: MbReleaseEvent[] = [
       { mbReleaseId: 'rel-001', countryCode: 'GB', date: '1969', formats: [] },
       { mbReleaseId: 'rel-002', countryCode: null, date: '2009', formats: [] },
@@ -126,9 +130,34 @@ describe('mergeMbReleaseEvents', () => {
 
     await mergeMbReleaseEvents(driver, 1234, mixed);
 
-    const [, params] = runSpy.mock.calls[0] as [string, { events: unknown[] }];
+    const [query, params] = runSpy.mock.calls[0] as [string, { events: { code: string }[] }];
+    expect(query).toContain('MB_RELEASED_IN {');
     expect(params.events).toHaveLength(1);
-    expect((params.events[0] as { countryCode: string }).countryCode).toBe('GB');
+    expect(params.events[0]?.code).toBe('GB');
+  });
+
+  it('routes MB Europe/Worldwide pseudo-codes (XE/XW) to the MB_RELEASED_IN_REGION block (#441)', async () => {
+    const regionEvents: MbReleaseEvent[] = [
+      { mbReleaseId: 'rel-eu', countryCode: 'XE', date: '1970', formats: ['Vinyl'] },
+      { mbReleaseId: 'rel-gb', countryCode: 'GB', date: '1970', formats: ['Vinyl'] },
+    ];
+    const { session, runSpy } = makeMockSession();
+    const driver = makeMockDriver(session);
+
+    await mergeMbReleaseEvents(driver, 1234, regionEvents);
+
+    expect(runSpy).toHaveBeenCalledTimes(2);
+    const countryCall = runSpy.mock.calls.find(([q]) => (q as string).includes('MB_RELEASED_IN {'));
+    const regionCall = runSpy.mock.calls.find(([q]) =>
+      (q as string).includes('MB_RELEASED_IN_REGION {'),
+    );
+    expect(countryCall).toBeDefined();
+    expect(regionCall).toBeDefined();
+    expect((countryCall![1] as { events: { code: string }[] }).events[0]?.code).toBe('GB');
+    const regionParams = regionCall![1] as { events: { code: string; mbReleaseId: string }[] };
+    expect(regionParams.events).toEqual([
+      { mbReleaseId: 'rel-eu', code: 'EU', date: '1970', formats: ['Vinyl'] },
+    ]);
   });
 
   it('closes the session even when run throws', async () => {
@@ -138,6 +167,20 @@ describe('mergeMbReleaseEvents', () => {
 
     await expect(mergeMbReleaseEvents(driver, 1, events)).rejects.toThrow('write error');
     expect(session.close).toHaveBeenCalledOnce();
+  });
+});
+
+describe('splitReleaseEventsByPlace', () => {
+  it('splits events into ISO country rows and region rows, skipping null country codes', () => {
+    const { countryRows, regionRows } = splitReleaseEventsByPlace([
+      { mbReleaseId: 'a', countryCode: 'GB', date: '1969', formats: ['Vinyl'] },
+      { mbReleaseId: 'b', countryCode: 'XW', date: '1970', formats: ['CD'] },
+      { mbReleaseId: 'c', countryCode: null, date: '2009', formats: [] },
+    ]);
+    expect(countryRows).toEqual([
+      { mbReleaseId: 'a', code: 'GB', date: '1969', formats: ['Vinyl'] },
+    ]);
+    expect(regionRows).toEqual([{ mbReleaseId: 'b', code: 'WW', date: '1970', formats: ['CD'] }]);
   });
 });
 
@@ -182,7 +225,8 @@ describe('resetMbReleaseEventsEnrichment', () => {
     expect(reset).toBe(5);
     expect(runSpy).toHaveBeenCalledTimes(2);
     const [deleteQuery] = runSpy.mock.calls[1] as [string, unknown];
-    expect(deleteQuery).toContain('MB_RELEASED_IN');
+    // #441: reset must delete both the Country and the Region release-event edges.
+    expect(deleteQuery).toContain('MB_RELEASED_IN|MB_RELEASED_IN_REGION');
     expect(session.close).toHaveBeenCalledOnce();
   });
 

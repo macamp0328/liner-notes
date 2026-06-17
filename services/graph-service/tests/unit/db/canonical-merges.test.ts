@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { mergeCountryClause, mergeStudioClause } from '../../../src/db/canonical-merges.js';
+import {
+  mergeCountryClause,
+  mergeRegionClause,
+  mergeStudioClause,
+} from '../../../src/db/canonical-merges.js';
 
 // The canonical write-path chokepoints (ADR 0005, law 6) are pure clause builders. These tests pin
 // their exact output — that string is interpolated verbatim into every Country/Studio writer's
@@ -17,6 +21,20 @@ describe('mergeCountryClause', () => {
 
   it('honours an explicit node variable', () => {
     expect(mergeCountryClause('$name', 'country')).toBe('MERGE (country:Country {name: $name})');
+  });
+});
+
+describe('mergeRegionClause', () => {
+  it('builds the canonical Region node MERGE from an UNWIND field', () => {
+    expect(mergeRegionClause('row.code')).toBe('MERGE (g:Region {name: row.code})');
+  });
+
+  it('builds the canonical Region node MERGE from a query parameter', () => {
+    expect(mergeRegionClause('$name')).toBe('MERGE (g:Region {name: $name})');
+  });
+
+  it('honours an explicit node variable', () => {
+    expect(mergeRegionClause('$name', 'region')).toBe('MERGE (region:Region {name: $name})');
   });
 });
 
