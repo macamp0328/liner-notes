@@ -381,7 +381,18 @@ jobs:
         # safety-critical (the bash-guard is the only enforcement against
         # `--no-verify` / `git push --force`; prepare.sh installs the husky walls),
         # so a silent break in any of them matters.
-        run: shellcheck scripts/admin/*.sh scripts/prepare.sh .claude/hooks/bash-guard.sh
+        run: shellcheck scripts/admin/*.sh scripts/prepare.sh .claude/hooks/bash-guard.sh scripts/check-mask.sh
+
+      - name: 'Check ::add-mask:: secret blob safety'
+        # ::add-mask:: only masks single-line values. Applying it to a multi-line
+        # JSON blob (e.g. the raw output of `aws secretsmanager get-secret-value`)
+        # masks only the first character and logs every remaining line — including
+        # all secret values — as plaintext to the public Actions log. This step
+        # catches the specific anti-pattern: a variable assigned from
+        # secretsmanager and then passed whole to ::add-mask::, rather than having
+        # each field extracted with jq and masked individually.
+        # Fix: see scripts/check-mask.sh for the correct pattern.
+        run: bash scripts/check-mask.sh
 
   script-tests:
     name: Script Tests

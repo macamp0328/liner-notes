@@ -404,6 +404,35 @@ Notes for agents:
   way. Matching is line-wise against the logical command, so commit messages that merely _mention_
   the blocked flags don't trip it.
 
+### GitHub Actions Secret Handling
+
+**`::add-mask::` only works on single-line values.** Applying it to a multi-line JSON blob (e.g.
+the raw output of `aws secretsmanager get-secret-value`) masks only the first character and logs
+every remaining line — including all secret values — to the public Actions log. The `check-mask.sh`
+CI step enforces the correct pattern.
+
+**Wrong (leaks secrets):**
+
+```bash
+json="$(aws secretsmanager get-secret-value ...)"
+echo "::add-mask::$json"   # only masks '{'; all secret values print on subsequent lines
+```
+
+**Correct (mask each extracted scalar individually):**
+
+```bash
+json="$(aws secretsmanager get-secret-value ...)"
+# Do NOT echo $json — it is multi-line JSON and ::add-mask:: only masks single-line values.
+for k in KEY1 KEY2; do
+  v="$(printf '%s' "$json" | jq -r --arg k "$k" '.[$k] // empty')"
+  echo "::add-mask::$v"   # single-line value — works correctly
+  echo "$k=$v" >> "$GITHUB_ENV"
+done
+```
+
+The `check-mask.sh` lint script (`pnpm mask:check`) detects this anti-pattern in all workflow
+files. It runs in the `actionlint` CI job and in `pnpm verify`.
+
 ---
 
 ## CI Requirements
