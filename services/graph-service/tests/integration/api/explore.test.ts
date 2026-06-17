@@ -636,7 +636,7 @@ describe('explore routes', () => {
       expect(master).toBeDefined();
       expect(master!.albumTitle).toBe('Maiden Voyage');
       expect(master!.countryCount).toBe(3);
-      expect([...master!.countries].sort()).toEqual(['Japan', 'UK', 'US']);
+      expect([...master!.countries].sort()).toEqual(['GB', 'JP', 'US']);
     });
 
     it('rejects limit > 50 via schema', async () => {

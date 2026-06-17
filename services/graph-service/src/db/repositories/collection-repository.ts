@@ -220,6 +220,7 @@ OPTIONAL MATCH (r)-[ol:ON_LABEL]->(l:Label)
 OPTIONAL MATCH (r)-[:IN_GENRE]->(g:Genre)
 OPTIONAL MATCH (r)-[:IN_STYLE]->(s:Style)
 OPTIONAL MATCH (r)-[:FROM_COUNTRY]->(c:Country)
+OPTIONAL MATCH (r)-[:FROM_REGION]->(creg:Region)
 OPTIONAL MATCH (r)-[:RECORDED_AT]->(st:Studio)
 OPTIONAL MATCH (rm:Musician)-[rco:CREDITED_ON]->(r)
 RETURN r,
@@ -227,7 +228,7 @@ RETURN r,
   collect(DISTINCT {discogsId: l.discogsId, name: l.name, catalogNumber: ol.catalogNumber}) AS labels,
   collect(DISTINCT g.name) AS genres,
   collect(DISTINCT s.name) AS styles,
-  c.name AS country,
+  coalesce(c.name, creg.name) AS country,
   collect(DISTINCT st.name) AS studios,
   collect(DISTINCT {name: rm.name, role: rco.role,
     displayRole: rco.displayRole, creditedAs: rco.creditedAs}) AS credits`,

@@ -1,7 +1,8 @@
 import type { Driver } from 'neo4j-driver';
 import neo4j from 'neo4j-driver';
 import { getStalenessDays } from '../enrichment/staleness.js';
-import { mergeCountryClause } from './canonical-merges.js';
+import { normalizeCountry } from '../ingestion/transforms.js';
+import { mergeCountryClause, mergeRegionClause } from './canonical-merges.js';
 
 type Neo4jInt = { toNumber(): number };
 
@@ -13,6 +14,44 @@ export interface UnenrichedMaster {
 export interface CountryWithFormats {
   country: string;
   formats: string[];
+}
+
+// A normalized pressing-place row: an ISO `:Country` code or a `:Region` token, with the union of all
+// formats seen for raw strings that collapse onto it.
+export interface PlaceWithFormats {
+  code: string;
+  formats: string[];
+}
+
+/**
+ * Normalize raw Discogs pressing countries (#441) into ISO `:Country` rows + `:Region` rows for the
+ * `RELEASED_IN` / `RELEASED_IN_REGION` writes. Pure + exported for unit testing.
+ *
+ * Distinct raw strings can collapse onto one code (`UK` + `England` → `GB`; `UK & Europe` + `Europe`
+ * → region `EU`). Because `RELEASED_IN` has no merge key beyond the (Master, place) endpoints, the
+ * later write would otherwise clobber `formats`; we **union** formats per code here so the surviving
+ * edge carries every format. (Done in TS, not `ON CREATE SET`, which would freeze the first batch's
+ * formats across reload runs.)
+ */
+export function buildReleasedInRows(countriesWithFormats: CountryWithFormats[]): {
+  countryRows: PlaceWithFormats[];
+  regionRows: PlaceWithFormats[];
+} {
+  const byCountry = new Map<string, Set<string>>();
+  const byRegion = new Map<string, Set<string>>();
+  const union = (acc: Map<string, Set<string>>, code: string, formats: string[]): void => {
+    const set = acc.get(code) ?? new Set<string>();
+    for (const f of formats) set.add(f);
+    acc.set(code, set);
+  };
+  for (const item of countriesWithFormats) {
+    const { countries, regions } = normalizeCountry(item.country);
+    for (const code of countries) union(byCountry, code, item.formats);
+    for (const code of regions) union(byRegion, code, item.formats);
+  }
+  const toRows = (acc: Map<string, Set<string>>): PlaceWithFormats[] =>
+    [...acc].map(([code, formats]) => ({ code, formats: [...formats] }));
+  return { countryRows: toRows(byCountry), regionRows: toRows(byRegion) };
 }
 
 // A Release is a candidate while it still lacks an originalYear (the master lookup either
@@ -54,17 +93,25 @@ export async function mergeMasterData(
       { masterDiscogsId: neo4j.int(masterDiscogsId), title, year: neo4j.int(year) },
     );
 
-    if (countriesWithFormats.length > 0) {
+    const { countryRows, regionRows } = buildReleasedInRows(countriesWithFormats);
+    if (countryRows.length > 0) {
       await session.run(
-        `UNWIND $countriesWithFormats AS item
+        `UNWIND $rows AS row
          MATCH (m:Master {discogsId: $masterDiscogsId})
-         ${mergeCountryClause('item.country')}
+         ${mergeCountryClause('row.code')}
          MERGE (m)-[rel:RELEASED_IN]->(c)
-         SET rel.formats = item.formats`,
-        {
-          masterDiscogsId: neo4j.int(masterDiscogsId),
-          countriesWithFormats,
-        },
+         SET rel.formats = row.formats`,
+        { masterDiscogsId: neo4j.int(masterDiscogsId), rows: countryRows },
+      );
+    }
+    if (regionRows.length > 0) {
+      await session.run(
+        `UNWIND $rows AS row
+         MATCH (m:Master {discogsId: $masterDiscogsId})
+         ${mergeRegionClause('row.code')}
+         MERGE (m)-[rel:RELEASED_IN_REGION]->(g)
+         SET rel.formats = row.formats`,
+        { masterDiscogsId: neo4j.int(masterDiscogsId), rows: regionRows },
       );
     }
   } finally {

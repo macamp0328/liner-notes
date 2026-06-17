@@ -373,65 +373,196 @@ export function isInstrumental(track: DiscogsTracklistEntry): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Country normalization (Issue 40)
+// Country normalization (Issue 40, #441 — ADR 0005)
 // ---------------------------------------------------------------------------
+//
+// `Country` is a multi-source controlled vocabulary: MusicBrainz/Wikidata emit ISO 3166-1 alpha-2
+// codes (`GB`/`DE`/`JP`), Discogs emits names and regional-market strings (`UK`/`Germany`/`Japan`/
+// `UK & Europe`). Keyed on the raw string they fragment — the same physical country lands on two
+// nodes that never join (ADR 0005's GB/UK proof). `normalizeCountry` is the single classifier that
+// resolves any raw token to ISO `:Country` codes **and** the separate `:Region` market tokens, so
+// `:Country` stays pure ISO. It is applied at every Country/Region writer through the
+// `mergeCountryClause`/`mergeRegionClause` chokepoints (canonical-merges.ts, ADR 0005 law 6).
+//
+// Regions are a genuinely different thing from countries — a regional-pressing SKU (`Europe`,
+// `Worldwide`, `Scandinavia`, `UK & Europe`'s "Europe" half) — so they get a distinct label rather
+// than being exploded into member countries (which would need a fuzzy region→members table and lose
+// the regional-SKU fact; ADR 0005 "Alternatives rejected").
 
-// Discogs uses non-ISO regional codes and compound market strings.
-// This map normalises them to canonical ISO 3166-1 alpha-2 codes (or regional
-// tokens EU / WW). Compound values (e.g. "USA & Canada") expand to multiple
-// codes. Unmapped values fall through as-is so no data is silently dropped.
-const COUNTRY_NORMALIZATION: Readonly<Record<string, string[]>> = {
-  US: ['US'],
-  USA: ['US'],
-  UK: ['GB'],
-  England: ['GB'],
-  Scotland: ['GB'],
-  Wales: ['GB'],
-  Europe: ['EU'],
-  Germany: ['DE'],
-  France: ['FR'],
-  Japan: ['JP'],
-  Canada: ['CA'],
-  Australia: ['AU'],
-  Netherlands: ['NL'],
-  Italy: ['IT'],
-  Spain: ['ES'],
-  Brazil: ['BR'],
-  Mexico: ['MX'],
-  Sweden: ['SE'],
-  Norway: ['NO'],
-  Denmark: ['DK'],
-  Finland: ['FI'],
-  Belgium: ['BE'],
-  Switzerland: ['CH'],
-  Austria: ['AT'],
-  Portugal: ['PT'],
-  Greece: ['GR'],
-  Poland: ['PL'],
-  'Czech Republic': ['CZ'],
-  Hungary: ['HU'],
-  Russia: ['RU'],
-  'South Korea': ['KR'],
-  Korea: ['KR'],
-  'New Zealand': ['NZ'],
-  'South Africa': ['ZA'],
-  Argentina: ['AR'],
-  'USA & Canada': ['US', 'CA'],
-  'US & Canada': ['US', 'CA'],
-  'UK & Europe': ['GB', 'EU'],
-  'Europe & UK': ['EU', 'GB'],
-  'Europe & US': ['EU', 'US'],
-  'US & Europe': ['US', 'EU'],
-  Worldwide: ['WW'],
-};
+/** A raw market token resolved to zero-or-more ISO country codes and zero-or-more region tokens. */
+export interface NormalizedCountry {
+  countries: string[];
+  regions: string[];
+}
+
+// Non-ISO single-country names/aliases → ISO 3166-1 alpha-2. The full set observed in prod
+// (`MATCH (c:Country) RETURN c.name`, 2026-06-17). Already-ISO codes (the MusicBrainz/Wikidata
+// emitters) are not listed — they pass through the `^[A-Z]{2}$` branch below.
+const COUNTRY_CODES = new Map<string, string>([
+  ['US', 'US'],
+  ['USA', 'US'],
+  ['UK', 'GB'],
+  ['England', 'GB'],
+  ['Scotland', 'GB'],
+  ['Wales', 'GB'],
+  ['Angola', 'AO'],
+  ['Argentina', 'AR'],
+  ['Australia', 'AU'],
+  ['Austria', 'AT'],
+  ['Bahrain', 'BH'],
+  ['Barbados', 'BB'],
+  ['Belgium', 'BE'],
+  ['Bolivia', 'BO'],
+  ['Brazil', 'BR'],
+  ['Bulgaria', 'BG'],
+  ['Canada', 'CA'],
+  ['Chile', 'CL'],
+  ['China', 'CN'],
+  ['Colombia', 'CO'],
+  ['Costa Rica', 'CR'],
+  ['Croatia', 'HR'],
+  ['Czech Republic', 'CZ'],
+  ['Denmark', 'DK'],
+  ['Dominican Republic', 'DO'],
+  ['Ecuador', 'EC'],
+  ['Egypt', 'EG'],
+  ['El Salvador', 'SV'],
+  ['Ethiopia', 'ET'],
+  ['Finland', 'FI'],
+  ['France', 'FR'],
+  ['Germany', 'DE'],
+  ['Ghana', 'GH'],
+  ['Greece', 'GR'],
+  ['Guatemala', 'GT'],
+  ['Honduras', 'HN'],
+  ['Hong Kong', 'HK'],
+  ['Hungary', 'HU'],
+  ['Iceland', 'IS'],
+  ['India', 'IN'],
+  ['Indonesia', 'ID'],
+  ['Iran', 'IR'],
+  ['Ireland', 'IE'],
+  ['Israel', 'IL'],
+  ['Italy', 'IT'],
+  ['Jamaica', 'JM'],
+  ['Japan', 'JP'],
+  ['Kenya', 'KE'],
+  ['Korea', 'KR'],
+  ['Lebanon', 'LB'],
+  ['Lithuania', 'LT'],
+  ['Luxembourg', 'LU'],
+  ['Malaysia', 'MY'],
+  ['Mexico', 'MX'],
+  ['Mozambique', 'MZ'],
+  ['Netherlands', 'NL'],
+  ['New Zealand', 'NZ'],
+  ['Nicaragua', 'NI'],
+  ['Nigeria', 'NG'],
+  ['Norway', 'NO'],
+  ['Pakistan', 'PK'],
+  ['Panama', 'PA'],
+  ['Paraguay', 'PY'],
+  ['Peru', 'PE'],
+  ['Philippines', 'PH'],
+  ['Poland', 'PL'],
+  ['Portugal', 'PT'],
+  ['Romania', 'RO'],
+  ['Russia', 'RU'],
+  ['Saudi Arabia', 'SA'],
+  ['Serbia', 'RS'],
+  ['Singapore', 'SG'],
+  ['South Africa', 'ZA'],
+  ['South Korea', 'KR'],
+  ['Spain', 'ES'],
+  ['Sweden', 'SE'],
+  ['Switzerland', 'CH'],
+  ['Syria', 'SY'],
+  ['Taiwan', 'TW'],
+  ['Thailand', 'TH'],
+  ['Turkey', 'TR'],
+  ['Ukraine', 'UA'],
+  ['United Arab Emirates', 'AE'],
+  ['Uruguay', 'UY'],
+  ['Venezuela', 'VE'],
+  ['Zambia', 'ZM'],
+  ['Zimbabwe', 'ZW'],
+]);
+
+// Supranational market codes → region token. `EU`/`WW` mirror the short-code convention; MusicBrainz
+// emits `XE` (Europe) / `XW` ([Worldwide]) for these, which must map to regions so `:Country` never
+// gains a non-ISO pseudo-code.
+const REGION_CODES = new Map<string, string>([
+  ['Europe', 'EU'],
+  ['EU', 'EU'],
+  ['Worldwide', 'WW'],
+  ['WW', 'WW'],
+  ['XE', 'EU'],
+  ['XW', 'WW'],
+]);
+
+// Multi-country / fuzzy market names that are their own region token (no short code).
+const REGION_NAMES = new Set<string>([
+  'Scandinavia',
+  'Benelux',
+  'Asia',
+  'Australasia',
+  'South East Asia',
+  'Middle East',
+  'CIS',
+  'Gulf Cooperation Council',
+  'North America',
+]);
+
+// Compound Discogs markets → the mix of concrete ISO countries + region tokens they denote. Concrete
+// enumerable members become countries; supranational parts (`Europe`→EU, `Benelux`, CIS) stay regions.
+const COMPOUND_MARKETS = new Map<string, NormalizedCountry>([
+  ['USA & Canada', { countries: ['US', 'CA'], regions: [] }],
+  ['US & Canada', { countries: ['US', 'CA'], regions: [] }],
+  ['Australia & New Zealand', { countries: ['AU', 'NZ'], regions: [] }],
+  ['UK & Ireland', { countries: ['GB', 'IE'], regions: [] }],
+  ['UK & US', { countries: ['GB', 'US'], regions: [] }],
+  ['Czech Republic & Slovakia', { countries: ['CZ', 'SK'], regions: [] }],
+  ['Germany, Austria, & Switzerland', { countries: ['DE', 'AT', 'CH'], regions: [] }],
+  ['Singapore & Malaysia', { countries: ['SG', 'MY'], regions: [] }],
+  ['Singapore, Malaysia & Hong Kong', { countries: ['SG', 'MY', 'HK'], regions: [] }],
+  [
+    'Singapore, Malaysia, Hong Kong & Thailand',
+    { countries: ['SG', 'MY', 'HK', 'TH'], regions: [] },
+  ],
+  ['Hong Kong & Thailand', { countries: ['HK', 'TH'], regions: [] }],
+  ['UK & Europe', { countries: ['GB'], regions: ['EU'] }],
+  ['Europe & UK', { countries: ['GB'], regions: ['EU'] }],
+  ['Europe & US', { countries: ['US'], regions: ['EU'] }],
+  ['US & Europe', { countries: ['US'], regions: ['EU'] }],
+  ['USA & Europe', { countries: ['US'], regions: ['EU'] }],
+  ['UK, Europe & US', { countries: ['GB', 'US'], regions: ['EU'] }],
+  ['USA, Canada & Europe', { countries: ['US', 'CA'], regions: ['EU'] }],
+  ['France & Benelux', { countries: ['FR'], regions: ['Benelux'] }],
+  ['Russia & CIS', { countries: ['RU'], regions: ['CIS'] }],
+  ['North America (inc Mexico)', { countries: [], regions: ['North America'] }],
+]);
 
 /**
- * Normalise a raw Discogs country string to an array of canonical codes.
- * Returns a single-element array for most inputs; compound market strings
- * (e.g. "USA & Canada") expand to multiple codes.
- * Unknown values fall back to [raw] — data is never silently discarded.
+ * Resolve a raw Discogs/MusicBrainz country string into ISO `:Country` codes and `:Region` tokens.
+ *
+ * Lookup order is load-bearing: compound markets and the alias/region maps are consulted **before**
+ * the `^[A-Z]{2}$` already-ISO passthrough, so two-letter aliases (`UK`→`GB`) and MB pseudo-codes
+ * (`XE`→region `EU`) collapse instead of leaking through as bogus countries.
+ *
+ * Unmapped values fall back to a single `:Country` keyed on the raw string — data is never silently
+ * dropped. Defunct states (`Yugoslavia`, `Czechoslovakia`, `USSR`, the GDR, `Netherlands Antilles`,
+ * `Rhodesia`) deliberately take this path: they have no current ISO 3166-1 code and the historic
+ * 3166-3 codes are reassigned/ambiguous, so they stay readable name-keyed nodes (ADR 0005).
  */
-export function normalizeCountry(raw: string): string[] {
-  // eslint-disable-next-line security/detect-object-injection
-  return COUNTRY_NORMALIZATION[raw] ?? [raw];
+export function normalizeCountry(raw: string): NormalizedCountry {
+  const token = raw.trim();
+  const compound = COMPOUND_MARKETS.get(token);
+  if (compound) return compound;
+  const regionCode = REGION_CODES.get(token);
+  if (regionCode) return { countries: [], regions: [regionCode] };
+  if (REGION_NAMES.has(token)) return { countries: [], regions: [token] };
+  const countryCode = COUNTRY_CODES.get(token);
+  if (countryCode) return { countries: [countryCode], regions: [] };
+  if (/^[A-Z]{2}$/.test(token)) return { countries: [token], regions: [] };
+  return { countries: [token], regions: [] };
 }

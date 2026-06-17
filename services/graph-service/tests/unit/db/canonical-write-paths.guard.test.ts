@@ -2,7 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mergeCountryClause, mergeStudioClause } from '../../../src/db/canonical-merges.js';
+import {
+  mergeCountryClause,
+  mergeRegionClause,
+  mergeStudioClause,
+} from '../../../src/db/canonical-merges.js';
 
 // The write-path chokepoint guard (ADR 0005, law 6 + "The guard"). `Country` and `Studio` are
 // multi-writer controlled-vocabulary nodes: their node MERGE must come from the single canonical
@@ -18,13 +22,13 @@ import { mergeCountryClause, mergeStudioClause } from '../../../src/db/canonical
 // Discogs/MB edge writers. Both scan `src/db/**` because the architecture keeps all Cypher in the
 // repository layer.
 
-// Matches `Country`/`Studio` used as a label inside a MERGE *node* pattern: `MERGE (` then any run
-// of non-`)` chars (so anonymous `MERGE (:Country` and multi-label `MERGE (c:Foo:Country` are both
-// caught) then `:Country`/`:Studio`. The `[^)]*` stops at the first `)`, so a relationship MERGE
+// Matches `Country`/`Region`/`Studio` used as a label inside a MERGE *node* pattern: `MERGE (` then
+// any run of non-`)` chars (so anonymous `MERGE (:Country` and multi-label `MERGE (c:Foo:Country` are
+// both caught) then `:Country`/`:Region`/`:Studio`. The `[^)]*` stops at the first `)`, so a rel MERGE
 // like `MERGE (a)-[:ORIGIN_COUNTRY]->(c)` never matches (its `COUNTRY` lives in the `[…]` after the
 // closing paren). Known blind spot: lowercase `merge` — the repo writes Cypher keywords uppercase by
 // convention, so it is not worth the false-positive risk of matching the English word "merge".
-const RAW_ENTITY_MERGE = /MERGE\s*\(\s*[^)]*:\s*(Country|Studio)\b/g;
+const RAW_ENTITY_MERGE = /MERGE\s*\(\s*[^)]*:\s*(Country|Region|Studio)\b/g;
 
 // The one file allowed to contain a raw Country/Studio node MERGE — it IS the canonical clause.
 // Matched on the SRC_DB_ROOT-relative path (not basename) so a future same-named file in a
@@ -84,6 +88,8 @@ const PROVENANCE_BEARING_EDGES = new Set<string>([
   'WROTE',
   'RECORDING_OF',
   'MB_RELEASED_IN',
+  // #441: the Region counterpart of MB_RELEASED_IN — same MusicBrainz provenance, distinct endpoint.
+  'MB_RELEASED_IN_REGION',
 ]);
 
 const STRUCTURAL_EDGES = new Set<string>([
@@ -97,6 +103,10 @@ const STRUCTURAL_EDGES = new Set<string>([
   'PARENT_LABEL',
   'SAME_PERSON_AS',
   'HAS_STAGE',
+  // #441: Region counterparts of the structural place edges (Discogs-sourced; provenance is in the
+  // type name, same as their Country variants).
+  'FROM_REGION',
+  'RELEASED_IN_REGION',
 ]);
 
 // Matches an edge created by MERGE/CREATE, capturing (1) the relationship variable (empty for an
@@ -191,6 +201,16 @@ describe('scanForRawEntityMerges', () => {
     ]);
     expect(scanForRawEntityMerges('MERGE (a)-[rel:ORIGIN_COUNTRY]->(c)')).toEqual([]);
     expect(scanForRawEntityMerges(mergeStudioClause('p.name'))).toHaveLength(1);
+  });
+
+  it('flags a raw Region node MERGE and the canonical Region helper output (#441)', () => {
+    expect(scanForRawEntityMerges('MERGE (g:Region {name: $x})')).toEqual([
+      { entity: 'Region', match: 'MERGE (g:Region' },
+    ]);
+    // The helper output IS a raw clause — legal only because it lives in canonical-merges.ts.
+    expect(scanForRawEntityMerges(mergeRegionClause('row.code'))).toEqual([
+      { entity: 'Region', match: 'MERGE (g:Region' },
+    ]);
   });
 });
 

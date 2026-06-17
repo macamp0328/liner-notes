@@ -23,7 +23,7 @@ import {
   parseInstrument,
   parseDurationSeconds,
 } from '../ingestion/transforms.js';
-import { mergeCountryClause, mergeStudioClause } from './canonical-merges.js';
+import { mergeCountryClause, mergeRegionClause, mergeStudioClause } from './canonical-merges.js';
 
 const VARIOUS_ARTISTS_IDS = [194, 355];
 
@@ -84,8 +84,7 @@ export async function mergeReleaseGraph(driver: Driver, release: DiscogsRelease)
     await mergeGenres(session, release.id, release.genres ?? []);
     await mergeStyles(session, release.id, release.styles ?? []);
     if (release.country) {
-      const normalizedCountries = normalizeCountry(release.country);
-      await mergeCountry(session, release.id, normalizedCountries);
+      await mergeCountry(session, release.id, release.country);
     }
     await mergeStudios(session, release.id, release.companies ?? []);
     const tracks = filterTracks(release.tracklist);
@@ -238,18 +237,31 @@ async function mergeStyles(session: Session, releaseId: number, styles: string[]
   }
 }
 
+// Writes the release's place-of-origin: a `FROM_COUNTRY` edge per normalized ISO `:Country` and a
+// `FROM_REGION` edge per `:Region` market token (#441). The raw Discogs `release.country` is
+// normalized here (not at the caller) so this is the single FROM_* write path.
 async function mergeCountry(
   session: Session,
   releaseId: number,
-  countries: string[],
+  rawCountry: string,
 ): Promise<void> {
-  for (const country of countries) {
+  const { countries, regions } = normalizeCountry(rawCountry);
+  if (countries.length > 0) {
     await session.run(
-      `${mergeCountryClause('$name')}
-       WITH c
-       MATCH (r:Release {discogsId: $releaseId})
+      `MATCH (r:Release {discogsId: $releaseId})
+       UNWIND $codes AS code
+       ${mergeCountryClause('code')}
        MERGE (r)-[:FROM_COUNTRY]->(c)`,
-      { name: country, releaseId: neo4j.int(releaseId) },
+      { codes: countries, releaseId: neo4j.int(releaseId) },
+    );
+  }
+  if (regions.length > 0) {
+    await session.run(
+      `MATCH (r:Release {discogsId: $releaseId})
+       UNWIND $codes AS code
+       ${mergeRegionClause('code')}
+       MERGE (r)-[:FROM_REGION]->(g)`,
+      { codes: regions, releaseId: neo4j.int(releaseId) },
     );
   }
 }

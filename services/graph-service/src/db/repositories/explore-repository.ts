@@ -1,5 +1,6 @@
 import neo4j, { Driver } from 'neo4j-driver';
 import type { RoleCategory } from '../../ingestion/transforms.js';
+import { normalizeCountry } from '../../ingestion/transforms.js';
 import { toInt, toStr, toFloat } from '../coercions.js';
 
 // ---------------------------------------------------------------------------
@@ -725,19 +726,28 @@ export async function getReleasesByCountry(
   driver: Driver,
   name: string,
 ): Promise<ExploreRelease[]> {
+  // Resolve the request to its ISO `:Country` code(s) so legacy/alias inputs still match the
+  // normalized nodes (#441): `?name=UK` and `?name=Germany` now find `GB`/`DE`. A pure-region input
+  // (`Europe`) yields no country codes and returns nothing — regions are not country queries (a
+  // dedicated /explore/region route is a follow-up). The raw input is included as a fallback so
+  // unmapped defunct-state names (e.g. `Yugoslavia`) keep working.
+  const { countries } = normalizeCountry(name);
+  // Lower-case before de-duping so case-variant aliases collapse to one term; the raw `name` is kept
+  // as a fallback so unmapped/defunct-state names (e.g. `Yugoslavia`) still match their name-keyed node.
+  const codes = [...new Set([...countries, name].map((c) => c.toLowerCase()))];
   const session = driver.session();
   try {
     const result = await session.run(
       `
       MATCH (r:Release)-[:FROM_COUNTRY]->(c:Country)
-      WHERE toLower(c.name) = toLower($name)
+      WHERE toLower(c.name) IN $codes
       OPTIONAL MATCH (r)-[:RELEASED_BY]->(a:Artist)
       RETURN r.discogsId AS discogsId, r.title AS title, a.name AS artist,
              coalesce(r.originalYear, r.pressingYear) AS pressingYear,
              r.format AS format, r.thumbUrl AS thumbUrl
       ORDER BY pressingYear
       `,
-      { name },
+      { codes },
     );
     return result.records.map(mapExploreRelease);
   } finally {
@@ -921,9 +931,10 @@ export async function getMostPressedReleases(
   try {
     const result = await session.run(
       `
-      MATCH (m:Master)-[:RELEASED_IN]->(c:Country)
+      MATCH (m:Master)-[:RELEASED_IN|RELEASED_IN_REGION]->(p)
+      WHERE p:Country OR p:Region
       WITH m.discogsId AS masterDiscogsId, m.title AS albumTitle,
-           collect(DISTINCT c.name) AS countries
+           collect(DISTINCT p.name) AS countries
       WHERE size(countries) > 1
       RETURN masterDiscogsId, albumTitle, size(countries) AS countryCount, countries
       ORDER BY countryCount DESC, albumTitle
