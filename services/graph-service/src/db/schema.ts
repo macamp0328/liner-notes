@@ -21,6 +21,13 @@ const statements = [
   // issue #330: backs the staleness-gated group-members candidate scan (getGroupCandidates).
   'CREATE INDEX musician_members_fetched_at IF NOT EXISTS FOR (m:Musician) ON (m.membersFetchedAt)',
   'CREATE INDEX studio_name IF NOT EXISTS FOR (s:Studio) ON (s.name)',
+  // issue #443 (ADR 0005, sub-issue 4): Studio is name-keyed and written by two repositories, so
+  // case/space variants ("EastWest" vs "Eastwest") fragmented into separate nodes. mergeStudioClause
+  // now MERGEs on a folded nameKey = toLower(trim(name)); this constraint enforces its uniqueness.
+  // No nameKey backfill: a backfill SET would itself violate the constraint on the existing variant
+  // pairs (both fold to one key) — migration is wipe-and-reload (ADR 0005). On the current graph the
+  // constraint applies cleanly because uniqueness ignores nodes lacking the property.
+  'CREATE CONSTRAINT studio_name_key IF NOT EXISTS FOR (s:Studio) REQUIRE s.nameKey IS UNIQUE',
   // issue #196: the track-versions stage (sole reader of t.normalizedTitle) was dropped.
   // Drop its now-unused index; IF EXISTS keeps this a no-op once cleared.
   'DROP INDEX track_normalized_title IF EXISTS',

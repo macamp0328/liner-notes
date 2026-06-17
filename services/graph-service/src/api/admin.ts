@@ -802,8 +802,9 @@ const PIPELINES: PipelineEntry[] = [
       'is a deterministic per-track studio attribution. Blocks until complete.\n\n' +
       '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, and ' +
       'only after `track-musicbrainz` has populated `recordingMbid`.**\n\n' +
-      'The Studio is MERGEd by name onto the existing name-keyed nodes, so a track’s MusicBrainz studio ' +
-      'lines up with the album’s Discogs studio of the same name. The Place’s coordinates and area ' +
+      'The Studio is MERGEd by its canonical `nameKey` (`toLower(trim(name))`, #443) onto the existing ' +
+      'name-keyed nodes, so a track’s MusicBrainz studio lines up with the album’s Discogs studio of the ' +
+      'same name — case/space variants included. The Place’s coordinates and area ' +
       'enrich the Studio node (feeding the recording-location map) via `coalesce`, so they only ever ' +
       'fill a gap.\n\n' +
       '**MusicBrainz place relations are genuinely sparse — zero studios across a collection is ' +
