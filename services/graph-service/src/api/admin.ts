@@ -605,7 +605,9 @@ const PIPELINES: PipelineEntry[] = [
     enrichDescription:
       'For each unenriched Master node, walks Discogs master ID → MusicBrainz release group → ' +
       'all official releases → release events, writing `MB_RELEASED_IN` relationships to `Country` ' +
-      'nodes with ISO-3166-1 alpha-2 codes and release dates. Blocks until complete.\n\n' +
+      'nodes with ISO-3166-1 alpha-2 codes and release dates. The resolved release-group MBID is ' +
+      'persisted on the Master as `musicbrainzReleaseGroupId` (provenance crosswalk, ADR 0005 law 5). ' +
+      'Blocks until complete.\n\n' +
       '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n' +
       'Selects Master nodes that still have no `MB_RELEASED_IN` relationship and whose last attempt has ' +
       'aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `mbReleaseEventsFetchedAt` after each ' +
@@ -629,8 +631,8 @@ const PIPELINES: PipelineEntry[] = [
     reset: {
       summary: 'Reset MusicBrainz release event enrichment markers for a full re-run',
       description:
-        'Removes the `mbReleaseEventsFetchedAt` property from all Master nodes and deletes all ' +
-        '`MB_RELEASED_IN` relationships, causing the next ' +
+        'Removes the `mbReleaseEventsFetchedAt` and `musicbrainzReleaseGroupId` properties from all ' +
+        'Master nodes and deletes all `MB_RELEASED_IN` relationships, causing the next ' +
         '`POST /api/v1/admin/mb-release-events/enrich` call to re-process every master from scratch.\n\n' +
         'This endpoint is blocked while enrichment is running.',
       runningMessage:
