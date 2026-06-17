@@ -430,8 +430,11 @@ for k in KEY1 KEY2; do
 done
 ```
 
-The `check-mask.sh` lint script (`pnpm mask:check`) detects this anti-pattern in all workflow
-files. It runs in the `actionlint` CI job and in `pnpm verify`.
+The `check-mask.sh` lint script (`pnpm mask:check`) detects this anti-pattern across both `*.yml`
+and `*.yaml` workflow files — it flags any variable assigned from `aws … secretsmanager
+get-secret-value` (global flags between `aws` and the subcommand are tolerated) that is then masked
+whole via `echo` or `printf`, while leaving correctly-masked single-line scalars alone. It runs in
+the `actionlint` CI job and in `pnpm verify`, and is regression-tested by `scripts/check-mask.test.ts`.
 
 ---
 
