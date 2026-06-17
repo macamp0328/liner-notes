@@ -137,6 +137,9 @@ function scanEdgeMerges(cypher: string): EdgeMergeRef[] {
  * relVar's `<relVar>.source` appears in the tail from this match up to the next MERGE/RETURN (its
  * SET / ON CREATE SET). Bounding the tail is what makes the check "set on this edge" rather than "the
  * string appears somewhere in the query" — a `WHERE relVar.source` read elsewhere can't fake a tag.
+ * Assumes a writer tags `source` in the SET immediately following its edge MERGE, before any later
+ * MERGE/RETURN (true of every writer today); one that deferred it past another clause would
+ * false-FAIL loudly — the safe direction for a CI guard, never a silent false pass.
  */
 function edgeHasSource(cypher: string, edge: EdgeMergeRef): boolean {
   if (/\bsource\b/.test(edge.inlineProps)) return true;
