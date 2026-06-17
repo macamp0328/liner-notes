@@ -4,6 +4,7 @@ import type { Logger } from '../ingestion/discogs-client.js';
 import {
   getMastersForReleaseEventEnrichment,
   mergeMbReleaseEvents,
+  setMasterReleaseGroupMbid,
   setMbReleaseEventsFetched,
 } from '../db/mb-release-events-repository.js';
 import { runEnrichment, type EnrichmentStage } from './run.js';
@@ -20,8 +21,15 @@ export interface MbReleaseEventsEnrichmentSummary {
 /** A candidate Master to look up in MusicBrainz. */
 type MasterCandidate = { masterDiscogsId: number };
 
-/** The events found for a linked Master, plus how many carry a usable country code. */
-type ResolvedEvents = { events: MbReleaseEvent[]; withCountryCount: number };
+/**
+ * The events found for a linked Master, plus how many carry a usable country code and the
+ * resolved MusicBrainz release-group MBID (persisted as a crosswalk attribute on the Master).
+ */
+type ResolvedEvents = {
+  releaseGroupMbid: string;
+  events: MbReleaseEvent[];
+  withCountryCount: number;
+};
 
 /**
  * Enrich Master nodes with MB_RELEASED_IN relationships to Country nodes.
@@ -73,9 +81,13 @@ export async function enrichMbReleaseEvents(
         `[mb-release-events] Master ${masterDiscogsId}: ${withCountry.length} events to write`,
       );
 
-      return { events, withCountryCount: withCountry.length };
+      return { releaseGroupMbid: mbid, events, withCountryCount: withCountry.length };
     },
     async write(d, { masterDiscogsId }, resolved) {
+      // MBID first: it must persist before the MB_RELEASED_IN edges or the fetched marker, both of
+      // which exclude the Master from re-selection. A crash after either would otherwise lose the
+      // crosswalk for good; ordered first, any mid-write crash re-resolves it idempotently.
+      await setMasterReleaseGroupMbid(d, masterDiscogsId, resolved.releaseGroupMbid);
       await mergeMbReleaseEvents(d, masterDiscogsId, resolved.events);
       await setMbReleaseEventsFetched(d, masterDiscogsId);
       eventsWritten += resolved.withCountryCount;

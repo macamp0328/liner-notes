@@ -722,7 +722,7 @@
       "post": {
         "summary": "Enrich Master nodes with MusicBrainz release events (MB_RELEASED_IN)",
         "tags": ["admin"],
-        "description": "For each unenriched Master node, walks Discogs master ID → MusicBrainz release group → all official releases → release events, writing `MB_RELEASED_IN` relationships to `Country` nodes with ISO-3166-1 alpha-2 codes and release dates. Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\nSelects Master nodes that still have no `MB_RELEASED_IN` relationship and whose last attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `mbReleaseEventsFetchedAt` after each attempt — so a master MusicBrainz had no events for is retried at most once per window while already-populated masters are skipped. Run `POST /api/v1/admin/mb-release-events/reset` to force a full re-run.\n\nEvents without a country code are skipped (only ISO-coded events can be linked to Country nodes). Same country with different release IDs creates separate relationships, enabling `min(r.date)` queries for first-release-per-country.\n\nRequires `MUSICBRAINZ_USER_AGENT` env var.",
+        "description": "For each unenriched Master node, walks Discogs master ID → MusicBrainz release group → all official releases → release events, writing `MB_RELEASED_IN` relationships to `Country` nodes with ISO-3166-1 alpha-2 codes and release dates. The resolved release-group MBID is persisted on the Master as `musicbrainzReleaseGroupId` (provenance crosswalk, ADR 0005 law 5). Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\nSelects Master nodes that still have no `MB_RELEASED_IN` relationship and whose last attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `mbReleaseEventsFetchedAt` after each attempt — so a master MusicBrainz had no events for is retried at most once per window while already-populated masters are skipped. Run `POST /api/v1/admin/mb-release-events/reset` to force a full re-run.\n\nEvents without a country code are skipped (only ISO-coded events can be linked to Country nodes). Same country with different release IDs creates separate relationships, enabling `min(r.date)` queries for first-release-per-country.\n\nRequires `MUSICBRAINZ_USER_AGENT` env var.",
         "security": [
           {
             "bearerAuth": []
@@ -791,7 +791,7 @@
       "post": {
         "summary": "Reset MusicBrainz release event enrichment markers for a full re-run",
         "tags": ["admin"],
-        "description": "Removes the `mbReleaseEventsFetchedAt` property from all Master nodes and deletes all `MB_RELEASED_IN` relationships, causing the next `POST /api/v1/admin/mb-release-events/enrich` call to re-process every master from scratch.\n\nThis endpoint is blocked while enrichment is running.",
+        "description": "Removes the `mbReleaseEventsFetchedAt` and `musicbrainzReleaseGroupId` properties from all Master nodes and deletes all `MB_RELEASED_IN` relationships, causing the next `POST /api/v1/admin/mb-release-events/enrich` call to re-process every master from scratch.\n\nThis endpoint is blocked while enrichment is running.",
         "security": [
           {
             "bearerAuth": []
