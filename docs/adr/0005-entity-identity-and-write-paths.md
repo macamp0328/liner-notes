@@ -54,18 +54,18 @@ per-entity decisions.
 
 ### Canonical keys and crosswalk, per entity (measured 2026-06-17, prod)
 
-| Entity      | Canonical key                   | Constraint            | Deterministic dupes | Cross-source crosswalk (persisted)       |
-| ----------- | ------------------------------- | --------------------- | ------------------- | ---------------------------------------- |
-| Release     | `discogsId`                     | UNIQUE                | 0                   | `barcode` (54%)                          |
-| Master      | `discogsId`                     | UNIQUE                | 0                   | — (MB release-group MBID **discarded**)  |
-| Label       | `discogsId`                     | UNIQUE                | 0                   | —                                        |
-| Artist      | `discogsId`                     | UNIQUE                | 0                   | `musicbrainzId` 96.6%, `wikidataQid` 90% |
-| Work        | `mbid`                          | UNIQUE                | 0                   | `writerMbids` 99%                        |
-| Track       | `(position, releaseDiscogsId)`  | none (Aura Free)      | 0 (0 malformed)     | `recordingMbid` 85%, `isrc` 45%          |
-| Musician    | `discogsId` \| `name` \| `mbid` | none                  | 0                   | `musicbrainzId` 84% of catalogued        |
-| Studio      | `name`                          | **none (anomaly)**    | 0 exact, 2 variants | `musicbrainzPlaceId` 46%, coords 29%     |
-| Genre/Style | `name`                          | UNIQUE                | 0                   | — (single-source vocab)                  |
-| Country     | `name` → **ISO 3166-1 alpha-2** | UNIQUE (on wrong key) | **fragmented**      | — (no ISO key today)                     |
+| Entity      | Canonical key                   | Constraint            | Deterministic dupes | Cross-source crosswalk (persisted)         |
+| ----------- | ------------------------------- | --------------------- | ------------------- | ------------------------------------------ |
+| Release     | `discogsId`                     | UNIQUE                | 0                   | `barcode` (54%)                            |
+| Master      | `discogsId`                     | UNIQUE                | 0                   | — (MB release-group MBID **discarded**)    |
+| Label       | `discogsId`                     | UNIQUE                | 0                   | —                                          |
+| Artist      | `discogsId`                     | UNIQUE                | 0                   | `musicbrainzId` 96.6%, `wikidataQid` 89.9% |
+| Work        | `mbid`                          | UNIQUE                | 0                   | `writerMbids` 99%                          |
+| Track       | `(position, releaseDiscogsId)`  | none (Aura Free)      | 0 (0 malformed)     | `recordingMbid` 85%, `isrc` 45%            |
+| Musician    | `discogsId` \| `name` \| `mbid` | none                  | 0                   | `musicbrainzId` 84% of catalogued          |
+| Studio      | `name`                          | **none (anomaly)**    | 0 exact, 2 variants | `musicbrainzPlaceId` 46%, coords 29%       |
+| Genre/Style | `name`                          | UNIQUE                | 0                   | — (single-source vocab)                    |
+| Country     | `name` → **ISO 3166-1 alpha-2** | UNIQUE (on wrong key) | **fragmented**      | — (no ISO key today)                       |
 
 ### The seven laws
 
