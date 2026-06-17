@@ -2,6 +2,10 @@
 
 A personal, open-source, forkable monorepo for exploring a vinyl record collection through a graph database. Your record collection is not a flat list — it is a deeply interconnected web of artists, musicians, studios, labels, eras, and sounds. **liner-notes** pulls a [Discogs](https://www.discogs.com) collection into [Neo4j](https://neo4j.com) and exposes a REST API for rich, relationship-driven exploration: "Who played bass on this record?", "What else was recorded at that studio?", "Which artists appear across the most records in my collection?"
 
+## Motivation
+
+This project is the hands-on companion to Chapter 2 of [_Designing Data-Intensive Applications_](https://dataintensive.net) (Martin Kleppmann, O'Reilly 2017), which compares the relational, document, and graph data models. After years working almost exclusively with relational databases, the goal here is to learn the property-graph model from the inside by building something real with it — graph data modeling, Cypher, traversal patterns (shortest path, depth-limited matching), and the operational basics of indexing, constraints, and query optimization in Neo4j. A record collection is a natural fit: the credits in the liner notes are already a graph, so the questions worth asking ("which session musician connects these two records?") are exactly the ones graphs answer well and relational schemas answer awkwardly.
+
 ## Services
 
 | Service       | Path                      | Description                                 |
@@ -95,7 +99,7 @@ Notes:
 
 ## Fork & Run Your Own Collection
 
-See the [Fork Guide](liner-notes-spec-v0.5.md#16-fork-guide) for step-by-step instructions to run this with your own Discogs collection.
+See [Quick Start](#quick-start) above for step-by-step instructions to run this with your own Discogs collection — clone, fill in `.env.local` (Discogs token + Neo4j connection), `mise install && pnpm install`, then `docker-compose up`. The collection auto-ingests on an empty graph, or trigger it manually with `POST /api/v1/admin/ingest` (requires `ADMIN_TOKEN`).
 
 ## Architecture
 
