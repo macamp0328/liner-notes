@@ -75,10 +75,11 @@ export async function mergeRecordingPlaces(
     await session.run(
       `UNWIND $places AS p
        ${mergeStudioClause('p.name')}
-         SET s.latitude = coalesce(p.latitude, s.latitude),
-             s.longitude = coalesce(p.longitude, s.longitude),
-             s.area = coalesce(p.area, s.area),
-             s.musicbrainzPlaceId = coalesce(p.placeMbid, s.musicbrainzPlaceId)
+       WITH s, p
+       SET s.latitude = coalesce(p.latitude, s.latitude),
+           s.longitude = coalesce(p.longitude, s.longitude),
+           s.area = coalesce(p.area, s.area),
+           s.musicbrainzPlaceId = coalesce(p.placeMbid, s.musicbrainzPlaceId)
        WITH s, p
        UNWIND $trackElementIds AS eid
        MATCH (t:Track) WHERE elementId(t) = eid

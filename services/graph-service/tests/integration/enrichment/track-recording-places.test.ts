@@ -43,9 +43,11 @@ async function seed(): Promise<void> {
        CREATE (t2:Track {position: 'B1', releaseDiscogsId: 9001, title: 'No Studio', recordingMbid: 'rec-none'})
        CREATE (r)-[:HAS_TRACK]->(t1)
        CREATE (r)-[:HAS_TRACK]->(t2)
-       // A pre-existing Discogs-keyed Studio of the same name (album-level), no coordinates yet.
+       // A pre-existing Discogs-keyed Studio of the same name (album-level), no coordinates yet. It
+       // carries the canonical nameKey the Discogs writer sets (#443), so the enrichment's
+       // nameKey-keyed MERGE lines up onto this node instead of creating a second one.
        CREATE (disc:Release {discogsId: 9002, title: 'Discogs Album'})
-       CREATE (s:Studio {name: 'Abbey Road Studios'})
+       CREATE (s:Studio {name: 'Abbey Road Studios', nameKey: 'abbey road studios'})
        CREATE (disc)-[:RECORDED_AT]->(s)`,
     );
   } finally {

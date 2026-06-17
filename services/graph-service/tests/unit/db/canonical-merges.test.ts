@@ -20,16 +20,27 @@ describe('mergeCountryClause', () => {
   });
 });
 
+// mergeStudioClause canonicalizes (sub-issue 4, #443): it keys the MERGE on a folded
+// `nameKey = toLower(trim(name))` so case/space variants collapse onto one node, while preserving the
+// readable display `name` (trimmed, NOT lowercased) via `ON CREATE SET` — first-writer-wins. The
+// `nameKey` carries a UNIQUE constraint (schema.ts). These tests pin the exact clause both writers
+// interpolate verbatim.
 describe('mergeStudioClause', () => {
-  it('builds the canonical Studio node MERGE from a query parameter', () => {
-    expect(mergeStudioClause('$name')).toBe('MERGE (s:Studio {name: $name})');
+  it('folds the canonical nameKey and preserves the display name from a query parameter', () => {
+    expect(mergeStudioClause('$name')).toBe(
+      'MERGE (s:Studio {nameKey: toLower(trim($name))}) ON CREATE SET s.name = trim($name)',
+    );
   });
 
-  it('builds the canonical Studio node MERGE from an UNWIND field', () => {
-    expect(mergeStudioClause('p.name')).toBe('MERGE (s:Studio {name: p.name})');
+  it('folds the canonical nameKey and preserves the display name from an UNWIND field', () => {
+    expect(mergeStudioClause('p.name')).toBe(
+      'MERGE (s:Studio {nameKey: toLower(trim(p.name))}) ON CREATE SET s.name = trim(p.name)',
+    );
   });
 
   it('honours an explicit node variable', () => {
-    expect(mergeStudioClause('$name', 'studio')).toBe('MERGE (studio:Studio {name: $name})');
+    expect(mergeStudioClause('$name', 'studio')).toBe(
+      'MERGE (studio:Studio {nameKey: toLower(trim($name))}) ON CREATE SET studio.name = trim($name)',
+    );
   });
 });
