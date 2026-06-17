@@ -22,6 +22,7 @@ const mockGetReleasesByCountry = vi.hoisted(() => vi.fn());
 const mockGetReleasesByDecade = vi.hoisted(() => vi.fn());
 const mockGetReleasesByYear = vi.hoisted(() => vi.fn());
 const mockGetConnections = vi.hoisted(() => vi.fn());
+const mockGetPath = vi.hoisted(() => vi.fn());
 const mockGetSharedMusicians = vi.hoisted(() => vi.fn());
 const mockGetMostInternationalTracks = vi.hoisted(() => vi.fn());
 const mockGetMostPressedReleases = vi.hoisted(() => vi.fn());
@@ -62,6 +63,7 @@ vi.mock('../../../src/db/repositories/explore-repository.js', () => ({
   getReleasesByDecade: mockGetReleasesByDecade,
   getReleasesByYear: mockGetReleasesByYear,
   getConnections: mockGetConnections,
+  getPath: mockGetPath,
   getSharedMusicians: mockGetSharedMusicians,
   getMostInternationalTracks: mockGetMostInternationalTracks,
   getMostPressedReleases: mockGetMostPressedReleases,
@@ -495,6 +497,147 @@ describe('explore routes', () => {
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/explore/connections/13570466?depth=4',
+      });
+      expect(response.statusCode).toBe(400);
+    });
+  });
+
+  // GET /api/v1/explore/path
+  describe('GET /api/v1/explore/path', () => {
+    const releaseNode = (discogsId: number, title: string) => ({
+      type: 'Release',
+      discogsId,
+      name: null,
+      title,
+    });
+    const samplePath = {
+      from: releaseNode(7000001, 'Maiden Voyage'),
+      to: releaseNode(7000002, 'Speak No Evil'),
+      found: true,
+      length: 2,
+      maxDepth: 6,
+      steps: [
+        {
+          relationship: 'CREDITED_ON',
+          forward: false,
+          role: 'Bass',
+          instrument: 'bass',
+          source: null,
+          node: { type: 'Musician', discogsId: 111, name: 'Ron Carter', title: null },
+        },
+        {
+          relationship: 'CREDITED_ON',
+          forward: true,
+          role: 'Bass',
+          instrument: 'bass',
+          source: null,
+          node: releaseNode(7000002, 'Speak No Evil'),
+        },
+      ],
+    };
+
+    it('returns 200 with the shortest path and per-hop steps', async () => {
+      mockGetPath.mockResolvedValue(samplePath);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/path?from=7000001&to=7000002',
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as typeof samplePath;
+      expect(body.found).toBe(true);
+      expect(body.length).toBe(2);
+      expect(body.steps).toHaveLength(2);
+      expect(body.steps[1]!.node.title).toBe('Speak No Evil');
+    });
+
+    it('parses numeric vs name endpoints independently (mixed types)', async () => {
+      mockGetPath.mockResolvedValue(samplePath);
+      await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/path?from=Ron+Carter&to=7000002',
+      });
+      expect(mockGetPath).toHaveBeenCalledWith(
+        expect.anything(),
+        { kind: 'person', name: 'Ron Carter' },
+        { kind: 'release', discogsId: 7000002 },
+        6,
+      );
+    });
+
+    it('passes maxDepth through to the repository', async () => {
+      mockGetPath.mockResolvedValue(samplePath);
+      await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/path?from=7000001&to=7000002&maxDepth=3',
+      });
+      expect(mockGetPath).toHaveBeenCalledWith(
+        expect.anything(),
+        { kind: 'release', discogsId: 7000001 },
+        { kind: 'release', discogsId: 7000002 },
+        3,
+      );
+    });
+
+    it('returns 200 with found:false when no path exists within maxDepth', async () => {
+      mockGetPath.mockResolvedValue({
+        from: releaseNode(7000001, 'Maiden Voyage'),
+        to: releaseNode(7000099, 'Unconnected'),
+        found: false,
+        length: null,
+        maxDepth: 6,
+        steps: [],
+      });
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/path?from=7000001&to=7000099',
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as { found: boolean; length: number | null };
+      expect(body.found).toBe(false);
+      expect(body.length).toBeNull();
+    });
+
+    it('returns 404 when the from endpoint resolves to no node', async () => {
+      mockGetPath.mockResolvedValue({
+        from: null,
+        to: releaseNode(7000002, 'Speak No Evil'),
+        found: false,
+        length: null,
+        maxDepth: 6,
+        steps: [],
+      });
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/path?from=99999999&to=7000002',
+      });
+      expect(response.statusCode).toBe(404);
+      const body = JSON.parse(response.payload) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error.message).toContain('from');
+    });
+
+    it('returns 404 when the to endpoint resolves to no node', async () => {
+      mockGetPath.mockResolvedValue({
+        from: releaseNode(7000001, 'Maiden Voyage'),
+        to: null,
+        found: false,
+        length: null,
+        maxDepth: 6,
+        steps: [],
+      });
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/path?from=7000001&to=__nobody__',
+      });
+      expect(response.statusCode).toBe(404);
+      const body = JSON.parse(response.payload) as { error: { message: string } };
+      expect(body.error.message).toContain('to');
+    });
+
+    it('returns 400 when a required endpoint query param is missing', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/path?from=7000001',
       });
       expect(response.statusCode).toBe(400);
     });

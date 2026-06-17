@@ -15,6 +15,7 @@ import {
   getReleasesByDecade,
   getReleasesByYear,
   getConnections,
+  getPath,
   getSharedMusicians,
   getMostPressedReleases,
   getTracksByAudioFeatures,
@@ -927,6 +928,220 @@ describe('getTracksByAudioFeatures', () => {
     const driver = makeMockDriver(session);
 
     await getTracksByAudioFeatures(driver, {}, 10);
+
+    expect(session.close).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getPath (#343)
+// ---------------------------------------------------------------------------
+
+describe('getPath', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const releaseNode = (id: number, title: string) => ({
+    type: 'Release',
+    discogsId: makeNeo4jInt(id),
+    name: null,
+    title,
+  });
+
+  it('zips path nodes and relationships into per-hop steps with the "why"', async () => {
+    const rec = makeRecord({
+      fromNode: releaseNode(7000001, 'Maiden Voyage'),
+      toNode: releaseNode(7000002, 'Speak No Evil'),
+      sameNode: false,
+      found: true,
+      len: makeNeo4jInt(2),
+      pathNodes: [
+        releaseNode(7000001, 'Maiden Voyage'),
+        { type: 'Musician', discogsId: makeNeo4jInt(111), name: 'Ron Carter', title: null },
+        releaseNode(7000002, 'Speak No Evil'),
+      ],
+      pathRels: [
+        { type: 'CREDITED_ON', forward: false, role: 'Bass', instrument: 'bass', source: null },
+        {
+          type: 'CREDITED_ON',
+          forward: true,
+          role: 'Bass',
+          instrument: 'bass',
+          source: 'musicbrainz',
+        },
+      ],
+    });
+    const { session } = makeMockSession([makeResult([rec])]);
+    const driver = makeMockDriver(session);
+
+    const result = await getPath(
+      driver,
+      { kind: 'release', discogsId: 7000001 },
+      { kind: 'release', discogsId: 7000002 },
+      6,
+    );
+
+    expect(result.found).toBe(true);
+    expect(result.length).toBe(2);
+    expect(result.maxDepth).toBe(6);
+    expect(result.from).toMatchObject({ discogsId: 7000001, title: 'Maiden Voyage' });
+    expect(result.to).toMatchObject({ discogsId: 7000002, title: 'Speak No Evil' });
+    expect(result.steps).toHaveLength(2);
+    // Step i reaches pathNodes[i+1]: the middle Musician, then the destination release.
+    expect(result.steps[0]).toMatchObject({
+      relationship: 'CREDITED_ON',
+      forward: false,
+      role: 'Bass',
+      instrument: 'bass',
+      source: null,
+      node: { type: 'Musician', name: 'Ron Carter' },
+    });
+    expect(result.steps[1]).toMatchObject({
+      relationship: 'CREDITED_ON',
+      forward: true,
+      source: 'musicbrainz',
+      node: { discogsId: 7000002, title: 'Speak No Evil' },
+    });
+  });
+
+  it('builds an allowlisted, depth-bounded shortestPath query and release params', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+
+    await getPath(
+      driver,
+      { kind: 'release', discogsId: 7000001 },
+      { kind: 'release', discogsId: 7000002 },
+      6,
+    );
+
+    const [query, params, txnConfig] = runSpy.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+      Record<string, unknown>,
+    ];
+    expect(query).toContain('shortestPath');
+    expect(query).toContain('CREDITED_ON|RECORDED_AT|SAME_PERSON_AS|MEMBER_OF*1..6');
+    // Hub exclusion is by construction (the allowlist), never a node-label WHERE on the path.
+    expect(query).not.toContain('Genre');
+    expect((params['fromId'] as { toNumber: () => number }).toNumber()).toBe(7000001);
+    expect((params['toId'] as { toNumber: () => number }).toNumber()).toBe(7000002);
+    expect(params['fromName']).toBeNull();
+    expect(params['toName']).toBeNull();
+    // A transaction timeout guards the dense-hub depth-6 worst case.
+    expect(txnConfig).toMatchObject({ timeout: expect.any(Number) as number });
+  });
+
+  it('passes a person endpoint by name and clamps maxDepth to the [1,6] ceiling', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+
+    await getPath(
+      driver,
+      { kind: 'person', name: 'Ron Carter' },
+      { kind: 'release', discogsId: 7000002 },
+      99,
+    );
+
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('*1..6');
+    expect(params['fromName']).toBe('Ron Carter');
+    expect(params['fromId']).toBeNull();
+    expect(params['toName']).toBeNull();
+  });
+
+  it('clamps a below-floor maxDepth up to 1', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+
+    await getPath(driver, { kind: 'release', discogsId: 1 }, { kind: 'release', discogsId: 2 }, 0);
+
+    const [query] = runSpy.mock.calls[0] as [string];
+    expect(query).toContain('*1..1');
+  });
+
+  it('returns found:false with both endpoints when no path exists within maxDepth', async () => {
+    const rec = makeRecord({
+      fromNode: releaseNode(7000001, 'Maiden Voyage'),
+      toNode: releaseNode(7000099, 'Unconnected'),
+      sameNode: false,
+      found: false,
+      len: null,
+      pathNodes: [],
+      pathRels: [],
+    });
+    const { session } = makeMockSession([makeResult([rec])]);
+    const driver = makeMockDriver(session);
+
+    const result = await getPath(
+      driver,
+      { kind: 'release', discogsId: 7000001 },
+      { kind: 'release', discogsId: 7000099 },
+      6,
+    );
+
+    expect(result.found).toBe(false);
+    expect(result.length).toBeNull();
+    expect(result.steps).toEqual([]);
+    expect(result.from).not.toBeNull();
+    expect(result.to).not.toBeNull();
+  });
+
+  it('synthesizes a length-0 path when both endpoints are the same node', async () => {
+    const rec = makeRecord({
+      fromNode: releaseNode(7000001, 'Maiden Voyage'),
+      toNode: releaseNode(7000001, 'Maiden Voyage'),
+      sameNode: true,
+      found: false,
+      len: null,
+      pathNodes: [],
+      pathRels: [],
+    });
+    const { session } = makeMockSession([makeResult([rec])]);
+    const driver = makeMockDriver(session);
+
+    const result = await getPath(
+      driver,
+      { kind: 'release', discogsId: 7000001 },
+      { kind: 'release', discogsId: 7000001 },
+      6,
+    );
+
+    expect(result.found).toBe(true);
+    expect(result.length).toBe(0);
+    expect(result.steps).toEqual([]);
+  });
+
+  it('reports a null endpoint when an identifier resolves to no node', async () => {
+    const rec = makeRecord({
+      fromNode: null,
+      toNode: releaseNode(7000002, 'Speak No Evil'),
+      sameNode: false,
+      found: false,
+      len: null,
+      pathNodes: [],
+      pathRels: [],
+    });
+    const { session } = makeMockSession([makeResult([rec])]);
+    const driver = makeMockDriver(session);
+
+    const result = await getPath(
+      driver,
+      { kind: 'release', discogsId: 99999999 },
+      { kind: 'release', discogsId: 7000002 },
+      6,
+    );
+
+    expect(result.from).toBeNull();
+    expect(result.to).not.toBeNull();
+  });
+
+  it('closes the session after the query', async () => {
+    const { session } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+
+    await getPath(driver, { kind: 'release', discogsId: 1 }, { kind: 'release', discogsId: 2 }, 6);
 
     expect(session.close).toHaveBeenCalledTimes(1);
   });

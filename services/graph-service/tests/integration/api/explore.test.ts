@@ -706,4 +706,64 @@ describe('explore routes', () => {
       expect(res.statusCode).toBe(400);
     });
   });
+
+  // The "six degrees" finder (#343). Ron Carter is CREDITED_ON both 7000001 (Maiden Voyage) and
+  // 7000002 (Speak No Evil), and both were RECORDED_AT Van Gelder Studio — two equal-length (2-hop)
+  // connectors, so the path goes through a person/studio, never a genre/country hub.
+  describe('GET /api/v1/explore/path', () => {
+    interface PathStep {
+      relationship: string;
+      node: { type: string; name: string | null; title: string | null; discogsId: number | null };
+    }
+    interface PathBody {
+      from: { discogsId: number | null } | null;
+      to: { discogsId: number | null } | null;
+      found: boolean;
+      length: number | null;
+      maxDepth: number;
+      steps: PathStep[];
+    }
+
+    it('finds a 2-hop path between two releases via a shared session player or studio', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/path?from=7000001&to=7000002',
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as PathBody;
+      expect(body.found).toBe(true);
+      expect(body.length).toBe(2);
+      expect(body.steps).toHaveLength(2);
+      // The single intermediate node connects the two records — Ron Carter or Van Gelder Studio,
+      // never a Genre/Country hub. (shortestPath picks one of the equal-length paths arbitrarily.)
+      const middle = body.steps[0]!.node;
+      expect(['Musician', 'Studio']).toContain(middle.type);
+      expect([middle.name, body.steps[0]!.relationship]).not.toContain('Rock');
+      // The path ends at the destination release.
+      expect(body.steps[1]!.node.discogsId).toBe(7000002);
+    });
+
+    it('resolves a person endpoint by name (1-hop person → release)', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/path?from=Ron%20Carter&to=7000002',
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as PathBody;
+      expect(body.found).toBe(true);
+      expect(body.length).toBe(1);
+      expect(body.steps[0]!.relationship).toBe('CREDITED_ON');
+      expect(body.steps[0]!.node.discogsId).toBe(7000002);
+    });
+
+    it('returns 404 when an endpoint resolves to no node', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/path?from=99999999&to=7000002',
+      });
+      expect(res.statusCode).toBe(404);
+      const body = JSON.parse(res.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('NOT_FOUND');
+    });
+  });
 });

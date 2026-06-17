@@ -17,6 +17,7 @@ import {
   getReleasesByDecade,
   getReleasesByYear,
   getConnections,
+  getPath,
   getSharedMusicians,
   getMostInternationalTracks,
   getMostPressedReleases,
@@ -29,6 +30,8 @@ import {
   type SongwriterWork,
   type ArtistInfluences,
   type ConnectionNode,
+  type PathResult,
+  type PathEndpoint,
   type SharedMusiciansResult,
   type InternationalTrack,
   type MostPressedRelease,
@@ -184,6 +187,36 @@ const connectionsResponseSchema = {
   },
 } as const;
 
+// One hop of a six-degrees path (#343): the edge traversed + why, and the node reached.
+const pathStepSchema = {
+  type: 'object',
+  required: ['relationship', 'forward', 'node'],
+  properties: {
+    relationship: { type: 'string' },
+    forward: { type: 'boolean' },
+    role: { type: 'string', nullable: true },
+    instrument: { type: 'string', nullable: true },
+    source: { type: 'string', nullable: true },
+    node: connectionNodeSchema,
+  },
+} as const;
+
+// /explore/path response (#343): the shortest human/credit path between two endpoints. An
+// object, not a bare array — joins /connections, /instrument, /influences as the explore
+// exceptions. The full node sequence is [from, ...steps[].node].
+const pathResultSchema = {
+  type: 'object',
+  required: ['from', 'to', 'found', 'maxDepth', 'steps'],
+  properties: {
+    from: connectionNodeSchema,
+    to: connectionNodeSchema,
+    found: { type: 'boolean' },
+    length: { type: 'integer', nullable: true },
+    maxDepth: { type: 'integer' },
+    steps: { type: 'array', items: pathStepSchema },
+  },
+} as const;
+
 const sharedMusiciansResponseSchema = {
   type: 'object',
   required: ['releaseA', 'releaseB', 'sharedMusicians'],
@@ -248,6 +281,15 @@ interface DepthQuery {
 
 interface ErrorReply {
   error: { code: string; message: string };
+}
+
+// Resolve a raw `from`/`to` value to a path endpoint (#343): an all-digits value is a Release
+// `discogsId`, anything else is a Musician/Artist name. Parsed per end, so a numeric record and a
+// named person can be mixed in one request.
+function parsePathEndpoint(raw: string): PathEndpoint {
+  return /^\d+$/.test(raw)
+    ? { kind: 'release', discogsId: Number.parseInt(raw, 10) }
+    : { kind: 'person', name: raw };
 }
 
 // ---------------------------------------------------------------------------
@@ -725,6 +767,62 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
       return reply.send(graph);
+    },
+  );
+
+  // GET /api/v1/explore/path?from=&to=&maxDepth=
+  fastify.get<{
+    Querystring: { from: string; to: string; maxDepth?: number };
+    Reply: PathResult | ErrorReply;
+  }>(
+    '/api/v1/explore/path',
+    {
+      schema: {
+        tags: ['explore'],
+        summary:
+          "Shortest human/credit path between two records or people — the 'six degrees' finder",
+        description:
+          'Returns the shortest path between `from` and `to` over an explicit edge allowlist ' +
+          '(`CREDITED_ON`, `RECORDED_AT`, `SAME_PERSON_AS`, `MEMBER_OF`), so the chain runs through ' +
+          'session players, producers, engineers and studios — never the genre/country/label hubs. ' +
+          'Each endpoint is numeric (a Release `discogsId`) or a string (a Musician/Artist name), ' +
+          'and the two may be mixed. Each hop carries why it connects (the credit role/instrument ' +
+          'or studio relation). An unknown `from`/`to` is a 404; both found but unconnected within ' +
+          '`maxDepth` is a 200 with `found: false`.',
+        querystring: {
+          type: 'object',
+          required: ['from', 'to'],
+          properties: {
+            from: { type: 'string', minLength: 1 },
+            to: { type: 'string', minLength: 1 },
+            maxDepth: { type: 'integer', minimum: 1, maximum: 6, default: 6 },
+          },
+        },
+        response: {
+          200: pathResultSchema,
+          404: errorResponseRef,
+        },
+      },
+    },
+    async (request, reply): Promise<PathResult | ErrorReply> => {
+      const { from, to, maxDepth } = request.query;
+      const result = await getPath(
+        getDriver(),
+        parsePathEndpoint(from),
+        parsePathEndpoint(to),
+        maxDepth ?? 6,
+      );
+      if (!result.from) {
+        return reply.code(404).send({
+          error: { code: 'NOT_FOUND', message: `from not found: ${from}` },
+        });
+      }
+      if (!result.to) {
+        return reply.code(404).send({
+          error: { code: 'NOT_FOUND', message: `to not found: ${to}` },
+        });
+      }
+      return reply.send(result);
     },
   );
 
