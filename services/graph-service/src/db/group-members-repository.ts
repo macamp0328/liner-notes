@@ -89,7 +89,7 @@ export async function setGroupMembers(
        MATCH (m:Musician {discogsId: member.id})
        WHERE m <> group
        MERGE (m)-[rel:MEMBER_OF]->(group)
-       SET rel.active = member.active`,
+       SET rel.active = member.active, rel.source = 'discogs'`,
       {
         groupDiscogsId: neo4j.int(groupDiscogsId),
         members: members.map((m) => ({ id: neo4j.int(m.id), active: m.active })),

@@ -45,7 +45,7 @@ export async function mergeMbReleaseEvents(
        MATCH (m:Master {discogsId: $masterDiscogsId})
        ${mergeCountryClause('event.countryCode')}
        MERGE (m)-[r:MB_RELEASED_IN {mbReleaseId: event.mbReleaseId}]->(c)
-       SET r.date = event.date, r.formats = event.formats`,
+       SET r.date = event.date, r.formats = event.formats, r.source = 'musicbrainz'`,
       {
         masterDiscogsId: neo4j.int(masterDiscogsId),
         events: withCountry.map((e) => ({

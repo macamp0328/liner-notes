@@ -265,7 +265,8 @@ async function mergeStudios(
       `${mergeStudioClause('$name')}
        WITH s
        MATCH (r:Release {discogsId: $releaseId})
-       MERGE (r)-[:RECORDED_AT]->(s)`,
+       MERGE (r)-[ra:RECORDED_AT]->(s)
+       SET ra.source = "discogs"`,
       { name: studio.name, releaseId: neo4j.int(releaseId) },
     );
   }
@@ -335,7 +336,7 @@ async function mergeReleaseCredits(
          MERGE (m)-[co:CREDITED_ON]->(r)
          SET co.role = $role, co.displayRole = $displayRole,
              co.roleCategory = $roleCategory, co.instrument = $instrument,
-             co.creditedAs = $creditedAs, co.scope = "release"`,
+             co.creditedAs = $creditedAs, co.scope = "release", co.source = "discogs"`,
         {
           discogsId: neo4j.int(credit.id),
           name: credit.name,
@@ -359,7 +360,7 @@ async function mergeReleaseCredits(
          MERGE (m)-[co:CREDITED_ON]->(r)
          SET co.role = $role, co.displayRole = $displayRole,
              co.roleCategory = $roleCategory, co.instrument = $instrument,
-             co.creditedAs = $creditedAs, co.scope = "release"`,
+             co.creditedAs = $creditedAs, co.scope = "release", co.source = "discogs"`,
         {
           name: credit.name,
           releaseId: neo4j.int(releaseId),
@@ -401,7 +402,7 @@ async function mergeTrackCredits(
            MERGE (m)-[co:CREDITED_ON]->(t)
            SET co.role = $role, co.displayRole = $displayRole,
                co.roleCategory = $roleCategory, co.instrument = $instrument,
-               co.creditedAs = $creditedAs, co.scope = "track"`,
+               co.creditedAs = $creditedAs, co.scope = "track", co.source = "discogs"`,
           {
             discogsId: neo4j.int(credit.id),
             name: credit.name,
@@ -425,7 +426,7 @@ async function mergeTrackCredits(
            MERGE (m)-[co:CREDITED_ON]->(t)
            SET co.role = $role, co.displayRole = $displayRole,
                co.roleCategory = $roleCategory, co.instrument = $instrument,
-               co.creditedAs = $creditedAs, co.scope = "track"`,
+               co.creditedAs = $creditedAs, co.scope = "track", co.source = "discogs"`,
           {
             name: credit.name,
             position: track.position,
