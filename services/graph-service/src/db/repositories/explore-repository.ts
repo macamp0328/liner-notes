@@ -732,7 +732,9 @@ export async function getReleasesByCountry(
   // dedicated /explore/region route is a follow-up). The raw input is included as a fallback so
   // unmapped defunct-state names (e.g. `Yugoslavia`) keep working.
   const { countries } = normalizeCountry(name);
-  const codes = [...new Set([...countries, name])].map((c) => c.toLowerCase());
+  // Lower-case before de-duping so case-variant aliases collapse to one term; the raw `name` is kept
+  // as a fallback so unmapped/defunct-state names (e.g. `Yugoslavia`) still match their name-keyed node.
+  const codes = [...new Set([...countries, name].map((c) => c.toLowerCase()))];
   const session = driver.session();
   try {
     const result = await session.run(

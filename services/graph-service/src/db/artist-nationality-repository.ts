@@ -3,6 +3,14 @@ import neo4j from 'neo4j-driver';
 import { getStalenessDays } from '../enrichment/staleness.js';
 import { mergeCountryClause } from './canonical-merges.js';
 
+// NOTE (#441/ADR 0005): `countryCode` is already ISO 3166-1 alpha-2 from upstream — MusicBrainz
+// (`country` / `iso-3166-1-codes[0]`) and Wikidata (P297) both resolve to alpha-2 — so the
+// ORIGIN_COUNTRY writers deliberately MERGE it directly without re-running `normalizeCountry`
+// (artist nationality is always one concrete country, never a `:Region` market). If a future
+// nationality source can emit a non-ISO token, route `countryCode` through `normalizeCountry(...)
+// .countries[0]` here so this stays consistent with the Discogs market writers and `:Country`
+// stays pure ISO.
+
 type Neo4jInt = { toNumber(): number };
 
 /**
