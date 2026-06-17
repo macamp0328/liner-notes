@@ -1,6 +1,7 @@
 import type { Driver } from 'neo4j-driver';
 import neo4j from 'neo4j-driver';
 import { getStalenessDays } from '../enrichment/staleness.js';
+import { mergeCountryClause } from './canonical-merges.js';
 
 type Neo4jInt = { toNumber(): number };
 
@@ -57,7 +58,7 @@ export async function mergeMasterData(
       await session.run(
         `UNWIND $countriesWithFormats AS item
          MATCH (m:Master {discogsId: $masterDiscogsId})
-         MERGE (c:Country {name: item.country})
+         ${mergeCountryClause('item.country')}
          MERGE (m)-[rel:RELEASED_IN]->(c)
          SET rel.formats = item.formats`,
         {

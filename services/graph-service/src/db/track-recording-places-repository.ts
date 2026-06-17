@@ -2,6 +2,7 @@ import type { Driver } from 'neo4j-driver';
 import neo4j from 'neo4j-driver';
 import type { MbRecordingPlace } from '../ingestion/musicbrainz-client.js';
 import { getStalenessDays } from '../enrichment/staleness.js';
+import { mergeStudioClause } from './canonical-merges.js';
 
 type Neo4jInt = { toNumber(): number };
 
@@ -73,7 +74,7 @@ export async function mergeRecordingPlaces(
   try {
     await session.run(
       `UNWIND $places AS p
-       MERGE (s:Studio { name: p.name })
+       ${mergeStudioClause('p.name')}
          SET s.latitude = coalesce(p.latitude, s.latitude),
              s.longitude = coalesce(p.longitude, s.longitude),
              s.area = coalesce(p.area, s.area),

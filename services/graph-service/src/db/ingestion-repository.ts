@@ -23,6 +23,7 @@ import {
   parseInstrument,
   parseDurationSeconds,
 } from '../ingestion/transforms.js';
+import { mergeCountryClause, mergeStudioClause } from './canonical-merges.js';
 
 const VARIOUS_ARTISTS_IDS = [194, 355];
 
@@ -244,7 +245,7 @@ async function mergeCountry(
 ): Promise<void> {
   for (const country of countries) {
     await session.run(
-      `MERGE (c:Country {name: $name})
+      `${mergeCountryClause('$name')}
        WITH c
        MATCH (r:Release {discogsId: $releaseId})
        MERGE (r)-[:FROM_COUNTRY]->(c)`,
@@ -261,7 +262,7 @@ async function mergeStudios(
   const studios = extractStudios(companies);
   for (const studio of studios) {
     await session.run(
-      `MERGE (s:Studio {name: $name})
+      `${mergeStudioClause('$name')}
        WITH s
        MATCH (r:Release {discogsId: $releaseId})
        MERGE (r)-[:RECORDED_AT]->(s)`,
