@@ -25,6 +25,8 @@ import { mergeCountryClause, mergeStudioClause } from '../../../src/db/canonical
 const RAW_ENTITY_MERGE = /MERGE\s*\(\s*[^)]*:\s*(Country|Studio)\b/g;
 
 // The one file allowed to contain a raw Country/Studio node MERGE — it IS the canonical clause.
+// Matched on the SRC_DB_ROOT-relative path (not basename) so a future same-named file in a
+// subdirectory can't silently exempt itself from the guard.
 const LEGAL_RAW_MERGE_FILES = ['canonical-merges.ts'];
 
 const THIS_FILE = fileURLToPath(import.meta.url);
@@ -90,7 +92,7 @@ describe('canonical write-path guard over src/db', () => {
   it('routes every Country/Studio node MERGE through the canonical helper', () => {
     const offenders: string[] = [];
     for (const file of collectSourceFiles(SRC_DB_ROOT)) {
-      if (LEGAL_RAW_MERGE_FILES.includes(file.split('/').pop() ?? '')) continue;
+      if (LEGAL_RAW_MERGE_FILES.includes(relative(SRC_DB_ROOT, file))) continue;
       // file is one of this repo's own src/db sources (see collectSourceFiles) — trusted path.
       // eslint-disable-next-line security/detect-non-literal-fs-filename
       const violations = scanForRawEntityMerges(readFileSync(file, 'utf8'));
