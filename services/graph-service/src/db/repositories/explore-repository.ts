@@ -109,6 +109,50 @@ export interface ConnectionsResult {
   nodes: ConnectionNode[];
 }
 
+/**
+ * One endpoint of a six-degrees path query (#343): a Release (numeric Discogs id) or a person
+ * (a `Musician`/`Artist` matched by name). The route parses each raw `from`/`to` query value into
+ * one of these — numeric ⇒ release, anything else ⇒ person — so the two ends can be mixed.
+ */
+export type PathEndpoint =
+  | { kind: 'release'; discogsId: number }
+  | { kind: 'person'; name: string };
+
+/**
+ * One hop along a shortest path (#343): the relationship traversed to reach `node`, plus *why* it
+ * connects. `forward` is true when the edge was walked along its stored direction — traversal is
+ * undirected, so arriving at a `Musician` from the `Release` they are `CREDITED_ON` is
+ * `forward: false`. `role` carries the credit role (`CREDITED_ON`) or the studio relation
+ * (`RECORDED_AT` — `recorded at`/`mixed at`); `instrument` is set only for instrument credits;
+ * `source` is edge provenance where present (e.g. `musicbrainz`/`wikidata`). All three are null for
+ * `SAME_PERSON_AS`/`MEMBER_OF` hops, which the `relationship` type alone explains.
+ */
+export interface PathStep {
+  relationship: string;
+  forward: boolean;
+  role: string | null;
+  instrument: string | null;
+  source: string | null;
+  node: ConnectionNode;
+}
+
+/**
+ * Result of a shortest human/credit path search between two endpoints (#343). `from`/`to` are the
+ * resolved endpoint nodes, or null when an identifier matched no node (the route turns a null end
+ * into a 404). `found` is whether a path exists within `maxDepth`; `length` is the hop count — 0
+ * when both ends resolve to the same node, null when not found. `steps` reconstructs the path: the
+ * full node sequence is `[from, ...steps.map((s) => s.node)]`, and `steps[i].relationship` is the
+ * edge between node i and node i+1.
+ */
+export interface PathResult {
+  from: ConnectionNode | null;
+  to: ConnectionNode | null;
+  found: boolean;
+  length: number | null;
+  maxDepth: number;
+  steps: PathStep[];
+}
+
 export interface SharedMusician {
   name: string;
   instrument: string | null;
@@ -1057,6 +1101,185 @@ export async function getTracksByAudioFeatures(
       deezerBpm: toFloat(rec.get('deezerBpm')),
       deezerGain: toFloat(rec.get('deezerGain')),
     }));
+  } finally {
+    await session.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// getPath — the "six degrees" finder (#343)
+//
+// Shortest path between two endpoints over an EXPLICIT relationship allowlist —
+// CREDITED_ON | RECORDED_AT | SAME_PERSON_AS | MEMBER_OF — so the chain runs
+// through the session players, producers, engineers, and studios that connect
+// two records, NOT the genre/country/label hubs that connect everything to
+// everything. Hub node types are excluded BY CONSTRUCTION: a Genre/Style/
+// Country/Label is reachable only via an edge OUTSIDE the allowlist (IN_GENRE /
+// FROM_COUNTRY / ON_LABEL / RELEASED_BY / HAS_TRACK), so the walk simply never
+// arrives at one — and crucially we add NO node-label `WHERE` over nodes(p),
+// which would force Neo4j's slow exhaustive-search fallback instead of the fast
+// bidirectional-BFS shortestPath planner.
+//
+// MEMBER_OF is traversed UNDIRECTED here, unlike getReleasesByMusician (which
+// expands it one way only to avoid over-attributing a group's whole catalog to a
+// member). A path reports an association CHAIN ("both are members of band G"),
+// not responsibility, so symmetric traversal is correct. RELEASED_BY (the primary
+// artist) is intentionally omitted from the allowlist — the point is the shared
+// session-player/studio link, not "same headline artist".
+//
+// maxDepth is a validated integer interpolated into the var-length bound (Cypher
+// cannot parameterize a var-length upper bound), coerced to [1, 6] at runtime as
+// defense-in-depth — same shape as getConnections' depth.
+// ---------------------------------------------------------------------------
+
+const PATH_RELATIONSHIPS = 'CREDITED_ON|RECORDED_AT|SAME_PERSON_AS|MEMBER_OF';
+const PATH_MAX_DEPTH_CEILING = 6;
+const PATH_QUERY_TIMEOUT_MS = 15_000;
+
+interface RawPathNode {
+  type: unknown;
+  discogsId: unknown;
+  name: unknown;
+  title: unknown;
+}
+
+interface RawPathRel {
+  type: unknown;
+  forward: unknown;
+  role: unknown;
+  instrument: unknown;
+  source: unknown;
+}
+
+function mapPathNode(n: RawPathNode): ConnectionNode {
+  return {
+    type: toStr(n.type) ?? '',
+    discogsId: toInt(n.discogsId),
+    name: toStr(n.name),
+    title: toStr(n.title),
+  };
+}
+
+export async function getPath(
+  driver: Driver,
+  from: PathEndpoint,
+  to: PathEndpoint,
+  maxDepth: number,
+): Promise<PathResult> {
+  const rounded = Math.round(maxDepth);
+  const safeMaxDepth = Number.isFinite(rounded)
+    ? Math.min(PATH_MAX_DEPTH_CEILING, Math.max(1, rounded))
+    : PATH_MAX_DEPTH_CEILING;
+  const session = driver.session();
+  try {
+    // Resolve each endpoint by label-anchored OPTIONAL MATCH (never an unbound `(n)` pattern, which
+    // is an AllNodesScan) + coalesce: numeric ⇒ Release by id, string ⇒ Musician/Artist by name
+    // (Musician preferred — SAME_PERSON_AS bridges to the Artist anyway). Persons order by `name`,
+    // not the nullable `discogsId` (id-0 / MBID-only people have none). Both ends resolve to a single
+    // representative node, then shortestPath runs over the allowlist. A self-pair (from = to) yields
+    // no path under `*1..`, so it is reported via `sameNode` and synthesized as length 0.
+    const query = `
+      OPTIONAL MATCH (frR:Release)  WHERE frR.discogsId = $fromId
+      OPTIONAL MATCH (frM:Musician) WHERE $fromName IS NOT NULL AND toLower(frM.name) = toLower($fromName)
+      WITH frR, frM ORDER BY frM.name LIMIT 1
+      OPTIONAL MATCH (frA:Artist)   WHERE $fromName IS NOT NULL AND toLower(frA.name) = toLower($fromName)
+      WITH frR, frM, frA ORDER BY frA.name LIMIT 1
+      WITH coalesce(frR, frM, frA) AS from
+      OPTIONAL MATCH (toR:Release)  WHERE toR.discogsId = $toId
+      WITH from, toR
+      OPTIONAL MATCH (toM:Musician) WHERE $toName IS NOT NULL AND toLower(toM.name) = toLower($toName)
+      WITH from, toR, toM ORDER BY toM.name LIMIT 1
+      OPTIONAL MATCH (toA:Artist)   WHERE $toName IS NOT NULL AND toLower(toA.name) = toLower($toName)
+      WITH from, toR, toM, toA ORDER BY toA.name LIMIT 1
+      WITH from, coalesce(toR, toM, toA) AS to
+      OPTIONAL MATCH p = shortestPath((from)-[:${PATH_RELATIONSHIPS}*1..${safeMaxDepth}]-(to))
+      RETURN
+        CASE WHEN from IS NULL THEN null
+             ELSE {type: head(labels(from)), discogsId: from.discogsId, name: from.name, title: from.title} END AS fromNode,
+        CASE WHEN to IS NULL THEN null
+             ELSE {type: head(labels(to)), discogsId: to.discogsId, name: to.name, title: to.title} END AS toNode,
+        (from IS NOT NULL AND to IS NOT NULL AND from = to) AS sameNode,
+        p IS NOT NULL AS found,
+        CASE WHEN p IS NULL THEN null ELSE length(p) END AS len,
+        CASE WHEN p IS NULL THEN []
+             ELSE [n IN nodes(p) | {type: head(labels(n)), discogsId: n.discogsId, name: n.name, title: n.title}] END AS pathNodes,
+        CASE WHEN p IS NULL THEN []
+             ELSE [i IN range(0, length(p) - 1) |
+               {type: type(relationships(p)[i]),
+                forward: startNode(relationships(p)[i]) = nodes(p)[i],
+                role: coalesce(relationships(p)[i].displayRole, relationships(p)[i].role, relationships(p)[i].relation),
+                instrument: relationships(p)[i].instrument,
+                source: relationships(p)[i].source}] END AS pathRels
+    `;
+    const params = {
+      fromId: from.kind === 'release' ? neo4j.int(from.discogsId) : null,
+      fromName: from.kind === 'person' ? from.name : null,
+      toId: to.kind === 'release' ? neo4j.int(to.discogsId) : null,
+      toName: to.kind === 'person' ? to.name : null,
+    };
+    const result = await session.run(query, params, { timeout: PATH_QUERY_TIMEOUT_MS });
+    const rec = result.records[0];
+    if (!rec) {
+      return {
+        from: null,
+        to: null,
+        found: false,
+        length: null,
+        maxDepth: safeMaxDepth,
+        steps: [],
+      };
+    }
+
+    const fromRaw = rec.get('fromNode') as RawPathNode | null;
+    const toRaw = rec.get('toNode') as RawPathNode | null;
+    const fromNode = fromRaw ? mapPathNode(fromRaw) : null;
+    const toNode = toRaw ? mapPathNode(toRaw) : null;
+
+    // from === to: shortestPath with `*1..` finds no self-path, so synthesize a length-0 result.
+    if (rec.get('sameNode') === true) {
+      return {
+        from: fromNode,
+        to: toNode,
+        found: true,
+        length: 0,
+        maxDepth: safeMaxDepth,
+        steps: [],
+      };
+    }
+
+    if (rec.get('found') !== true) {
+      return {
+        from: fromNode,
+        to: toNode,
+        found: false,
+        length: null,
+        maxDepth: safeMaxDepth,
+        steps: [],
+      };
+    }
+
+    const rawNodes = rec.get('pathNodes') as RawPathNode[];
+    const rawRels = rec.get('pathRels') as RawPathRel[];
+    // pathNodes has one more entry than pathRels; step i traverses rawRels[i] to reach pathNodes[i+1].
+    const steps: PathStep[] = rawRels.map((r, i) => {
+      const next = rawNodes[i + 1];
+      return {
+        relationship: toStr(r.type) ?? '',
+        forward: r.forward === true,
+        role: toStr(r.role),
+        instrument: toStr(r.instrument),
+        source: toStr(r.source),
+        node: next ? mapPathNode(next) : { type: '', discogsId: null, name: null, title: null },
+      };
+    });
+    return {
+      from: fromNode,
+      to: toNode,
+      found: true,
+      length: toInt(rec.get('len')),
+      maxDepth: safeMaxDepth,
+      steps,
+    };
   } finally {
     await session.close();
   }

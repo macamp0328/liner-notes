@@ -6347,6 +6347,169 @@
         }
       }
     },
+    "/api/v1/explore/path": {
+      "get": {
+        "summary": "Shortest human/credit path between two records or people — the 'six degrees' finder",
+        "tags": ["explore"],
+        "description": "Returns the shortest path between `from` and `to` over an explicit edge allowlist (`CREDITED_ON`, `RECORDED_AT`, `SAME_PERSON_AS`, `MEMBER_OF`), so the chain runs through session players, producers, engineers and studios — never the genre/country/label hubs. Each endpoint is numeric (a Release `discogsId`) or a string (a Musician/Artist name), and the two may be mixed. Each hop carries why it connects (the credit role/instrument or studio relation). An unknown `from`/`to` is a 404; both found but unconnected within `maxDepth` is a 200 with `found: false`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6,
+              "default": 6
+            },
+            "in": "query",
+            "name": "maxDepth",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["from", "to", "found", "maxDepth", "steps"],
+                  "properties": {
+                    "from": {
+                      "type": "object",
+                      "required": ["type"],
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "discogsId": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "name": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "title": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    },
+                    "to": {
+                      "type": "object",
+                      "required": ["type"],
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "discogsId": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "name": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "title": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    },
+                    "found": {
+                      "type": "boolean"
+                    },
+                    "length": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "maxDepth": {
+                      "type": "integer"
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["relationship", "forward", "node"],
+                        "properties": {
+                          "relationship": {
+                            "type": "string"
+                          },
+                          "forward": {
+                            "type": "boolean"
+                          },
+                          "role": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "instrument": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "source": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "node": {
+                            "type": "object",
+                            "required": ["type"],
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "discogsId": {
+                                "type": "integer",
+                                "nullable": true
+                              },
+                              "name": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "title": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/explore/shared-musicians": {
       "get": {
         "summary": "Release pairs that share one or more session musicians",
