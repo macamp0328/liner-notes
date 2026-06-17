@@ -8,11 +8,13 @@ import type { MbReleaseEvent } from '../../../src/ingestion/musicbrainz-client.j
 // ---------------------------------------------------------------------------
 const mockGetMasters = vi.hoisted(() => vi.fn());
 const mockMergeEvents = vi.hoisted(() => vi.fn());
+const mockSetMbid = vi.hoisted(() => vi.fn());
 const mockSetFetched = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/db/mb-release-events-repository.js', () => ({
   getMastersForReleaseEventEnrichment: mockGetMasters,
   mergeMbReleaseEvents: mockMergeEvents,
+  setMasterReleaseGroupMbid: mockSetMbid,
   setMbReleaseEventsFetched: mockSetFetched,
 }));
 
@@ -47,6 +49,7 @@ describe('enrichMbReleaseEvents', () => {
     vi.clearAllMocks();
     mockGetMasters.mockResolvedValue([]);
     mockMergeEvents.mockResolvedValue(undefined);
+    mockSetMbid.mockResolvedValue(undefined);
     mockSetFetched.mockResolvedValue(undefined);
   });
 
@@ -76,8 +79,15 @@ describe('enrichMbReleaseEvents', () => {
 
     expect(client.getReleaseGroupMbidByMasterDiscogsId).toHaveBeenCalledWith(1234);
     expect(client.getReleaseEventsByReleaseGroupMbid).toHaveBeenCalledWith('rg-mbid-abc');
+    expect(mockSetMbid).toHaveBeenCalledWith(fakeDriver, 1234, 'rg-mbid-abc');
     expect(mockMergeEvents).toHaveBeenCalledWith(fakeDriver, 1234, events);
     expect(mockSetFetched).toHaveBeenCalledWith(fakeDriver, 1234);
+    // Crash-safety invariant: the MBID must persist before either exclusion-causing write
+    // (the MB_RELEASED_IN merge and the fetched marker), or a mid-write crash loses the crosswalk.
+    const callOrder = (mock: ReturnType<typeof vi.fn>): number =>
+      mock.mock.invocationCallOrder[0] ?? -1;
+    expect(callOrder(mockSetMbid)).toBeLessThan(callOrder(mockMergeEvents));
+    expect(callOrder(mockSetMbid)).toBeLessThan(callOrder(mockSetFetched));
     expect(summary.mastersProcessed).toBe(1);
     expect(summary.mastersSkipped).toBe(0);
     expect(summary.mastersFailed).toBe(0);
@@ -92,6 +102,7 @@ describe('enrichMbReleaseEvents', () => {
 
     expect(client.getReleaseEventsByReleaseGroupMbid).not.toHaveBeenCalled();
     expect(mockMergeEvents).not.toHaveBeenCalled();
+    expect(mockSetMbid).not.toHaveBeenCalled();
     expect(mockSetFetched).toHaveBeenCalledWith(fakeDriver, 9999);
     expect(summary.mastersSkipped).toBe(1);
     expect(summary.mastersProcessed).toBe(0);

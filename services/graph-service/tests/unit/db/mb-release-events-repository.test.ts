@@ -3,6 +3,7 @@ import type { Driver, Session, Result } from 'neo4j-driver';
 import {
   getMastersForReleaseEventEnrichment,
   mergeMbReleaseEvents,
+  setMasterReleaseGroupMbid,
   setMbReleaseEventsFetched,
   resetMbReleaseEventsEnrichment,
   splitReleaseEventsByPlace,
@@ -207,6 +208,30 @@ describe('setMbReleaseEventsFetched', () => {
   });
 });
 
+describe('setMasterReleaseGroupMbid', () => {
+  it('runs the SET query persisting musicbrainzReleaseGroupId for the given master', async () => {
+    const { session, runSpy } = makeMockSession();
+    const driver = makeMockDriver(session);
+
+    await setMasterReleaseGroupMbid(driver, 4321, 'rg-mbid-xyz');
+
+    expect(runSpy).toHaveBeenCalledOnce();
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('m.musicbrainzReleaseGroupId = $releaseGroupMbid');
+    expect(params).toMatchObject({ releaseGroupMbid: 'rg-mbid-xyz' });
+    expect(session.close).toHaveBeenCalledOnce();
+  });
+
+  it('closes the session even when run throws', async () => {
+    const { session } = makeMockSession();
+    (session.run as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('write error'));
+    const driver = makeMockDriver(session);
+
+    await expect(setMasterReleaseGroupMbid(driver, 1, 'rg-mbid')).rejects.toThrow('write error');
+    expect(session.close).toHaveBeenCalledOnce();
+  });
+});
+
 describe('resetMbReleaseEventsEnrichment', () => {
   it('returns the count of reset masters and deletes MB_RELEASED_IN relationships', async () => {
     const resetRecord = { get: vi.fn().mockReturnValue({ toNumber: () => 5 }) };
@@ -224,6 +249,8 @@ describe('resetMbReleaseEventsEnrichment', () => {
 
     expect(reset).toBe(5);
     expect(runSpy).toHaveBeenCalledTimes(2);
+    const [removeQuery] = runSpy.mock.calls[0] as [string, unknown];
+    expect(removeQuery).toContain('REMOVE m.mbReleaseEventsFetchedAt, m.musicbrainzReleaseGroupId');
     const [deleteQuery] = runSpy.mock.calls[1] as [string, unknown];
     // #441: reset must delete both the Country and the Region release-event edges.
     expect(deleteQuery).toContain('MB_RELEASED_IN|MB_RELEASED_IN_REGION');

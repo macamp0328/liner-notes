@@ -12,11 +12,13 @@
 // it into its existing query, preserving single-query/`UNWIND`-batched/multi-edge structure. The same
 // pure-string-helper shape as `lucene.ts`'s `escapeLuceneQuery`.
 //
-// SCOPE (ADR 0005): these helpers are the *syntactic* chokepoint. The value normalization that keeps
-// `:Country` pure ISO (and splits region/market tokens onto `:Region`) lives in `normalizeCountry`
-// (transforms.ts), applied per-writer in TS **before** the UNWIND payload is built — a clause string
-// can't fan one raw market into a Country MERGE *and* a Region MERGE. Studio trim/case-fold
-// (sub-issue 4) still lands inside `mergeStudioClause` later.
+// SCOPE (ADR 0005): these helpers are the node-MERGE chokepoint; WHERE the normalization lives differs
+// by entity. Studio canonicalization (sub-issue 4, #443) is folded straight into `mergeStudioClause`
+// (a `nameKey` fold, see below), so every Studio writer inherits it for free. Country normalization
+// can't live in the clause — a string can't fan one raw market into a `:Country` MERGE *and* a
+// `:Region` MERGE — so it lives in `normalizeCountry` (transforms.ts, sub-issue 2, #441), applied
+// per-writer in TS before the UNWIND payload is built. `mergeCountryClause`/`mergeRegionClause` stay
+// value-preserving clause builders.
 
 /**
  * Canonical `(:Country)` node MERGE — the single write path for Country (ADR 0005, law 6).
@@ -44,12 +46,18 @@ export function mergeRegionClause(nameExpr: string, nodeVar = 'g'): string {
 }
 
 /**
- * Canonical `(:Studio)` node MERGE — the single write path for Studio (ADR 0005, law 6).
+ * Canonical `(:Studio)` node MERGE — the single write path for Studio (ADR 0005, law 6 + sub-issue 4,
+ * #443). Studio is name-keyed (no Discogs/MB id), so both writers MERGE the same physical studio. To
+ * stop case/space variants ("EastWest" vs "Eastwest") fragmenting into separate nodes, the merge keys
+ * on a folded `nameKey = toLower(trim(name))` (backed by a UNIQUE constraint in `schema.ts`); the
+ * human-readable `name` is preserved verbatim (trimmed, NOT lowercased) via `ON CREATE SET`, so the
+ * first writer to create the node sets the display value and later writers reuse it. Read paths that
+ * surface the name (the map, the connections graph) keep showing readable casing.
  *
  * @param nameExpr a Cypher expression evaluating to the studio name — a query parameter (`'$name'`)
  *   or an `UNWIND` field (`'p.name'`).
  * @param nodeVar the bound node variable (defaults to `s`, matching every current call site).
  */
 export function mergeStudioClause(nameExpr: string, nodeVar = 's'): string {
-  return `MERGE (${nodeVar}:Studio {name: ${nameExpr}})`;
+  return `MERGE (${nodeVar}:Studio {nameKey: toLower(trim(${nameExpr}))}) ON CREATE SET ${nodeVar}.name = trim(${nameExpr})`;
 }

@@ -24,9 +24,9 @@ describe('applySchema', () => {
     } as unknown as Driver;
   });
 
-  it('opens and closes a fresh session for each of the 59 statements', async () => {
+  it('opens and closes a fresh session for each of the 60 statements', async () => {
     await applySchema(driver);
-    expect(sessions).toHaveLength(59);
+    expect(sessions).toHaveLength(60);
     for (const s of sessions) {
       expect(s.run).toHaveBeenCalledTimes(1);
       expect(s.close).toHaveBeenCalledTimes(1);
@@ -90,6 +90,14 @@ describe('applySchema', () => {
     expect(stmts.some((s) => s.includes('release_discogs_id') && s.includes('IS UNIQUE'))).toBe(
       true,
     );
+  });
+
+  it('creates the Studio nameKey uniqueness constraint (issue #443)', async () => {
+    await applySchema(driver);
+    const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
+    expect(
+      stmts.some((s) => s.includes('studio_name_key') && s.includes('s.nameKey IS UNIQUE')),
+    ).toBe(true);
   });
 
   it('backfills lyricsStatus=resolved on pre-existing lyric’d tracks (#246)', async () => {

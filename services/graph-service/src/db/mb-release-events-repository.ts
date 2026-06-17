@@ -113,12 +113,32 @@ export async function setMbReleaseEventsFetched(
   }
 }
 
+// Persist the resolved MusicBrainz release-group MBID as a provenance/crosswalk attribute on the
+// Master (ADR 0005 law 5: cross-source IDs are stored, never used-and-discarded). Written before the
+// MB_RELEASED_IN edges + the fetched marker so a mid-write crash leaves the Master re-selectable and
+// the MBID re-resolves idempotently rather than being lost behind the candidate-query exclusion.
+export async function setMasterReleaseGroupMbid(
+  driver: Driver,
+  masterDiscogsId: number,
+  releaseGroupMbid: string,
+): Promise<void> {
+  const session = driver.session();
+  try {
+    await session.run(
+      `MATCH (m:Master {discogsId: $masterDiscogsId}) SET m.musicbrainzReleaseGroupId = $releaseGroupMbid`,
+      { masterDiscogsId: neo4j.int(masterDiscogsId), releaseGroupMbid },
+    );
+  } finally {
+    await session.close();
+  }
+}
+
 export async function resetMbReleaseEventsEnrichment(driver: Driver): Promise<number> {
   const session = driver.session();
   try {
     const resetResult = await session.run(
       `MATCH (m:Master) WHERE m.mbReleaseEventsFetchedAt IS NOT NULL
-       REMOVE m.mbReleaseEventsFetchedAt
+       REMOVE m.mbReleaseEventsFetchedAt, m.musicbrainzReleaseGroupId
        RETURN count(m) AS reset`,
     );
     const reset = (resetResult.records[0]?.get('reset') as Neo4jInt | undefined)?.toNumber() ?? 0;

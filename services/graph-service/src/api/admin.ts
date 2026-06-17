@@ -605,7 +605,9 @@ const PIPELINES: PipelineEntry[] = [
     enrichDescription:
       'For each unenriched Master node, walks Discogs master ID → MusicBrainz release group → ' +
       'all official releases → release events, writing `MB_RELEASED_IN` relationships to `Country` ' +
-      'nodes with ISO-3166-1 alpha-2 codes and release dates. Blocks until complete.\n\n' +
+      'nodes with ISO-3166-1 alpha-2 codes and release dates. The resolved release-group MBID is ' +
+      'persisted on the Master as `musicbrainzReleaseGroupId` (provenance crosswalk, ADR 0005 law 5). ' +
+      'Blocks until complete.\n\n' +
       '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually.**\n\n' +
       'Selects Master nodes that still have no `MB_RELEASED_IN` relationship and whose last attempt has ' +
       'aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `mbReleaseEventsFetchedAt` after each ' +
@@ -629,8 +631,8 @@ const PIPELINES: PipelineEntry[] = [
     reset: {
       summary: 'Reset MusicBrainz release event enrichment markers for a full re-run',
       description:
-        'Removes the `mbReleaseEventsFetchedAt` property from all Master nodes and deletes all ' +
-        '`MB_RELEASED_IN` relationships, causing the next ' +
+        'Removes the `mbReleaseEventsFetchedAt` and `musicbrainzReleaseGroupId` properties from all ' +
+        'Master nodes and deletes all `MB_RELEASED_IN` relationships, causing the next ' +
         '`POST /api/v1/admin/mb-release-events/enrich` call to re-process every master from scratch.\n\n' +
         'This endpoint is blocked while enrichment is running.',
       runningMessage:
@@ -802,8 +804,9 @@ const PIPELINES: PipelineEntry[] = [
       'is a deterministic per-track studio attribution. Blocks until complete.\n\n' +
       '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, and ' +
       'only after `track-musicbrainz` has populated `recordingMbid`.**\n\n' +
-      'The Studio is MERGEd by name onto the existing name-keyed nodes, so a track’s MusicBrainz studio ' +
-      'lines up with the album’s Discogs studio of the same name. The Place’s coordinates and area ' +
+      'The Studio is MERGEd by its canonical `nameKey` (`toLower(trim(name))`, #443) onto the existing ' +
+      'name-keyed nodes, so a track’s MusicBrainz studio lines up with the album’s Discogs studio of the ' +
+      'same name — case/space variants included. The Place’s coordinates and area ' +
       'enrich the Studio node (feeding the recording-location map) via `coalesce`, so they only ever ' +
       'fill a gap.\n\n' +
       '**MusicBrainz place relations are genuinely sparse — zero studios across a collection is ' +
