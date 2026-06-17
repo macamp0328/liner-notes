@@ -2,6 +2,7 @@ import type { Driver } from 'neo4j-driver';
 import neo4j from 'neo4j-driver';
 import type { MbReleaseEvent } from '../ingestion/musicbrainz-client.js';
 import { getStalenessDays } from '../enrichment/staleness.js';
+import { mergeCountryClause } from './canonical-merges.js';
 
 type Neo4jInt = { toNumber(): number };
 
@@ -42,7 +43,7 @@ export async function mergeMbReleaseEvents(
     await session.run(
       `UNWIND $events AS event
        MATCH (m:Master {discogsId: $masterDiscogsId})
-       MERGE (c:Country {name: event.countryCode})
+       ${mergeCountryClause('event.countryCode')}
        MERGE (m)-[r:MB_RELEASED_IN {mbReleaseId: event.mbReleaseId}]->(c)
        SET r.date = event.date, r.formats = event.formats`,
       {

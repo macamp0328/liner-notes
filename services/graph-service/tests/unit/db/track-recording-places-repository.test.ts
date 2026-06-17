@@ -6,6 +6,7 @@ import {
   setRecordingPlacesFetched,
   resetRecordingPlacesEnrichment,
 } from '../../../src/db/track-recording-places-repository.js';
+import { mergeStudioClause } from '../../../src/db/canonical-merges.js';
 import type { MbRecordingPlace } from '../../../src/ingestion/musicbrainz-client.js';
 
 vi.mock('neo4j-driver', async (importOriginal) => {
@@ -100,8 +101,9 @@ describe('mergeRecordingPlaces', () => {
 
     expect(runSpy).toHaveBeenCalledOnce();
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
-    // Name is the join key onto the existing Discogs-keyed Studio nodes.
-    expect(query).toContain('MERGE (s:Studio { name: p.name })');
+    // Name is the join key onto the existing Discogs-keyed Studio nodes. The clause comes from the
+    // canonical Studio write-path chokepoint (ADR 0005, law 6), not a raw inline MERGE.
+    expect(query).toContain(mergeStudioClause('p.name'));
     // Coords only ever fill a gap — a later null-coord fetch never clobbers good data.
     expect(query).toContain('s.latitude = coalesce(p.latitude, s.latitude)');
     expect(query).toContain('s.longitude = coalesce(p.longitude, s.longitude)');

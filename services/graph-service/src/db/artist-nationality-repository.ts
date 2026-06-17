@@ -1,6 +1,7 @@
 import type { Driver } from 'neo4j-driver';
 import neo4j from 'neo4j-driver';
 import { getStalenessDays } from '../enrichment/staleness.js';
+import { mergeCountryClause } from './canonical-merges.js';
 
 type Neo4jInt = { toNumber(): number };
 
@@ -114,7 +115,7 @@ export async function setArtistNationality(
          OPTIONAL MATCH (a)-[old:ORIGIN_COUNTRY]->()
          DELETE old
          WITH a
-         MERGE (c:Country {name: $countryCode})
+         ${mergeCountryClause('$countryCode')}
          MERGE (a)-[rel:ORIGIN_COUNTRY]->(c)
          SET rel.source = $source, a.nationalityFetchedAt = datetime()`,
         { discogsId: neo4j.int(discogsId), countryCode, source },
@@ -182,7 +183,7 @@ export async function setMusicianNationality(
          OPTIONAL MATCH (m)-[old:ORIGIN_COUNTRY]->()
          DELETE old
          WITH m
-         MERGE (c:Country {name: $countryCode})
+         ${mergeCountryClause('$countryCode')}
          MERGE (m)-[rel:ORIGIN_COUNTRY]->(c)
          SET rel.source = $source, m.nationalityFetchedAt = datetime()`,
         {
