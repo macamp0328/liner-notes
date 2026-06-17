@@ -965,6 +965,13 @@
       "properties": ["discogsId"]
     },
     {
+      "name": "region_name",
+      "type": "NODE_PROPERTY_UNIQUENESS",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Region"],
+      "properties": ["name"]
+    },
+    {
       "name": "release_discogs_id",
       "type": "NODE_PROPERTY_UNIQUENESS",
       "entityType": "NODE",
@@ -977,6 +984,13 @@
       "entityType": "NODE",
       "labelsOrTypes": ["ReloadJob"],
       "properties": ["jobId"]
+    },
+    {
+      "name": "studio_name_key",
+      "type": "NODE_PROPERTY_UNIQUENESS",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Studio"],
+      "properties": ["nameKey"]
     },
     {
       "name": "style_name",
@@ -1163,6 +1177,14 @@
       "owningConstraint": null
     },
     {
+      "name": "region_name",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Region"],
+      "properties": ["name"],
+      "owningConstraint": "region_name"
+    },
+    {
       "name": "releaseArtistTrackSearch",
       "indexType": "FULLTEXT",
       "entityType": "NODE",
@@ -1225,6 +1247,14 @@
       "labelsOrTypes": ["Studio"],
       "properties": ["name"],
       "owningConstraint": null
+    },
+    {
+      "name": "studio_name_key",
+      "indexType": "RANGE",
+      "entityType": "NODE",
+      "labelsOrTypes": ["Studio"],
+      "properties": ["nameKey"],
+      "owningConstraint": "studio_name_key"
     },
     {
       "name": "style_name",
