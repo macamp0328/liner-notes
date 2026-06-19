@@ -68,6 +68,27 @@
           "indexed": false
         },
         {
+          "name": "memberOfQids",
+          "types": ["StringArray"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "memberOfSinceYears",
+          "types": ["LongArray", "StringArray"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
+          "name": "memberOfUntilYears",
+          "types": ["LongArray", "StringArray"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
           "name": "musicbrainzId",
           "types": ["String"],
           "mandatory": false,
@@ -221,6 +242,13 @@
           "indexed": true
         },
         {
+          "name": "musicbrainzReleaseGroupId",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": false,
+          "indexed": false
+        },
+        {
           "name": "title",
           "types": ["String"],
           "mandatory": false,
@@ -287,6 +315,18 @@
           "mandatory": false,
           "unique": false,
           "indexed": false
+        }
+      ]
+    },
+    {
+      "label": "Region",
+      "properties": [
+        {
+          "name": "name",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": true,
+          "indexed": true
         }
       ]
     },
@@ -530,6 +570,13 @@
           "types": ["String"],
           "mandatory": false,
           "unique": false,
+          "indexed": true
+        },
+        {
+          "name": "nameKey",
+          "types": ["String"],
+          "mandatory": false,
+          "unique": true,
           "indexed": true
         }
       ]
@@ -833,6 +880,11 @@
       "to": "Country"
     },
     {
+      "type": "FROM_REGION",
+      "from": "Release",
+      "to": "Region"
+    },
+    {
       "type": "HAS_STAGE",
       "from": "ReloadJob",
       "to": "ReloadStage"
@@ -861,6 +913,16 @@
       "type": "MB_RELEASED_IN",
       "from": "Master",
       "to": "Country"
+    },
+    {
+      "type": "MB_RELEASED_IN_REGION",
+      "from": "Master",
+      "to": "Region"
+    },
+    {
+      "type": "MEMBER_OF",
+      "from": "Artist",
+      "to": "Artist"
     },
     {
       "type": "MEMBER_OF",
@@ -911,6 +973,11 @@
       "type": "RELEASED_IN",
       "from": "Master",
       "to": "Country"
+    },
+    {
+      "type": "RELEASED_IN_REGION",
+      "from": "Master",
+      "to": "Region"
     },
     {
       "type": "SAME_PERSON_AS",

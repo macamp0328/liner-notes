@@ -7,7 +7,7 @@
 > `pnpm schema:diagram` to refresh. Node/relationship names and properties below
 > are the authoritative model; the tables in the service handbook point here.
 
-**Drift:** ✅ In sync with the last snapshot and schema.ts.
+**Drift:** ⚠️ model changed vs last snapshot (1 label(s), 5 property(ies), 4 relationship(s)).
 
 ## Entity-relationship diagram
 
@@ -29,6 +29,9 @@ erDiagram
         StringArray genres
         String imageUrl
         StringArray influencedByQids
+        StringArray memberOfQids
+        LongArray_StringArray memberOfSinceYears
+        LongArray_StringArray memberOfUntilYears
         String musicbrainzId "indexed"
         DateTime musicbrainzIdFetchedAt "indexed"
         String name "indexed"
@@ -56,6 +59,7 @@ erDiagram
     Master {
         Long discogsId PK
         DateTime mbReleaseEventsFetchedAt "indexed"
+        String musicbrainzReleaseGroupId
         String title
         Long year
     }
@@ -67,6 +71,9 @@ erDiagram
         String name "indexed"
         DateTime nationalityFetchedAt "indexed"
         Boolean notAGroup
+    }
+    Region {
+        String name PK
     }
     Release {
         String barcode
@@ -107,6 +114,7 @@ erDiagram
         Double longitude
         String musicbrainzPlaceId
         String name "indexed"
+        String nameKey PK
     }
     Style {
         String name PK
@@ -155,12 +163,15 @@ erDiagram
     Musician }o--o{ Release : "CREDITED_ON"
     Musician }o--o{ Track : "CREDITED_ON"
     Release }o--o{ Country : "FROM_COUNTRY"
+    Release }o--o{ Region : "FROM_REGION"
     ReloadJob }o--o{ ReloadStage : "HAS_STAGE"
     Release }o--o{ Track : "HAS_TRACK"
     Artist }o--o{ Artist : "INFLUENCED_BY"
     Release }o--o{ Genre : "IN_GENRE"
     Release }o--o{ Style : "IN_STYLE"
     Master }o--o{ Country : "MB_RELEASED_IN"
+    Master }o--o{ Region : "MB_RELEASED_IN_REGION"
+    Artist }o--o{ Artist : "MEMBER_OF"
     Musician }o--o{ Musician : "MEMBER_OF"
     Release }o--o{ Label : "ON_LABEL"
     Artist }o--o{ Country : "ORIGIN_COUNTRY"
@@ -171,6 +182,7 @@ erDiagram
     Track }o--o{ Work : "RECORDING_OF"
     Release }o--o{ Artist : "RELEASED_BY"
     Master }o--o{ Country : "RELEASED_IN"
+    Master }o--o{ Region : "RELEASED_IN_REGION"
     Musician }o--o{ Artist : "SAME_PERSON_AS"
     Artist }o--o{ Work : "WROTE"
     Musician }o--o{ Work : "WROTE"
@@ -193,6 +205,7 @@ flowchart LR
     Label["Label"]
     Master["Master"]
     Musician["Musician"]
+    Region["Region"]
     Release["Release"]
     ReloadJob["ReloadJob"]
     ReloadStage["ReloadStage"]
@@ -203,12 +216,15 @@ flowchart LR
     Musician -->|"CREDITED_ON"| Release
     Musician -->|"CREDITED_ON"| Track
     Release -->|"FROM_COUNTRY"| Country
+    Release -->|"FROM_REGION"| Region
     ReloadJob -->|"HAS_STAGE"| ReloadStage
     Release -->|"HAS_TRACK"| Track
     Artist -->|"INFLUENCED_BY"| Artist
     Release -->|"IN_GENRE"| Genre
     Release -->|"IN_STYLE"| Style
     Master -->|"MB_RELEASED_IN"| Country
+    Master -->|"MB_RELEASED_IN_REGION"| Region
+    Artist -->|"MEMBER_OF"| Artist
     Musician -->|"MEMBER_OF"| Musician
     Release -->|"ON_LABEL"| Label
     Artist -->|"ORIGIN_COUNTRY"| Country
@@ -219,6 +235,7 @@ flowchart LR
     Track -->|"RECORDING_OF"| Work
     Release -->|"RELEASED_BY"| Artist
     Master -->|"RELEASED_IN"| Country
+    Master -->|"RELEASED_IN_REGION"| Region
     Musician -->|"SAME_PERSON_AS"| Artist
     Artist -->|"WROTE"| Work
     Musician -->|"WROTE"| Work
