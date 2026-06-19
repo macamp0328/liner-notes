@@ -1,6 +1,7 @@
 import type { Driver } from 'neo4j-driver';
 import type { MbReleaseEvent, MusicBrainzClient } from '../ingestion/musicbrainz-client.js';
 import type { Logger } from '../ingestion/discogs-client.js';
+import { isDigitalOnlyRelease } from '../ingestion/transforms.js';
 import {
   getMastersForReleaseEventEnrichment,
   mergeMbReleaseEvents,
@@ -67,9 +68,20 @@ export async function enrichMbReleaseEvents(
         return null;
       }
 
-      const events = await mbClient.getReleaseEventsByReleaseGroupMbid(mbid);
+      const allEvents = await mbClient.getReleaseEventsByReleaseGroupMbid(mbid);
+      // Drop worldwide-digital storefront events before counting/writing: a digital edition is
+      // enumerated as one ISO release-event per country, saturating MB_RELEASED_IN to ~every
+      // country, so it is availability footprint, not pressing reach (#458).
+      const events = allEvents.filter((e) => !isDigitalOnlyRelease(e.formats));
+      const droppedDigital = allEvents.length - events.length;
       const withCountry = events.filter((e) => e.countryCode !== null);
       const withoutCountry = events.length - withCountry.length;
+
+      if (droppedDigital > 0) {
+        log.info(
+          `[mb-release-events] Master ${masterDiscogsId}: ${droppedDigital} digital-only event(s) dropped (#458)`,
+        );
+      }
 
       if (withoutCountry > 0) {
         log.info(
@@ -101,7 +113,7 @@ export async function enrichMbReleaseEvents(
 
   if (candidateCount > 0 && summary.failed === 0 && eventsWritten === 0) {
     log.warn(
-      `[mb-release-events] No-op: ${candidateCount} master(s) found, 0 failures, but 0 events written (processed=${summary.enriched}, skipped=${summary.skipped}). Expected >0 — verify the MusicBrainz master→release-group lookup and that resolved release groups have country-coded release events, before treating this as complete.`,
+      `[mb-release-events] No-op: ${candidateCount} master(s) found, 0 failures, but 0 events written (processed=${summary.enriched}, skipped=${summary.skipped}). Expected >0 — verify the MusicBrainz master→release-group lookup and that resolved release groups have country-coded release events (or that every resolved event was digital-only and dropped, #458), before treating this as complete.`,
     );
   }
 

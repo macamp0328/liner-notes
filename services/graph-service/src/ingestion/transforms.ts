@@ -314,6 +314,68 @@ export function normalizeInstrumentFamilies(labels: readonly string[]): string[]
 }
 
 /**
+ * MusicBrainz `media.format` values that are purely digital. EXACT match only — NEVER a substring
+ * test: a substring `'digital'` check would also catch "Digital Compact Cassette" (DCC), a physical
+ * tape, and wrongly drop it. `'File'` is a Discogs value essentially never seen on MB's
+ * `media.format`; kept defensively. (#458)
+ */
+const DIGITAL_FORMATS = new Set(['Digital Media', 'File']);
+
+/**
+ * Whether a release's formats are entirely digital. A worldwide digital edition is enumerated by
+ * MusicBrainz as one ISO release-event per country storefront, which would otherwise saturate
+ * MB_RELEASED_IN to ~every country (#458). True only when there is at least one format and every one
+ * is in DIGITAL_FORMATS; an empty/unknown formats list is NOT digital — absence of format data is
+ * not evidence of a digital release, and the saturation driver always carries "Digital Media".
+ */
+export function isDigitalOnlyRelease(formats: readonly string[]): boolean {
+  return formats.length > 0 && formats.every((f) => DIGITAL_FORMATS.has(f));
+}
+
+// Priority-ordered: the first family whose keyword is a substring of the lowercased format wins.
+// Grounded in MusicBrainz's un-prefixed `media.format` vocabulary (it returns "Vinyl", not
+// "12\" Vinyl"). Physical-but-niche formats (DVD, Blu-ray, MiniDisc, DAT, Shellac, Download Card)
+// fall through to 'other' — they are KEPT; only digital-only events are dropped (#458).
+//   • '8-track'/'8 track' → "8-Track Cartridge"
+//   • 'cassette' also matches "Digital Compact Cassette" (DCC) — a physical tape, not digital
+//   • 'cd' matches CD/CD-R/HDCD/SHM-CD/Blu-spec CD/Enhanced CD; 'sacd' is redundant (contains 'cd')
+//     but self-documents that SACD folds into the cd family
+const FORMAT_FAMILY_RULES: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['8-track', ['8-track', '8 track']],
+  ['cassette', ['cassette']],
+  ['reel', ['reel']],
+  ['vinyl', ['vinyl']],
+  ['cd', ['cd', 'sacd']],
+];
+
+function formatFamily(format: string): string {
+  const lower = format.toLowerCase();
+  for (const [family, keywords] of FORMAT_FAMILY_RULES) {
+    for (const keyword of keywords) {
+      if (lower.includes(keyword)) return family;
+    }
+  }
+  return 'other';
+}
+
+/**
+ * Normalize a release's raw MusicBrainz formats onto a small controlled physical-medium vocabulary
+ * (vinyl/cassette/cd/8-track/reel/other), excluding any digital format, then deduping + sorting
+ * (mirrors {@link normalizeInstrumentFamilies}). Stored as MB_RELEASED_IN.formatFamilies alongside
+ * the raw `formats` so physical-format reach analytics (e.g. "how many countries got a vinyl
+ * pressing") stay clean without re-deriving spellings (#458). An all-digital list yields `[]` (every
+ * token excluded), though such events are dropped upstream and never reach here.
+ */
+export function normalizeFormatFamilies(formats: readonly string[]): string[] {
+  const families = new Set<string>();
+  for (const format of formats) {
+    if (DIGITAL_FORMATS.has(format)) continue;
+    families.add(formatFamily(format));
+  }
+  return [...families].sort();
+}
+
+/**
  * Filter a tracklist to only real song entries.
  * Discogs uses type_ === "heading" for side labels ("Side A") and
  * type_ === "index" for indexed non-display entries. Only "track" entries are real songs.

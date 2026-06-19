@@ -5,6 +5,8 @@ import {
   parseRoleCategory,
   parseInstrument,
   normalizeInstrumentFamilies,
+  isDigitalOnlyRelease,
+  normalizeFormatFamilies,
   filterTracks,
   extractStudios,
   extractBarcode,
@@ -305,6 +307,76 @@ describe('normalizeInstrumentFamilies', () => {
 
   it('returns an empty array for empty input', () => {
     expect(normalizeInstrumentFamilies([])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isDigitalOnlyRelease (#458, worldwide-digital storefront saturation)
+// ---------------------------------------------------------------------------
+describe('isDigitalOnlyRelease', () => {
+  it('is true when every format is digital', () => {
+    expect(isDigitalOnlyRelease(['Digital Media'])).toBe(true);
+    expect(isDigitalOnlyRelease(['File'])).toBe(true);
+    expect(isDigitalOnlyRelease(['Digital Media', 'File'])).toBe(true);
+  });
+
+  it('is false when any format is physical', () => {
+    expect(isDigitalOnlyRelease(['Vinyl'])).toBe(false);
+    expect(isDigitalOnlyRelease(['CD'])).toBe(false);
+    // Mixed: a physical pressing that also shipped digitally is still pressing reach.
+    expect(isDigitalOnlyRelease(['Vinyl', 'Digital Media'])).toBe(false);
+  });
+
+  it('is false for an empty/unknown formats list (absence is not evidence of digital)', () => {
+    expect(isDigitalOnlyRelease([])).toBe(false);
+  });
+
+  it('does NOT treat "Digital Compact Cassette" (DCC) as digital — it is a physical tape', () => {
+    // Guards the exact-match-only contract: a substring "digital" test would wrongly drop DCC.
+    expect(isDigitalOnlyRelease(['Digital Compact Cassette'])).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeFormatFamilies (#458, physical-medium vocabulary on MB_RELEASED_IN)
+// ---------------------------------------------------------------------------
+describe('normalizeFormatFamilies', () => {
+  it('maps MusicBrainz formats onto the physical-medium vocabulary', () => {
+    expect(normalizeFormatFamilies(['Vinyl'])).toEqual(['vinyl']);
+    expect(normalizeFormatFamilies(['VinylDisc'])).toEqual(['vinyl']);
+    expect(normalizeFormatFamilies(['Cassette'])).toEqual(['cassette']);
+    expect(normalizeFormatFamilies(['Reel-to-reel'])).toEqual(['reel']);
+    expect(normalizeFormatFamilies(['8-Track Cartridge'])).toEqual(['8-track']);
+  });
+
+  it('folds the whole CD family (CD-R, SACD, HDCD, …) into "cd"', () => {
+    expect(normalizeFormatFamilies(['CD'])).toEqual(['cd']);
+    expect(normalizeFormatFamilies(['CD-R'])).toEqual(['cd']);
+    expect(normalizeFormatFamilies(['SACD'])).toEqual(['cd']);
+    expect(normalizeFormatFamilies(['Enhanced CD'])).toEqual(['cd']);
+  });
+
+  it('maps "Digital Compact Cassette" (DCC) to cassette, not digital', () => {
+    expect(normalizeFormatFamilies(['Digital Compact Cassette'])).toEqual(['cassette']);
+  });
+
+  it('buckets physical-but-niche formats into "other" (kept, not dropped)', () => {
+    expect(normalizeFormatFamilies(['DVD'])).toEqual(['other']);
+    expect(normalizeFormatFamilies(['Shellac'])).toEqual(['other']);
+    expect(normalizeFormatFamilies(['MiniDisc'])).toEqual(['other']);
+  });
+
+  it('excludes digital formats, deduping + sorting the rest', () => {
+    // Marry Me's saturation driver: a digital-only edition yields no physical family.
+    expect(normalizeFormatFamilies(['Digital Media'])).toEqual([]);
+    // Mixed: the digital token is dropped, the physical one kept.
+    expect(normalizeFormatFamilies(['Vinyl', 'Digital Media'])).toEqual(['vinyl']);
+    // Dedupe + sort across a multi-format release.
+    expect(normalizeFormatFamilies(['CD', 'Vinyl', 'CD'])).toEqual(['cd', 'vinyl']);
+  });
+
+  it('returns an empty array for empty input', () => {
+    expect(normalizeFormatFamilies([])).toEqual([]);
   });
 });
 
