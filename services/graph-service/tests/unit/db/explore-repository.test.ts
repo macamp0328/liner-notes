@@ -15,6 +15,7 @@ import {
   getReleasesByDecade,
   getReleasesByYear,
   getConnections,
+  getRelatedReleases,
   getPath,
   getSharedMusicians,
   getMostPressedReleases,
@@ -677,7 +678,7 @@ describe('getConnections', () => {
     vi.clearAllMocks();
   });
 
-  it('returns seed and connected nodes', async () => {
+  it('returns seed and connected nodes with edge-specificity weight', async () => {
     const rec = makeRecord({
       discogsId: makeNeo4jInt(13570466),
       title: 'U.F.O.F.',
@@ -686,8 +687,22 @@ describe('getConnections', () => {
       format: 'Vinyl',
       thumbUrl: null,
       nodes: [
-        { type: 'Musician', discogsId: null, name: 'John Smith', title: null },
-        { type: 'Release', discogsId: makeNeo4jInt(9999991), name: null, title: 'Other Album' },
+        {
+          type: 'Studio',
+          discogsId: null,
+          name: 'Niche Studio',
+          title: null,
+          degree: makeNeo4jInt(2),
+          weight: 0.5,
+        },
+        {
+          type: 'Release',
+          discogsId: makeNeo4jInt(9999991),
+          name: null,
+          title: 'Other Album',
+          degree: makeNeo4jInt(8),
+          weight: 0.125,
+        },
       ],
     });
     const { session } = makeMockSession([makeResult([rec])]);
@@ -696,8 +711,15 @@ describe('getConnections', () => {
     expect(result).not.toBeNull();
     expect(result!.seed.discogsId).toBe(13570466);
     expect(result!.nodes).toHaveLength(2);
-    expect(result!.nodes[0]).toMatchObject({ type: 'Musician', name: 'John Smith' });
-    expect(result!.nodes[1]).toMatchObject({ type: 'Release', title: 'Other Album' });
+    expect(result!.nodes[0]).toEqual({
+      type: 'Studio',
+      discogsId: null,
+      name: 'Niche Studio',
+      title: null,
+      degree: 2,
+      weight: 0.5,
+    });
+    expect(result!.nodes[1]).toMatchObject({ type: 'Release', title: 'Other Album', degree: 8 });
   });
 
   it('returns null when release not found', async () => {
@@ -721,6 +743,79 @@ describe('getConnections', () => {
     const driver = makeMockDriver(session);
     const result = await getConnections(driver, 13570466, 1);
     expect(result!.nodes).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getRelatedReleases (#331)
+// ---------------------------------------------------------------------------
+
+describe('getRelatedReleases', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns ranked releases with score and weight-sorted bridge breakdown', async () => {
+    const existence = makeResult([makeRecord({ id: makeNeo4jInt(13570466) })]);
+    const ranking = makeResult([
+      makeRecord({
+        discogsId: makeNeo4jInt(9999991),
+        title: 'Other Album',
+        artist: 'Some Artist',
+        pressingYear: makeNeo4jInt(1973),
+        format: 'Vinyl',
+        thumbUrl: null,
+        score: 0.7,
+        // intentionally out of weight order — the mapper must sort strongest-first
+        bridges: [
+          { type: 'Musician', name: 'Prolific Player', weight: 0.05 },
+          { type: 'Studio', name: 'Niche Studio', weight: 0.5 },
+        ],
+      }),
+    ]);
+    const { session, runSpy } = makeMockSession([existence, ranking]);
+    const driver = makeMockDriver(session);
+
+    const results = await getRelatedReleases(driver, 13570466, 25);
+
+    expect(results).not.toBeNull();
+    expect(results!).toHaveLength(1);
+    expect(results![0]).toMatchObject({
+      discogsId: 9999991,
+      title: 'Other Album',
+      artist: 'Some Artist',
+      score: 0.7,
+    });
+    expect(results![0]!.bridges).toEqual([
+      { type: 'Studio', name: 'Niche Studio', weight: 0.5 },
+      { type: 'Musician', name: 'Prolific Player', weight: 0.05 },
+    ]);
+    // existence check + ranking query
+    expect(runSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns null when the seed release is absent (no second query)', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    const driver = makeMockDriver(session);
+    const results = await getRelatedReleases(driver, 404404, 25);
+    expect(results).toBeNull();
+    expect(runSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns an empty array when the seed exists but has no related releases', async () => {
+    const existence = makeResult([makeRecord({ id: makeNeo4jInt(13570466) })]);
+    const { session } = makeMockSession([existence, makeResult([])]);
+    const driver = makeMockDriver(session);
+    const results = await getRelatedReleases(driver, 13570466, 25);
+    expect(results).toEqual([]);
+  });
+
+  it('closes the session', async () => {
+    const existence = makeResult([makeRecord({ id: makeNeo4jInt(13570466) })]);
+    const { session } = makeMockSession([existence, makeResult([])]);
+    const driver = makeMockDriver(session);
+    await getRelatedReleases(driver, 13570466, 25);
+    expect(session.close).toHaveBeenCalledOnce();
   });
 });
 

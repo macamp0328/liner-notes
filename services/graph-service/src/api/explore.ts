@@ -17,6 +17,7 @@ import {
   getReleasesByDecade,
   getReleasesByYear,
   getConnections,
+  getRelatedReleases,
   getPath,
   getSharedMusicians,
   getMostInternationalTracks,
@@ -29,7 +30,8 @@ import {
   type WorkRecording,
   type SongwriterWork,
   type ArtistInfluences,
-  type ConnectionNode,
+  type WeightedConnectionNode,
+  type RelatedRelease,
   type PathResult,
   type PathEndpoint,
   type SharedMusiciansResult,
@@ -178,12 +180,54 @@ const connectionNodeSchema = {
   },
 } as const;
 
+// A connection node carrying its edge-specificity weight (#331). Separate from the bare
+// connectionNodeSchema above (which the path schemas reuse and must not grow these fields).
+const weightedConnectionNodeSchema = {
+  type: 'object',
+  required: ['type', 'degree', 'weight'],
+  properties: {
+    type: { type: 'string' },
+    discogsId: { type: 'integer', nullable: true },
+    name: { type: 'string', nullable: true },
+    title: { type: 'string', nullable: true },
+    degree: { type: 'integer' },
+    weight: { type: 'number' },
+  },
+} as const;
+
 const connectionsResponseSchema = {
   type: 'object',
   required: ['seed', 'nodes'],
   properties: {
     seed: exploreReleaseSchema,
-    nodes: { type: 'array', items: connectionNodeSchema },
+    nodes: { type: 'array', items: weightedConnectionNodeSchema },
+  },
+} as const;
+
+// One shared neighbour explaining a relatedness rank (#331): node label, display name, 1/degree weight.
+const connectionBridgeSchema = {
+  type: 'object',
+  required: ['type', 'weight'],
+  properties: {
+    type: { type: 'string' },
+    name: { type: 'string', nullable: true },
+    weight: { type: 'number' },
+  },
+} as const;
+
+// /explore/related item (#331): an ExploreRelease plus its relatedness `score` and the bridge breakdown.
+const relatedReleaseSchema = {
+  type: 'object',
+  required: ['discogsId', 'title', 'score', 'bridges'],
+  properties: {
+    discogsId: { type: 'integer' },
+    title: { type: 'string' },
+    artist: { type: 'string', nullable: true },
+    pressingYear: { type: 'integer', nullable: true },
+    format: { type: 'string', nullable: true },
+    thumbUrl: { type: 'string', nullable: true },
+    score: { type: 'number' },
+    bridges: { type: 'array', items: connectionBridgeSchema },
   },
 } as const;
 
@@ -730,14 +774,14 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get<{
     Params: DiscogsIdParams;
     Querystring: DepthQuery;
-    Reply: { seed: ExploreRelease; nodes: ConnectionNode[] } | ErrorReply;
+    Reply: { seed: ExploreRelease; nodes: WeightedConnectionNode[] } | ErrorReply;
   }>(
     '/api/v1/explore/connections/:discogsId',
     {
       schema: {
         tags: ['explore'],
         summary:
-          'Graph traversal from a release — returns nodes reachable within depth hops (max 3)',
+          'Graph traversal from a release — nodes reachable within depth hops (max 3), each tagged with its edge-specificity weight (1/degree), most-specific first',
         params: {
           type: 'object',
           required: ['discogsId'],
@@ -758,7 +802,7 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
     async (
       request,
       reply,
-    ): Promise<{ seed: ExploreRelease; nodes: ConnectionNode[] } | ErrorReply> => {
+    ): Promise<{ seed: ExploreRelease; nodes: WeightedConnectionNode[] } | ErrorReply> => {
       const depth = request.query.depth ?? 2;
       const graph = await getConnections(getDriver(), request.params.discogsId, depth as 1 | 2 | 3);
       if (!graph) {
@@ -767,6 +811,49 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
       return reply.send(graph);
+    },
+  );
+
+  // GET /api/v1/explore/related/:discogsId?limit=N
+  fastify.get<{
+    Params: DiscogsIdParams;
+    Querystring: { limit?: number };
+    Reply: RelatedRelease[] | ErrorReply;
+  }>(
+    '/api/v1/explore/related/:discogsId',
+    {
+      schema: {
+        tags: ['explore'],
+        summary:
+          'Releases most related to this one, ranked by edge specificity (Σ 1/degree over shared session players, producers, engineers, and studios)',
+        description:
+          'Edge-specificity-weighted relatedness (#331). Bridges traverse only the human/credit allowlist (CREDITED_ON, RECORDED_AT, SAME_PERSON_AS, MEMBER_OF), so genre/country/label hubs and the same-headline-artist link are excluded by construction. Each result carries its `score` and the bridge breakdown that earned it. 404 if the release is unknown; empty array if it has no qualifying connections.',
+        params: {
+          type: 'object',
+          required: ['discogsId'],
+          properties: { discogsId: { type: 'integer' } },
+        },
+        querystring: {
+          type: 'object',
+          properties: {
+            limit: { type: 'integer', minimum: 1, maximum: 100, default: 25 },
+          },
+        },
+        response: {
+          200: { type: 'array', items: relatedReleaseSchema },
+          404: errorResponseRef,
+        },
+      },
+    },
+    async (request, reply): Promise<RelatedRelease[] | ErrorReply> => {
+      const limit = request.query.limit ?? 25;
+      const related = await getRelatedReleases(getDriver(), request.params.discogsId, limit);
+      if (related === null) {
+        return reply.code(404).send({
+          error: { code: 'NOT_FOUND', message: 'Release not found' },
+        });
+      }
+      return reply.send(related);
     },
   );
 

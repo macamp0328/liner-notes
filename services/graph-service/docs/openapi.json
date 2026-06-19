@@ -6245,7 +6245,7 @@
     },
     "/api/v1/explore/connections/{discogsId}": {
       "get": {
-        "summary": "Graph traversal from a release — returns nodes reachable within depth hops (max 3)",
+        "summary": "Graph traversal from a release — nodes reachable within depth hops (max 3), each tagged with its edge-specificity weight (1/degree), most-specific first",
         "tags": ["explore"],
         "parameters": [
           {
@@ -6309,7 +6309,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["type"],
+                        "required": ["type", "degree", "weight"],
                         "properties": {
                           "type": {
                             "type": "string"
@@ -6325,6 +6325,112 @@
                           "title": {
                             "type": "string",
                             "nullable": true
+                          },
+                          "degree": {
+                            "type": "integer"
+                          },
+                          "weight": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/related/{discogsId}": {
+      "get": {
+        "summary": "Releases most related to this one, ranked by edge specificity (Σ 1/degree over shared session players, producers, engineers, and studios)",
+        "tags": ["explore"],
+        "description": "Edge-specificity-weighted relatedness (#331). Bridges traverse only the human/credit allowlist (CREDITED_ON, RECORDED_AT, SAME_PERSON_AS, MEMBER_OF), so genre/country/label hubs and the same-headline-artist link are excluded by construction. Each result carries its `score` and the bridge breakdown that earned it. 404 if the release is unknown; empty array if it has no qualifying connections.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer"
+            },
+            "in": "path",
+            "name": "discogsId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["discogsId", "title", "score", "bridges"],
+                    "properties": {
+                      "discogsId": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "artist": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "pressingYear": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "format": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "thumbUrl": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "score": {
+                        "type": "number"
+                      },
+                      "bridges": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": ["type", "weight"],
+                          "properties": {
+                            "type": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "weight": {
+                              "type": "number"
+                            }
                           }
                         }
                       }
