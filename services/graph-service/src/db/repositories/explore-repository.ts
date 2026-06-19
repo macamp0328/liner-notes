@@ -105,9 +105,45 @@ export interface ConnectionNode {
   title: string | null;
 }
 
+/**
+ * A connection node annotated with its edge-specificity weight (#331). `degree` is the node's total
+ * degree across the whole graph (`COUNT { (n)--() }`); `weight = 1/degree` so a hub node (a `Rock`
+ * genre wired to ~150 releases) scores near zero while a niche node (a `Studio` on 2 releases) scores
+ * ~0.5. `/connections` orders by `degree ASC` so the most specific connections survive the 200-cap.
+ * Distinct from the bare {@link ConnectionNode} (reused by the #343 path types, which must NOT carry
+ * these fields).
+ */
+export type WeightedConnectionNode = ConnectionNode & {
+  degree: number;
+  weight: number;
+};
+
 export interface ConnectionsResult {
   seed: ExploreRelease;
-  nodes: ConnectionNode[];
+  nodes: WeightedConnectionNode[];
+}
+
+/**
+ * One shared neighbour ("bridge") linking the seed release to a related release (#331): the node
+ * label `type` (Musician / Studio / Artist / …), its display `name`, and the edge-specificity
+ * `weight = 1/degree(bridge)`. A shared niche studio outweighs a shared prolific session player.
+ */
+export interface ConnectionBridge {
+  type: string;
+  name: string | null;
+  weight: number;
+}
+
+/**
+ * A release ranked as related to a seed (#331), with the bridges that earned its rank. `score` is the
+ * sum of every shared bridge's `weight` (`Σ 1/degree`); `bridges` is that breakdown, strongest-first
+ * and capped for payload size (the full set still feeds `score`). Bridges traverse only the #343
+ * `PATH_RELATIONSHIPS` allowlist, so genre/country/label/track hubs and the same-headline-artist
+ * `RELEASED_BY` edge are excluded by construction — every bridge is a shared person or studio.
+ */
+export interface RelatedRelease extends ExploreRelease {
+  score: number;
+  bridges: ConnectionBridge[];
 }
 
 /**
@@ -837,12 +873,16 @@ export async function getConnections(
           AND connected <> start
       WITH start, sa, connected WHERE connected IS NOT NULL
       WITH DISTINCT start, sa, connected
+      WITH start, sa, connected, COUNT { (connected)-[]-() } AS degree
+      ORDER BY degree ASC
       LIMIT 200
       WITH start, sa, collect({
              type: head(labels(connected)),
              discogsId: connected.discogsId,
              name: connected.name,
-             title: connected.title
+             title: connected.title,
+             degree: degree,
+             weight: 1.0 / degree
            }) AS nodes
       RETURN start.discogsId AS discogsId, start.title AS title, sa.name AS artist,
              coalesce(start.originalYear, start.pressingYear) AS pressingYear,
@@ -866,14 +906,18 @@ export async function getConnections(
       discogsId: unknown;
       name: unknown;
       title: unknown;
+      degree: unknown;
+      weight: unknown;
     }>;
-    const nodes: ConnectionNode[] = rawNodes
+    const nodes: WeightedConnectionNode[] = rawNodes
       .filter((n) => n.type !== null)
       .map((n) => ({
         type: toStr(n.type) ?? '',
         discogsId: toInt(n.discogsId),
         name: toStr(n.name),
         title: toStr(n.title),
+        degree: toInt(n.degree) ?? 0,
+        weight: toFloat(n.weight) ?? 0,
       }));
     return { seed, nodes };
   } finally {
@@ -1291,6 +1335,107 @@ export async function getPath(
       maxDepth: safeMaxDepth,
       steps,
     };
+  } finally {
+    await session.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// getRelatedReleases — edge-specificity-weighted relatedness ranking (#331)
+//
+// For a seed release, find OTHER releases sharing a neighbour ("bridge") node and rank them by
+// `Σ 1/degree(bridge)` over the shared bridges. Two ideas combine, both from the issue:
+//
+//   1. Hub suppression by the SAME relationship allowlist `getPath` (#343) uses
+//      (PATH_RELATIONSHIPS). Genre/Style/Country/Label/Track and the same-headline-artist
+//      RELEASED_BY edge are excluded BY CONSTRUCTION — they are only reachable via edges outside
+//      the allowlist — so every bridge is a shared session player, producer, engineer, studio,
+//      group, or resolved-same-person. This is the primary "shares a producer, not is-also-rock"
+//      filter; we add NO node-label WHERE (which would force a slow scan).
+//   2. Inverse-degree weighting (1/degree) as the REFINEMENT over that already-clean set: a niche
+//      shared studio (degree ~2 → 0.5) outranks a prolific shared session player (degree ~30 →
+//      0.03). Degree is cheap plain Cypher (COUNT {}) — no GDS (unavailable on Aura Free), no
+//      precomputed property, no refresh job.
+//
+// A per-bridge degree cap (RELATED_MAX_BRIDGE_DEGREE) drops any residual hyper-connected bridge
+// belt-and-suspenders, and the query runs under the shared PATH_QUERY_TIMEOUT_MS budget. The seed
+// is existence-checked first so an absent id is a 404 (null) while an isolated release is an empty
+// array. The bridge breakdown carries the node LABEL (Musician/Studio/…), not the CREDITED_ON
+// roleCategory — the label already answers "shared studio vs shared person"; a precise "shared
+// producer" filter would need to choose which of the two bridge edges' role applies (deferred).
+// ---------------------------------------------------------------------------
+
+const RELATED_MAX_BRIDGE_DEGREE = 50;
+const RELATED_BRIDGE_DISPLAY = 12;
+
+interface RawBridge {
+  type: unknown;
+  name: unknown;
+  weight: unknown;
+}
+
+export async function getRelatedReleases(
+  driver: Driver,
+  discogsId: number,
+  limit: number,
+): Promise<RelatedRelease[] | null> {
+  const rounded = Math.round(limit);
+  const safeLimit = Number.isFinite(rounded) ? Math.min(100, Math.max(1, rounded)) : 25;
+  const session = driver.session();
+  try {
+    const exists = await session.run(
+      `MATCH (r:Release {discogsId: $discogsId}) RETURN r.discogsId AS id LIMIT 1`,
+      { discogsId: neo4j.int(discogsId) },
+    );
+    if (exists.records.length === 0) return null;
+
+    const query = `
+      MATCH (start:Release {discogsId: $discogsId})
+        -[:${PATH_RELATIONSHIPS}]-(bridge)
+        -[:${PATH_RELATIONSHIPS}]-(other:Release)
+      WHERE other.discogsId <> start.discogsId
+      WITH DISTINCT other, bridge
+      WITH other, bridge, COUNT { (bridge)-[]-() } AS deg
+      WHERE deg > 0 AND deg <= $maxBridgeDegree
+      WITH other,
+           sum(1.0 / deg) AS score,
+           collect({
+             type: head(labels(bridge)),
+             name: coalesce(bridge.name, bridge.title),
+             weight: 1.0 / deg
+           }) AS bridges
+      OPTIONAL MATCH (other)-[:RELEASED_BY]->(sa:Artist)
+      RETURN other.discogsId AS discogsId, other.title AS title, sa.name AS artist,
+             coalesce(other.originalYear, other.pressingYear) AS pressingYear,
+             other.format AS format, other.thumbUrl AS thumbUrl,
+             score, bridges
+      ORDER BY score DESC, other.discogsId ASC
+      LIMIT $limit
+    `;
+    const result = await session.run(
+      query,
+      {
+        discogsId: neo4j.int(discogsId),
+        maxBridgeDegree: neo4j.int(RELATED_MAX_BRIDGE_DEGREE),
+        limit: neo4j.int(safeLimit),
+      },
+      { timeout: PATH_QUERY_TIMEOUT_MS },
+    );
+    return result.records.map((rec) => {
+      const rawBridges = (rec.get('bridges') as RawBridge[])
+        .map((b) => ({
+          type: toStr(b.type) ?? '',
+          name: toStr(b.name),
+          weight: toFloat(b.weight) ?? 0,
+        }))
+        .sort((a, b) => b.weight - a.weight)
+        .slice(0, RELATED_BRIDGE_DISPLAY);
+      return {
+        ...mapExploreRelease(rec),
+        score: toFloat(rec.get('score')) ?? 0,
+        bridges: rawBridges,
+      };
+    });
   } finally {
     await session.close();
   }

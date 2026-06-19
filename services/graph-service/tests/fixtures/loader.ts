@@ -423,3 +423,50 @@ export async function seedEntityResolution(driver: Driver): Promise<void> {
     await session.close();
   }
 }
+
+/**
+ * Seed an isolated edge-specificity-weighting fixture (#331) for `/explore/related/:discogsId`. Call
+ * AFTER seedGraph(). Fully self-contained (discogsIds ≥ 7060000, distinct musician/genre names) so it
+ * does not perturb other explore assertions. The seed release (7060001) connects to:
+ *
+ *   - release A (7060002) via a LOW-degree shared Musician (degree 2: seed + A only) → weight 0.5
+ *   - release B (7060003) via a HIGH-degree shared Musician (degree 8: seed + B + 6 fillers) →
+ *     weight 0.125 each, so A must outrank B
+ *   - release C (7060004) via a shared Genre ONLY → must be ABSENT (genre is outside the
+ *     PATH_RELATIONSHIPS allowlist, excluded by construction)
+ */
+export async function seedRelatedness(driver: Driver): Promise<void> {
+  const session = driver.session();
+  try {
+    await session.run(
+      `MERGE (seed:Release {discogsId: 7060001}) SET seed.title = 'Relatedness Seed'
+       MERGE (a:Release {discogsId: 7060002}) SET a.title = 'Relatedness A'
+       MERGE (b:Release {discogsId: 7060003}) SET b.title = 'Relatedness B'
+       MERGE (c:Release {discogsId: 7060004}) SET c.title = 'Relatedness C'
+
+       // low-degree bridge: shared only between seed and A → degree 2
+       MERGE (low:Musician {discogsId: 760001}) SET low.name = 'Rel Low Player'
+       MERGE (low)-[:CREDITED_ON {scope: 'release', roleCategory: 'performer'}]->(seed)
+       MERGE (low)-[:CREDITED_ON {scope: 'release', roleCategory: 'performer'}]->(a)
+
+       // high-degree bridge: shared between seed and B, plus 6 filler releases → degree 8
+       MERGE (high:Musician {discogsId: 760002}) SET high.name = 'Rel High Player'
+       MERGE (high)-[:CREDITED_ON {scope: 'release', roleCategory: 'performer'}]->(seed)
+       MERGE (high)-[:CREDITED_ON {scope: 'release', roleCategory: 'performer'}]->(b)
+
+       // genre bridge only: seed and C share a genre, nothing in the allowlist → C must not surface
+       MERGE (genre:Genre {name: 'Relatedness Test Genre'})
+       MERGE (seed)-[:IN_GENRE]->(genre)
+       MERGE (c)-[:IN_GENRE]->(genre)`,
+    );
+    // 6 filler releases to inflate the high-degree musician's degree to 8.
+    await session.run(
+      `MATCH (high:Musician {discogsId: 760002})
+       UNWIND range(7060010, 7060015) AS rid
+       MERGE (f:Release {discogsId: rid}) SET f.title = 'Relatedness Filler ' + toString(rid)
+       MERGE (high)-[:CREDITED_ON {scope: 'release', roleCategory: 'performer'}]->(f)`,
+    );
+  } finally {
+    await session.close();
+  }
+}

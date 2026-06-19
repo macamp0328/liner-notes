@@ -9,6 +9,7 @@ import {
   seedWorks,
   seedSongwriters,
   seedInfluences,
+  seedRelatedness,
 } from '../../fixtures/loader.js';
 import { getDriver } from '../../../src/db/client.js';
 import { linkInfluencedBy } from '../../../src/db/artist-influences-repository.js';
@@ -27,6 +28,7 @@ describe('explore routes', () => {
     await seedWorks(getDriver());
     await seedSongwriters(getDriver());
     await seedInfluences(getDriver());
+    await seedRelatedness(getDriver());
     // Drive the real projection so the route reads production-shaped INFLUENCED_BY edges (#391).
     await linkInfluencedBy(getDriver());
   });
@@ -484,6 +486,25 @@ describe('explore routes', () => {
       expect(body.nodes.length).toBeGreaterThan(0);
     });
 
+    it('tags each node with degree and 1/degree weight, ordered specific-first (#331)', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/v1/explore/connections/${SEED_RELEASE_ID}?depth=2`,
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as {
+        nodes: { degree: number; weight: number }[];
+      };
+      expect(body.nodes.length).toBeGreaterThan(0);
+      for (const n of body.nodes) {
+        expect(n.degree).toBeGreaterThanOrEqual(1);
+        expect(n.weight).toBeCloseTo(1 / n.degree, 6);
+      }
+      // ordered by degree ascending (weight descending)
+      const degrees = body.nodes.map((n) => n.degree);
+      expect(degrees).toEqual([...degrees].sort((x, y) => x - y));
+    });
+
     it('returns 404 when the seed release is absent', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/v1/explore/connections/1' });
       expect(res.statusCode).toBe(404);
@@ -495,6 +516,61 @@ describe('explore routes', () => {
         url: `/api/v1/explore/connections/${SEED_RELEASE_ID}?depth=5`,
       });
       expect(res.statusCode).toBe(400);
+    });
+  });
+
+  describe('GET /api/v1/explore/related/:discogsId', () => {
+    // Fixture (seedRelatedness, #331): seed 7060001 shares a low-degree Musician with A (7060002),
+    // a high-degree Musician with B (7060003), and only a Genre with C (7060004).
+    it('ranks a low-degree shared bridge above a high-degree one and excludes genre-only links', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/related/7060001' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as {
+        discogsId: number;
+        score: number;
+        bridges: { type: string; name: string | null; weight: number }[];
+      }[];
+
+      const a = body.find((r) => r.discogsId === 7060002);
+      const b = body.find((r) => r.discogsId === 7060003);
+      const c = body.find((r) => r.discogsId === 7060004);
+
+      expect(a).toBeDefined();
+      expect(b).toBeDefined();
+      // genre-only link is excluded by the allowlist (genre is not a bridge)
+      expect(c).toBeUndefined();
+
+      // A's shared bridge has degree 2 (weight 0.5); B's has degree 8 (weight 0.125) → A outranks B.
+      expect(a!.score).toBeGreaterThan(b!.score);
+      expect(a!.score).toBeCloseTo(0.5, 6);
+      expect(b!.score).toBeCloseTo(0.125, 6);
+      // highest-scoring result is A
+      expect(body[0]!.discogsId).toBe(7060002);
+      // bridge breakdown carries the node label
+      expect(a!.bridges[0]).toMatchObject({ type: 'Musician', weight: 0.5 });
+    });
+
+    it('respects the limit query param', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/related/7060001?limit=1',
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as unknown[];
+      expect(body).toHaveLength(1);
+    });
+
+    it('returns an empty array for a release with no qualifying connections', async () => {
+      // 7060004 (C) connects only via a Genre → no allowlist bridges.
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/related/7060004' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as unknown[];
+      expect(body).toEqual([]);
+    });
+
+    it('returns 404 when the seed release is absent', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/related/2' });
+      expect(res.statusCode).toBe(404);
     });
   });
 

@@ -22,6 +22,7 @@ const mockGetReleasesByCountry = vi.hoisted(() => vi.fn());
 const mockGetReleasesByDecade = vi.hoisted(() => vi.fn());
 const mockGetReleasesByYear = vi.hoisted(() => vi.fn());
 const mockGetConnections = vi.hoisted(() => vi.fn());
+const mockGetRelatedReleases = vi.hoisted(() => vi.fn());
 const mockGetPath = vi.hoisted(() => vi.fn());
 const mockGetSharedMusicians = vi.hoisted(() => vi.fn());
 const mockGetMostInternationalTracks = vi.hoisted(() => vi.fn());
@@ -63,6 +64,7 @@ vi.mock('../../../src/db/repositories/explore-repository.js', () => ({
   getReleasesByDecade: mockGetReleasesByDecade,
   getReleasesByYear: mockGetReleasesByYear,
   getConnections: mockGetConnections,
+  getRelatedReleases: mockGetRelatedReleases,
   getPath: mockGetPath,
   getSharedMusicians: mockGetSharedMusicians,
   getMostInternationalTracks: mockGetMostInternationalTracks,
@@ -454,10 +456,19 @@ describe('explore routes', () => {
 
   // GET /api/v1/explore/connections/:discogsId
   describe('GET /api/v1/explore/connections/:discogsId', () => {
-    it('returns 200 with graph connections at default depth 2', async () => {
+    it('returns 200 with graph connections carrying edge-specificity weight', async () => {
       mockGetConnections.mockResolvedValue({
         seed: sampleRelease,
-        nodes: [{ type: 'Musician', discogsId: null, name: 'John Smith', title: null }],
+        nodes: [
+          {
+            type: 'Musician',
+            discogsId: null,
+            name: 'John Smith',
+            title: null,
+            degree: 4,
+            weight: 0.25,
+          },
+        ],
       });
       const response = await app.inject({
         method: 'GET',
@@ -466,10 +477,11 @@ describe('explore routes', () => {
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.payload) as {
         seed: typeof sampleRelease;
-        nodes: unknown[];
+        nodes: { degree: number; weight: number }[];
       };
       expect(body.seed.discogsId).toBe(13570466);
       expect(body.nodes).toHaveLength(1);
+      expect(body.nodes[0]).toMatchObject({ degree: 4, weight: 0.25 });
     });
 
     it('returns 200 with explicit depth param', async () => {
@@ -497,6 +509,63 @@ describe('explore routes', () => {
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/explore/connections/13570466?depth=4',
+      });
+      expect(response.statusCode).toBe(400);
+    });
+  });
+
+  // GET /api/v1/explore/related/:discogsId
+  describe('GET /api/v1/explore/related/:discogsId', () => {
+    const sampleRelated = {
+      ...sampleRelease,
+      discogsId: 9999991,
+      title: 'Other Album',
+      score: 0.7,
+      bridges: [
+        { type: 'Studio', name: 'Niche Studio', weight: 0.5 },
+        { type: 'Musician', name: 'Shared Player', weight: 0.2 },
+      ],
+    };
+
+    it('returns 200 with ranked related releases and bridge breakdown', async () => {
+      mockGetRelatedReleases.mockResolvedValue([sampleRelated]);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/related/13570466',
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as (typeof sampleRelated)[];
+      expect(body).toHaveLength(1);
+      expect(body[0]).toMatchObject({ discogsId: 9999991, score: 0.7 });
+      expect(body[0]!.bridges[0]).toEqual({ type: 'Studio', name: 'Niche Studio', weight: 0.5 });
+      expect(mockGetRelatedReleases).toHaveBeenCalledWith(expect.anything(), 13570466, 25);
+    });
+
+    it('passes an explicit limit through to the repository', async () => {
+      mockGetRelatedReleases.mockResolvedValue([]);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/related/13570466?limit=5',
+      });
+      expect(response.statusCode).toBe(200);
+      expect(mockGetRelatedReleases).toHaveBeenCalledWith(expect.anything(), 13570466, 5);
+    });
+
+    it('returns 404 when the release is unknown', async () => {
+      mockGetRelatedReleases.mockResolvedValue(null);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/related/99999',
+      });
+      expect(response.statusCode).toBe(404);
+      const body = JSON.parse(response.payload) as { error: { code: string } };
+      expect(body.error.code).toBe('NOT_FOUND');
+    });
+
+    it('returns 400 when limit is below the minimum', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/related/13570466?limit=0',
       });
       expect(response.statusCode).toBe(400);
     });
