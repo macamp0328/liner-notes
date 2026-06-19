@@ -59,7 +59,9 @@ jobs:
         run: |
           set -euo pipefail
           json="$(aws secretsmanager get-secret-value --secret-id liner-notes/graph-service/prod --query SecretString --output text)"
-          echo "::add-mask::$json"
+          # Do NOT echo $json — it is multi-line JSON and ::add-mask:: only masks
+          # single-line values; echoing it leaks all secrets to the log. Mask each
+          # extracted value individually below instead.
           for k in NEO4J_URI NEO4J_USER NEO4J_PASSWORD; do
             v="$(printf '%s' "$json" | jq -r --arg k "$k" '.[$k] // empty')"
             if [ -z "$v" ]; then echo "::error::prod secret is missing key $k"; exit 1; fi
