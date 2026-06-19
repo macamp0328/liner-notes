@@ -139,6 +139,67 @@ describe('enrichMbReleaseEvents', () => {
     expect(summary.eventsWritten).toBe(1);
   });
 
+  it('drops worldwide-digital storefront events so the country count cannot saturate (#458)', async () => {
+    mockGetMasters.mockResolvedValue([{ masterDiscogsId: 74610 }]);
+    // Mimic St. Vincent's "Marry Me": one worldwide digital edition enumerated as many single-date
+    // ISO storefronts. Every event is digital-only → nothing is pressing reach.
+    const digitalEvents: MbReleaseEvent[] = ['US', 'GB', 'DE', 'FR', 'JP'].map((cc, i) => ({
+      mbReleaseId: `rel-digital-${i}`,
+      countryCode: cc,
+      date: '2007-07-10',
+      formats: ['Digital Media'],
+    }));
+    const client = makeMbClient(
+      async () => 'rg-marry-me',
+      async () => digitalEvents,
+    );
+
+    const summary = await enrichMbReleaseEvents(client, fakeDriver, silentLogger);
+
+    // All digital → nothing reaches the writer; the distinct-country count collapses to 0.
+    expect(mockMergeEvents).toHaveBeenCalledWith(fakeDriver, 74610, []);
+    expect(summary.eventsWritten).toBe(0);
+    // Took the data→write path (not skipped) and is still stamped fetched, so it is excluded from
+    // re-selection until the staleness window — idempotent, not re-fetched forever.
+    expect(summary.mastersProcessed).toBe(1);
+    expect(mockSetFetched).toHaveBeenCalledWith(fakeDriver, 74610);
+    expect(silentLogger.info).toHaveBeenCalledWith(
+      expect.stringContaining('digital-only event(s) dropped'),
+    );
+  });
+
+  it('keeps mixed physical+digital events, dropping only the all-digital ones (#458)', async () => {
+    mockGetMasters.mockResolvedValue([{ masterDiscogsId: 42 }]);
+    const vinylEvent: MbReleaseEvent = {
+      mbReleaseId: 'rel-vinyl',
+      countryCode: 'GB',
+      date: '1975',
+      formats: ['Vinyl'],
+    };
+    const mixedEvent: MbReleaseEvent = {
+      mbReleaseId: 'rel-mixed',
+      countryCode: 'US',
+      date: '1975',
+      formats: ['CD', 'Digital Media'],
+    };
+    const digitalEvent: MbReleaseEvent = {
+      mbReleaseId: 'rel-digital',
+      countryCode: 'JP',
+      date: '2015',
+      formats: ['Digital Media'],
+    };
+    const client = makeMbClient(
+      async () => 'rg-mixed',
+      async () => [vinylEvent, mixedEvent, digitalEvent],
+    );
+
+    const summary = await enrichMbReleaseEvents(client, fakeDriver, silentLogger);
+
+    // The vinyl and the mixed (physical-bearing) events survive; the digital-only one is dropped.
+    expect(mockMergeEvents).toHaveBeenCalledWith(fakeDriver, 42, [vinylEvent, mixedEvent]);
+    expect(summary.eventsWritten).toBe(2);
+  });
+
   it('continues processing remaining masters after a per-master failure', async () => {
     mockGetMasters.mockResolvedValue([{ masterDiscogsId: 1 }, { masterDiscogsId: 2 }]);
     const client = makeMbClient(

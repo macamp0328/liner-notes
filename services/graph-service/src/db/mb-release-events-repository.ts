@@ -2,25 +2,30 @@ import type { Driver } from 'neo4j-driver';
 import neo4j from 'neo4j-driver';
 import type { MbReleaseEvent } from '../ingestion/musicbrainz-client.js';
 import { getStalenessDays } from '../enrichment/staleness.js';
-import { normalizeCountry } from '../ingestion/transforms.js';
+import { normalizeCountry, normalizeFormatFamilies } from '../ingestion/transforms.js';
 import { mergeCountryClause, mergeRegionClause } from './canonical-merges.js';
 
 type Neo4jInt = { toNumber(): number };
 
 // One MB release event resolved to its target place: an ISO `:Country` code or a `:Region` token
-// (MB emits `XE`/`XW` for Europe/Worldwide). Carries the event's merge key + props (#441).
+// (MB emits `XE`/`XW` for Europe/Worldwide). Carries the event's merge key + props (#441), plus the
+// normalized physical-medium families derived from the raw `formats` (#458).
 interface EventPlaceRow {
   mbReleaseId: string;
   code: string;
   date: string | null;
   formats: string[];
+  formatFamilies: string[];
 }
 
 /**
  * Split MB release events into ISO `:Country` rows and `:Region` rows for the `MB_RELEASED_IN` /
  * `MB_RELEASED_IN_REGION` writes (#441). Pure + exported for unit testing. A single event's
  * `countryCode` resolves to at most one target (an ISO code never co-occurs with a region token), so
- * there is no per-event format collision (unlike the Discogs master-data path).
+ * there is no per-event format collision (unlike the Discogs master-data path). Tags each row with
+ * the normalized physical `formatFamilies` (#458) alongside the raw `formats`. The digital-only
+ * **drop** is upstream in the enrichment stage (it changes counts the stage owns); this only shapes
+ * and tags kept events.
  */
 export function splitReleaseEventsByPlace(events: MbReleaseEvent[]): {
   countryRows: EventPlaceRow[];
@@ -31,7 +36,12 @@ export function splitReleaseEventsByPlace(events: MbReleaseEvent[]): {
   for (const event of events) {
     if (event.countryCode === null) continue;
     const { countries, regions } = normalizeCountry(event.countryCode);
-    const base = { mbReleaseId: event.mbReleaseId, date: event.date, formats: event.formats };
+    const base = {
+      mbReleaseId: event.mbReleaseId,
+      date: event.date,
+      formats: event.formats,
+      formatFamilies: normalizeFormatFamilies(event.formats),
+    };
     for (const code of countries) countryRows.push({ ...base, code });
     for (const code of regions) regionRows.push({ ...base, code });
   }
@@ -79,7 +89,8 @@ export async function mergeMbReleaseEvents(
          MATCH (m:Master {discogsId: $masterDiscogsId})
          ${mergeCountryClause('event.code')}
          MERGE (m)-[r:MB_RELEASED_IN {mbReleaseId: event.mbReleaseId}]->(c)
-         SET r.date = event.date, r.formats = event.formats, r.source = 'musicbrainz'`,
+         SET r.date = event.date, r.formats = event.formats,
+             r.formatFamilies = event.formatFamilies, r.source = 'musicbrainz'`,
         { masterDiscogsId: neo4j.int(masterDiscogsId), events: countryRows },
       );
     }
@@ -89,7 +100,8 @@ export async function mergeMbReleaseEvents(
          MATCH (m:Master {discogsId: $masterDiscogsId})
          ${mergeRegionClause('event.code')}
          MERGE (m)-[r:MB_RELEASED_IN_REGION {mbReleaseId: event.mbReleaseId}]->(g)
-         SET r.date = event.date, r.formats = event.formats, r.source = 'musicbrainz'`,
+         SET r.date = event.date, r.formats = event.formats,
+             r.formatFamilies = event.formatFamilies, r.source = 'musicbrainz'`,
         { masterDiscogsId: neo4j.int(masterDiscogsId), events: regionRows },
       );
     }

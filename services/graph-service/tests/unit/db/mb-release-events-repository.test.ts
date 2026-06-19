@@ -105,6 +105,8 @@ describe('mergeMbReleaseEvents', () => {
     expect(runSpy).toHaveBeenCalledOnce();
     const [query] = runSpy.mock.calls[0] as [string, unknown];
     expect(query).toContain('MB_RELEASED_IN');
+    // #458: the normalized physical-medium families are written alongside the raw formats.
+    expect(query).toContain('r.formatFamilies = event.formatFamilies');
     expect(session.close).toHaveBeenCalledOnce();
   });
 
@@ -131,10 +133,15 @@ describe('mergeMbReleaseEvents', () => {
 
     await mergeMbReleaseEvents(driver, 1234, mixed);
 
-    const [query, params] = runSpy.mock.calls[0] as [string, { events: { code: string }[] }];
+    const [query, params] = runSpy.mock.calls[0] as [
+      string,
+      { events: { code: string; formatFamilies: string[] }[] },
+    ];
     expect(query).toContain('MB_RELEASED_IN {');
     expect(params.events).toHaveLength(1);
     expect(params.events[0]?.code).toBe('GB');
+    // #458: an empty formats list yields no physical family (still written as a pressing edge).
+    expect(params.events[0]?.formatFamilies).toEqual([]);
   });
 
   it('routes MB Europe/Worldwide pseudo-codes (XE/XW) to the MB_RELEASED_IN_REGION block (#441)', async () => {
@@ -155,9 +162,18 @@ describe('mergeMbReleaseEvents', () => {
     expect(countryCall).toBeDefined();
     expect(regionCall).toBeDefined();
     expect((countryCall![1] as { events: { code: string }[] }).events[0]?.code).toBe('GB');
+    // #458: both the Country and Region writes carry the formatFamilies SET.
+    expect(countryCall![0] as string).toContain('r.formatFamilies = event.formatFamilies');
+    expect(regionCall![0] as string).toContain('r.formatFamilies = event.formatFamilies');
     const regionParams = regionCall![1] as { events: { code: string; mbReleaseId: string }[] };
     expect(regionParams.events).toEqual([
-      { mbReleaseId: 'rel-eu', code: 'EU', date: '1970', formats: ['Vinyl'] },
+      {
+        mbReleaseId: 'rel-eu',
+        code: 'EU',
+        date: '1970',
+        formats: ['Vinyl'],
+        formatFamilies: ['vinyl'],
+      },
     ]);
   });
 
@@ -178,10 +194,13 @@ describe('splitReleaseEventsByPlace', () => {
       { mbReleaseId: 'b', countryCode: 'XW', date: '1970', formats: ['CD'] },
       { mbReleaseId: 'c', countryCode: null, date: '2009', formats: [] },
     ]);
+    // #458: each row also carries the normalized physical-medium families.
     expect(countryRows).toEqual([
-      { mbReleaseId: 'a', code: 'GB', date: '1969', formats: ['Vinyl'] },
+      { mbReleaseId: 'a', code: 'GB', date: '1969', formats: ['Vinyl'], formatFamilies: ['vinyl'] },
     ]);
-    expect(regionRows).toEqual([{ mbReleaseId: 'b', code: 'WW', date: '1970', formats: ['CD'] }]);
+    expect(regionRows).toEqual([
+      { mbReleaseId: 'b', code: 'WW', date: '1970', formats: ['CD'], formatFamilies: ['cd'] },
+    ]);
   });
 });
 
