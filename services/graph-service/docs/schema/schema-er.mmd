@@ -10,6 +10,9 @@ erDiagram
         StringArray genres
         String imageUrl
         StringArray influencedByQids
+        StringArray memberOfQids
+        LongArray_StringArray memberOfSinceYears
+        LongArray_StringArray memberOfUntilYears
         String musicbrainzId "indexed"
         DateTime musicbrainzIdFetchedAt "indexed"
         String name "indexed"
@@ -37,6 +40,7 @@ erDiagram
     Master {
         Long discogsId PK
         DateTime mbReleaseEventsFetchedAt "indexed"
+        String musicbrainzReleaseGroupId
         String title
         Long year
     }
@@ -48,6 +52,9 @@ erDiagram
         String name "indexed"
         DateTime nationalityFetchedAt "indexed"
         Boolean notAGroup
+    }
+    Region {
+        String name PK
     }
     Release {
         String barcode
@@ -88,6 +95,7 @@ erDiagram
         Double longitude
         String musicbrainzPlaceId
         String name "indexed"
+        String nameKey PK
     }
     Style {
         String name PK
@@ -136,12 +144,15 @@ erDiagram
     Musician }o--o{ Release : "CREDITED_ON"
     Musician }o--o{ Track : "CREDITED_ON"
     Release }o--o{ Country : "FROM_COUNTRY"
+    Release }o--o{ Region : "FROM_REGION"
     ReloadJob }o--o{ ReloadStage : "HAS_STAGE"
     Release }o--o{ Track : "HAS_TRACK"
     Artist }o--o{ Artist : "INFLUENCED_BY"
     Release }o--o{ Genre : "IN_GENRE"
     Release }o--o{ Style : "IN_STYLE"
     Master }o--o{ Country : "MB_RELEASED_IN"
+    Master }o--o{ Region : "MB_RELEASED_IN_REGION"
+    Artist }o--o{ Artist : "MEMBER_OF"
     Musician }o--o{ Musician : "MEMBER_OF"
     Release }o--o{ Label : "ON_LABEL"
     Artist }o--o{ Country : "ORIGIN_COUNTRY"
@@ -152,6 +163,7 @@ erDiagram
     Track }o--o{ Work : "RECORDING_OF"
     Release }o--o{ Artist : "RELEASED_BY"
     Master }o--o{ Country : "RELEASED_IN"
+    Master }o--o{ Region : "RELEASED_IN_REGION"
     Musician }o--o{ Artist : "SAME_PERSON_AS"
     Artist }o--o{ Work : "WROTE"
     Musician }o--o{ Work : "WROTE"
