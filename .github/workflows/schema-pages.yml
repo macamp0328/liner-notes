@@ -46,7 +46,7 @@ jobs:
       - name: Build static page from committed artifacts
         run: SCHEMA_PAGE_DATE="$(date -u +%Y-%m-%d) (${GITHUB_SHA:0:7})" pnpm schema:page
       - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
       - id: deploy
