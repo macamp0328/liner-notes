@@ -32,7 +32,7 @@ jobs:
     if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Mandatory: without this, create-pull-request pushes via the persisted
           # GITHUB_TOKEN and the PR won't trigger CI — silently un-mergeable.
