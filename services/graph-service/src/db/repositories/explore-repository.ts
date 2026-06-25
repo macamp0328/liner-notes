@@ -280,6 +280,27 @@ function mapExploreRelease(record: { get: (key: string) => unknown }): ExploreRe
   };
 }
 
+interface QidArtist {
+  discogsId: number;
+  name: string;
+  wikidataQid: string;
+}
+
+// The QID-keyed artist node shared by the #391 influence neighbours and the #424 bandmates — same
+// fallbacks as the other explore mappers (`wikidataQid` is always present, the edge can't exist
+// without it). Keeps the null-coercion contract in one place for both routes.
+function mapQidArtist(x: Record<string, unknown>): QidArtist {
+  return {
+    discogsId: toInt(x['discogsId']) ?? 0,
+    name: toStr(x['name']) ?? '',
+    wikidataQid: toStr(x['wikidataQid']) ?? '',
+  };
+}
+
+function mapQidArtistList(raw: unknown): QidArtist[] {
+  return ((raw as Array<Record<string, unknown>> | null) ?? []).map(mapQidArtist);
+}
+
 // ---------------------------------------------------------------------------
 // getReleasesByMusician
 // ---------------------------------------------------------------------------
@@ -296,7 +317,13 @@ function mapExploreRelease(record: { get: (key: string) => unknown }): ExploreRe
  *     from the Discogs Musician membership to the Artist layer via SAME_PERSON_AS, and a group record
  *     is dropped only on positive evidence it falls OUTSIDE a known tenure — both the release year and
  *     a tenure bound known and the year out of range. Unknown year or absent/unbounded tenure keeps
- *     the record (include-when-unknown). The guard narrows ONLY this inferred expansion: a record the
+ *     the record (include-when-unknown). The guard keys on the release year
+ *     (`coalesce(originalYear, pressingYear)`), not a recording date (none is stored): a *reissue* of
+ *     in-tenure material keeps its master's `originalYear` so it stays in-window, but a brand-new
+ *     compilation that *first issues* a previously-unreleased in-tenure recording (its own master,
+ *     year out of tenure) is dropped from the inferred expansion — an accepted year-granularity
+ *     tradeoff, and moot when the member is individually credited (that arrives via the self branch).
+ *     The guard narrows ONLY this inferred expansion: a record the
  *     member personally played on arrives via the self/sibling branches (no window) and is never
  *     dropped. The reverse (group→members) is deliberately NOT expanded: it would attribute every
  *     member's unrelated solo credit to the group, making the group look involved in records it never
@@ -627,15 +654,9 @@ export async function getArtistInfluences(driver: Driver, name: string): Promise
       { name },
     );
     const record = result.records[0];
-    const mapList = (raw: unknown): InfluenceArtist[] =>
-      ((raw as Array<Record<string, unknown>> | null) ?? []).map((x) => ({
-        discogsId: toInt(x['discogsId']) ?? 0,
-        name: toStr(x['name']) ?? '',
-        wikidataQid: toStr(x['wikidataQid']) ?? '',
-      }));
     return {
-      influencedBy: record ? mapList(record.get('influencedBy')) : [],
-      influenced: record ? mapList(record.get('influenced')) : [],
+      influencedBy: record ? mapQidArtistList(record.get('influencedBy')) : [],
+      influenced: record ? mapQidArtistList(record.get('influenced')) : [],
     };
   } finally {
     await session.close();
@@ -683,21 +704,13 @@ export async function getArtistMembership(driver: Driver, name: string): Promise
     const record = result.records[0];
     const mapBands = (raw: unknown): MembershipBand[] =>
       ((raw as Array<Record<string, unknown>> | null) ?? []).map((x) => ({
-        discogsId: toInt(x['discogsId']) ?? 0,
-        name: toStr(x['name']) ?? '',
-        wikidataQid: toStr(x['wikidataQid']) ?? '',
+        ...mapQidArtist(x),
         since: toInt(x['since']),
         until: toInt(x['until']),
       }));
-    const mapBandmates = (raw: unknown): MembershipBandmate[] =>
-      ((raw as Array<Record<string, unknown>> | null) ?? []).map((x) => ({
-        discogsId: toInt(x['discogsId']) ?? 0,
-        name: toStr(x['name']) ?? '',
-        wikidataQid: toStr(x['wikidataQid']) ?? '',
-      }));
     return {
       bands: record ? mapBands(record.get('bands')) : [],
-      bandmates: record ? mapBandmates(record.get('bandmates')) : [],
+      bandmates: record ? mapQidArtistList(record.get('bandmates')) : [],
     };
   } finally {
     await session.close();

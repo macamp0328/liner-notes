@@ -152,7 +152,9 @@ const songwriterWorkSchema = {
   },
 } as const;
 
-const influenceArtistSchema = {
+// A QID-keyed in-collection artist node — the shape shared by the #391 influence neighbours and the
+// #424 bandmates (both edges resolve on the Wikidata QID, so `wikidataQid` is always present).
+const qidArtistSchema = {
   type: 'object',
   required: ['discogsId', 'name', 'wikidataQid'],
   properties: {
@@ -166,13 +168,13 @@ const artistInfluencesResponseSchema = {
   type: 'object',
   required: ['influencedBy', 'influenced'],
   properties: {
-    influencedBy: { type: 'array', items: influenceArtistSchema },
-    influenced: { type: 'array', items: influenceArtistSchema },
+    influencedBy: { type: 'array', items: qidArtistSchema },
+    influenced: { type: 'array', items: qidArtistSchema },
   },
 } as const;
 
-// One band the queried artist belonged to (#424): the Wikidata P463 group + the tenure years
-// (`since`/`until` null when Wikidata had no qualifier).
+// One band the queried artist belonged to (#424): a QID artist plus the tenure years (`since`/`until`
+// null when Wikidata had no qualifier).
 const membershipBandSchema = {
   type: 'object',
   required: ['discogsId', 'name', 'wikidataQid'],
@@ -185,22 +187,12 @@ const membershipBandSchema = {
   },
 } as const;
 
-const membershipBandmateSchema = {
-  type: 'object',
-  required: ['discogsId', 'name', 'wikidataQid'],
-  properties: {
-    discogsId: { type: 'integer' },
-    name: { type: 'string' },
-    wikidataQid: { type: 'string' },
-  },
-} as const;
-
 const artistMembershipResponseSchema = {
   type: 'object',
   required: ['bands', 'bandmates'],
   properties: {
     bands: { type: 'array', items: membershipBandSchema },
-    bandmates: { type: 'array', items: membershipBandmateSchema },
+    bandmates: { type: 'array', items: qidArtistSchema },
   },
 } as const;
 
