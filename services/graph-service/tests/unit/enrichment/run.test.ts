@@ -4,6 +4,7 @@ import {
   runEnrichment,
   TERMINAL_EMPTY,
   type EnrichmentStage,
+  type RetryConfig,
 } from '../../../src/enrichment/run.js';
 import { __resetShutdown } from '../../../src/lifecycle/shutdown.js';
 
@@ -554,6 +555,219 @@ describe('runEnrichment', () => {
 
       expect(summary.enriched).toBe(0);
       expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Aborted at 0/1'));
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Bounded transient-failure retry sweep (#455)
+  // -------------------------------------------------------------------------
+  describe('retry sweep', () => {
+    afterEach(() => __resetShutdown());
+
+    // A predicate + a no-op sleep keep the sweep deterministic and timer-free, mirroring how the
+    // suite injects zero-backoff clients elsewhere rather than reaching for fake timers.
+    const isTransient = (err: unknown): boolean =>
+      err instanceof Error && err.message === 'transient';
+    const baseRetry = (over: Partial<RetryConfig> = {}): RetryConfig => ({
+      maxRounds: 2,
+      isRetryable: isTransient,
+      backoffBaseMs: 1,
+      sleep: async (): Promise<void> => {},
+      random: (): number => 0,
+      ...over,
+    });
+
+    it('re-attempts a transient failure and recovers it within the run', async () => {
+      const write = vi.fn().mockResolvedValue(undefined);
+      const resolve = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('transient'))
+        .mockResolvedValue('lyrics');
+      const stage = makeStage({
+        selectCandidates: vi.fn().mockResolvedValue([{ id: 1 }]),
+        resolve,
+        write,
+      });
+
+      const summary = await runEnrichment(fakeDriver, stage, { retry: baseRetry() });
+
+      expect(summary).toMatchObject({ enriched: 1, skipped: 0, failed: 0, recovered: 1 });
+      expect(resolve).toHaveBeenCalledTimes(2);
+      expect(write).toHaveBeenCalledOnce();
+    });
+
+    it('does not sweep a non-retryable failure', async () => {
+      const resolve = vi.fn().mockRejectedValue(new Error('permanent'));
+      const stage = makeStage({
+        selectCandidates: vi.fn().mockResolvedValue([{ id: 1 }]),
+        resolve,
+      });
+
+      const summary = await runEnrichment(fakeDriver, stage, { retry: baseRetry() });
+
+      expect(summary).toMatchObject({ failed: 1, recovered: 0 });
+      // Only the main-pass attempt — the sweep never re-ran a non-transient failure.
+      expect(resolve).toHaveBeenCalledOnce();
+    });
+
+    it('counts a swept item that now resolves null as skipped and stamps it', async () => {
+      const markAttempted = vi.fn().mockResolvedValue(undefined);
+      const resolve = vi.fn().mockRejectedValueOnce(new Error('transient')).mockResolvedValue(null);
+      const stage = makeStage({
+        selectCandidates: vi.fn().mockResolvedValue([{ id: 1 }]),
+        resolve,
+        markAttempted,
+      });
+
+      const summary = await runEnrichment(fakeDriver, stage, { retry: baseRetry() });
+
+      expect(summary).toMatchObject({ skipped: 1, failed: 0, recovered: 1 });
+      expect(markAttempted).toHaveBeenCalledOnce();
+    });
+
+    it('counts a swept item that now resolves TERMINAL_EMPTY as exhausted', async () => {
+      const markTerminal = vi.fn().mockResolvedValue(undefined);
+      const resolve = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('transient'))
+        .mockResolvedValue(TERMINAL_EMPTY);
+      const stage = makeStage({
+        selectCandidates: vi.fn().mockResolvedValue([{ id: 1 }]),
+        resolve,
+        markTerminal,
+      });
+
+      const summary = await runEnrichment(fakeDriver, stage, { retry: baseRetry() });
+
+      expect(summary).toMatchObject({ exhausted: 1, failed: 0, recovered: 1 });
+      expect(markTerminal).toHaveBeenCalledOnce();
+    });
+
+    it('skips the sweep entirely when transient failures exceed the outage cap', async () => {
+      const logger = makeMockLogger();
+      // Above the absolute floor (25) so the fraction governs: cap = max(25, 0.5 × 60) = 30,
+      // and 60 transient failures exceed it → a clear outage, sweep skipped.
+      const items = Array.from({ length: 60 }, (_, k) => ({ id: k }));
+      const resolve = vi.fn().mockRejectedValue(new Error('transient'));
+      const stage = makeStage({
+        selectCandidates: vi.fn().mockResolvedValue(items),
+        resolve,
+      });
+
+      const summary = await runEnrichment(fakeDriver, stage, {
+        logger,
+        retry: baseRetry({ maxRetryableFraction: 0.5 }),
+      });
+
+      expect(summary).toMatchObject({ failed: 60, recovered: 0 });
+      // Only the main pass ran — no sweep re-attempts.
+      expect(resolve).toHaveBeenCalledTimes(60);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('exceed the retry cap'));
+    });
+
+    it('does not sweep when the run was aborted', async () => {
+      const controller = new AbortController();
+      const resolve = vi.fn().mockImplementation(async () => {
+        controller.abort();
+        throw new Error('transient');
+      });
+      const stage = makeStage({
+        selectCandidates: vi.fn().mockResolvedValue([{ id: 1 }]),
+        resolve,
+      });
+
+      const summary = await runEnrichment(fakeDriver, stage, {
+        signal: controller.signal,
+        retry: baseRetry(),
+      });
+
+      expect(summary).toMatchObject({ failed: 1, recovered: 0 });
+      // Aborted before the sweep — the failure is left for the next (resumed) run, not re-attempted.
+      expect(resolve).toHaveBeenCalledOnce();
+    });
+
+    it('leaves an item failed after exhausting all rounds on a persistent transient error', async () => {
+      const resolve = vi.fn().mockRejectedValue(new Error('transient'));
+      const stage = makeStage({
+        selectCandidates: vi.fn().mockResolvedValue([{ id: 1 }]),
+        resolve,
+      });
+
+      const summary = await runEnrichment(fakeDriver, stage, { retry: baseRetry() });
+
+      expect(summary).toMatchObject({ failed: 1, recovered: 0 });
+      // 1 main pass + 2 sweep rounds, all still transient.
+      expect(resolve).toHaveBeenCalledTimes(3);
+    });
+
+    it('leaves an item failed when its sweep re-attempt throws a non-retryable error', async () => {
+      const resolve = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('transient')) // main pass → swept
+        .mockRejectedValue(new Error('permanent')); // sweep re-attempt → no longer retryable
+      const stage = makeStage({
+        selectCandidates: vi.fn().mockResolvedValue([{ id: 1 }]),
+        resolve,
+      });
+
+      const summary = await runEnrichment(fakeDriver, stage, { retry: baseRetry() });
+
+      expect(summary).toMatchObject({ failed: 1, recovered: 0 });
+      // Main pass + one sweep re-attempt; once non-retryable it is dropped, so round 2 never runs it.
+      expect(resolve).toHaveBeenCalledTimes(2);
+    });
+
+    it('uses the default (real) backoff sleep when none is injected', async () => {
+      const resolve = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('transient'))
+        .mockResolvedValue('lyrics');
+      const stage = makeStage({
+        selectCandidates: vi.fn().mockResolvedValue([{ id: 1 }]),
+        resolve,
+      });
+
+      // No `sleep` override → exercises the real setTimeout-based default; a 1ms base keeps it fast.
+      const summary = await runEnrichment(fakeDriver, stage, {
+        retry: { maxRounds: 1, isRetryable: isTransient, backoffBaseMs: 1 },
+      });
+
+      expect(summary).toMatchObject({ enriched: 1, failed: 0, recovered: 1 });
+    });
+
+    it('clamps the per-round backoff to the ceiling so a huge base cannot hang the run', async () => {
+      const slept: number[] = [];
+      const resolve = vi.fn().mockRejectedValue(new Error('transient')); // never recovers → both rounds sleep
+      const stage = makeStage({
+        selectCandidates: vi.fn().mockResolvedValue([{ id: 1 }]),
+        resolve,
+      });
+
+      await runEnrichment(fakeDriver, stage, {
+        retry: {
+          maxRounds: 2,
+          isRetryable: isTransient,
+          backoffBaseMs: 1_000_000_000, // ~11.5 days; must be clamped to the 32s ceiling
+          random: (): number => 1, // max jitter → returns the (clamped) base verbatim
+          sleep: async (ms: number): Promise<void> => {
+            slept.push(ms);
+          },
+        },
+      });
+
+      expect(slept.length).toBeGreaterThan(0);
+      for (const ms of slept) expect(ms).toBeLessThanOrEqual(32_000);
+    });
+
+    it('omits recovered when no retry is configured', async () => {
+      const stage = makeStage({
+        selectCandidates: vi.fn().mockResolvedValue([{ id: 1 }]),
+        resolve: vi.fn().mockResolvedValue('x'),
+      });
+
+      const summary = await runEnrichment(fakeDriver, stage);
+
+      expect(summary.recovered).toBeUndefined();
     });
   });
 });

@@ -3,10 +3,13 @@ import type { Driver } from 'neo4j-driver';
 import {
   enrichLyrics,
   resolveReloadLyricsConcurrency,
+  resolveLyricsRetryRounds,
+  isRetryableLyricsError,
   type LyricsClients,
 } from '../../../src/enrichment/lyrics.js';
 import { LrclibClient } from '../../../src/ingestion/lrclib-client.js';
 import { GeniusClient } from '../../../src/ingestion/genius-client.js';
+import { RetriesExhaustedError } from '../../../src/ingestion/rate-limited-fetch.js';
 import { closedSnapshot } from '../../../src/ingestion/circuit-breaker.js';
 import { snapshotEnv } from '../../helpers/env.js';
 
@@ -134,9 +137,73 @@ describe('resolveReloadLyricsConcurrency (#372)', () => {
   });
 });
 
+describe('resolveLyricsRetryRounds (#455)', () => {
+  const env = snapshotEnv(['LYRICS_RETRY_ROUNDS']);
+
+  beforeEach(() => env.clear());
+  afterEach(() => env.restore());
+
+  it('defaults to 2 when unset', () => {
+    expect(resolveLyricsRetryRounds()).toBe(2);
+  });
+
+  it('honours an explicit value', () => {
+    process.env['LYRICS_RETRY_ROUNDS'] = '5';
+    expect(resolveLyricsRetryRounds()).toBe(5);
+  });
+
+  it('treats 0 as disabled', () => {
+    process.env['LYRICS_RETRY_ROUNDS'] = '0';
+    expect(resolveLyricsRetryRounds()).toBe(0);
+  });
+
+  it('clamps a negative value to 0 (disabled), not an unbounded loop', () => {
+    process.env['LYRICS_RETRY_ROUNDS'] = '-3';
+    expect(resolveLyricsRetryRounds()).toBe(0);
+  });
+
+  it('clamps an absurdly large value to the upper bound (10)', () => {
+    process.env['LYRICS_RETRY_ROUNDS'] = '500';
+    expect(resolveLyricsRetryRounds()).toBe(10);
+  });
+
+  it('falls back to the default on a non-numeric value', () => {
+    process.env['LYRICS_RETRY_ROUNDS'] = 'abc';
+    expect(resolveLyricsRetryRounds()).toBe(2);
+  });
+});
+
+describe('isRetryableLyricsError (#455)', () => {
+  it('treats a request timeout as retryable', () => {
+    const timeout = Object.assign(new Error('timed out'), { name: 'TimeoutError' });
+    expect(isRetryableLyricsError(timeout)).toBe(true);
+  });
+
+  it('treats an undici "fetch failed" network error as retryable', () => {
+    expect(isRetryableLyricsError(new Error('fetch failed'))).toBe(true);
+  });
+
+  it('treats a 429/5xx retry-budget exhaustion as retryable', () => {
+    expect(isRetryableLyricsError(new RetriesExhaustedError('LRCLIB API', 3, 'http://x'))).toBe(
+      true,
+    );
+  });
+
+  it('does not retry a plain non-ok error (fatal-ish status)', () => {
+    expect(isRetryableLyricsError(new Error('LRCLIB API error 451 for http://x'))).toBe(false);
+  });
+
+  it('does not retry a contract error', () => {
+    expect(
+      isRetryableLyricsError(new Error('resolve() returned null but the stage declares no ...')),
+    ).toBe(false);
+  });
+});
+
 describe('enrichLyrics', () => {
   let fetchSpy: MockInstance<typeof fetch>;
   const savedConcurrency = process.env['LYRICS_CONCURRENCY'];
+  const savedRetryRounds = process.env['LYRICS_RETRY_ROUNDS'];
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -145,6 +212,10 @@ describe('enrichLyrics', () => {
     // Force serial so call-order assertions are deterministic; the worker pool is covered in
     // run.test.ts. (Intra-stage concurrency is an orthogonal concern from lyrics' own logic.)
     process.env['LYRICS_CONCURRENCY'] = '1';
+    // Disable the in-run retry sweep (#455) by default so these transient-failure tests assert the
+    // single-attempt behaviour without a real backoff; the sweep has its own describe below, which
+    // opts in via the `opts.retry` seam with an injected no-op sleep.
+    process.env['LYRICS_RETRY_ROUNDS'] = '0';
 
     mockGetUnenrichedTracks.mockResolvedValue([]);
     mockSetTrackLyrics.mockResolvedValue(undefined);
@@ -158,6 +229,8 @@ describe('enrichLyrics', () => {
   afterEach(() => {
     if (savedConcurrency === undefined) delete process.env['LYRICS_CONCURRENCY'];
     else process.env['LYRICS_CONCURRENCY'] = savedConcurrency;
+    if (savedRetryRounds === undefined) delete process.env['LYRICS_RETRY_ROUNDS'];
+    else process.env['LYRICS_RETRY_ROUNDS'] = savedRetryRounds;
     delete process.env['CIRCUIT_BREAKER_THRESHOLD'];
     fetchSpy.mockRestore();
   });
@@ -413,6 +486,27 @@ describe('enrichLyrics', () => {
     expect(mockMarkLyricsFetched).not.toHaveBeenCalled();
     // 3 retries + the initial attempt — the hardened client recovered nothing, then gave up.
     expect(fetchSpy.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // In-run retry sweep (#455) — a transient LRCLIB blip recovers within the run
+  // -------------------------------------------------------------------------
+  it('recovers a transient LRCLIB timeout within the run via the retry sweep', async () => {
+    mockGetUnenrichedTracks.mockResolvedValue([sampleTrack]);
+    // First attempt times out (fail-fast, counted failed); the sweep's re-attempt succeeds.
+    const timeout = Object.assign(new Error('The operation timed out'), { name: 'TimeoutError' });
+    fetchSpy.mockRejectedValueOnce(timeout).mockResolvedValue(makeOkResponse(lrclibHit));
+
+    const summary = await enrichLyrics(fakeDriver, undefined, undefined, clients(false), {
+      // Inject a no-op sleep so the sweep's backoff is instant — no fake timers, mirroring the
+      // zero-backoff clients. maxRounds overrides the beforeEach LYRICS_RETRY_ROUNDS=0.
+      retry: { maxRounds: 1, sleep: async (): Promise<void> => {} },
+    });
+
+    expect(summary.enriched).toBe(1);
+    expect(summary.failed).toBe(0);
+    expect(summary.recovered).toBe(1);
+    expect(mockSetTrackLyrics).toHaveBeenCalledOnce();
   });
 
   // -------------------------------------------------------------------------

@@ -2552,6 +2552,9 @@
                             "failed": {
                               "type": "integer"
                             },
+                            "recovered": {
+                              "type": "integer"
+                            },
                             "durationMs": {
                               "type": "integer"
                             }
@@ -2745,6 +2748,9 @@
                               "type": "integer"
                             },
                             "failed": {
+                              "type": "integer"
+                            },
+                            "recovered": {
                               "type": "integer"
                             },
                             "durationMs": {
@@ -3462,6 +3468,9 @@
                             "failed": {
                               "type": "integer"
                             },
+                            "recovered": {
+                              "type": "integer"
+                            },
                             "durationMs": {
                               "type": "integer"
                             }
@@ -3640,6 +3649,9 @@
                             "failed": {
                               "type": "integer"
                             },
+                            "recovered": {
+                              "type": "integer"
+                            },
                             "durationMs": {
                               "type": "integer"
                             }
@@ -3727,6 +3739,9 @@
                               "type": "integer"
                             },
                             "failed": {
+                              "type": "integer"
+                            },
+                            "recovered": {
                               "type": "integer"
                             },
                             "durationMs": {
@@ -3901,6 +3916,9 @@
                             "failed": {
                               "type": "integer"
                             },
+                            "recovered": {
+                              "type": "integer"
+                            },
                             "durationMs": {
                               "type": "integer"
                             }
@@ -4071,6 +4089,9 @@
                               "type": "integer"
                             },
                             "failed": {
+                              "type": "integer"
+                            },
+                            "recovered": {
                               "type": "integer"
                             },
                             "durationMs": {
@@ -7266,6 +7287,7 @@
                             "tracksWithDeezerBpm",
                             "tracksWithDeezerGain",
                             "mastersWithReleaseEvents",
+                            "mastersWithMbReleaseGroup",
                             "samePersonLinks",
                             "memberOfEdges",
                             "groupsWithMembers",
@@ -7823,6 +7845,22 @@
                               }
                             },
                             "mastersWithReleaseEvents": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "mastersWithMbReleaseGroup": {
                               "type": "object",
                               "required": ["covered", "applicable", "pct"],
                               "properties": {

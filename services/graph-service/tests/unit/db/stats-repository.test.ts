@@ -129,7 +129,7 @@ describe('getStats', () => {
         deezerCovered: int(30),
         deezerGainCovered: int(24),
       },
-      master: { total: int(7), releaseEventsCovered: int(5) },
+      master: { total: int(7), releaseEventsCovered: int(5), mbReleaseGroupCovered: int(6) },
       work: {
         total: int(50),
         multiRecording: int(4),
@@ -267,6 +267,14 @@ describe('getStats', () => {
       pct: 71.4,
     });
 
+    // MB release-group link coverage (#385): 6/7 ≈ 85.7. Distinct from (and ≥) release-events
+    // coverage — a Master can resolve a link yet write zero edges if all its events were digital.
+    expect(stats.enrichment.mastersWithMbReleaseGroup).toEqual({
+      covered: 6,
+      applicable: 7,
+      pct: 85.7,
+    });
+
     // nationality, per-label, split by source; untagged = covered − Σ sources
     expect(stats.enrichment.artistsWithNationality).toEqual({
       covered: 12,
@@ -314,7 +322,7 @@ describe('getStats', () => {
         deezerCovered: int(0),
         deezerGainCovered: int(0),
       },
-      master: { total: int(0), releaseEventsCovered: int(0) },
+      master: { total: int(0), releaseEventsCovered: int(0), mbReleaseGroupCovered: int(0) },
       natArtist: {},
       natMusician: {},
       natProducer: {},

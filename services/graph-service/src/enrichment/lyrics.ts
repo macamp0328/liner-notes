@@ -16,8 +16,15 @@ import {
   type UnenrichedTrack,
 } from '../db/lyrics-repository.js';
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
-import { runEnrichment, type EnrichmentStage, type EnrichmentSummary } from './run.js';
+import {
+  runEnrichment,
+  type EnrichmentStage,
+  type EnrichmentSummary,
+  type RetryConfig,
+} from './run.js';
 import { closedSnapshot } from '../ingestion/circuit-breaker.js';
+import { transientNetworkCode } from '../ingestion/network-errors.js';
+import { RetriesExhaustedError } from '../ingestion/rate-limited-fetch.js';
 import {
   scoreLyricsMatch,
   isConfidentMatch,
@@ -114,6 +121,34 @@ export function resolveReloadLyricsConcurrency(): number {
   return Number.isFinite(parsed) ? clampConcurrency(parsed) : resolveConcurrency();
 }
 
+const DEFAULT_RETRY_ROUNDS = 2;
+const MAX_RETRY_ROUNDS = 10;
+
+/**
+ * Resolve `LYRICS_RETRY_ROUNDS` (env) — the bounded number of in-run transient-failure retry rounds
+ * (#455). Default 2; `0` disables the sweep. Non-numeric/unset → default; clamped to
+ * `[0, MAX_RETRY_ROUNDS]` so a fat-fingered value fails safe (a blip lasting past a few escalating-
+ * backoff rounds isn't transient, and an unbounded count would re-hammer the source every round).
+ */
+export function resolveLyricsRetryRounds(): number {
+  const parsed = parseInt(process.env['LYRICS_RETRY_ROUNDS'] ?? '', 10);
+  return Number.isFinite(parsed)
+    ? Math.min(Math.max(0, parsed), MAX_RETRY_ROUNDS)
+    : DEFAULT_RETRY_ROUNDS;
+}
+
+/**
+ * Whether a thrown lyrics error is a transient blip worth re-attempting in the in-run retry sweep
+ * (#455). True for a request timeout / undici socket error (`transientNetworkCode`) and for a
+ * 429/5xx that exhausted the client's retry budget (`RetriesExhaustedError`) — the LRCLIB-timeout
+ * failure mode the issue reported. Deliberately false for the plain `Error('LRCLIB API error <status>')`
+ * non-ok path (a fatal-ish status) and for any Neo4j `write`-thrown error: a half-applied write must
+ * not be blindly re-`resolve`d, and a non-transient failure won't change on a re-attempt.
+ */
+export function isRetryableLyricsError(err: unknown): boolean {
+  return transientNetworkCode(err) !== null || err instanceof RetriesExhaustedError;
+}
+
 /**
  * Resolve `LYRICS_CONFIDENCE_THRESHOLD` (env) to the match-confidence gate (#248). Unset, empty,
  * non-numeric, or out of `[0, 1]` → fall back to {@link LYRICS_CONFIDENCE_DEFAULT} (0.85): a
@@ -177,13 +212,32 @@ function gradeMatch(
  * notes). The multi-source fallback lives inside `resolve`, so a single track is only ever counted
  * `failed` once (LRCLIB throwing short-circuits the Genius attempt); the per-item loop, isolation,
  * and stamp-on-attempt contract are owned by {@link runEnrichment}.
+ *
+ * The stage opts into the bounded in-run transient-failure retry sweep (#455, `LYRICS_RETRY_ROUNDS`,
+ * default 2): after the main pass, transient failures (`isRetryableLyricsError`) are re-attempted with
+ * an escalating jittered backoff so a fresh-reload LRCLIB blip — which has no later staleness window
+ * in the same run — recovers before the stage completes instead of leaving a durable not-found gap.
  */
 export async function enrichLyrics(
   driver: Driver,
   logger?: Logger,
   onProgress: ProgressReporter = NOOP_PROGRESS,
   clients?: LyricsClients,
-  opts?: { concurrency?: number },
+  opts?: {
+    concurrency?: number;
+    /**
+     * In-run transient-failure retry sweep overrides (#455). Production leaves these unset — rounds
+     * come from `LYRICS_RETRY_ROUNDS` and the rest are sensible constants. Tests inject `sleep`
+     * (a no-op) for determinism without fake timers, mirroring the zero-backoff-client pattern.
+     */
+    retry?: {
+      maxRounds?: number;
+      backoffBaseMs?: number;
+      maxRetryableFraction?: number;
+      sleep?: (ms: number) => Promise<void>;
+      random?: () => number;
+    };
+  },
 ): Promise<LyricsEnrichmentSummary> {
   const log: Logger = logger ?? console;
   const lrclib = clients?.lrclib ?? buildLrclibClientFromEnv(log);
@@ -193,6 +247,7 @@ export async function enrichLyrics(
   const concurrency =
     opts?.concurrency !== undefined ? clampConcurrency(opts.concurrency) : resolveConcurrency();
   const confidenceThreshold = resolveConfidenceThreshold();
+  const retryRounds = opts?.retry?.maxRounds ?? resolveLyricsRetryRounds();
 
   const stage: EnrichmentStage<UnenrichedTrack, LyricsResolved> = {
     name: 'lyrics',
@@ -279,7 +334,31 @@ export async function enrichLyrics(
     describeItem: (track) => `"${track.title}"`,
   };
 
-  const base = await runEnrichment(driver, stage, { logger: log, onProgress, concurrency });
+  // Opt into the bounded in-run retry sweep (#455) so a transient LRCLIB blip during a fresh reload
+  // recovers in-run instead of hardening into a durable not-found gap. Omitted entirely when rounds
+  // resolve to 0 (operator disabled), so the runner skips the sweep cleanly.
+  const retry: RetryConfig | undefined =
+    retryRounds > 0
+      ? {
+          maxRounds: retryRounds,
+          isRetryable: isRetryableLyricsError,
+          ...(opts?.retry?.backoffBaseMs !== undefined
+            ? { backoffBaseMs: opts.retry.backoffBaseMs }
+            : {}),
+          ...(opts?.retry?.maxRetryableFraction !== undefined
+            ? { maxRetryableFraction: opts.retry.maxRetryableFraction }
+            : {}),
+          ...(opts?.retry?.sleep !== undefined ? { sleep: opts.retry.sleep } : {}),
+          ...(opts?.retry?.random !== undefined ? { random: opts.retry.random } : {}),
+        }
+      : undefined;
+
+  const base = await runEnrichment(driver, stage, {
+    logger: log,
+    onProgress,
+    concurrency,
+    ...(retry !== undefined ? { retry } : {}),
+  });
 
   // Surface each source's run-scoped breaker so a trip (e.g. Genius 403 all run, #240) is visible
   // in /admin/reload/status. The breaker already logs the trip once at warn, so we don't re-log

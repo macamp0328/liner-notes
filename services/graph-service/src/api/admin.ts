@@ -335,9 +335,11 @@ interface PipelineEntry {
 }
 
 // Status (`lastResult`) summary shapes — no `required`, matching the original status routes.
-// `exhausted` (#367) is the terminal-empty counter; without it here, response serialization would
-// strip it from /admin/<stage>/status (it surfaces in /admin/reload/status for free, since that
-// route's `counts` schema allows additional numeric or integer-array properties).
+// `exhausted` (#367) is the terminal-empty counter and `recovered` (#455) is the in-run retry-sweep
+// counter; without them here, response serialization would strip them from /admin/<stage>/status
+// (they surface in /admin/reload/status for free, since that route's `counts` schema allows
+// additional numeric or integer-array properties). Both are generic-runner counters only some stages
+// emit (today `recovered` is lyrics-only) — absent from a stage's data, the serializer just omits it.
 const standardSummarySchema = {
   type: 'object',
   properties: {
@@ -345,6 +347,7 @@ const standardSummarySchema = {
     skipped: { type: 'integer' },
     exhausted: { type: 'integer' },
     failed: { type: 'integer' },
+    recovered: { type: 'integer' },
     durationMs: { type: 'integer' },
   },
 };

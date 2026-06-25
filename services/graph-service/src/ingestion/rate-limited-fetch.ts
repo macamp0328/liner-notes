@@ -88,7 +88,8 @@ const DEFAULT_BACKOFF_CEIL_MS = 32_000;
  */
 export const DEFAULT_TIMEOUT_MS = 30_000;
 
-function defaultSleep(ms: number): Promise<void> {
+/** A setTimeout-based sleep — the default for any injectable `sleep` seam in this package. */
+export function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
