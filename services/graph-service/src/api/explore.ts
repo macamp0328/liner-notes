@@ -8,6 +8,7 @@ import {
   getRecordingsByWork,
   getWorksBySongwriter,
   getArtistInfluences,
+  getArtistMembership,
   getReleasesByStudio,
   getRecordingLocations,
   getReleasesByLabel,
@@ -30,6 +31,7 @@ import {
   type WorkRecording,
   type SongwriterWork,
   type ArtistInfluences,
+  type ArtistMembership,
   type WeightedConnectionNode,
   type RelatedRelease,
   type PathResult,
@@ -166,6 +168,39 @@ const artistInfluencesResponseSchema = {
   properties: {
     influencedBy: { type: 'array', items: influenceArtistSchema },
     influenced: { type: 'array', items: influenceArtistSchema },
+  },
+} as const;
+
+// One band the queried artist belonged to (#424): the Wikidata P463 group + the tenure years
+// (`since`/`until` null when Wikidata had no qualifier).
+const membershipBandSchema = {
+  type: 'object',
+  required: ['discogsId', 'name', 'wikidataQid'],
+  properties: {
+    discogsId: { type: 'integer' },
+    name: { type: 'string' },
+    wikidataQid: { type: 'string' },
+    since: { type: 'integer', nullable: true },
+    until: { type: 'integer', nullable: true },
+  },
+} as const;
+
+const membershipBandmateSchema = {
+  type: 'object',
+  required: ['discogsId', 'name', 'wikidataQid'],
+  properties: {
+    discogsId: { type: 'integer' },
+    name: { type: 'string' },
+    wikidataQid: { type: 'string' },
+  },
+} as const;
+
+const artistMembershipResponseSchema = {
+  type: 'object',
+  required: ['bands', 'bandmates'],
+  properties: {
+    bands: { type: 'array', items: membershipBandSchema },
+    bandmates: { type: 'array', items: membershipBandmateSchema },
   },
 } as const;
 
@@ -354,9 +389,10 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
           "node. The name is matched against Musician nodes AND, via `SAME_PERSON_AS`, an Artist's " +
           'canonical name — so querying an alias or the canonical name returns the same release set, ' +
           'over both release- and track-scoped credits. `MEMBER_OF` is expanded one way only: ' +
-          "querying an individual also returns their group's records (an INFERRED, temporally-" +
-          "unguarded involvement — the group's catalog, not necessarily records they personally " +
-          'played on; date-qualified membership is roadmapped). Querying a group returns only the ' +
+          "querying an individual also returns their group's records (an INFERRED involvement — the " +
+          "group's catalog, not necessarily records they personally played on), temporally guarded by " +
+          'the Wikidata P463 tenure (#424) so out-of-tenure group records are dropped where the years ' +
+          'are known (unknown years are kept). Querying a group returns only the ' +
           "group's own credits — it is deliberately NOT expanded to its members' solo work, which " +
           'would over-attribute the group.',
         params: {
@@ -536,6 +572,37 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request, reply): Promise<ArtistInfluences | ErrorReply> => {
       const result = await getArtistInfluences(getDriver(), request.params.name);
+      return reply.send(result);
+    },
+  );
+
+  // GET /api/v1/explore/membership/:name — the Wikidata P463 band-membership neighbourhood (#424)
+  fastify.get<{ Params: NameParams; Reply: ArtistMembership | ErrorReply }>(
+    '/api/v1/explore/membership/:name',
+    {
+      schema: {
+        tags: ['explore'],
+        summary:
+          'The bands this artist belonged to, with tenure, and their bandmates (Wikidata P463)',
+        description:
+          'Returns the Wikidata P463 band-membership neighbourhood of this artist (#424): `bands` are ' +
+          'the groups they belonged to, each with the `since`/`until` tenure years (null when Wikidata ' +
+          'recorded no begin/end qualifier); `bandmates` are the other in-collection members of those ' +
+          'bands. Both are restricted to artists already in the collection — each edge is a ' +
+          'deterministic Wikidata QID join, never a name match — so the graph is sparse by design.',
+        params: {
+          type: 'object',
+          required: ['name'],
+          properties: { name: { type: 'string' } },
+        },
+        response: {
+          200: artistMembershipResponseSchema,
+          400: errorResponseRef,
+        },
+      },
+    },
+    async (request, reply): Promise<ArtistMembership | ErrorReply> => {
+      const result = await getArtistMembership(getDriver(), request.params.name);
       return reply.send(result);
     },
   );
