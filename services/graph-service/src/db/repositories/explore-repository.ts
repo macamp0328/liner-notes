@@ -98,6 +98,42 @@ export interface ArtistInfluences {
   influenced: InfluenceArtist[];
 }
 
+/**
+ * One band the queried Artist belonged to (#424), from the dated Wikidata P463 edge
+ * `(:Artist)-[:MEMBER_OF {source:"wikidata"}]->(:Artist)` (#392). `since`/`until` are the begin/end
+ * **year** of the tenure, `null` when Wikidata carried no P580/P582 qualifier. `wikidataQid` is the
+ * QID the edge resolved on (always present — the edge can't exist without it). One entry per edge, so
+ * once #427 represents multiple tenures as parallel edges the same band appears once per tenure.
+ */
+export interface MembershipBand {
+  discogsId: number;
+  name: string;
+  wikidataQid: string;
+  since: number | null;
+  until: number | null;
+}
+
+/**
+ * One in-collection bandmate of the queried Artist (#424): another Artist who is a Wikidata member of
+ * one of the same bands. Tenure-less by design — it answers "who else was in these bands", not "when".
+ */
+export interface MembershipBandmate {
+  discogsId: number;
+  name: string;
+  wikidataQid: string;
+}
+
+/**
+ * The Wikidata band-membership neighbourhood of one Artist (#424): the `bands` they belonged to (with
+ * tenure) and the `bandmates` they shared those bands with. Both restricted to in-collection artists
+ * (the edges only ever link two Artist nodes that share the QID join), so the graph is sparse by
+ * design. Both empty for an unknown name or one with no MEMBER_OF edges.
+ */
+export interface ArtistMembership {
+  bands: MembershipBand[];
+  bandmates: MembershipBandmate[];
+}
+
 export interface ConnectionNode {
   type: string;
   discogsId: number | null;
@@ -244,6 +280,27 @@ function mapExploreRelease(record: { get: (key: string) => unknown }): ExploreRe
   };
 }
 
+interface QidArtist {
+  discogsId: number;
+  name: string;
+  wikidataQid: string;
+}
+
+// The QID-keyed artist node shared by the #391 influence neighbours and the #424 bandmates — same
+// fallbacks as the other explore mappers (`wikidataQid` is always present, the edge can't exist
+// without it). Keeps the null-coercion contract in one place for both routes.
+function mapQidArtist(x: Record<string, unknown>): QidArtist {
+  return {
+    discogsId: toInt(x['discogsId']) ?? 0,
+    name: toStr(x['name']) ?? '',
+    wikidataQid: toStr(x['wikidataQid']) ?? '',
+  };
+}
+
+function mapQidArtistList(raw: unknown): QidArtist[] {
+  return ((raw as Array<Record<string, unknown>> | null) ?? []).map(mapQidArtist);
+}
+
 // ---------------------------------------------------------------------------
 // getReleasesByMusician
 // ---------------------------------------------------------------------------
@@ -254,12 +311,24 @@ function mapExploreRelease(record: { get: (key: string) => unknown }): ExploreRe
  *   - the directly-named node, and the canonical name via SAME_PERSON_AS (so an alias and the
  *     Artist's canonical name return the same set) + its alias siblings — pure accuracy, same person.
  *   - the groups a queried *member* belongs to (MEMBER_OF, member→group): a member's results
- *     additionally include their group's records — an INFERRED, temporally-unguarded involvement
- *     (the group's catalog, not necessarily records the person personally played on; date-qualified
- *     membership is roadmapped #339/#341). The reverse (group→members) is deliberately NOT expanded:
- *     it would attribute every member's unrelated solo credit to the group, making the group look
- *     involved in records it never touched (PR #330 review). A group query therefore returns only
- *     the group's own credits; the MEMBER_OF edges still exist and are surfaced via /stats.
+ *     additionally include their group's records — an INFERRED involvement (the group's catalog, not
+ *     necessarily records the person personally played on), now **temporally guarded** (#424): the
+ *     member→group expansion carries the Wikidata P463 tenure window (`since`/`until`, #392) bridged
+ *     from the Discogs Musician membership to the Artist layer via SAME_PERSON_AS, and a group record
+ *     is dropped only on positive evidence it falls OUTSIDE a known tenure — both the release year and
+ *     a tenure bound known and the year out of range. Unknown year or absent/unbounded tenure keeps
+ *     the record (include-when-unknown). The guard keys on the release year
+ *     (`coalesce(originalYear, pressingYear)`), not a recording date (none is stored): a *reissue* of
+ *     in-tenure material keeps its master's `originalYear` so it stays in-window, but a brand-new
+ *     compilation that *first issues* a previously-unreleased in-tenure recording (its own master,
+ *     year out of tenure) is dropped from the inferred expansion — an accepted year-granularity
+ *     tradeoff, and moot when the member is individually credited (that arrives via the self branch).
+ *     The guard narrows ONLY this inferred expansion: a record the
+ *     member personally played on arrives via the self/sibling branches (no window) and is never
+ *     dropped. The reverse (group→members) is deliberately NOT expanded: it would attribute every
+ *     member's unrelated solo credit to the group, making the group look involved in records it never
+ *     touched (PR #330 review). A group query therefore returns only the group's own credits; the
+ *     MEMBER_OF edges still exist and are surfaced via /stats.
  * Then returns their CREDITED_ON releases incl. track-scoped credits (track→release via HAS_TRACK),
  * deduped by release, with one representative artist/instrument/role per release.
  */
@@ -277,16 +346,37 @@ export async function getReleasesByMusician(
       WITH collect(DISTINCT seed) AS seeds
       UNWIND seeds AS s
       CALL {
-        WITH s RETURN s AS person
-        UNION WITH s MATCH (s)-[:SAME_PERSON_AS]->(:Artist)<-[:SAME_PERSON_AS]-(sib:Musician) RETURN sib AS person
-        UNION WITH s MATCH (s)-[:MEMBER_OF]->(grp:Musician) RETURN grp AS person
+        // self + alias siblings: no tenure window — always included (a person's own credits).
+        WITH s RETURN s AS person, null AS since, null AS until
+        UNION WITH s MATCH (s)-[:SAME_PERSON_AS]->(:Artist)<-[:SAME_PERSON_AS]-(sib:Musician)
+          RETURN sib AS person, null AS since, null AS until
+        // member→group: carry the Wikidata P463 tenure window (#424), bridged from the Discogs
+        // Musician MEMBER_OF to the Artist-layer dated edge via SAME_PERSON_AS. The Discogs edge is
+        // labelled :Musician on both ends and the Wikidata edge :Artist+{source:'wikidata'} (the #392
+        // guardrail — keep the two MEMBER_OF graphs from conflating). The bridge is OPTIONAL, so a
+        // group with no Wikidata tenure resolves to a null window → unbounded (include-when-unknown).
+        UNION WITH s
+          MATCH (s)-[:MEMBER_OF]->(grp:Musician)
+          OPTIONAL MATCH (s)-[:SAME_PERSON_AS]->(:Artist)-[mem:MEMBER_OF {source:'wikidata'}]->(:Artist)<-[:SAME_PERSON_AS]-(grp)
+          RETURN grp AS person, mem.since AS since, mem.until AS until
       }
-      WITH DISTINCT person
+      WITH DISTINCT person, since, until
       MATCH (person)-[c:CREDITED_ON]->(target)
       WHERE target:Release OR target:Track
       OPTIONAL MATCH (rTrack:Release)-[:HAS_TRACK]->(target)
-      WITH (CASE WHEN target:Release THEN target ELSE rTrack END) AS r, c
+      WITH (CASE WHEN target:Release THEN target ELSE rTrack END) AS r, c, since, until
       WHERE r IS NOT NULL
+        // Temporal guard (#424): drop a member's INFERRED group record only on positive evidence it
+        // sits outside a known tenure. Unbounded window, unknown release year, or in-range → keep.
+        // include-if-any-window: a release kept by one (person,window) row survives the dedup below.
+        AND (
+          (since IS NULL AND until IS NULL)
+          OR coalesce(r.originalYear, r.pressingYear) IS NULL
+          OR (
+            (since IS NULL OR coalesce(r.originalYear, r.pressingYear) >= since)
+            AND (until IS NULL OR coalesce(r.originalYear, r.pressingYear) <= until)
+          )
+        )
       // Pick ONE representative credit per release so instrument + role come from the SAME edge
       // (independent min() could pair an instrument from one credit with a role from another).
       WITH r, c ORDER BY c.displayRole, c.roleCategory
@@ -564,15 +654,63 @@ export async function getArtistInfluences(driver: Driver, name: string): Promise
       { name },
     );
     const record = result.records[0];
-    const mapList = (raw: unknown): InfluenceArtist[] =>
+    return {
+      influencedBy: record ? mapQidArtistList(record.get('influencedBy')) : [],
+      influenced: record ? mapQidArtistList(record.get('influenced')) : [],
+    };
+  } finally {
+    await session.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// getArtistMembership
+// ---------------------------------------------------------------------------
+
+/**
+ * The Wikidata P463 band-membership neighbourhood of one Artist (#424), resolved case-insensitively by
+ * name. `bands` are the groups this artist belonged to (outgoing `MEMBER_OF {source:'wikidata'}`, with
+ * the `since`/`until` tenure); `bandmates` are the other in-collection members of those bands. Only
+ * in-collection artists appear — the dated edges only ever link two Artist nodes that share the QID
+ * join. Returns empty arrays for an unknown name or one with no membership edges.
+ *
+ * Like {@link getArtistInfluences}, `Artist.name` is not unique, so the two `collect`s run AFTER both
+ * OPTIONAL MATCHes with no grouping key — unioning every matched root's neighbours into one row. A
+ * per-node `WITH a, collect(...)` would split by node and silently return one node's slice. `collect`
+ * drops the no-match `null` row (the `CASE WHEN … IS NULL THEN null`), so an artist with no bands
+ * yields `[]`, not `[{discogsId:null,…}]`. The membership edge is matched with its `:Artist` labels
+ * and `{source:'wikidata'}` explicit (the #392 guardrail — an unlabeled `[:MEMBER_OF]` would conflate
+ * the Discogs Musician→Musician graph). One row per edge, so #427's future parallel tenure edges add
+ * extra `bands` entries for the same band with no change here.
+ */
+export async function getArtistMembership(driver: Driver, name: string): Promise<ArtistMembership> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `
+      MATCH (a:Artist) WHERE toLower(a.name) = toLower($name)
+      OPTIONAL MATCH (a)-[m:MEMBER_OF {source:'wikidata'}]->(band:Artist)
+      OPTIONAL MATCH (band)<-[:MEMBER_OF {source:'wikidata'}]-(mate:Artist) WHERE mate <> a
+      WITH
+        collect(DISTINCT CASE WHEN band IS NULL THEN null ELSE
+          { discogsId: band.discogsId, name: band.name, wikidataQid: band.wikidataQid,
+            since: m.since, until: m.until } END) AS bands,
+        collect(DISTINCT CASE WHEN mate IS NULL THEN null ELSE
+          { discogsId: mate.discogsId, name: mate.name, wikidataQid: mate.wikidataQid } END) AS bandmates
+      RETURN bands, bandmates
+      `,
+      { name },
+    );
+    const record = result.records[0];
+    const mapBands = (raw: unknown): MembershipBand[] =>
       ((raw as Array<Record<string, unknown>> | null) ?? []).map((x) => ({
-        discogsId: toInt(x['discogsId']) ?? 0,
-        name: toStr(x['name']) ?? '',
-        wikidataQid: toStr(x['wikidataQid']) ?? '',
+        ...mapQidArtist(x),
+        since: toInt(x['since']),
+        until: toInt(x['until']),
       }));
     return {
-      influencedBy: record ? mapList(record.get('influencedBy')) : [],
-      influenced: record ? mapList(record.get('influenced')) : [],
+      bands: record ? mapBands(record.get('bands')) : [],
+      bandmates: record ? mapQidArtistList(record.get('bandmates')) : [],
     };
   } finally {
     await session.close();

@@ -8,6 +8,7 @@ import { buildServer } from '../../../src/server.js';
 
 const mockVerifyConnectivity = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const mockGetReleasesByMusician = vi.hoisted(() => vi.fn());
+const mockGetArtistMembership = vi.hoisted(() => vi.fn());
 const mockGetReleasesByCredit = vi.hoisted(() => vi.fn());
 const mockGetReleasesByInstrument = vi.hoisted(() => vi.fn());
 const mockGetArtistsByPersonLevelInstrument = vi.hoisted(() => vi.fn());
@@ -50,6 +51,7 @@ vi.mock('../../../src/db/ingestion-repository.js', () => ({
 
 vi.mock('../../../src/db/repositories/explore-repository.js', () => ({
   getReleasesByMusician: mockGetReleasesByMusician,
+  getArtistMembership: mockGetArtistMembership,
   getReleasesByCredit: mockGetReleasesByCredit,
   getReleasesByInstrument: mockGetReleasesByInstrument,
   getArtistsByPersonLevelInstrument: mockGetArtistsByPersonLevelInstrument,
@@ -145,6 +147,39 @@ describe('explore routes', () => {
       const response = await app.inject({ method: 'GET', url: '/api/v1/explore/musician/Unknown' });
       expect(response.statusCode).toBe(200);
       expect(JSON.parse(response.payload)).toEqual([]);
+    });
+  });
+
+  // GET /api/v1/explore/membership/:name
+  describe('GET /api/v1/explore/membership/:name', () => {
+    const sampleMembership = {
+      bands: [
+        { discogsId: 980002, name: 'The Band', wikidataQid: 'Q-band', since: 1970, until: 1975 },
+      ],
+      bandmates: [{ discogsId: 980003, name: 'Other Member', wikidataQid: 'Q-mate' }],
+    };
+
+    it('returns 200 with { bands, bandmates }', async () => {
+      mockGetArtistMembership.mockResolvedValue(sampleMembership);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/membership/Member%20One',
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as typeof sampleMembership;
+      expect(body.bands).toEqual(sampleMembership.bands);
+      expect(body.bandmates).toEqual(sampleMembership.bandmates);
+      expect(mockGetArtistMembership).toHaveBeenCalledWith(expect.anything(), 'Member One');
+    });
+
+    it('returns 200 with empty arrays when the artist has no membership edges', async () => {
+      mockGetArtistMembership.mockResolvedValue({ bands: [], bandmates: [] });
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/membership/Nobody',
+      });
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.payload)).toEqual({ bands: [], bandmates: [] });
     });
   });
 

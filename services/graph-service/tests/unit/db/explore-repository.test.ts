@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Driver, Session, Result, Record as Neo4jRecord } from 'neo4j-driver';
 import {
   getReleasesByMusician,
+  getArtistMembership,
   getReleasesByCredit,
   getReleasesByInstrument,
   getRecordingsByWork,
@@ -133,6 +134,97 @@ describe('getReleasesByMusician', () => {
     const { session } = makeMockSession([makeResult([])]);
     const driver = makeMockDriver(session);
     await getReleasesByMusician(driver, 'Test');
+    expect(session.close).toHaveBeenCalledOnce();
+  });
+
+  it('temporally guards the member→group expansion with the Wikidata tenure (#424)', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    await getReleasesByMusician(makeMockDriver(session), 'Test');
+    const [query] = runSpy.mock.calls[0] as [string];
+    // The group branch carries a tenure window bridged to the Artist layer (explicit :Artist labels +
+    // source predicate per the #392 guardrail), LEFT-joined so a group with no tenure stays unbounded.
+    expect(query).toContain("-[mem:MEMBER_OF {source:'wikidata'}]->");
+    expect(query).toContain('RETURN grp AS person, mem.since AS since, mem.until AS until');
+    // The Discogs membership edge stays Musician→Musician.
+    expect(query).toContain('(s)-[:MEMBER_OF]->(grp:Musician)');
+    // include-when-unknown: an unbounded window or an unknown release year keeps the record.
+    expect(query).toContain('(since IS NULL AND until IS NULL)');
+    expect(query).toContain('coalesce(r.originalYear, r.pressingYear) IS NULL');
+    expect(query).toContain('coalesce(r.originalYear, r.pressingYear) >= since');
+    expect(query).toContain('coalesce(r.originalYear, r.pressingYear) <= until');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getArtistMembership
+// ---------------------------------------------------------------------------
+
+describe('getArtistMembership', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('maps bands (with tenure) and bandmates', async () => {
+    const rec = makeRecord({
+      bands: [
+        {
+          discogsId: makeNeo4jInt(980002),
+          name: 'The Band',
+          wikidataQid: 'Q-band',
+          since: makeNeo4jInt(1970),
+          until: makeNeo4jInt(1975),
+        },
+      ],
+      bandmates: [{ discogsId: makeNeo4jInt(980003), name: 'Other Member', wikidataQid: 'Q-mate' }],
+    });
+    const { session } = makeMockSession([makeResult([rec])]);
+    const result = await getArtistMembership(makeMockDriver(session), 'Member One');
+    expect(result.bands).toEqual([
+      { discogsId: 980002, name: 'The Band', wikidataQid: 'Q-band', since: 1970, until: 1975 },
+    ]);
+    expect(result.bandmates).toEqual([
+      { discogsId: 980003, name: 'Other Member', wikidataQid: 'Q-mate' },
+    ]);
+  });
+
+  it('preserves null tenure years (no Wikidata qualifier) rather than coercing to 0', async () => {
+    const rec = makeRecord({
+      bands: [
+        {
+          discogsId: makeNeo4jInt(980002),
+          name: 'The Band',
+          wikidataQid: 'Q-band',
+          since: null,
+          until: null,
+        },
+      ],
+      bandmates: [],
+    });
+    const { session } = makeMockSession([makeResult([rec])]);
+    const result = await getArtistMembership(makeMockDriver(session), 'Member One');
+    expect(result.bands[0]!.since).toBeNull();
+    expect(result.bands[0]!.until).toBeNull();
+    expect(result.bandmates).toEqual([]);
+  });
+
+  it('returns empty arrays for an unknown name (no record)', async () => {
+    const { session } = makeMockSession([makeResult([])]);
+    const result = await getArtistMembership(makeMockDriver(session), 'Nobody');
+    expect(result).toEqual({ bands: [], bandmates: [] });
+  });
+
+  it('queries the dated Wikidata MEMBER_OF edge with explicit labels (#392 guardrail)', async () => {
+    const { session, runSpy } = makeMockSession([makeResult([])]);
+    await getArtistMembership(makeMockDriver(session), 'Member One');
+    const [query] = runSpy.mock.calls[0] as [string];
+    expect(query).toContain("(a)-[m:MEMBER_OF {source:'wikidata'}]->(band:Artist)");
+    expect(query).toContain("(band)<-[:MEMBER_OF {source:'wikidata'}]-(mate:Artist)");
+    expect(query).toContain('mate <> a');
+  });
+
+  it('closes the session', async () => {
+    const { session } = makeMockSession([makeResult([])]);
+    await getArtistMembership(makeMockDriver(session), 'Test');
     expect(session.close).toHaveBeenCalledOnce();
   });
 });
