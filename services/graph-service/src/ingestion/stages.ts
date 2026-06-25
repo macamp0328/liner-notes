@@ -6,26 +6,11 @@ import type { DeezerClient } from './deezer-client.js';
 import type { WikidataClient } from './wikidata-client.js';
 import type { BreakerSource, CircuitBreakerSnapshot } from './circuit-breaker.js';
 import { ingestReleases } from './ingest.js';
-import { enrichLyrics, resolveReloadLyricsConcurrency } from '../enrichment/lyrics.js';
-import { enrichMasterData } from '../enrichment/master-data.js';
-import { enrichArtistGenres } from '../enrichment/artist-genres.js';
-import { enrichArtistProfiles } from '../enrichment/artist-profiles.js';
-import { enrichLabelHierarchy } from '../enrichment/label-hierarchy.js';
-import { enrichGroupMembers } from '../enrichment/group-members.js';
-import { enrichPersonReconciliation } from '../enrichment/person-reconciliation.js';
-import { enrichMbReleaseEvents } from '../enrichment/mb-release-events.js';
-import { enrichTrackMusicBrainz } from '../enrichment/track-musicbrainz.js';
-import { enrichTrackWorks } from '../enrichment/track-works.js';
-import { enrichTrackRecordingArtists } from '../enrichment/track-recording-artists.js';
-import { enrichTrackRecordingPlaces } from '../enrichment/track-recording-places.js';
-import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
-import { enrichTrackDeezer } from '../enrichment/track-deezer.js';
-import { enrichNationality } from '../enrichment/artist-nationality.js';
-import { enrichArtistMusicbrainzIds } from '../enrichment/artist-musicbrainz-id.js';
-import { enrichSongwriterReconciliation } from '../enrichment/songwriter-reconciliation.js';
-import { enrichArtistWikidata } from '../enrichment/artist-wikidata.js';
-import { enrichArtistInfluences } from '../enrichment/artist-influences.js';
-import { enrichBandMemberships } from '../enrichment/band-membership.js';
+import {
+  STAGE_DEFINITIONS,
+  toStageDescriptor,
+  type EnrichmentStageName,
+} from './stage-definitions.js';
 import type { ProgressReporter } from '../enrichment/progress.js';
 
 /**
@@ -140,328 +125,81 @@ export interface StageDescriptor {
 const MAX_FAILED_RELEASE_IDS = 50;
 
 /**
- * Every stage except `verify`, in priority order — when several stages are eligible for one free
- * slot the earlier one wins. Ordering is governed by `deps` (not array position), so this list is
- * tuned for *priority*: cheap + #165-gate stages (`master-data`, `artist-profiles`, the pure-Cypher
- * `artist-genres`) lead, ahead of the slow `track-musicbrainz` and `lyrics`, so the
- * gate metrics reach threshold without waiting on the multi-hour stages. The list is also a valid
- * topological sort (every dep appears earlier), which keeps the persisted stage ordinals sensible.
+ * The `releases` stage stays hand-written here: it runs `ingestReleases` (the shared release
+ * fetch/MERGE loop, not an enrichment) and owns the lone `number[]` count (`failedReleaseIds`,
+ * #417), neither of which fits the {@link StageDefinition} enrichment contract. It is reload-only —
+ * it has no standalone `/admin/*` route, so it never appears in `STAGE_DEFINITIONS`.
+ */
+const RELEASES_DESCRIPTOR: StageDescriptor = {
+  name: 'releases',
+  deps: [],
+  resources: ['discogs'],
+  sources: ['discogs'],
+  run: async (ctx, onProgress): Promise<StageCounts | null> => {
+    if (!ctx.discogs) return null;
+    const s = await ingestReleases(ctx.discogs, ctx.driver, ctx.username, ctx.log, onProgress);
+    return {
+      releasesProcessed: s.releasesProcessed,
+      releasesFailed: s.releasesFailed,
+      releaseErrors: s.errors.length,
+      // Surface *which* releases failed (#417), bounded — omitted entirely on a clean reload.
+      ...(s.failedReleaseIds.length > 0
+        ? { failedReleaseIds: s.failedReleaseIds.slice(0, MAX_FAILED_RELEASE_IDS) }
+        : {}),
+    };
+  },
+};
+
+/**
+ * The 20 enrichment stages in reload **priority** order — when several are eligible for one free
+ * slot the earlier one wins. Ordering at runtime is governed by each stage's `deps` (declared on its
+ * {@link StageDefinition}), not array position, so this list is tuned for priority: cheap + #165-gate
+ * stages (`master-data`, `artist-profiles`, the pure-Cypher `artist-genres`) lead, ahead of the slow
+ * `track-musicbrainz` and `lyrics`, so the gate metrics reach threshold without waiting on the
+ * multi-hour stages. It is also a valid topological sort (every dep appears earlier), which keeps the
+ * persisted stage ordinals sensible.
  *
- * Dependency edges: every enrichment deps `releases` (else its candidate query runs on an empty
- * graph and marks complete, permanently missing data); `mb-release-events` deps `master-data`
- * (its candidate query `MATCH (m:Master)` needs the Master nodes only `master-data` creates);
- * `track-acousticbrainz`/`track-deezer` dep `track-musicbrainz` (they need the recordingMbid/isrc
- * it writes).
- *
- * Each `run` forwards the orchestrator's optional `onProgress` reporter to its enrich function
- * (#179); `artist-genres` has no per-item loop, so it takes none.
+ * This is a **permutation** of {@link STAGE_DEFINITIONS} (which is in admin-route registration order,
+ * a separate concern) — a unit test asserts the two stay in lockstep, so a stage added to the registry
+ * without a slot here (or vice versa) fails at test time. Dependency edges and resource lanes live on
+ * each `StageDefinition`, not here.
+ */
+const RELOAD_ORDER: readonly EnrichmentStageName[] = [
+  'master-data',
+  'artist-profiles',
+  'artist-genres',
+  'label-hierarchy',
+  'group-members',
+  'person-reconciliation',
+  'track-musicbrainz',
+  'track-works',
+  'mb-release-events',
+  'lyrics',
+  'track-acousticbrainz',
+  'track-deezer',
+  'mb-artist-id',
+  'track-recording-artists',
+  'track-recording-places',
+  'nationality',
+  'artist-wikidata',
+  'artist-influences',
+  'band-membership',
+  'songwriter-reconciliation',
+];
+
+const STAGE_DEFINITION_BY_NAME = new Map(STAGE_DEFINITIONS.map((def) => [def.name, def]));
+
+/**
+ * Every stage except `verify`: the hand-written `releases` bookend followed by the 20 enrichment
+ * stages, each derived from its single {@link StageDefinition} via {@link toStageDescriptor}.
  */
 const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [
-  {
-    name: 'releases',
-    deps: [],
-    resources: ['discogs'],
-    sources: ['discogs'],
-    run: async (ctx, onProgress): Promise<StageCounts | null> => {
-      if (!ctx.discogs) return null;
-      const s = await ingestReleases(ctx.discogs, ctx.driver, ctx.username, ctx.log, onProgress);
-      return {
-        releasesProcessed: s.releasesProcessed,
-        releasesFailed: s.releasesFailed,
-        releaseErrors: s.errors.length,
-        // Surface *which* releases failed (#417), bounded — omitted entirely on a clean reload.
-        ...(s.failedReleaseIds.length > 0
-          ? { failedReleaseIds: s.failedReleaseIds.slice(0, MAX_FAILED_RELEASE_IDS) }
-          : {}),
-      };
-    },
-  },
-  {
-    name: 'master-data',
-    deps: ['releases'],
-    resources: ['discogs'],
-    sources: ['discogs'],
-    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
-      if (!ctx.discogs) return null;
-      return { ...(await enrichMasterData(ctx.discogs, ctx.driver, ctx.log, onProgress)) };
-    },
-  },
-  {
-    name: 'artist-profiles',
-    deps: ['releases'],
-    resources: ['discogs'],
-    sources: ['discogs'],
-    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
-      if (!ctx.discogs) return null;
-      return { ...(await enrichArtistProfiles(ctx.discogs, ctx.driver, ctx.log, onProgress)) };
-    },
-  },
-  {
-    name: 'artist-genres',
-    deps: ['releases'],
-    resources: [],
-    run: async (ctx) => ({ ...(await enrichArtistGenres(ctx.driver, ctx.log)) }),
-  },
-  {
-    name: 'label-hierarchy',
-    deps: ['releases'],
-    resources: ['discogs'],
-    sources: ['discogs'],
-    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
-      if (!ctx.discogs) return null;
-      return { ...(await enrichLabelHierarchy(ctx.discogs, ctx.driver, ctx.log, onProgress)) };
-    },
-  },
-  {
-    // #330: fetch /artists/{id} per Musician-with-discogsId to discover groups and write MEMBER_OF.
-    // Holds the `discogs` rate-limiter lane. Its per-group write touches the group + member Musician
-    // nodes (Musician axis); the only concurrent Musician multi-writer is `person-reconciliation`,
-    // which deps this stage (so they never overlap) — no `track`-style node-lock lane is needed.
-    name: 'group-members',
-    deps: ['releases'],
-    resources: ['discogs'],
-    sources: ['discogs'],
-    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
-      if (!ctx.discogs) return null;
-      return { ...(await enrichGroupMembers(ctx.discogs, ctx.driver, ctx.log, onProgress)) };
-    },
-  },
-  {
-    // #330: backfill SAME_PERSON_AS (Musician → Artist by shared discogsId) the order-dependent
-    // inline write missed. One big MERGE tx spanning BOTH the Artist axis (endpoint) and the
-    // Musician axis — the only writer that does — so it must not overlap the two single-axis batched
-    // writers. `deps` order it after both (artist-genres = Artist, group-members = Musician); those
-    // two touch disjoint labels and may overlap each other, so no resource lane is needed. No
-    // artist-profiles dep: that stage is single-node-per-tx (deadlock-immune) and holds no data this
-    // pass reads. Runs after `group-members` so its samePersonLinks coverage metric is final at verify.
-    name: 'person-reconciliation',
-    deps: ['artist-genres', 'group-members'],
-    resources: [],
-    run: async (ctx) => ({ ...(await enrichPersonReconciliation(ctx.driver, ctx.log)) }),
-  },
-  {
-    name: 'track-musicbrainz',
-    deps: ['releases'],
-    resources: ['musicbrainz', 'track'],
-    sources: ['musicbrainz'],
-    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
-      if (!ctx.musicbrainz) return null;
-      return {
-        ...(await enrichTrackMusicBrainz(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)),
-      };
-    },
-  },
-  {
-    // #336: link each Track to the MusicBrainz Work it records, via the recordingMbid that
-    // track-musicbrainz wrote (hence the dep). Holds `musicbrainz` (shared rate limiter) and
-    // `track` (its batched write touches ≥2 Track nodes per tx — same deadlock class as the other
-    // batched Track writers, so it serialises with them on the node-lock lane).
-    name: 'track-works',
-    deps: ['track-musicbrainz'],
-    resources: ['musicbrainz', 'track'],
-    sources: ['musicbrainz'],
-    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
-      if (!ctx.musicbrainz) return null;
-      return { ...(await enrichTrackWorks(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)) };
-    },
-  },
-  {
-    name: 'mb-release-events',
-    deps: ['master-data'],
-    resources: ['musicbrainz'],
-    sources: ['musicbrainz'],
-    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
-      if (!ctx.musicbrainz) return null;
-      return { ...(await enrichMbReleaseEvents(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)) };
-    },
-  },
-  {
-    name: 'lyrics',
-    deps: ['releases'],
-    resources: [],
-    // Pass the reload-scoped concurrency (#372): `RELOAD_LYRICS_CONCURRENCY` lets an operator throttle
-    // lyrics under the heavy concurrent reload without affecting standalone runs; unset → LYRICS_CONCURRENCY.
-    run: async (ctx, onProgress) => ({
-      ...(await enrichLyrics(ctx.driver, ctx.log, onProgress, undefined, {
-        concurrency: resolveReloadLyricsConcurrency(),
-      })),
-    }),
-  },
-  {
-    name: 'track-acousticbrainz',
-    deps: ['track-musicbrainz'],
-    resources: ['track'],
-    sources: ['acousticbrainz'],
-    run: async (ctx, onProgress) => ({
-      ...(await enrichTrackAcousticBrainz(ctx.acousticbrainz, ctx.driver, ctx.log, onProgress)),
-    }),
-  },
-  {
-    name: 'track-deezer',
-    deps: ['track-musicbrainz'],
-    resources: ['track'],
-    sources: ['deezer'],
-    run: async (ctx, onProgress) => ({
-      ...(await enrichTrackDeezer(ctx.deezer, ctx.driver, ctx.log, onProgress)),
-    }),
-  },
-  {
-    // #380: resolve each Artist/Musician's MusicBrainz artist MBID (via the Discogs-URL relation)
-    // and store it as `musicbrainzId` — the deterministic identity mapping the
-    // `songwriter-reconciliation` pass joins on to promote Work writers to WROTE edges. Holds the
-    // `musicbrainz` rate-limiter lane. Ordered before `nationality` (which deps it) so nationality
-    // reuses the stored MBID and skips its own `/url` lookup — net-zero MB calls across the two for
-    // resolvable nodes (mb-artist-id does the `/url`, nationality the `/artist`).
-    name: 'mb-artist-id',
-    deps: ['releases'],
-    resources: ['musicbrainz'],
-    sources: ['musicbrainz'],
-    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
-      if (!ctx.musicbrainz) return null;
-      return {
-        ...(await enrichArtistMusicbrainzIds(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)),
-      };
-    },
-  },
-  {
-    // #335: push MusicBrainz recording-level performance credits down to the specific Track. Deps
-    // BOTH track-musicbrainz (for the recordingMbid it queries) AND mb-artist-id (for the
-    // musicbrainzId join that resolves each performer). Ordered after mb-artist-id so the array stays
-    // a valid topological sort — running mb-artist-id first lets a performer whose Discogs↔MB link
-    // resolved be reused instead of duplicated (a performer MusicBrainz has no Discogs link for still
-    // gets an MBID-keyed fallback node, by design). Holds `musicbrainz` (shared rate limiter) and `track`
-    // (its batched write touches ≥2 Track nodes per tx — the same deadlock class as the other batched
-    // Track writers, so it serialises with them on the node-lock lane).
-    name: 'track-recording-artists',
-    deps: ['track-musicbrainz', 'mb-artist-id'],
-    resources: ['musicbrainz', 'track'],
-    sources: ['musicbrainz'],
-    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
-      if (!ctx.musicbrainz) return null;
-      return {
-        ...(await enrichTrackRecordingArtists(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)),
-      };
-    },
-  },
-  {
-    // #339 (slice 2): attribute MusicBrainz recording-level studios to the specific Track from its
-    // place-rels (`recorded at` / `mixed at` → a Place). Deps ONLY track-musicbrainz (for the
-    // recordingMbid it queries) — unlike track-recording-artists it needs no mb-artist-id, because
-    // studios MERGE by name (not a person-MBID join) and the Place's coordinates come straight off the
-    // relation. Holds `musicbrainz` (shared rate limiter) and `track` (its batched write touches ≥2
-    // Track nodes plus a Studio per tx — the same deadlock class as the other batched Track writers,
-    // so it serialises with them on the node-lock lane). A scheduler leaf: nothing deps it.
-    name: 'track-recording-places',
-    deps: ['track-musicbrainz'],
-    resources: ['musicbrainz', 'track'],
-    sources: ['musicbrainz'],
-    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
-      if (!ctx.musicbrainz) return null;
-      return {
-        ...(await enrichTrackRecordingPlaces(ctx.musicbrainz, ctx.driver, ctx.log, onProgress)),
-      };
-    },
-  },
-  {
-    // #380: deps mb-artist-id so the musicbrainzId is populated first — resolveCountry then reuses
-    // it (getCountryByMbid) and skips its own `/url` lookup. Both already share the `musicbrainz`
-    // lane (never overlap); the dep only pins the order so the reuse actually kicks in.
-    // #341: also holds the `wikidata` lane — it drives the one shared `ctx.wikidata` client, which
-    // the `artist-wikidata` stage also uses, so the lane serialises that limiter across both.
-    // #418: also deps track-recording-artists. That stage introduces MBID-keyed fallback Musician
-    // nodes (musicbrainzId set, no discogsId) for performers MusicBrainz has no Discogs link for. The
-    // shared `musicbrainz` lane already keeps the two from overlapping, but without this dep their
-    // order is a race — so the new performers could land just after nationality selected candidates
-    // and sit unenriched until the next reload. The dep pins nationality to run after them, so they
-    // are in scope this run and resolve deterministically by their MBID (see resolveCountryByMbid in
-    // artist-nationality.ts). Acyclic: track-recording-artists deps only track-musicbrainz +
-    // mb-artist-id, neither of which reaches nationality.
-    name: 'nationality',
-    deps: ['releases', 'mb-artist-id', 'track-recording-artists'],
-    resources: ['discogs', 'musicbrainz', 'wikidata'],
-    sources: ['musicbrainz', 'wikidata', 'discogs'],
-    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
-      if (!ctx.musicbrainz) return null;
-      return {
-        ...(await enrichNationality(
-          ctx.musicbrainz,
-          ctx.driver,
-          ctx.log,
-          ctx.wikidata ?? undefined,
-          ctx.discogs ?? undefined,
-          onProgress,
-        )),
-      };
-    },
-  },
-  {
-    // #341: resolve each Artist's Wikidata QID (P1953 join, Wikipedia-URL fallback) and harvest
-    // lifespan (P569/P570), image (P18), and awards (P166). Holds `wikidata` (shared rate limiter,
-    // serialised with `nationality`) and `discogs` (the fallback's profile fetch — the primary
-    // P1953 join uses the discogsId already on the node, so it needs no Discogs call). Writes one
-    // Artist per tx, so no `track`-style node-lock lane is needed.
-    name: 'artist-wikidata',
-    deps: ['releases'],
-    resources: ['wikidata', 'discogs'],
-    sources: ['wikidata', 'discogs'],
-    run: async (ctx, onProgress): Promise<Record<string, number> | null> => {
-      if (!ctx.wikidata) return null;
-      return {
-        ...(await enrichArtistWikidata(
-          ctx.wikidata,
-          ctx.discogs ?? undefined,
-          ctx.driver,
-          ctx.log,
-          onProgress,
-        )),
-      };
-    },
-  },
-  {
-    // #391: project each Artist's captured P737 influences (the `influencedByQids` list artist-wikidata
-    // stored) into in-collection (:Artist)-[:INFLUENCED_BY {source:"wikidata"}]->(:Artist) edges,
-    // resolving each target QID against `a.wikidataQid` (deterministic QID join; unowned targets are
-    // dropped). Deps `artist-wikidata` so every QID is stored before resolution — creating edges inline
-    // in that pass would miss any target enriched later in the same pass. Pure Cypher, no external
-    // client: resources [] (ordering via deps), no `sources`.
-    name: 'artist-influences',
-    deps: ['artist-wikidata'],
-    resources: [],
-    run: async (ctx) => ({ ...(await enrichArtistInfluences(ctx.driver, ctx.log)) }),
-  },
-  {
-    // #392: project each Artist's captured P463 memberships (the index-aligned memberOfQids +
-    // memberOfSinceYears/memberOfUntilYears artist-wikidata stored) into dated in-collection
-    // (:Artist)-[:MEMBER_OF {source:"wikidata", since, until}]->(:Artist) edges, resolving each group
-    // QID against `a.wikidataQid` (deterministic QID join; unowned groups dropped). Distinct from the
-    // Discogs (:Musician)-[:MEMBER_OF {active}] edge (different label-pair + props). Deps
-    // `artist-wikidata` so every QID is stored before resolution. Pure Cypher, no external client:
-    // resources [] (ordering via deps), no `sources`.
-    name: 'band-membership',
-    deps: ['artist-wikidata'],
-    resources: [],
-    run: async (ctx) => ({ ...(await enrichBandMemberships(ctx.driver, ctx.log)) }),
-  },
-  {
-    // #380: promote each Work's captured writerMbids to (:Artist|:Musician)-[:WROTE]->(:Work) edges
-    // by joining on the musicbrainzId from mb-artist-id. Pure Cypher, no MB calls. Like
-    // person-reconciliation it is a dual-axis writer (its two single-label MERGEs lock Artist then
-    // Musician, plus Work), so it must not overlap any node writer: deps it after the two batched
-    // single-axis writers (transitively via person-reconciliation, which already deps artist-genres
-    // + group-members) AND after the per-node Artist writers nationality + artist-wikidata. track-
-    // works + mb-artist-id supply the data it reads. Pure-Cypher + fast, so running just before
-    // verify is free; resources [] — ordering via deps handles exclusion, matching person-reconciliation.
-    name: 'songwriter-reconciliation',
-    deps: [
-      'track-works',
-      'mb-artist-id',
-      'person-reconciliation',
-      'nationality',
-      'artist-wikidata',
-    ],
-    resources: [],
-    run: async (ctx) => ({ ...(await enrichSongwriterReconciliation(ctx.driver, ctx.log)) }),
-  },
+  RELEASES_DESCRIPTOR,
+  ...RELOAD_ORDER.map((name): StageDescriptor => {
+    const def = STAGE_DEFINITION_BY_NAME.get(name);
+    if (def === undefined) throw new Error(`RELOAD_ORDER names unknown enrichment stage: ${name}`);
+    return toStageDescriptor(def);
+  }),
 ];
 
 /**
