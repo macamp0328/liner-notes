@@ -64,6 +64,11 @@ export async function enrichMbReleaseEvents(
       const mbid = await mbClient.getReleaseGroupMbidByMasterDiscogsId(masterDiscogsId);
 
       if (mbid === null) {
+        // Throttle-only (`null`), deliberately NOT TERMINAL_EMPTY (#385/#367): MusicBrainz is a
+        // living, editable database, so a missing Discogs↔MB release-group link can be added by an
+        // editor later ("coverage grows") — unlike an immutable non-group or the frozen
+        // AcousticBrainz. A terminal marker here would forever skip a Master that MB later links;
+        // the 30-day staleness throttle already bounds the re-query cost. See ADR 0003.
         log.info(`[mb-release-events] No MB link for master ${masterDiscogsId} — skipping`);
         return null;
       }
