@@ -86,9 +86,11 @@ describe('GET /api/v1/stats', () => {
          SET t.lyrics = 'oops', t.lyricsSource = 'lrclib', t.lyricsStatus = 'instrumental'`,
       );
       await session.run(`MERGE (m:Master {discogsId: 555555})`);
-      // mb-release-events output on the master.
+      // mb-release-events output on the master. The crosswalk MBID is written before the edges in
+      // the real path (setMasterReleaseGroupMbid), so seed it too — it backs mastersWithMbReleaseGroup.
       await session.run(
         `MATCH (m:Master {discogsId: 555555})
+         SET m.musicbrainzReleaseGroupId = 'rg-1'
          MERGE (c:Country {name: 'US'})
          MERGE (m)-[r:MB_RELEASED_IN {mbReleaseId: 'mb-rel-1'}]->(c)
          SET r.date = '1959', r.formats = ['Vinyl']`,
@@ -177,6 +179,8 @@ describe('GET /api/v1/stats', () => {
       enrichment.artistsWithStyles.applicable,
     );
     expect(enrichment.mastersWithReleaseEvents).toEqual({ covered: 1, applicable: 1, pct: 100 });
+    // #385: the one master carries a resolved release-group link crosswalk.
+    expect(enrichment.mastersWithMbReleaseGroup).toEqual({ covered: 1, applicable: 1, pct: 100 });
 
     // Both lyric'd tracks came from LRCLIB; the per-source split reflects it.
     expect(enrichment.tracksWithLyrics.sources.lrclib!.covered).toBe(2);

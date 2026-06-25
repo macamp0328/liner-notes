@@ -96,6 +96,8 @@ function makeStats(
     tracksWithDeezerBpm: cov(20, 45),
     tracksWithDeezerGain: cov(20, 45),
     mastersWithReleaseEvents: cov(40, 50),
+    // #385: MB release-group link coverage, measured but ungated (not in RELOAD_COVERAGE_THRESHOLDS).
+    mastersWithMbReleaseGroup: cov(45, 50),
     // #330: clears the minPct:100 gate — covered == applicable (deterministic exhaustive pass).
     samePersonLinks: cov(80, 80),
     memberOfEdges: 12,
