@@ -735,6 +735,30 @@ describe('runEnrichment', () => {
       expect(summary).toMatchObject({ enriched: 1, failed: 0, recovered: 1 });
     });
 
+    it('clamps the per-round backoff to the ceiling so a huge base cannot hang the run', async () => {
+      const slept: number[] = [];
+      const resolve = vi.fn().mockRejectedValue(new Error('transient')); // never recovers → both rounds sleep
+      const stage = makeStage({
+        selectCandidates: vi.fn().mockResolvedValue([{ id: 1 }]),
+        resolve,
+      });
+
+      await runEnrichment(fakeDriver, stage, {
+        retry: {
+          maxRounds: 2,
+          isRetryable: isTransient,
+          backoffBaseMs: 1_000_000_000, // ~11.5 days; must be clamped to the 32s ceiling
+          random: (): number => 1, // max jitter → returns the (clamped) base verbatim
+          sleep: async (ms: number): Promise<void> => {
+            slept.push(ms);
+          },
+        },
+      });
+
+      expect(slept.length).toBeGreaterThan(0);
+      for (const ms of slept) expect(ms).toBeLessThanOrEqual(32_000);
+    });
+
     it('omits recovered when no retry is configured', async () => {
       const stage = makeStage({
         selectCandidates: vi.fn().mockResolvedValue([{ id: 1 }]),

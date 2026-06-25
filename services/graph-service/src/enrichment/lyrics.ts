@@ -122,15 +122,19 @@ export function resolveReloadLyricsConcurrency(): number {
 }
 
 const DEFAULT_RETRY_ROUNDS = 2;
+const MAX_RETRY_ROUNDS = 10;
 
 /**
  * Resolve `LYRICS_RETRY_ROUNDS` (env) — the bounded number of in-run transient-failure retry rounds
- * (#455). Default 2; `0` disables the sweep. Non-numeric/unset → default; a negative value clamps to
- * 0 (disabled), so a fat-fingered value fails safe rather than looping unboundedly.
+ * (#455). Default 2; `0` disables the sweep. Non-numeric/unset → default; clamped to
+ * `[0, MAX_RETRY_ROUNDS]` so a fat-fingered value fails safe (a blip lasting past a few escalating-
+ * backoff rounds isn't transient, and an unbounded count would re-hammer the source every round).
  */
 export function resolveLyricsRetryRounds(): number {
   const parsed = parseInt(process.env['LYRICS_RETRY_ROUNDS'] ?? '', 10);
-  return Number.isFinite(parsed) ? Math.max(0, parsed) : DEFAULT_RETRY_ROUNDS;
+  return Number.isFinite(parsed)
+    ? Math.min(Math.max(0, parsed), MAX_RETRY_ROUNDS)
+    : DEFAULT_RETRY_ROUNDS;
 }
 
 /**

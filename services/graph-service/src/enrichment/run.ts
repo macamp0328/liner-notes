@@ -3,6 +3,7 @@ import type { Logger } from '../ingestion/discogs-client.js';
 import { NOOP_PROGRESS, type ProgressReporter } from './progress.js';
 import { getShutdownSignal } from '../lifecycle/shutdown.js';
 import { jitteredBackoffMs } from '../ingestion/backoff.js';
+import { defaultSleep } from '../ingestion/rate-limited-fetch.js';
 
 /**
  * The shared summary every per-item enrichment run returns. Stages that track extra
@@ -152,10 +153,12 @@ const DEFAULT_RETRY_MAX_FRACTION = 0.5;
  * numerous enough to risk a long sweep (it dominates at the large-reload scale the cap targets).
  */
 const DEFAULT_RETRY_MIN_SWEEP = 25;
-
-function defaultRetrySleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+/**
+ * Ceiling on the sweep's per-round backoff base, mirroring rate-limited-fetch's `DEFAULT_BACKOFF_CEIL_MS`.
+ * The base doubles each round (`base × 2^(round-1)`), so without a clamp a large `LYRICS_RETRY_ROUNDS`
+ * would grow a single inter-round sleep to hours/days; clamp keeps it bounded regardless of round count.
+ */
+const DEFAULT_RETRY_BACKOFF_CEIL_MS = 32_000;
 
 /** The settled result of running one item through the contract, before counters are touched. */
 type ItemOutcome =
@@ -163,6 +166,33 @@ type ItemOutcome =
   | { kind: 'skipped' }
   | { kind: 'exhausted' }
   | { kind: 'failed'; err: unknown };
+
+/**
+ * Drain `items` through `fn` with a bounded shared-index worker pool — the concurrency primitive
+ * shared by the main pass and the #455 retry sweep. `min(concurrency, items.length)` workers each
+ * claim the next index; the claim (`next < length` then `items[next++]`) is one synchronous step with
+ * no await between, so workers never double-draw. The loop ends on the index bound or a `signal`
+ * abort — `!signal.aborted` lets a SIGTERM stop the drain between items (#291), each worker finishing
+ * its in-flight item. The `undefined` guard is only TypeScript narrowing under
+ * `noUncheckedIndexedAccess`: a slot whose value is legitimately `undefined` is skipped, not treated
+ * as the end of the drain. At concurrency 1 this is a single serial drainer.
+ */
+async function drainPool<T>(
+  items: readonly T[],
+  concurrency: number,
+  signal: AbortSignal,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const workerCount = Math.min(concurrency, items.length);
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (next < items.length && !signal.aborted) {
+      const item = items[next++];
+      if (item !== undefined) await fn(item);
+    }
+  });
+  await Promise.all(workers);
+}
 
 /**
  * Drive a {@link EnrichmentStage} over its candidates, owning the per-item isolation and
@@ -313,23 +343,8 @@ export async function runEnrichment<TItem, TResolved>(
     }
   };
 
-  // Shared-index worker pool: each worker draws the next item until the list is drained.
-  // `min(concurrency, total)` workers — at concurrency 1 this is a single serial drainer. The
-  // claim (`next < total` then `items[next++]`) is one synchronous step with no await between, so
-  // workers never double-draw. Termination is the index bound, not the value: the `undefined`
-  // guard is only TypeScript narrowing under `noUncheckedIndexedAccess` — a stage whose `TItem`
-  // legitimately includes `undefined` skips that slot without ending the drain early.
-  let next = 0;
-  const workerCount = Math.min(concurrency, total);
-  const workers = Array.from({ length: workerCount }, async () => {
-    // `!signal.aborted` lets a SIGTERM stop the drain between items (#291): each worker finishes its
-    // in-flight item, then the bound check ends the loop, leaving the rest for the next run.
-    while (next < total && !signal.aborted) {
-      const item = items[next++];
-      if (item !== undefined) await handleItem(item);
-    }
-  });
-  await Promise.all(workers);
+  // Main pass: drain every candidate through the bounded pool (see {@link drainPool}).
+  await drainPool(items, concurrency, signal, handleItem);
 
   // Bounded transient-failure retry sweep (#455). Skipped on SIGTERM (a shutting-down run mustn't
   // start new work) and when the transient-failure count exceeds the outage cap (a struggling source
@@ -348,7 +363,7 @@ export async function runEnrichment<TItem, TResolved>(
         `[${stage.name}] ${retryableFailures.length} transient failure(s) exceed the retry cap (max(${DEFAULT_RETRY_MIN_SWEEP}, ${maxFraction} × ${total})) — skipping the in-run retry sweep, leaving them for the staleness window`,
       );
     } else {
-      const sleep = retry.sleep ?? defaultRetrySleep;
+      const sleep = retry.sleep ?? defaultSleep;
       const jitterOpts = retry.random !== undefined ? { random: retry.random } : {};
       const backoffBaseMs = retry.backoffBaseMs ?? DEFAULT_RETRY_BACKOFF_BASE_MS;
       let pending = retryableFailures;
@@ -357,7 +372,13 @@ export async function runEnrichment<TItem, TResolved>(
         round <= retry.maxRounds && pending.length > 0 && !signal.aborted;
         round++
       ) {
-        const backoffMs = jitteredBackoffMs(backoffBaseMs * 2 ** (round - 1), jitterOpts);
+        // The base doubles each round but is clamped so a large maxRounds can't grow a single sleep
+        // to hours/days; jitter then halves it to [base/2, base] (AWS equal jitter).
+        const cappedBase = Math.min(
+          backoffBaseMs * 2 ** (round - 1),
+          DEFAULT_RETRY_BACKOFF_CEIL_MS,
+        );
+        const backoffMs = jitteredBackoffMs(cappedBase, jitterOpts);
         log.info(
           `[${stage.name}] Retry round ${round}/${retry.maxRounds}: re-attempting ${pending.length} transient failure(s) after ${backoffMs}ms`,
         );
@@ -368,34 +389,25 @@ export async function runEnrichment<TItem, TResolved>(
         const roundItems = pending;
         const stillFailing: TItem[] = [];
         let roundRecovered = 0;
-        let sweepNext = 0;
-        const sweepWorkers = Array.from(
-          { length: Math.min(concurrency, roundItems.length) },
-          async () => {
-            while (sweepNext < roundItems.length && !signal.aborted) {
-              const item = roundItems[sweepNext++];
-              if (item === undefined) continue;
-              const outcome = await processItem(item);
-              if (outcome.kind === 'failed') {
-                if (retry.isRetryable(outcome.err)) {
-                  stillFailing.push(item);
-                } else {
-                  // Now a non-transient failure — it stays counted `failed`; log the new reason once
-                  // and drop it from the sweep (re-resolving it further won't change the verdict).
-                  logItemFailure(item, outcome.err);
-                }
-              } else {
-                failed--;
-                recovered++;
-                roundRecovered++;
-                if (outcome.kind === 'enriched') enriched++;
-                else if (outcome.kind === 'skipped') skipped++;
-                else exhausted++;
-              }
+        await drainPool(roundItems, concurrency, signal, async (item) => {
+          const outcome = await processItem(item);
+          if (outcome.kind === 'failed') {
+            if (retry.isRetryable(outcome.err)) {
+              stillFailing.push(item);
+            } else {
+              // Now a non-transient failure — it stays counted `failed`; log the new reason once
+              // and drop it from the sweep (re-resolving it further won't change the verdict).
+              logItemFailure(item, outcome.err);
             }
-          },
-        );
-        await Promise.all(sweepWorkers);
+          } else {
+            failed--;
+            recovered++;
+            roundRecovered++;
+            if (outcome.kind === 'enriched') enriched++;
+            else if (outcome.kind === 'skipped') skipped++;
+            else exhausted++;
+          }
+        });
         log.info(
           `[${stage.name}] Retry round ${round}/${retry.maxRounds}: recovered ${roundRecovered}, ${stillFailing.length} still failing`,
         );

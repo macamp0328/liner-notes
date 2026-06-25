@@ -162,6 +162,11 @@ describe('resolveLyricsRetryRounds (#455)', () => {
     expect(resolveLyricsRetryRounds()).toBe(0);
   });
 
+  it('clamps an absurdly large value to the upper bound (10)', () => {
+    process.env['LYRICS_RETRY_ROUNDS'] = '500';
+    expect(resolveLyricsRetryRounds()).toBe(10);
+  });
+
   it('falls back to the default on a non-numeric value', () => {
     process.env['LYRICS_RETRY_ROUNDS'] = 'abc';
     expect(resolveLyricsRetryRounds()).toBe(2);
