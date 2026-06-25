@@ -351,6 +351,60 @@ export async function seedInfluences(driver: Driver): Promise<void> {
 }
 
 /**
+ * Seed Wikidata P463 band-membership fixtures (#424) for the `/explore/membership/:name` route and the
+ * temporal guard on `getReleasesByMusician`. Call AFTER seedGraph(). All entities use discogsIds in a
+ * fresh ≥ 980000 band and distinct `Tenure *` names so they don't perturb other explore assertions
+ * (decade/year use `> 0`, shared-musicians uses `find`). Writes the production shapes directly:
+ *
+ *   - a member (Artist + Musician, SAME_PERSON_AS-linked) and a band (Artist + Musician, linked),
+ *   - the Discogs `(:Musician)-[:MEMBER_OF]->(:Musician)` edge the explore query traverses,
+ *   - the dated Wikidata `(:Artist)-[:MEMBER_OF {source:'wikidata', since, until}]->(:Artist)` edge
+ *     (member 1970–1975) the guard bridges to via SAME_PERSON_AS, plus a second member (the bandmate),
+ *   - three band-credited releases: the member's own (1972), an in-tenure band release (1973), and an
+ *     out-of-tenure band release (1980) — so the guard's keep/drop boundary is exercised.
+ */
+export async function seedBandMembership(driver: Driver): Promise<void> {
+  const session = driver.session();
+  try {
+    await session.run(
+      `// member ≡ Musician+Artist; band ≡ Musician+Artist; bandmate = Artist only.
+       MERGE (ma:Artist {discogsId: 980001}) SET ma.name = 'Tenure Member', ma.wikidataQid = 'Q-tenure-member'
+       MERGE (mm:Musician {discogsId: 980001}) SET mm.name = 'Tenure Member'
+       MERGE (mm)-[:SAME_PERSON_AS]->(ma)
+       MERGE (ba:Artist {discogsId: 980002}) SET ba.name = 'Tenure Band', ba.wikidataQid = 'Q-tenure-band'
+       MERGE (bm:Musician {discogsId: 980002}) SET bm.name = 'Tenure Band'
+       MERGE (bm)-[:SAME_PERSON_AS]->(ba)
+       MERGE (mate:Artist {discogsId: 980003}) SET mate.name = 'Tenure Bandmate', mate.wikidataQid = 'Q-tenure-mate'
+       // Discogs membership (Musician→Musician) — what getReleasesByMusician expands.
+       MERGE (mm)-[dr:MEMBER_OF]->(bm) SET dr.active = true, dr.source = 'discogs'
+       // Wikidata dated membership (Artist→Artist) — the tenure the guard reads. Member 1970–1975.
+       MERGE (ma)-[r1:MEMBER_OF {source: 'wikidata'}]->(ba) SET r1.since = 1970, r1.until = 1975
+       MERGE (mate)-[r2:MEMBER_OF {source: 'wikidata'}]->(ba) SET r2.since = 1970, r2.until = 1972`,
+    );
+    await session.run(
+      `MERGE (r0:Release {discogsId: 980010}) SET r0.title = 'Member Solo', r0.pressingYear = 1972
+       MERGE (rIn:Release {discogsId: 980011}) SET rIn.title = 'Band In Tenure', rIn.pressingYear = 1973
+       MERGE (rOut:Release {discogsId: 980012}) SET rOut.title = 'Band Out Of Tenure', rOut.pressingYear = 1980
+       WITH r0, rIn, rOut
+       MATCH (mm:Musician {discogsId: 980001})
+       MERGE (mm)-[c0:CREDITED_ON]->(r0)
+         SET c0.role = 'Bass', c0.displayRole = 'Bass', c0.roleCategory = 'performer',
+             c0.creditedAs = null, c0.scope = 'release'
+       WITH rIn, rOut
+       MATCH (bm:Musician {discogsId: 980002})
+       MERGE (bm)-[c1:CREDITED_ON]->(rIn)
+         SET c1.role = 'Ensemble', c1.displayRole = 'Ensemble', c1.roleCategory = 'performer',
+             c1.creditedAs = null, c1.scope = 'release'
+       MERGE (bm)-[c2:CREDITED_ON]->(rOut)
+         SET c2.role = 'Ensemble', c2.displayRole = 'Ensemble', c2.roleCategory = 'performer',
+             c2.creditedAs = null, c2.scope = 'release'`,
+    );
+  } finally {
+    await session.close();
+  }
+}
+
+/**
  * Seed entity-resolution fixtures (#330) for the explore + reconciliation tests. Call AFTER
  * seedGraph(). All entities use discogsIds ≥ 900000 and distinct names so they don't perturb the
  * other explore assertions (which match by their own names / use `>=` bounds). Writes the same

@@ -9,6 +9,7 @@ import {
   seedWorks,
   seedSongwriters,
   seedInfluences,
+  seedBandMembership,
   seedRelatedness,
 } from '../../fixtures/loader.js';
 import { getDriver } from '../../../src/db/client.js';
@@ -28,6 +29,7 @@ describe('explore routes', () => {
     await seedWorks(getDriver());
     await seedSongwriters(getDriver());
     await seedInfluences(getDriver());
+    await seedBandMembership(getDriver());
     await seedRelatedness(getDriver());
     // Drive the real projection so the route reads production-shaped INFLUENCED_BY edges (#391).
     await linkInfluencedBy(getDriver());
@@ -302,6 +304,68 @@ describe('explore routes', () => {
       // dup1 was influenced by Delta, dup2 by Epsilon — both nodes' edges must appear, not just one.
       const names = body.influencedBy.map((x) => x.name).sort();
       expect(names).toEqual(['Influence Delta', 'Influence Epsilon']);
+    });
+  });
+
+  // #424: Wikidata P463 band membership — the read surface + the temporal guard on the member→group
+  // expansion of getReleasesByMusician.
+  describe('GET /api/v1/explore/membership/:name', () => {
+    type MembershipBody = {
+      bands: Array<{
+        discogsId: number;
+        name: string;
+        wikidataQid: string;
+        since: number | null;
+        until: number | null;
+      }>;
+      bandmates: Array<{ discogsId: number; name: string; wikidataQid: string }>;
+    };
+
+    it('returns the bands (with tenure) and bandmates', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/membership/Tenure%20Member',
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as MembershipBody;
+      expect(body.bands).toEqual([
+        {
+          discogsId: 980002,
+          name: 'Tenure Band',
+          wikidataQid: 'Q-tenure-band',
+          since: 1970,
+          until: 1975,
+        },
+      ]);
+      expect(body.bandmates).toEqual([
+        { discogsId: 980003, name: 'Tenure Bandmate', wikidataQid: 'Q-tenure-mate' },
+      ]);
+    });
+
+    it('returns empty arrays for a name with no membership edges', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/membership/__nobody__' });
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.payload)).toEqual({ bands: [], bandmates: [] });
+    });
+  });
+
+  describe('GET /api/v1/explore/musician/:name — temporal membership guard (#424)', () => {
+    const ids = (payload: string): number[] =>
+      (JSON.parse(payload) as { discogsId: number }[]).map((r) => r.discogsId);
+
+    it('keeps the member’s own credit and the in-tenure band record, drops the out-of-tenure one', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/musician/Tenure%20Member',
+      });
+      expect(res.statusCode).toBe(200);
+      const got = ids(res.payload);
+      // 980010 is the member's OWN credit (self branch, unbounded) — never guarded.
+      expect(got).toContain(980010);
+      // 980011 is a band record from 1973, inside the 1970–1975 tenure → kept.
+      expect(got).toContain(980011);
+      // 980012 is a band record from 1980, outside the tenure → dropped by the guard.
+      expect(got).not.toContain(980012);
     });
   });
 
