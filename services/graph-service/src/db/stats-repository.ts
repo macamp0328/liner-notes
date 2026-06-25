@@ -113,6 +113,13 @@ export interface StatsData {
     tracksWithDeezerBpm: CoverageMetric;
     tracksWithDeezerGain: CoverageMetric;
     mastersWithReleaseEvents: CoverageMetric;
+    // MB release-group link resolution rate (#385). covered = Masters carrying a resolved
+    // `musicbrainzReleaseGroupId` crosswalk, applicable = all Masters. The complement (the no-link
+    // population) is precisely the set a TERMINAL_EMPTY marker would have frozen — surfaced so the
+    // throttle-only decision (#385: MusicBrainz is a living DB, so a missing link is transient
+    // "coverage grows", not permanent) stays observable as the rate climbs over time. Descriptive
+    // only — intentionally NOT verify-gated (a collection can legitimately have few MB links).
+    mastersWithMbReleaseGroup: CoverageMetric;
     // Entity resolution (#330). samePersonLinks IS a CoverageMetric (gated by the reload verify
     // pass — covered/applicable over reconcilable Musicians). memberOfEdges/groupsWithMembers are
     // raw counts (MEMBER_OF has no knowable denominator); not CoverageMetrics, so the verify gate's
@@ -248,7 +255,9 @@ const MASTER_QUERY = `
   RETURN
     count(m) AS total,
     count(CASE WHEN EXISTS { (m)-[:MB_RELEASED_IN|MB_RELEASED_IN_REGION]->() } THEN 1 END)
-      AS releaseEventsCovered`;
+      AS releaseEventsCovered,
+    count(CASE WHEN m.musicbrainzReleaseGroupId IS NOT NULL THEN 1 END)
+      AS mbReleaseGroupCovered`;
 
 // Studio coordinate coverage (#342) — the recording-location-map denominator. total = all studios,
 // withCoordinates = studios carrying MB Place lat+long (#339 slice 2). An empty graph returns one row
@@ -518,6 +527,7 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       tracksWithDeezerBpm: coverage(n(track, 'deezerCovered'), isrcCovered),
       tracksWithDeezerGain: coverage(n(track, 'deezerGainCovered'), isrcCovered),
       mastersWithReleaseEvents: coverage(n(master, 'releaseEventsCovered'), n(master, 'total')),
+      mastersWithMbReleaseGroup: coverage(n(master, 'mbReleaseGroupCovered'), n(master, 'total')),
       samePersonLinks: coverage(
         n(musician, 'samePersonCovered'),
         n(musician, 'samePersonApplicable'),

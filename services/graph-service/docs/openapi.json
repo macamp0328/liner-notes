@@ -7266,6 +7266,7 @@
                             "tracksWithDeezerBpm",
                             "tracksWithDeezerGain",
                             "mastersWithReleaseEvents",
+                            "mastersWithMbReleaseGroup",
                             "samePersonLinks",
                             "memberOfEdges",
                             "groupsWithMembers",
@@ -7823,6 +7824,22 @@
                               }
                             },
                             "mastersWithReleaseEvents": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "mastersWithMbReleaseGroup": {
                               "type": "object",
                               "required": ["covered", "applicable", "pct"],
                               "properties": {
