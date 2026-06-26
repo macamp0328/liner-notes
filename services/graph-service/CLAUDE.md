@@ -385,13 +385,21 @@ state to Neo4j so it survives a restart.
 
 Source files:
 
-- `src/ingestion/stages.ts` — `RELOAD_STAGES`: the single source-of-truth definition. Each
-  descriptor's `run` delegates to the existing `enrichX` function (one definition per stage) and
-  declares `deps` (ordering prerequisites) + `resources` (mutual-exclusion lanes). The array is in
-  **priority** order (cheap + #165-gate stages first), which is also a valid topological sort;
-  actual run order is governed by `deps`, not array position. `verify` is the final **coverage
-  gate** (#178) — its descriptor `run` is a no-op; the gate logic lives in the orchestrator's
-  `runVerifyGate` (it needs cross-stage `ranStages`), and its derived deps keep it strictly last.
+- `src/ingestion/stage-definitions.ts` — `STAGE_DEFINITIONS`: the **single source-of-truth**
+  definition (#477), one `StageDefinition` per enrichment stage. Each carries the stage's `enrich`
+  (delegating to the existing `enrichX` function), its scheduling `deps`/`resources`/`sources`, the
+  `requires` client, and the admin-route metadata (`statusLabel`/schemas/`clientCheckFirst`/`reset`).
+  Both the reload descriptor (`toStageDescriptor`) and the standalone admin routes
+  (`toPipelineEntry` in `api/admin.ts`) **derive** from it, so a stage is declared exactly once and a
+  name mismatch is impossible (a parity test asserts both derivations + reload⇄registry lockstep).
+- `src/ingestion/stages.ts` — `RELOAD_STAGES`: the reload sequence, **derived** from
+  `STAGE_DEFINITIONS` via `toStageDescriptor`. Only the reload-only bookends are hand-written here:
+  `releases` (runs `ingestReleases`, owns the `failedReleaseIds` count) and `verify` (the final
+  **coverage gate** #178 — its `run` is a no-op; the gate logic lives in the orchestrator's
+  `runVerifyGate`, which needs cross-stage `ranStages`, and its derived deps keep it strictly last).
+  The 20 enrichment stages map through `RELOAD_ORDER` — a **priority**-ordered permutation of
+  `STAGE_DEFINITIONS` (cheap + #165-gate stages first), also a valid topological sort; actual run
+  order is governed by `deps`, not array position.
 - `src/ingestion/scheduler.ts` — `scheduleStages`: the generic bounded-concurrency, dependency- and
   resource-aware scheduler (no Neo4j/job-repo imports) plus `validateStageGraph` (test-only DAG
   guard). See "Scheduling (#176)" below.

@@ -1,10 +1,6 @@
 import type { Driver } from 'neo4j-driver';
 import type { Logger } from './discogs-client.js';
-import { buildDiscogsClientFromEnv } from './ingest.js';
-import { buildMusicBrainzClientFromEnv } from './musicbrainz-client.js';
-import { buildAcousticBrainzClientFromEnv } from './acousticbrainz-client.js';
-import { buildDeezerClientFromEnv } from './deezer-client.js';
-import { buildWikidataClientFromEnv } from './wikidata-client.js';
+import { buildClientsFromEnv } from './stage-definitions.js';
 import { RELOAD_STAGES, foldBreakerCounts } from './stages.js';
 import type { ReloadContext, ReloadStageName, StageDescriptor } from './stages.js';
 import { scheduleStages } from './scheduler.js';
@@ -73,16 +69,7 @@ export interface ReloadResult {
  * come back null; their stages then skip rather than fail.
  */
 export function buildReloadContext(driver: Driver, username: string, log: Logger): ReloadContext {
-  return {
-    driver,
-    log,
-    username,
-    discogs: buildDiscogsClientFromEnv(log),
-    musicbrainz: buildMusicBrainzClientFromEnv(log),
-    acousticbrainz: buildAcousticBrainzClientFromEnv(log),
-    deezer: buildDeezerClientFromEnv(log),
-    wikidata: buildWikidataClientFromEnv(log),
-  };
+  return { ...buildClientsFromEnv(log), driver, log, username };
 }
 
 /**
