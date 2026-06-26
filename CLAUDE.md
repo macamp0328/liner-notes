@@ -230,7 +230,8 @@ Route handler (src/api/) → Repository (src/db/) → Neo4j driver (src/db/clien
 | `src/ingestion/rate-limited-fetch.ts` | `createRateLimitedFetch` — shared retry/backoff/spacing core for the 5 API clients                                                               |
 | `src/ingestion/discogs-client.ts`     | Rate-limited Discogs HTTP client (60 req/min, 429 backoff)                                                                                       |
 | `src/ingestion/ingest.ts`             | First-5-stage pipeline (`runIngestion`) + shared `ingestReleases`                                                                                |
-| `src/ingestion/stages.ts`             | `RELOAD_STAGES` — full reload sequence + per-stage `deps`/`resources`                                                                            |
+| `src/ingestion/stage-definitions.ts`  | `STAGE_DEFINITIONS` — single source of truth per enrichment stage (#477); `RELOAD_STAGES` + admin routes both derive from it                     |
+| `src/ingestion/stages.ts`             | `RELOAD_STAGES` — reload sequence derived from `STAGE_DEFINITIONS` (+ hand-written `releases`/`verify` bookends)                                 |
 | `src/ingestion/scheduler.ts`          | `scheduleStages` — generic dependency/resource-aware concurrent scheduler                                                                        |
 | `src/ingestion/orchestrator.ts`       | `runReload` — drives the scheduler, DB-checkpointed, resumable                                                                                   |
 | `src/db/job-repository.ts`            | `ReloadJob`/`ReloadStage` persistence (checkpoint/resume)                                                                                        |
