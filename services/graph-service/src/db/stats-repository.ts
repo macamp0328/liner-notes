@@ -97,6 +97,13 @@ export interface StatsData {
     // false-fail a healthy reload whose collection legitimately has no MB studio data (see
     // reload-verify.ts).
     tracksWithMbStudio: CoverageMetric;
+    // #434: tracks with an MB-sourced recording↔recording lineage edge
+    // (`(:Track)-[:RELATED_RECORDING {source:'musicbrainz'}]->(:Recording)`, from recording-rels). A
+    // CoverageMetric so it reads on /stats (denominator = tracks with a recordingMbid), but
+    // intentionally NOT verify-gated: recording lineage is even sparser than place data and has no
+    // sibling silently-zero guard, so a floor would false-fail a healthy reload whose collection
+    // legitimately has no MB lineage data (see reload-verify.ts).
+    tracksWithMbLineage: CoverageMetric;
     // #342: studios with known coordinates (the recording-location-map denominator). Covered = studios
     // with lat+long (from MB Place data, #339 slice 2), applicable = all studios. Like tracksWithMbStudio,
     // a CoverageMetric so it reads on /stats but intentionally NOT verify-gated — MB place coverage is
@@ -245,6 +252,10 @@ const TRACK_QUERY = `
     count(CASE WHEN EXISTS {
       (t)-[ra:RECORDED_AT]->(:Studio) WHERE ra.source = 'musicbrainz'
     } THEN 1 END) AS mbStudioCovered,
+    // #434: tracks with an MB-sourced recording↔recording lineage edge from recording-rels.
+    count(CASE WHEN EXISTS {
+      (t)-[rl:RELATED_RECORDING]->(:Recording) WHERE rl.source = 'musicbrainz'
+    } THEN 1 END) AS mbLineageCovered,
     count(CASE WHEN t.isrc IS NOT NULL THEN 1 END) AS isrcCovered,
     count(CASE WHEN t.recordingMbid IS NOT NULL AND t.tempo IS NOT NULL THEN 1 END) AS tempoCovered,
     count(CASE WHEN t.isrc IS NOT NULL AND t.deezerBpm IS NOT NULL THEN 1 END) AS deezerCovered,
@@ -513,6 +524,8 @@ export async function getStats(driver: Driver): Promise<StatsData> {
       tracksWithMbProductionCredits: coverage(n(track, 'mbProductionCreditsCovered'), mbidCovered),
       tracksWithMbArrangers: coverage(n(track, 'mbArrangersCovered'), mbidCovered),
       tracksWithMbStudio: coverage(n(track, 'mbStudioCovered'), mbidCovered),
+      // #434 recording↔recording lineage coverage, un-gated like tracksWithMbStudio (sparse by design).
+      tracksWithMbLineage: coverage(n(track, 'mbLineageCovered'), mbidCovered),
       // #342 studio-level coordinate coverage (all studios denominator), un-gated like tracksWithMbStudio.
       studiosWithCoordinates: coverage(n(studio, 'withCoordinates'), n(studio, 'total')),
       worksWithMultipleRecordings: n(work, 'multiRecording'),

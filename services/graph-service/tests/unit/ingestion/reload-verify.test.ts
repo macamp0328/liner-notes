@@ -85,6 +85,8 @@ function makeStats(
     tracksWithMbArrangers: cov(9, 60),
     // #339 (slice 2): MB studio coverage, measured but ungated (sparse + own fetch, no sibling guard).
     tracksWithMbStudio: cov(4, 60),
+    // #434: MB recording-lineage coverage, measured but ungated (sparse, like tracksWithMbStudio).
+    tracksWithMbLineage: cov(2, 60),
     // #342: studio coordinate coverage, measured but ungated (sparse, like tracksWithMbStudio).
     studiosWithCoordinates: cov(3, 20),
     worksWithMultipleRecordings: 8,
@@ -157,6 +159,11 @@ describe('RELOAD_COVERAGE_THRESHOLDS', () => {
   it('does NOT gate tracksWithMbStudio — MB place relations are sparse, own fetch, no sibling guard (#339)', () => {
     const metrics = RELOAD_COVERAGE_THRESHOLDS.map((t) => t.metric);
     expect(metrics).not.toContain('tracksWithMbStudio');
+  });
+
+  it('does NOT gate tracksWithMbLineage — MB recording-rels are sparse, own fetch, no sibling guard (#434)', () => {
+    const metrics = RELOAD_COVERAGE_THRESHOLDS.map((t) => t.metric);
+    expect(metrics).not.toContain('tracksWithMbLineage');
   });
 
   it('maps each metric to the stage that produces it', () => {
