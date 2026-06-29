@@ -983,7 +983,7 @@ describe('MusicBrainzClient', () => {
       ]);
     });
 
-    it('keeps mastering / remixer release-scoped — they are NOT pushed down to a track (#339)', async () => {
+    it('keeps mastering release-scoped — it is NOT pushed down to a track (#339)', async () => {
       fetchSpy.mockResolvedValueOnce(
         makeOkResponse({
           id: 'rec-1',
@@ -999,12 +999,6 @@ describe('MusicBrainzClient', () => {
               'target-type': 'artist',
               attributes: [],
               artist: { id: 'm-1', name: 'Masterer' },
-            },
-            {
-              type: 'remixer',
-              'target-type': 'artist',
-              attributes: [],
-              artist: { id: 'r-1', name: 'Remixer' },
             },
           ],
         }),
@@ -1081,6 +1075,28 @@ describe('MusicBrainzClient', () => {
       for (const a of artists) {
         expect(parseRoleCategory(a.role)).toBe('composer');
       }
+    });
+
+    it('maps the remixer role down to track scope, dropping qualifier attributes (#434)', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            {
+              type: 'remixer',
+              'target-type': 'artist',
+              attributes: ['additional'],
+              artist: { id: 'rm-1', name: 'Remixer' },
+            },
+          ],
+        }),
+      );
+
+      const artists = await client.getArtistsByRecordingMbid('rec-1');
+
+      expect(artists).toEqual([{ mbid: 'rm-1', name: 'Remixer', role: 'remixer', attributes: [] }]);
+      // The remixer credit is its own kind — it buckets `other`, not producer/engineer/composer.
+      expect(parseRoleCategory(artists[0]!.role)).toBe('other');
     });
 
     it('ignores performance relations without an artist id or with a non-artist target', async () => {

@@ -74,7 +74,7 @@ function collectSourceFiles(dir: string): string[] {
 // by more than one source (the relationship type name alone then can't disambiguate provenance):
 // CREDITED_ON (Discogs|MB), RECORDED_AT (Discogs release|MB track), MEMBER_OF (Discogs|Wikidata),
 // ORIGIN_COUNTRY (MB|Wikidata), plus the MB/Wikidata-only INFLUENCED_BY/WROTE/RECORDING_OF/
-// MB_RELEASED_IN tagged for uniformity. Structural / single-source edges deliberately carry no
+// RELATED_RECORDING/MB_RELEASED_IN tagged for uniformity. Structural / single-source edges deliberately carry no
 // `source` — note RELEASED_IN is the Discogs Master→Country edge whose MusicBrainz counterpart is the
 // *distinct* type MB_RELEASED_IN, so its provenance already lives in the type name. Half A flags a
 // provenance edge missing `source`; Half B flags any edge type in NEITHER set, so a NEW edge type
@@ -87,6 +87,8 @@ const PROVENANCE_BEARING_EDGES = new Set<string>([
   'INFLUENCED_BY',
   'WROTE',
   'RECORDING_OF',
+  // #434: recording↔recording derivative lineage — Track→Recording, always `source: "musicbrainz"`.
+  'RELATED_RECORDING',
   'MB_RELEASED_IN',
   // #441: the Region counterpart of MB_RELEASED_IN — same MusicBrainz provenance, distinct endpoint.
   'MB_RELEASED_IN_REGION',

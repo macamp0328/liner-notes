@@ -312,11 +312,13 @@ const RECORDING_DERIVATION_RELATIONS = new Set([
  * would silently drop real data.
  *
  * Deliberately EXCLUDED (kept release-scoped or out of this slice): `mastering`/lacquer/cover-art
- * (inherently whole-release; `mastering` is also deprecated at recording level in MB), `remixer` (a
- * derivative recording — the lineage epic), and the niche `programming`/`editor`/`sound effects`. The
- * `arranger` family IS pushed down — recording-level arranging is track-attributable — via the separate
- * `RECORDING_ARRANGER_ROLE_MAP` below. MB production attributes (`additional`/`co`/`executive`/…) are
- * qualifiers, not credit tokens, and are dropped (see `getArtistsByRecordingMbid`).
+ * (inherently whole-release; `mastering` is also deprecated at recording level in MB) and the niche
+ * `programming`/`editor`/`sound effects`. The `arranger` family IS pushed down — recording-level
+ * arranging is track-attributable — via the separate `RECORDING_ARRANGER_ROLE_MAP` below, and the
+ * `remixer` (the person who remixed THIS recording) via `RECORDING_REMIXER_ROLES` (#434 — distinct
+ * from the recording↔recording `RELATED_RECORDING` lineage edge). MB production attributes
+ * (`additional`/`co`/`executive`/…) are qualifiers, not credit tokens, and are dropped (see
+ * `getArtistsByRecordingMbid`).
  */
 const RECORDING_PRODUCTION_ROLE_MAP: ReadonlyMap<string, string> = new Map([
   ['producer', 'producer'],
@@ -343,6 +345,17 @@ const RECORDING_ARRANGER_ROLE_MAP: ReadonlyMap<string, string> = new Map([
   ['vocal arranger', 'vocal arranger'],
   ['orchestrator', 'orchestrator'],
 ]);
+
+/**
+ * Recording-level remixer artist-relation, pushed down to track scope (#434). MusicBrainz models the
+ * remixer at the recording level — the person who remixed THIS recording — so it is genuinely
+ * track-attributable, like the production/arranger credits above. The credit token is the raw type
+ * `remixer`, which `parseRoleCategory` buckets `other` (no performer/producer/engineer/composer keyword
+ * is a substring of "remixer") — correct, since a remixer is its own kind of credit. This is the PERSON
+ * who remixed, deferred here from #339's slice-1 client as part of the lineage epic; the recording↔
+ * recording derivative EDGE is the separate `RELATED_RECORDING` lineage (track-recording-lineage stage).
+ */
+const RECORDING_REMIXER_ROLES = new Set(['remixer']);
 
 /** Convert a MusicBrainz millisecond length to whole seconds; null for missing or non-positive values. */
 function msToSeconds(ms: number | null | undefined): number | null {
@@ -591,10 +604,11 @@ export class MusicBrainzClient {
    * Fetch the track-attributable credits of a MusicBrainz recording from its artist relationships.
    * Uses `inc=artist-rels`; reads `relations[]` whose `type` is a **performance** role
    * (#335: `performer`/`instrument`/`vocal`, instrument/vocal name in `attributes`), a **production**
-   * role (#339: `RECORDING_PRODUCTION_ROLE_MAP` — producer + engineer family) or an **arranging** role
-   * (#339: `RECORDING_ARRANGER_ROLE_MAP` — arranger family + orchestrator); the latter two are mapped to
-   * a canonical role string with attributes dropped. Roles outside all three sets (`mastering`,
-   * `remixer`, …) are not pushed down to a track. Each person's MB artist MBID is retained
+   * role (#339: `RECORDING_PRODUCTION_ROLE_MAP` — producer + engineer family), an **arranging** role
+   * (#339: `RECORDING_ARRANGER_ROLE_MAP` — arranger family + orchestrator) or the **remixer** role
+   * (#434: `RECORDING_REMIXER_ROLES`); the production/arranging ones are mapped to a canonical role
+   * string with attributes dropped. Roles outside all four sets (`mastering`, …) are not pushed down to
+   * a track. Each person's MB artist MBID is retained
    * so the credit reconciles to our Discogs-keyed Musician nodes deterministically (the `mb-artist-id`
    * join, #380) — never name-matching. Empty array on no track-attributable credits, an open breaker,
    * or a 404 (a known recordingMbid that no longer resolves is not retried until the staleness window
@@ -647,6 +661,18 @@ export class MusicBrainzClient {
           mbid: rel.artist.id,
           name: rel.artist.name,
           role: arrangerRole,
+          attributes: [],
+        });
+        continue;
+      }
+
+      if (RECORDING_REMIXER_ROLES.has(rel.type)) {
+        // The person who remixed THIS recording (#434). The credit token is the raw `remixer` type
+        // (buckets `other` via parseRoleCategory); qualifier attributes are dropped, like production.
+        artists.push({
+          mbid: rel.artist.id,
+          name: rel.artist.name,
+          role: rel.type,
           attributes: [],
         });
         continue;
