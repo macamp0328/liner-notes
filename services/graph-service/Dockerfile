@@ -1,7 +1,7 @@
 # Build context: repo root (not the service directory)
 # docker build -f services/graph-service/Dockerfile .
 
-FROM node:22-alpine@sha256:ab07539e0988b63558ff621f5fbe1077054c39d9809112974fb79993949d41cd AS base
+FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS base
 RUN npm install -g pnpm@9.15.9
 
 # ── Build stage ───────────────────────────────────────────────────────────────
@@ -20,7 +20,7 @@ COPY services/graph-service/src services/graph-service/src/
 RUN pnpm --filter @liner-notes/graph-service build
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
-FROM node:22-alpine@sha256:ab07539e0988b63558ff621f5fbe1077054c39d9809112974fb79993949d41cd AS runtime
+FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS runtime
 RUN npm install -g pnpm@9.15.9
 
 WORKDIR /app
