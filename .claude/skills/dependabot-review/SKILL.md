@@ -100,7 +100,7 @@ gh pr comment <n> --body "Closing in favor of #<issue> — <one-line reason>."
 gh pr close <n> --delete-branch
 ```
 
-Apply the four-axis labels per [docs/agents/triage-labels.md](docs/agents/triage-labels.md). github-actions/docker bumps → `area:ci` + `chore`; npm runtime deps → the affected `area:*`. A security bump that can't merge cleanly → `priority:high`.
+Apply the four-axis labels per [docs/agents/triage-labels.md](../../../docs/agents/triage-labels.md). github-actions/docker bumps → `area:ci` + `chore`; npm runtime deps → the affected `area:*`. A security bump that can't merge cleanly → `priority:high`.
 
 ## Phase 5 — Alerts with no PR
 
