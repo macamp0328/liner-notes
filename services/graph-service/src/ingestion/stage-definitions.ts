@@ -30,6 +30,7 @@ import { enrichTrackMusicBrainz } from '../enrichment/track-musicbrainz.js';
 import { enrichTrackWorks } from '../enrichment/track-works.js';
 import { enrichTrackRecordingArtists } from '../enrichment/track-recording-artists.js';
 import { enrichTrackRecordingPlaces } from '../enrichment/track-recording-places.js';
+import { enrichTrackRecordingLineage } from '../enrichment/track-recording-lineage.js';
 import { enrichTrackAcousticBrainz } from '../enrichment/track-acousticbrainz.js';
 import { enrichTrackDeezer } from '../enrichment/track-deezer.js';
 import { enrichNationality } from '../enrichment/artist-nationality.js';
@@ -45,6 +46,7 @@ import { resetTrackMusicBrainzEnrichment } from '../db/track-musicbrainz-reposit
 import { resetTrackWorksEnrichment } from '../db/track-works-repository.js';
 import { resetRecordingArtistsEnrichment } from '../db/track-recording-artists-repository.js';
 import { resetRecordingPlacesEnrichment } from '../db/track-recording-places-repository.js';
+import { resetRecordingLineageEnrichment } from '../db/track-recording-lineage-repository.js';
 import { resetTrackAcousticBrainzEnrichment } from '../db/track-acousticbrainz-repository.js';
 import { resetTrackDeezerEnrichment } from '../db/track-deezer-repository.js';
 import { resetArtistProfilesEnrichment } from '../db/artist-profiles-repository.js';
@@ -303,6 +305,17 @@ const trackRecordingPlacesSummarySchema = {
   },
 };
 
+const trackRecordingLineageSummarySchema = {
+  type: 'object',
+  properties: {
+    recordingsProcessed: { type: 'integer' },
+    recordingsSkipped: { type: 'integer' },
+    recordingsFailed: { type: 'integer' },
+    lineageEdges: { type: 'integer' },
+    durationMs: { type: 'integer' },
+  },
+};
+
 const artistGenresSummarySchema = {
   type: 'object',
   properties: {
@@ -352,7 +365,7 @@ const bandMembershipSummarySchema = {
 };
 
 /**
- * The 20 enrichment-stage definitions. **Array order = admin route registration order** (the order
+ * The 21 enrichment-stage definitions. **Array order = admin route registration order** (the order
  * the original hand-written PIPELINES blocks appeared): fastify-swagger emits paths in registration
  * order and the committed docs/openapi.json is a raw stringify, so reordering entries churns the
  * docs. The reload run order is a separate concern — stages.ts maps these through its own
@@ -703,6 +716,56 @@ export const STAGE_DEFINITIONS: readonly StageDefinition[] = [
       runningMessage:
         'MusicBrainz recording-studio enrichment is currently running — wait for it to finish before resetting',
       run: (driver) => resetRecordingPlacesEnrichment(driver),
+    },
+  },
+  {
+    name: 'track-recording-lineage',
+    deps: ['track-musicbrainz'],
+    resources: ['musicbrainz', 'track'],
+    sources: ['musicbrainz'],
+    requires: 'musicbrainz',
+    enrich: async (clients, driver, log, onProgress) => ({
+      ...(await enrichTrackRecordingLineage(clients.musicbrainz!, driver, log, onProgress)),
+    }),
+    statusLabel: 'MusicBrainz recording lineage enrichment',
+    runningMessage: 'MusicBrainz recording lineage enrichment already in progress',
+    enrichSummary:
+      'Attribute MusicBrainz recording↔recording derivative lineage to the specific Track as RELATED_RECORDING edges',
+    enrichDescription:
+      'For each Track that carries a `recordingMbid` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), ' +
+      'fetches the recording’s `recording-rels` and writes a **track-scoped** ' +
+      '`(:Track)-[:RELATED_RECORDING {source: "musicbrainz", type, direction}]->(:Recording)` edge to an ' +
+      'MBID-keyed fallback `Recording` node for each curated derivative relation (#434) — `remix`, ' +
+      '`DJ-mix`, `edit`, `mashes up`, `a cappella`, `instrumental`, `karaoke`, `compilation`. The ' +
+      'related recording’s `type` + MB `direction` are stored RAW so the lineage is never normalised ' +
+      '(and so can never be stored backwards). Blocks until complete.\n\n' +
+      '**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, and ' +
+      'only after `track-musicbrainz` has populated `recordingMbid`.**\n\n' +
+      'The fallback `Recording` node captures out-of-collection originals/derivatives; an in-collection ' +
+      'counterpart resolves at query time via the `Recording.mbid → Track.recordingMbid` join (surfaced ' +
+      'through `GET /api/v1/explore/lineage/:mbid`).\n\n' +
+      '**MusicBrainz recording↔recording relations are genuinely sparse — zero lineage across a ' +
+      'collection is legitimate, not an error.**\n\n' +
+      'Re-selects a Track while it still has no MB-sourced lineage (null `recordingLineageFetchedAt`) ' +
+      'once its last attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping ' +
+      '`recordingLineageFetchedAt` after each attempt — so a recording MusicBrainz has no relations for ' +
+      'is retried at most once per window. Run ' +
+      '`POST /api/v1/admin/track-recording-lineage/reset` to force a full re-run.\n\n' +
+      'Requires `MUSICBRAINZ_USER_AGENT` env var.',
+    statusSummarySchema: trackRecordingLineageSummarySchema,
+    schemaHas503: true,
+    clientCheckFirst: false,
+    reset: {
+      summary: 'Reset MusicBrainz recording lineage enrichment for a full re-run',
+      description:
+        'Removes every MusicBrainz-sourced `RELATED_RECORDING` edge (`source: "musicbrainz"`), prunes ' +
+        'the now-orphaned fallback `Recording` nodes, and clears the `recordingLineageFetchedAt` ' +
+        'marker, causing the next `POST /api/v1/admin/track-recording-lineage/enrich` call to ' +
+        're-process every recording from scratch.\n\n' +
+        'This endpoint is blocked while enrichment is running.',
+      runningMessage:
+        'MusicBrainz recording lineage enrichment is currently running — wait for it to finish before resetting',
+      run: (driver) => resetRecordingLineageEnrichment(driver),
     },
   },
   {
