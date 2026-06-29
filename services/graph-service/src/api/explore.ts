@@ -6,6 +6,7 @@ import {
   getReleasesByInstrument,
   getArtistsByPersonLevelInstrument,
   getRecordingsByWork,
+  getRecordingLineage,
   getWorksBySongwriter,
   getArtistInfluences,
   getArtistMembership,
@@ -29,6 +30,7 @@ import {
   type InstrumentCredit,
   type InstrumentPlayer,
   type WorkRecording,
+  type RecordingLineageLink,
   type SongwriterWork,
   type ArtistInfluences,
   type ArtistMembership,
@@ -131,6 +133,31 @@ const workRecordingSchema = {
     artist: { type: 'string', nullable: true },
     year: { type: 'integer', nullable: true },
     thumbUrl: { type: 'string', nullable: true },
+  },
+} as const;
+
+const recordingLineageLinkSchema = {
+  type: 'object',
+  required: ['relatedRecordingMbid', 'type', 'phrase', 'inCollectionReleases'],
+  properties: {
+    relatedRecordingMbid: { type: 'string' },
+    relatedTitle: { type: 'string' },
+    type: { type: 'string' },
+    direction: { type: 'string', nullable: true },
+    phrase: { type: 'string' },
+    inCollectionReleases: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['discogsId', 'title', 'trackTitle'],
+        properties: {
+          discogsId: { type: 'integer' },
+          title: { type: 'string' },
+          trackTitle: { type: 'string' },
+          position: { type: 'string', nullable: true },
+        },
+      },
+    },
   },
 } as const;
 
@@ -510,6 +537,36 @@ export async function exploreRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request, reply): Promise<WorkRecording[] | ErrorReply> => {
       const items = await getRecordingsByWork(getDriver(), request.params.mbid);
+      return reply.send(items);
+    },
+  );
+
+  // GET /api/v1/explore/lineage/:mbid — recording↔recording derivative lineage (remix/edit/…, #434)
+  fastify.get<{ Params: MbidParams; Reply: RecordingLineageLink[] | ErrorReply }>(
+    '/api/v1/explore/lineage/:mbid',
+    {
+      schema: {
+        tags: ['explore'],
+        summary: 'Recording↔recording derivative lineage for a MusicBrainz recording',
+        description:
+          'Given a MusicBrainz `recordingMbid`, returns its derivative lineage links (#434) — remix, ' +
+          'edit, instrumental, etc. — each with the raw MusicBrainz `type` + `direction`, a human ' +
+          '`phrase` ("[this recording] {phrase} {relatedTitle}"), and the in-collection releases that ' +
+          'carry the related recording (empty when it is an out-of-collection original/derivative). ' +
+          'Sparse by design.',
+        params: {
+          type: 'object',
+          required: ['mbid'],
+          properties: { mbid: { type: 'string' } },
+        },
+        response: {
+          200: { type: 'array', items: recordingLineageLinkSchema },
+          400: errorResponseRef,
+        },
+      },
+    },
+    async (request, reply): Promise<RecordingLineageLink[] | ErrorReply> => {
+      const items = await getRecordingLineage(getDriver(), request.params.mbid);
       return reply.send(items);
     },
   );

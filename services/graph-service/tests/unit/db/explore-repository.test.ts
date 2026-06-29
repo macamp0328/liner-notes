@@ -6,6 +6,8 @@ import {
   getReleasesByCredit,
   getReleasesByInstrument,
   getRecordingsByWork,
+  getRecordingLineage,
+  describeLineage,
   getWorksBySongwriter,
   getReleasesByStudio,
   getRecordingLocations,
@@ -399,6 +401,88 @@ describe('getRecordingsByWork', () => {
   it('returns an empty array for an unknown work', async () => {
     const { session } = makeMockSession([makeResult([])]);
     expect(await getRecordingsByWork(makeMockDriver(session), 'nope')).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// describeLineage + getRecordingLineage (#434)
+// ---------------------------------------------------------------------------
+
+describe('describeLineage', () => {
+  it('renders the forward phrase by default and the backward phrase on direction=backward', () => {
+    expect(describeLineage('remix', 'forward')).toBe('remix of');
+    expect(describeLineage('remix', 'backward')).toBe('has remixes');
+    // "version" family flips polarity: forward = "has versions", backward = "is a version of".
+    expect(describeLineage('instrumental', 'forward')).toBe('instrumental versions');
+    expect(describeLineage('instrumental', 'backward')).toBe('instrumental version of');
+  });
+
+  it('treats a missing direction as forward', () => {
+    expect(describeLineage('edit', null)).toBe('edit of');
+  });
+
+  it('falls back to the raw type for an unknown relation type', () => {
+    expect(describeLineage('some-future-type', 'forward')).toBe('some-future-type');
+  });
+});
+
+describe('getRecordingLineage', () => {
+  it('maps lineage links, derives the phrase, and resolves in-collection releases', async () => {
+    const rec = makeRecord({
+      relatedRecordingMbid: 'orig-1',
+      relatedTitle: 'Original Mix',
+      type: 'remix',
+      direction: 'forward',
+      inCollectionReleases: [
+        {
+          discogsId: makeNeo4jInt(7000001),
+          title: 'Remixes',
+          trackTitle: 'Song (Remix)',
+          position: 'A1',
+        },
+      ],
+    });
+    const { session, runSpy } = makeMockSession([makeResult([rec])]);
+
+    const out = await getRecordingLineage(makeMockDriver(session), 'rec-1');
+
+    expect(out).toEqual([
+      {
+        relatedRecordingMbid: 'orig-1',
+        relatedTitle: 'Original Mix',
+        type: 'remix',
+        direction: 'forward',
+        phrase: 'remix of',
+        inCollectionReleases: [
+          { discogsId: 7000001, title: 'Remixes', trackTitle: 'Song (Remix)', position: 'A1' },
+        ],
+      },
+    ]);
+    const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('RELATED_RECORDING');
+    expect(query).toContain('Track { recordingMbid: $mbid }');
+    expect(params).toEqual({ mbid: 'rec-1' });
+  });
+
+  it('returns an out-of-collection link with an empty release list', async () => {
+    const rec = makeRecord({
+      relatedRecordingMbid: 'orig-2',
+      relatedTitle: 'Some Original',
+      type: 'instrumental',
+      direction: 'backward',
+      inCollectionReleases: [],
+    });
+    const { session } = makeMockSession([makeResult([rec])]);
+
+    const out = await getRecordingLineage(makeMockDriver(session), 'rec-1');
+
+    expect(out[0]!.phrase).toBe('instrumental version of');
+    expect(out[0]!.inCollectionReleases).toEqual([]);
+  });
+
+  it('returns an empty array for a recording with no lineage', async () => {
+    const { session } = makeMockSession([makeResult([])]);
+    expect(await getRecordingLineage(makeMockDriver(session), 'nope')).toEqual([]);
   });
 });
 

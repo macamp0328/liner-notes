@@ -57,6 +57,29 @@ export interface WorkRecording {
   thumbUrl: string | null;
 }
 
+/** One in-collection appearance of a lineage-linked recording: where we own that recording (#434). */
+export interface LineageReleaseRef {
+  discogsId: number;
+  title: string;
+  trackTitle: string;
+  position: string | null;
+}
+
+/**
+ * One recording↔recording lineage link from a queried recording (#434). `type` + `direction` are the
+ * raw MusicBrainz values (never normalised); `phrase` is the human reading from the queried
+ * recording's perspective ("[this recording] {phrase} {relatedTitle}"). `inCollectionReleases` lists
+ * where the related recording is owned — empty when it is an out-of-collection original/derivative.
+ */
+export interface RecordingLineageLink {
+  relatedRecordingMbid: string;
+  relatedTitle: string;
+  type: string;
+  direction: string | null;
+  phrase: string;
+  inCollectionReleases: LineageReleaseRef[];
+}
+
 /**
  * One in-collection recording of a Work written by a given person (#380). Flat like
  * {@link WorkRecording} — one row per recording — plus the composition (`workMbid`/`workTitle`) and
@@ -572,6 +595,90 @@ export async function getRecordingsByWork(driver: Driver, mbid: string): Promise
       year: toInt(rec.get('year')),
       thumbUrl: toStr(rec.get('thumbUrl')),
     }));
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * The MusicBrainz recording↔recording link phrases (#434), keyed by relation type. `forward` reads
+ * from the entity MB returned with `direction: "forward"`, `backward` from the reverse side — verbatim
+ * from `musicbrainz.org/relationships/recording-recording`. Used to render a human phrase from the
+ * queried recording's perspective without ever normalising the stored edge.
+ */
+const LINEAGE_PHRASES: ReadonlyMap<string, { forward: string; backward: string }> = new Map([
+  ['remix', { forward: 'remix of', backward: 'has remixes' }],
+  ['DJ-mix', { forward: 'DJ-mix of', backward: 'DJ-mixes' }],
+  ['edit', { forward: 'edit of', backward: 'edits' }],
+  ['compilation', { forward: 'compilation of', backward: 'compiled in' }],
+  ['mashes up', { forward: 'mash-up of', backward: 'mash-ups' }],
+  ['a cappella', { forward: 'a cappella versions', backward: 'a cappella version of' }],
+  ['instrumental', { forward: 'instrumental versions', backward: 'instrumental version of' }],
+  ['karaoke', { forward: 'karaoke versions', backward: 'karaoke version of' }],
+]);
+
+/**
+ * Render the human lineage phrase for a raw (type, direction) pair (#434), read from the queried
+ * recording's side. `direction: "backward"` uses the reverse phrase; anything else (including a
+ * missing direction) uses the forward phrase. An unknown type falls back to the raw type string, so a
+ * future MB type still reads sensibly until {@link LINEAGE_PHRASES} is broadened. Cosmetic — the raw
+ * `type`/`direction` on the edge stay authoritative.
+ */
+export function describeLineage(type: string, direction: string | null): string {
+  const phrases = LINEAGE_PHRASES.get(type);
+  if (phrases === undefined) return type;
+  return direction === 'backward' ? phrases.backward : phrases.forward;
+}
+
+/**
+ * Every recording↔recording lineage link of a recording, by its MusicBrainz `recordingMbid` (#434).
+ * Reads the outgoing `RELATED_RECORDING` edges of the queried recording's in-collection Tracks (the
+ * edge is fanned out to every Track carrying the source `recordingMbid`, so the result is DISTINCT on
+ * the target + type) and resolves each related recording in-collection via the
+ * `Recording.mbid → Track.recordingMbid` join. Returns an empty array for an unknown recording or one
+ * with no lineage.
+ */
+export async function getRecordingLineage(
+  driver: Driver,
+  mbid: string,
+): Promise<RecordingLineageLink[]> {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `
+      MATCH (t:Track { recordingMbid: $mbid })-[r:RELATED_RECORDING]->(rec:Recording)
+      OPTIONAL MATCH (rt:Track { recordingMbid: rec.mbid })<-[:HAS_TRACK]-(rr:Release)
+      WITH rec, r.type AS type, r.direction AS direction,
+           collect(DISTINCT CASE WHEN rr IS NOT NULL
+             THEN { discogsId: rr.discogsId, title: rr.title, trackTitle: rt.title, position: rt.position }
+             END) AS inColl
+      RETURN rec.mbid AS relatedRecordingMbid, rec.title AS relatedTitle, type, direction,
+             [x IN inColl WHERE x IS NOT NULL] AS inCollectionReleases
+      ORDER BY type, relatedRecordingMbid
+      `,
+      { mbid },
+    );
+    return result.records.map((rec) => {
+      const type = toStr(rec.get('type')) ?? '';
+      const direction = toStr(rec.get('direction'));
+      const inColl = (rec.get('inCollectionReleases') as unknown[]) ?? [];
+      return {
+        relatedRecordingMbid: toStr(rec.get('relatedRecordingMbid')) ?? '',
+        relatedTitle: toStr(rec.get('relatedTitle')) ?? '',
+        type,
+        direction,
+        phrase: describeLineage(type, direction),
+        inCollectionReleases: inColl.map((row) => {
+          const ref = row as Record<string, unknown>;
+          return {
+            discogsId: toInt(ref.discogsId) ?? 0,
+            title: toStr(ref.title) ?? '',
+            trackTitle: toStr(ref.trackTitle) ?? '',
+            position: toStr(ref.position),
+          };
+        }),
+      };
+    });
   } finally {
     await session.close();
   }
