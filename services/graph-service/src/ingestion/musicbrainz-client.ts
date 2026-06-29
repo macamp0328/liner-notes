@@ -101,6 +101,26 @@ export interface MbRecordingPlace {
   area: string | null;
 }
 
+/**
+ * A recording↔recording derivative relationship harvested from a recording's `recording-rels` (#434).
+ * MusicBrainz links one recording to another with a typed derivative relationship — a remix, an edit,
+ * an instrumental version, a compilation, and so on. We keep the related recording's MBID + title (so
+ * an out-of-collection original/derivative is still captured as a fallback `Recording` node) and store
+ * the relation `type` + MB `direction` RAW: the direction records which side of the relationship the
+ * fetched recording sits on, so the lineage can be rendered without ever being normalised — and
+ * therefore never stored backwards.
+ */
+export interface MbRecordingDerivation {
+  /** The OTHER recording's MBID — the link target a fallback `Recording` node merges on. */
+  recordingMbid: string;
+  /** The other recording's title; display text on the fallback node (empty when MB omits it). */
+  title: string;
+  /** The MB relation type, e.g. `remix` / `edit` / `instrumental` — kept verbatim on the edge. */
+  type: string;
+  /** MB relationship direction (`forward` / `backward`); null when MB omits it. Stored raw. */
+  direction: string | null;
+}
+
 export interface MusicBrainzClientConfig {
   userAgent: string;
   /** Milliseconds to sleep after every successful request. 1100ms keeps us safely under 1 req/sec. */
@@ -198,6 +218,16 @@ interface MbRecordingPlaceRelsResponse {
   }>;
 }
 
+interface MbRecordingRelsResponse {
+  id: string;
+  relations?: Array<{
+    type: string;
+    direction?: string;
+    'target-type'?: string;
+    recording?: { id: string; title?: string };
+  }>;
+}
+
 interface MbReleaseListResponse {
   'release-count': number;
   releases: Array<{
@@ -250,6 +280,27 @@ const RECORDING_PERFORMANCE_ROLES = new Set(['performer', 'instrument', 'vocal']
  * not pushed down to a track in this slice; add to this set to broaden.
  */
 const RECORDING_PLACE_RELATIONS = new Set(['recorded at', 'mixed at']);
+
+/**
+ * Recording↔recording relationship types we treat as audio lineage (#434), harvested from
+ * `inc=recording-rels`. These are the exact MusicBrainz relationship-type NAMES (verbatim, spaces and
+ * all — the ws/2 `type` field carries the name, the same way the place-rels above carry `recorded at`).
+ * Broaden lineage by editing this one Set.
+ *
+ * Deliberately EXCLUDED: `samples material` (its own epic, #337), the deprecated `first track release`
+ * / `remaster`, and `music video` / `commentary` (not audio lineage). `live performance of` is a
+ * recording→**work** relationship owned by #336 — it is not a recording↔recording type at all.
+ */
+const RECORDING_DERIVATION_RELATIONS = new Set([
+  'remix',
+  'DJ-mix',
+  'edit',
+  'mashes up',
+  'a cappella',
+  'instrumental',
+  'karaoke',
+  'compilation',
+]);
 
 /**
  * Recording-level production/engineering artist-relation types we now push down to track scope (#339),
@@ -642,6 +693,42 @@ export class MusicBrainzClient {
       });
     }
     return places;
+  }
+
+  /**
+   * Fetch the recording↔recording lineage of a MusicBrainz recording from its `recording-rels` (#434).
+   * Uses `inc=recording-rels`; reads `relations[]` whose `target-type` is `recording` and whose `type`
+   * is one of `RECORDING_DERIVATION_RELATIONS` (remix / edit / instrumental / …). Each related
+   * recording's MBID + title is returned with the relation `type` and MB `direction`, both kept RAW so
+   * the lineage is never normalised at write time — and so can never be stored backwards. Empty array
+   * on no lineage relations, an open breaker, or a 404 (a known recordingMbid that no longer resolves
+   * is not retried until the staleness window expires).
+   */
+  async getRecordingRelationsByMbid(recordingMbid: string): Promise<MbRecordingDerivation[]> {
+    const endpoint = `${BASE_URL}/recording/${encodeURIComponent(recordingMbid)}?inc=recording-rels&fmt=json`;
+
+    let response: MbRecordingRelsResponse;
+    try {
+      response = await this.fetchWithBackoff<MbRecordingRelsResponse>(endpoint);
+    } catch (err) {
+      if (err instanceof CircuitBreakerOpenError) return [];
+      if (err instanceof Error && err.message.includes('not found (404)')) return [];
+      throw err;
+    }
+
+    const derivations: MbRecordingDerivation[] = [];
+    for (const rel of response.relations ?? []) {
+      if (rel['target-type'] !== 'recording' || rel.recording?.id === undefined) continue;
+      if (!RECORDING_DERIVATION_RELATIONS.has(rel.type)) continue;
+
+      derivations.push({
+        recordingMbid: rel.recording.id,
+        title: rel.recording.title?.trim() ?? '',
+        type: rel.type,
+        direction: rel.direction ?? null,
+      });
+    }
+    return derivations;
   }
 
   /**
