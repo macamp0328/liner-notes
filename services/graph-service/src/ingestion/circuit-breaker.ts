@@ -28,13 +28,7 @@ export interface OutcomeSignal {
 
 /** Stable per-source keys used in logs, snapshots, and the reload-status `counts` map. */
 export type BreakerSource =
-  | 'discogs'
-  | 'musicbrainz'
-  | 'acousticbrainz'
-  | 'deezer'
-  | 'wikidata'
-  | 'genius'
-  | 'lrclib';
+  'discogs' | 'musicbrainz' | 'acousticbrainz' | 'deezer' | 'wikidata' | 'genius' | 'lrclib';
 
 const FATAL_STATUSES = new Set([401, 403, 451]);
 

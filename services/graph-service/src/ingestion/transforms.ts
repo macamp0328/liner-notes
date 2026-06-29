@@ -43,13 +43,7 @@ export function parseDisplayRole(role: string): string {
 }
 
 export type RoleCategory =
-  | 'performer'
-  | 'composer'
-  | 'producer'
-  | 'engineer'
-  | 'visual'
-  | 'crew'
-  | 'other';
+  'performer' | 'composer' | 'producer' | 'engineer' | 'visual' | 'crew' | 'other';
 
 const ROLE_CATEGORY_RULES: ReadonlyArray<readonly [RoleCategory, readonly string[]]> = [
   [

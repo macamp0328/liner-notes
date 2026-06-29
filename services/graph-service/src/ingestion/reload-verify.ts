@@ -81,12 +81,7 @@ export const RELOAD_COVERAGE_THRESHOLDS: readonly CoverageThreshold[] = [
 
 /** Why a metric passed or failed — drives the human-readable failure summary. */
 export type VerifyReason =
-  | 'ok'
-  | 'not-applicable'
-  | 'not-run'
-  | 'silently-zero'
-  | 'below-threshold'
-  | 'empty-graph';
+  'ok' | 'not-applicable' | 'not-run' | 'silently-zero' | 'below-threshold' | 'empty-graph';
 
 export interface MetricVerdict {
   metric: string;

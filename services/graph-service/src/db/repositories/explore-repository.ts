@@ -188,8 +188,7 @@ export interface RelatedRelease extends ExploreRelease {
  * one of these — numeric ⇒ release, anything else ⇒ person — so the two ends can be mixed.
  */
 export type PathEndpoint =
-  | { kind: 'release'; discogsId: number }
-  | { kind: 'person'; name: string };
+  { kind: 'release'; discogsId: number } | { kind: 'person'; name: string };
 
 /**
  * One hop along a shortest path (#343): the relationship traversed to reach `node`, plus *why* it

@@ -397,14 +397,7 @@ function inlineIntoMarkdown(mmdName: string, body: string, targets: string[]): v
 // ---------------------------------------------------------------------------
 
 export type Category =
-  | 'iam'
-  | 'compute'
-  | 'networking'
-  | 'observability'
-  | 'storage'
-  | 'secrets'
-  | 'edge'
-  | 'other';
+  'iam' | 'compute' | 'networking' | 'observability' | 'storage' | 'secrets' | 'edge' | 'other';
 
 const CATEGORY_META: Record<Category, { label: string; fill: string; order: number }> = {
   networking: { label: 'Networking', fill: '#dcfce7', order: 1 }, // soft green
