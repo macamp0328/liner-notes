@@ -1343,6 +1343,131 @@
         }
       }
     },
+    "/api/v1/admin/track-recording-lineage/enrich": {
+      "post": {
+        "summary": "Attribute MusicBrainz recording↔recording derivative lineage to the specific Track as RELATED_RECORDING edges",
+        "tags": ["admin"],
+        "description": "For each Track that carries a `recordingMbid` (set by `POST /api/v1/admin/track-musicbrainz/enrich`), fetches the recording’s `recording-rels` and writes a **track-scoped** `(:Track)-[:RELATED_RECORDING {source: \"musicbrainz\", type, direction}]->(:Recording)` edge to an MBID-keyed fallback `Recording` node for each curated derivative relation (#434) — `remix`, `DJ-mix`, `edit`, `mashes up`, `a cappella`, `instrumental`, `karaoke`, `compilation`. The related recording’s `type` + MB `direction` are stored RAW so the lineage is never normalised (and so can never be stored backwards). Blocks until complete.\n\n**This step is NOT part of `POST /api/v1/admin/ingest` — it must be triggered manually, and only after `track-musicbrainz` has populated `recordingMbid`.**\n\nThe fallback `Recording` node captures out-of-collection originals/derivatives; an in-collection counterpart resolves at query time via the `Recording.mbid → Track.recordingMbid` join (surfaced through `GET /api/v1/explore/lineage/:mbid`).\n\n**MusicBrainz recording↔recording relations are genuinely sparse — zero lineage across a collection is legitimate, not an error.**\n\nRe-selects a Track while it still has no MB-sourced lineage (null `recordingLineageFetchedAt`) once its last attempt has aged past `ENRICHMENT_STALENESS_DAYS` (default 30), stamping `recordingLineageFetchedAt` after each attempt — so a recording MusicBrainz has no relations for is retried at most once per window. Run `POST /api/v1/admin/track-recording-lineage/reset` to force a full re-run.\n\nRequires `MUSICBRAINZ_USER_AGENT` env var.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["message", "statusUrl"],
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "statusUrl": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-recording-lineage/reset": {
+      "post": {
+        "summary": "Reset MusicBrainz recording lineage enrichment for a full re-run",
+        "tags": ["admin"],
+        "description": "Removes every MusicBrainz-sourced `RELATED_RECORDING` edge (`source: \"musicbrainz\"`), prunes the now-orphaned fallback `Recording` nodes, and clears the `recordingLineageFetchedAt` marker, causing the next `POST /api/v1/admin/track-recording-lineage/enrich` call to re-process every recording from scratch.\n\nThis endpoint is blocked while enrichment is running.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["reset"],
+                      "properties": {
+                        "reset": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/track-acousticbrainz/enrich": {
       "post": {
         "summary": "Enrich Track nodes with AcousticBrainz audio features",
@@ -3202,6 +3327,95 @@
                               "type": "integer"
                             },
                             "studioEdges": {
+                              "type": "integer"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "nullable": true
+                        },
+                        "lastError": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/track-recording-lineage/status": {
+      "get": {
+        "summary": "Status of the most recent MusicBrainz recording lineage enrichment run",
+        "tags": ["admin"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "running",
+                        "startedAt",
+                        "completedAt",
+                        "durationMs",
+                        "lastResult",
+                        "lastError"
+                      ],
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "durationMs": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "lastResult": {
+                          "type": "object",
+                          "properties": {
+                            "recordingsProcessed": {
+                              "type": "integer"
+                            },
+                            "recordingsSkipped": {
+                              "type": "integer"
+                            },
+                            "recordingsFailed": {
+                              "type": "integer"
+                            },
+                            "lineageEdges": {
                               "type": "integer"
                             },
                             "durationMs": {
@@ -5625,6 +5839,89 @@
         }
       }
     },
+    "/api/v1/explore/lineage/{mbid}": {
+      "get": {
+        "summary": "Recording↔recording derivative lineage for a MusicBrainz recording",
+        "tags": ["explore"],
+        "description": "Given a MusicBrainz `recordingMbid`, returns its derivative lineage links (#434) — remix, edit, instrumental, etc. — each with the raw MusicBrainz `type` + `direction`, a human `phrase` (\"[this recording] {phrase} {relatedTitle}\"), and the in-collection releases that carry the related recording (empty when it is an out-of-collection original/derivative). Sparse by design.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "mbid",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["relatedRecordingMbid", "type", "phrase", "inCollectionReleases"],
+                    "properties": {
+                      "relatedRecordingMbid": {
+                        "type": "string"
+                      },
+                      "relatedTitle": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string"
+                      },
+                      "direction": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "phrase": {
+                        "type": "string"
+                      },
+                      "inCollectionReleases": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": ["discogsId", "title", "trackTitle"],
+                          "properties": {
+                            "discogsId": {
+                              "type": "integer"
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "trackTitle": {
+                              "type": "string"
+                            },
+                            "position": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/explore/songwriter/{name}": {
       "get": {
         "summary": "Compositions written by this person and the recordings of them in the collection",
@@ -7278,6 +7575,7 @@
                             "tracksWithMbProductionCredits",
                             "tracksWithMbArrangers",
                             "tracksWithMbStudio",
+                            "tracksWithMbLineage",
                             "studiosWithCoordinates",
                             "worksWithMultipleRecordings",
                             "worksWithWriterLinks",
@@ -7727,6 +8025,22 @@
                               }
                             },
                             "tracksWithMbStudio": {
+                              "type": "object",
+                              "required": ["covered", "applicable", "pct"],
+                              "properties": {
+                                "covered": {
+                                  "type": "integer"
+                                },
+                                "applicable": {
+                                  "type": "integer"
+                                },
+                                "pct": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "tracksWithMbLineage": {
                               "type": "object",
                               "required": ["covered", "applicable", "pct"],
                               "properties": {

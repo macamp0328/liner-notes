@@ -31,6 +31,7 @@ export type ReloadStageName =
   | 'track-works'
   | 'track-recording-artists'
   | 'track-recording-places'
+  | 'track-recording-lineage'
   | 'track-acousticbrainz'
   | 'track-deezer'
   | 'mb-artist-id'
@@ -151,7 +152,7 @@ const RELEASES_DESCRIPTOR: StageDescriptor = {
 };
 
 /**
- * The 20 enrichment stages in reload **priority** order — when several are eligible for one free
+ * The 21 enrichment stages in reload **priority** order — when several are eligible for one free
  * slot the earlier one wins. Ordering at runtime is governed by each stage's `deps` (declared on its
  * {@link StageDefinition}), not array position, so this list is tuned for priority: cheap + #165-gate
  * stages (`master-data`, `artist-profiles`, the pure-Cypher `artist-genres`) lead, ahead of the slow
@@ -180,6 +181,7 @@ const RELOAD_ORDER: readonly EnrichmentStageName[] = [
   'mb-artist-id',
   'track-recording-artists',
   'track-recording-places',
+  'track-recording-lineage',
   'nationality',
   'artist-wikidata',
   'artist-influences',
@@ -190,7 +192,7 @@ const RELOAD_ORDER: readonly EnrichmentStageName[] = [
 const STAGE_DEFINITION_BY_NAME = new Map(STAGE_DEFINITIONS.map((def) => [def.name, def]));
 
 /**
- * Every stage except `verify`: the hand-written `releases` bookend followed by the 20 enrichment
+ * Every stage except `verify`: the hand-written `releases` bookend followed by the 21 enrichment
  * stages, each derived from its single {@link StageDefinition} via {@link toStageDescriptor}.
  */
 const RELOAD_STAGES_BEFORE_VERIFY: readonly StageDescriptor[] = [

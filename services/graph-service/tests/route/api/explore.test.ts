@@ -13,6 +13,7 @@ const mockGetReleasesByCredit = vi.hoisted(() => vi.fn());
 const mockGetReleasesByInstrument = vi.hoisted(() => vi.fn());
 const mockGetArtistsByPersonLevelInstrument = vi.hoisted(() => vi.fn());
 const mockGetRecordingsByWork = vi.hoisted(() => vi.fn());
+const mockGetRecordingLineage = vi.hoisted(() => vi.fn());
 const mockGetWorksBySongwriter = vi.hoisted(() => vi.fn());
 const mockGetReleasesByStudio = vi.hoisted(() => vi.fn());
 const mockGetRecordingLocations = vi.hoisted(() => vi.fn());
@@ -56,6 +57,7 @@ vi.mock('../../../src/db/repositories/explore-repository.js', () => ({
   getReleasesByInstrument: mockGetReleasesByInstrument,
   getArtistsByPersonLevelInstrument: mockGetArtistsByPersonLevelInstrument,
   getRecordingsByWork: mockGetRecordingsByWork,
+  getRecordingLineage: mockGetRecordingLineage,
   getWorksBySongwriter: mockGetWorksBySongwriter,
   getReleasesByStudio: mockGetReleasesByStudio,
   getRecordingLocations: mockGetRecordingLocations,
@@ -294,6 +296,48 @@ describe('explore routes', () => {
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/explore/work/unknown-mbid',
+      });
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.payload)).toEqual([]);
+    });
+  });
+
+  // GET /api/v1/explore/lineage/:mbid (#434)
+  describe('GET /api/v1/explore/lineage/:mbid', () => {
+    const sampleLink = {
+      relatedRecordingMbid: 'orig-1',
+      relatedTitle: 'Original Mix',
+      type: 'remix',
+      direction: 'forward',
+      phrase: 'remix of',
+      inCollectionReleases: [
+        { discogsId: 7000001, title: 'Remixes', trackTitle: 'Song (Remix)', position: 'A1' },
+      ],
+    };
+
+    it('returns 200 with the lineage links and passes the mbid through', async () => {
+      mockGetRecordingLineage.mockResolvedValue([sampleLink]);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/lineage/4f19a475-4607-31cc-aba9-390f5a007352',
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload) as (typeof sampleLink)[];
+      expect(body).toHaveLength(1);
+      expect(body[0]!.type).toBe('remix');
+      expect(body[0]!.phrase).toBe('remix of');
+      expect(body[0]!.inCollectionReleases[0]!.discogsId).toBe(7000001);
+      expect(mockGetRecordingLineage).toHaveBeenCalledWith(
+        expect.anything(),
+        '4f19a475-4607-31cc-aba9-390f5a007352',
+      );
+    });
+
+    it('returns 200 with empty array for a recording with no lineage', async () => {
+      mockGetRecordingLineage.mockResolvedValue([]);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/explore/lineage/unknown-mbid',
       });
       expect(response.statusCode).toBe(200);
       expect(JSON.parse(response.payload)).toEqual([]);

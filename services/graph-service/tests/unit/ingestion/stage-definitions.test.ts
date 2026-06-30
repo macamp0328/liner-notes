@@ -26,6 +26,7 @@ const ENRICHMENT_STAGE_NAMES = [
   'track-works',
   'track-recording-artists',
   'track-recording-places',
+  'track-recording-lineage',
   'track-acousticbrainz',
   'track-deezer',
   'artist-profiles',
@@ -51,6 +52,7 @@ const _exhaustive: Record<EnrichmentStageName, true> = {
   'track-works': true,
   'track-recording-artists': true,
   'track-recording-places': true,
+  'track-recording-lineage': true,
   'track-acousticbrainz': true,
   'track-deezer': true,
   'artist-profiles': true,
@@ -77,6 +79,7 @@ const REQUIRES: Record<EnrichmentStageName, 'discogs' | 'musicbrainz' | 'wikidat
   'track-works': 'musicbrainz',
   'track-recording-artists': 'musicbrainz',
   'track-recording-places': 'musicbrainz',
+  'track-recording-lineage': 'musicbrainz',
   'track-acousticbrainz': undefined,
   'track-deezer': undefined,
   'artist-profiles': 'discogs',
@@ -108,7 +111,7 @@ const SCHEMA_HAS_503_FALSE = new Set<EnrichmentStageName>([
   'band-membership',
 ]);
 
-// The 7 stages WITHOUT a reset route (the other 13 have one).
+// The 7 stages WITHOUT a reset route (the other 14 have one).
 const NO_RESET = new Set<EnrichmentStageName>([
   'lyrics',
   'master-data',
@@ -120,10 +123,10 @@ const NO_RESET = new Set<EnrichmentStageName>([
 ]);
 
 describe('STAGE_DEFINITIONS registry', () => {
-  it('declares exactly the 20 enrichment stages, names unique', () => {
-    expect(STAGE_DEFINITIONS).toHaveLength(20);
+  it('declares exactly the 21 enrichment stages, names unique', () => {
+    expect(STAGE_DEFINITIONS).toHaveLength(21);
     const names = STAGE_DEFINITIONS.map((d) => d.name);
-    expect(new Set(names).size).toBe(20);
+    expect(new Set(names).size).toBe(21);
   });
 
   it('is in admin route-registration order (drift churns docs/openapi.json)', () => {

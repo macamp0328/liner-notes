@@ -30,6 +30,7 @@ const MUSICBRAINZ_STAGES = new Set([
   'track-works',
   'track-recording-artists',
   'track-recording-places',
+  'track-recording-lineage',
   'mb-release-events',
   'mb-artist-id',
   'nationality',

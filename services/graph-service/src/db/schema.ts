@@ -39,6 +39,9 @@ const statements = [
   'CREATE CONSTRAINT master_discogs_id IF NOT EXISTS FOR (m:Master) REQUIRE m.discogsId IS UNIQUE',
   // issue #336: Work (composition) nodes are MBID-keyed; RECORDING_OF links a Track to its Work.
   'CREATE CONSTRAINT work_mbid IF NOT EXISTS FOR (w:Work) REQUIRE w.mbid IS UNIQUE',
+  // issue #434: Recording (fallback) nodes are MBID-keyed; RELATED_RECORDING links a Track to the
+  // recording it derives from / gives rise to (remix/edit/instrumental/…).
+  'CREATE CONSTRAINT recording_mbid IF NOT EXISTS FOR (r:Recording) REQUIRE r.mbid IS UNIQUE',
   'CREATE INDEX track_recording_mbid IF NOT EXISTS FOR (t:Track) ON (t.recordingMbid)',
   'CREATE INDEX track_isrc IF NOT EXISTS FOR (t:Track) ON (t.isrc)',
   'CREATE INDEX track_tempo IF NOT EXISTS FOR (t:Track) ON (t.tempo)',
@@ -86,6 +89,8 @@ const statements = [
   'CREATE INDEX track_recording_artists_fetched_at IF NOT EXISTS FOR (t:Track) ON (t.recordingArtistsFetchedAt)',
   // issue #339 (slice 2): track-recording-places enrichment marker (MB recording → Track→Studio RECORDED_AT).
   'CREATE INDEX track_recording_places_fetched_at IF NOT EXISTS FOR (t:Track) ON (t.recordingPlacesFetchedAt)',
+  // issue #434: track-recording-lineage enrichment marker (MB recording → Track→Recording RELATED_RECORDING).
+  'CREATE INDEX track_recording_lineage_fetched_at IF NOT EXISTS FOR (t:Track) ON (t.recordingLineageFetchedAt)',
 
   // One-time cleanup: remove the superseded boolean markers. The `*FetchedAt` queries
   // never read them, so this is cosmetic — but it keeps the graph free of vestigial

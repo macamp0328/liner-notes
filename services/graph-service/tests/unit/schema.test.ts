@@ -24,9 +24,9 @@ describe('applySchema', () => {
     } as unknown as Driver;
   });
 
-  it('opens and closes a fresh session for each of the 60 statements', async () => {
+  it('opens and closes a fresh session for each of the 62 statements', async () => {
     await applySchema(driver);
-    expect(sessions).toHaveLength(60);
+    expect(sessions).toHaveLength(62);
     for (const s of sessions) {
       expect(s.run).toHaveBeenCalledTimes(1);
       expect(s.close).toHaveBeenCalledTimes(1);
@@ -63,6 +63,21 @@ describe('applySchema', () => {
     expect(
       stmts.some(
         (s) => s.includes('CREATE INDEX track_works_fetched_at') && s.includes('worksFetchedAt'),
+      ),
+    ).toBe(true);
+  });
+
+  it('creates the Recording uniqueness constraint and recordingLineageFetchedAt index (issue #434)', async () => {
+    await applySchema(driver);
+    const stmts = sessions.map((s) => (vi.mocked(s.run).mock.calls[0] as [string])[0]);
+    expect(stmts.some((s) => s.includes('recording_mbid') && s.includes('r.mbid IS UNIQUE'))).toBe(
+      true,
+    );
+    expect(
+      stmts.some(
+        (s) =>
+          s.includes('CREATE INDEX track_recording_lineage_fetched_at') &&
+          s.includes('recordingLineageFetchedAt'),
       ),
     ).toBe(true);
   });
