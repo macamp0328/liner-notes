@@ -217,6 +217,72 @@ describe('explore routes', () => {
     });
   });
 
+  // #434: recording↔recording lineage edges, resolved in-collection via Recording.mbid → Track.recordingMbid.
+  describe('GET /api/v1/explore/lineage/:mbid', () => {
+    type LineageBody = {
+      relatedRecordingMbid: string;
+      type: string;
+      direction: string | null;
+      phrase: string;
+      inCollectionReleases: { discogsId: number }[];
+    };
+
+    beforeAll(async () => {
+      // Isolated nodes (unique discogsIds/mbids) so this can't perturb the shared seed; torn down below.
+      const session = getDriver().session();
+      try {
+        await session.run(
+          `MERGE (src:Release {discogsId: 7099001}) SET src.title = 'Lineage Source'
+           MERGE (st:Track {position: 'L1', releaseDiscogsId: 7099001})
+             SET st.recordingMbid = 'rec-lin-src', st.title = 'Source Track'
+           MERGE (src)-[:HAS_TRACK]->(st)
+           MERGE (tgt:Release {discogsId: 7099002}) SET tgt.title = 'Lineage Target'
+           MERGE (tt:Track {position: 'L1', releaseDiscogsId: 7099002})
+             SET tt.recordingMbid = 'rec-lin-tgt', tt.title = 'Target Track'
+           MERGE (tgt)-[:HAS_TRACK]->(tt)
+           MERGE (rec:Recording {mbid: 'rec-lin-tgt'}) SET rec.title = 'Original Mix'
+           MERGE (st)-[rel:RELATED_RECORDING {type: 'remix'}]->(rec)
+             SET rel.source = 'musicbrainz', rel.direction = 'forward', rel.recordingMbid = 'rec-lin-src'`,
+        );
+      } finally {
+        await session.close();
+      }
+    });
+
+    afterAll(async () => {
+      const session = getDriver().session();
+      try {
+        await session.run(
+          `MATCH (r:Release) WHERE r.discogsId IN [7099001, 7099002]
+           OPTIONAL MATCH (r)-[:HAS_TRACK]->(t:Track)
+           DETACH DELETE r, t`,
+        );
+        await session.run(`MATCH (rec:Recording {mbid: 'rec-lin-tgt'}) DETACH DELETE rec`);
+      } finally {
+        await session.close();
+      }
+    });
+
+    it('returns the derivative link with its phrase and the in-collection target release', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/lineage/rec-lin-src' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload) as LineageBody[];
+      expect(body).toHaveLength(1);
+      expect(body[0]!.relatedRecordingMbid).toBe('rec-lin-tgt');
+      expect(body[0]!.type).toBe('remix');
+      expect(body[0]!.direction).toBe('forward');
+      expect(body[0]!.phrase).toBe('remix of');
+      // The target recording is in-collection (a Track carries rec-lin-tgt) → resolved to its Release.
+      expect(body[0]!.inCollectionReleases.map((r) => r.discogsId)).toEqual([7099002]);
+    });
+
+    it('returns an empty array for a recording with no lineage', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/explore/lineage/__none__' });
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.payload)).toEqual([]);
+    });
+  });
+
   // #380: WROTE edges joined deterministically on musicbrainzId, surfaced by composer name.
   describe('GET /api/v1/explore/songwriter/:name', () => {
     type SongwriterBody = { workMbid: string; workTitle: string; roles: string[] };

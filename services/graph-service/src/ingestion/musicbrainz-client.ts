@@ -101,6 +101,26 @@ export interface MbRecordingPlace {
   area: string | null;
 }
 
+/**
+ * A recording↔recording derivative relationship harvested from a recording's `recording-rels` (#434).
+ * MusicBrainz links one recording to another with a typed derivative relationship — a remix, an edit,
+ * an instrumental version, a compilation, and so on. We keep the related recording's MBID + title (so
+ * an out-of-collection original/derivative is still captured as a fallback `Recording` node) and store
+ * the relation `type` + MB `direction` RAW: the direction records which side of the relationship the
+ * fetched recording sits on, so the lineage can be rendered without ever being normalised — and
+ * therefore never stored backwards.
+ */
+export interface MbRecordingDerivation {
+  /** The OTHER recording's MBID — the link target a fallback `Recording` node merges on. */
+  recordingMbid: string;
+  /** The other recording's title; display text on the fallback node (empty when MB omits it). */
+  title: string;
+  /** The MB relation type, e.g. `remix` / `edit` / `instrumental` — kept verbatim on the edge. */
+  type: string;
+  /** MB relationship direction (`forward` / `backward`); null when MB omits it. Stored raw. */
+  direction: string | null;
+}
+
 export interface MusicBrainzClientConfig {
   userAgent: string;
   /** Milliseconds to sleep after every successful request. 1100ms keeps us safely under 1 req/sec. */
@@ -198,6 +218,16 @@ interface MbRecordingPlaceRelsResponse {
   }>;
 }
 
+interface MbRecordingRelsResponse {
+  id: string;
+  relations?: Array<{
+    type: string;
+    direction?: string;
+    'target-type'?: string;
+    recording?: { id: string; title?: string };
+  }>;
+}
+
 interface MbReleaseListResponse {
   'release-count': number;
   releases: Array<{
@@ -252,6 +282,27 @@ const RECORDING_PERFORMANCE_ROLES = new Set(['performer', 'instrument', 'vocal']
 const RECORDING_PLACE_RELATIONS = new Set(['recorded at', 'mixed at']);
 
 /**
+ * Recording↔recording relationship types we treat as audio lineage (#434), harvested from
+ * `inc=recording-rels`. These are the exact MusicBrainz relationship-type NAMES (verbatim, spaces and
+ * all — the ws/2 `type` field carries the name, the same way the place-rels above carry `recorded at`).
+ * Broaden lineage by editing this one Set.
+ *
+ * Deliberately EXCLUDED: `samples material` (its own epic, #337), the deprecated `first track release`
+ * / `remaster`, and `music video` / `commentary` (not audio lineage). `live performance of` is a
+ * recording→**work** relationship owned by #336 — it is not a recording↔recording type at all.
+ */
+const RECORDING_DERIVATION_RELATIONS = new Set([
+  'remix',
+  'DJ-mix',
+  'edit',
+  'mashes up',
+  'a cappella',
+  'instrumental',
+  'karaoke',
+  'compilation',
+]);
+
+/**
  * Recording-level production/engineering artist-relation types we now push down to track scope (#339),
  * each mapped to a canonical role string. MusicBrainz models these at the recording level — genuinely
  * track-attributable, unlike Discogs's album-level production credits. The mapping is chosen so the
@@ -261,11 +312,13 @@ const RECORDING_PLACE_RELATIONS = new Set(['recorded at', 'mixed at']);
  * would silently drop real data.
  *
  * Deliberately EXCLUDED (kept release-scoped or out of this slice): `mastering`/lacquer/cover-art
- * (inherently whole-release; `mastering` is also deprecated at recording level in MB), `remixer` (a
- * derivative recording — the lineage epic), and the niche `programming`/`editor`/`sound effects`. The
- * `arranger` family IS pushed down — recording-level arranging is track-attributable — via the separate
- * `RECORDING_ARRANGER_ROLE_MAP` below. MB production attributes (`additional`/`co`/`executive`/…) are
- * qualifiers, not credit tokens, and are dropped (see `getArtistsByRecordingMbid`).
+ * (inherently whole-release; `mastering` is also deprecated at recording level in MB) and the niche
+ * `programming`/`editor`/`sound effects`. The `arranger` family IS pushed down — recording-level
+ * arranging is track-attributable — via the separate `RECORDING_ARRANGER_ROLE_MAP` below, and the
+ * `remixer` (the person who remixed THIS recording) via `RECORDING_REMIXER_ROLES` (#434 — distinct
+ * from the recording↔recording `RELATED_RECORDING` lineage edge). MB production attributes
+ * (`additional`/`co`/`executive`/…) are qualifiers, not credit tokens, and are dropped (see
+ * `getArtistsByRecordingMbid`).
  */
 const RECORDING_PRODUCTION_ROLE_MAP: ReadonlyMap<string, string> = new Map([
   ['producer', 'producer'],
@@ -292,6 +345,17 @@ const RECORDING_ARRANGER_ROLE_MAP: ReadonlyMap<string, string> = new Map([
   ['vocal arranger', 'vocal arranger'],
   ['orchestrator', 'orchestrator'],
 ]);
+
+/**
+ * Recording-level remixer artist-relation, pushed down to track scope (#434). MusicBrainz models the
+ * remixer at the recording level — the person who remixed THIS recording — so it is genuinely
+ * track-attributable, like the production/arranger credits above. The credit token is the raw type
+ * `remixer`, which `parseRoleCategory` buckets `other` (no performer/producer/engineer/composer keyword
+ * is a substring of "remixer") — correct, since a remixer is its own kind of credit. This is the PERSON
+ * who remixed, deferred here from #339's slice-1 client as part of the lineage epic; the recording↔
+ * recording derivative EDGE is the separate `RELATED_RECORDING` lineage (track-recording-lineage stage).
+ */
+const RECORDING_REMIXER_ROLES = new Set(['remixer']);
 
 /** Convert a MusicBrainz millisecond length to whole seconds; null for missing or non-positive values. */
 function msToSeconds(ms: number | null | undefined): number | null {
@@ -540,10 +604,11 @@ export class MusicBrainzClient {
    * Fetch the track-attributable credits of a MusicBrainz recording from its artist relationships.
    * Uses `inc=artist-rels`; reads `relations[]` whose `type` is a **performance** role
    * (#335: `performer`/`instrument`/`vocal`, instrument/vocal name in `attributes`), a **production**
-   * role (#339: `RECORDING_PRODUCTION_ROLE_MAP` — producer + engineer family) or an **arranging** role
-   * (#339: `RECORDING_ARRANGER_ROLE_MAP` — arranger family + orchestrator); the latter two are mapped to
-   * a canonical role string with attributes dropped. Roles outside all three sets (`mastering`,
-   * `remixer`, …) are not pushed down to a track. Each person's MB artist MBID is retained
+   * role (#339: `RECORDING_PRODUCTION_ROLE_MAP` — producer + engineer family), an **arranging** role
+   * (#339: `RECORDING_ARRANGER_ROLE_MAP` — arranger family + orchestrator) or the **remixer** role
+   * (#434: `RECORDING_REMIXER_ROLES`); the production/arranging ones are mapped to a canonical role
+   * string with attributes dropped. Roles outside all four sets (`mastering`, …) are not pushed down to
+   * a track. Each person's MB artist MBID is retained
    * so the credit reconciles to our Discogs-keyed Musician nodes deterministically (the `mb-artist-id`
    * join, #380) — never name-matching. Empty array on no track-attributable credits, an open breaker,
    * or a 404 (a known recordingMbid that no longer resolves is not retried until the staleness window
@@ -600,6 +665,18 @@ export class MusicBrainzClient {
         });
         continue;
       }
+
+      if (RECORDING_REMIXER_ROLES.has(rel.type)) {
+        // The person who remixed THIS recording (#434). The credit token is the raw `remixer` type
+        // (buckets `other` via parseRoleCategory); qualifier attributes are dropped, like production.
+        artists.push({
+          mbid: rel.artist.id,
+          name: rel.artist.name,
+          role: rel.type,
+          attributes: [],
+        });
+        continue;
+      }
     }
     return artists;
   }
@@ -642,6 +719,42 @@ export class MusicBrainzClient {
       });
     }
     return places;
+  }
+
+  /**
+   * Fetch the recording↔recording lineage of a MusicBrainz recording from its `recording-rels` (#434).
+   * Uses `inc=recording-rels`; reads `relations[]` whose `target-type` is `recording` and whose `type`
+   * is one of `RECORDING_DERIVATION_RELATIONS` (remix / edit / instrumental / …). Each related
+   * recording's MBID + title is returned with the relation `type` and MB `direction`, both kept RAW so
+   * the lineage is never normalised at write time — and so can never be stored backwards. Empty array
+   * on no lineage relations, an open breaker, or a 404 (a known recordingMbid that no longer resolves
+   * is not retried until the staleness window expires).
+   */
+  async getRecordingRelationsByMbid(recordingMbid: string): Promise<MbRecordingDerivation[]> {
+    const endpoint = `${BASE_URL}/recording/${encodeURIComponent(recordingMbid)}?inc=recording-rels&fmt=json`;
+
+    let response: MbRecordingRelsResponse;
+    try {
+      response = await this.fetchWithBackoff<MbRecordingRelsResponse>(endpoint);
+    } catch (err) {
+      if (err instanceof CircuitBreakerOpenError) return [];
+      if (err instanceof Error && err.message.includes('not found (404)')) return [];
+      throw err;
+    }
+
+    const derivations: MbRecordingDerivation[] = [];
+    for (const rel of response.relations ?? []) {
+      if (rel['target-type'] !== 'recording' || rel.recording?.id === undefined) continue;
+      if (!RECORDING_DERIVATION_RELATIONS.has(rel.type)) continue;
+
+      derivations.push({
+        recordingMbid: rel.recording.id,
+        title: rel.recording.title?.trim() ?? '',
+        type: rel.type,
+        direction: rel.direction ?? null,
+      });
+    }
+    return derivations;
   }
 
   /**

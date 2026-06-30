@@ -243,10 +243,33 @@ collection:
               sortKey: 200
             url: '{{ _.base_url }}/api/v1/admin/track-recording-places/status'
             method: GET
+      - name: track-recording-lineage
+        meta:
+          id: fld_a0e81bd611e83379ac9cd999fb26982f
+          sortKey: 1000
+        children:
+          - name: Attribute MusicBrainz recording↔recording derivative lineage to the specific Track as RELATED_RECORDING edges
+            meta:
+              id: req_c978b1bb2d9ec6f1b996c0d212222028
+              sortKey: 0
+            url: '{{ _.base_url }}/api/v1/admin/track-recording-lineage/enrich'
+            method: POST
+          - name: Reset MusicBrainz recording lineage enrichment for a full re-run
+            meta:
+              id: req_f3ff3f4a0838c12ffe8cb60174fb1e52
+              sortKey: 100
+            url: '{{ _.base_url }}/api/v1/admin/track-recording-lineage/reset'
+            method: POST
+          - name: Status of the most recent MusicBrainz recording lineage enrichment run
+            meta:
+              id: req_5c16268955a296193215ba965abe9b6d
+              sortKey: 200
+            url: '{{ _.base_url }}/api/v1/admin/track-recording-lineage/status'
+            method: GET
       - name: track-acousticbrainz
         meta:
           id: fld_a5b20e870d6e814a58ab0606f4d340d0
-          sortKey: 1000
+          sortKey: 1100
         children:
           - name: Enrich Track nodes with AcousticBrainz audio features
             meta:
@@ -269,7 +292,7 @@ collection:
       - name: track-deezer
         meta:
           id: fld_2489505638a9fa3e5441b173bc2ec21b
-          sortKey: 1100
+          sortKey: 1200
         children:
           - name: Enrich Track nodes with Deezer BPM and loudness
             meta:
@@ -292,7 +315,7 @@ collection:
       - name: artist-profiles
         meta:
           id: fld_7e77f2af1e01d2375a512e63c6a10f76
-          sortKey: 1200
+          sortKey: 1300
         children:
           - name: Enrich Artist nodes with realName and profile from the Discogs artist API
             meta:
@@ -315,7 +338,7 @@ collection:
       - name: artist-genres
         meta:
           id: fld_5515ef67fb5cd51c3edfd967d155a77d
-          sortKey: 1300
+          sortKey: 1400
         children:
           - name: Aggregate genres and styles from releases onto Artist nodes
             meta:
@@ -332,7 +355,7 @@ collection:
       - name: label-hierarchy
         meta:
           id: fld_083702ea93a8197853c12e4adb8ee28e
-          sortKey: 1400
+          sortKey: 1500
         children:
           - name: Enrich Label nodes with their parent label from the Discogs label API
             meta:
@@ -355,7 +378,7 @@ collection:
       - name: group-members
         meta:
           id: fld_8aab557e9325a1e70388e072e9945260
-          sortKey: 1500
+          sortKey: 1600
         children:
           - name: Link group members via MEMBER_OF from the Discogs artist API
             meta:
@@ -378,7 +401,7 @@ collection:
       - name: person-reconciliation
         meta:
           id: fld_03d54ba059816940e23ed9da3cc552e4
-          sortKey: 1600
+          sortKey: 1700
         children:
           - name: Reconcile Musician identities with Artist nodes (SAME_PERSON_AS)
             meta:
@@ -395,7 +418,7 @@ collection:
       - name: mb-artist-id
         meta:
           id: fld_d7e5fbc6092b092c39ab0baa0a215c9a
-          sortKey: 1700
+          sortKey: 1800
         children:
           - name: Resolve each Artist/Musician MusicBrainz artist MBID (musicbrainzId)
             meta:
@@ -418,7 +441,7 @@ collection:
       - name: songwriter-reconciliation
         meta:
           id: fld_59f1251beec52792d3fc6ab437a567c4
-          sortKey: 1800
+          sortKey: 1900
         children:
           - name: Promote Work writers to (:Artist|:Musician)-[:WROTE]->(:Work) edges
             meta:
@@ -435,7 +458,7 @@ collection:
       - name: artist-wikidata
         meta:
           id: fld_3ba8b93c32fb71336b9382394c58f8a6
-          sortKey: 1900
+          sortKey: 2000
         children:
           - name: Enrich Artist nodes with Wikidata biographical data (QID, lifespan, image, awards)
             meta:
@@ -458,7 +481,7 @@ collection:
       - name: artist-influences
         meta:
           id: fld_72fed65dbeeb29c01ff3cdbcf57f7ef8
-          sortKey: 2000
+          sortKey: 2100
         children:
           - name: Project Wikidata P737 influences into INFLUENCED_BY edges
             meta:
@@ -475,7 +498,7 @@ collection:
       - name: band-membership
         meta:
           id: fld_734e152be840cf1ace563955af0ff353
-          sortKey: 2100
+          sortKey: 2200
         children:
           - name: Project Wikidata P463 memberships into dated MEMBER_OF edges
             meta:
@@ -492,7 +515,7 @@ collection:
       - name: reload
         meta:
           id: fld_5808d8d0499fb9db11f9d9870b1ff194
-          sortKey: 2200
+          sortKey: 2300
         children:
           - name: Trigger the orchestrated reload (ingest + every enrichment) with resume
             meta:
@@ -609,10 +632,19 @@ collection:
         pathParameters:
           - name: mbid
             value: example
+      - name: Recording↔recording derivative lineage for a MusicBrainz recording
+        meta:
+          id: req_1bbb2e3a248454fa16ebe41ecb0a2e36
+          sortKey: 500
+        url: '{{ _.base_url }}/api/v1/explore/lineage/:mbid'
+        method: GET
+        pathParameters:
+          - name: mbid
+            value: example
       - name: Compositions written by this person and the recordings of them in the collection
         meta:
           id: req_2be885b6dcd5ef9cd439d2a2b5a0c38c
-          sortKey: 500
+          sortKey: 600
         url: '{{ _.base_url }}/api/v1/explore/songwriter/:name'
         method: GET
         pathParameters:
@@ -621,7 +653,7 @@ collection:
       - name: Who influenced this artist and who they influenced (Wikidata P737)
         meta:
           id: req_845527fd8b54808fa391148339219a23
-          sortKey: 600
+          sortKey: 700
         url: '{{ _.base_url }}/api/v1/explore/influences/:name'
         method: GET
         pathParameters:
@@ -630,7 +662,7 @@ collection:
       - name: The bands this artist belonged to, with tenure, and their bandmates (Wikidata P463)
         meta:
           id: req_2eddf69f9ea640ccc01d2e1104db84d9
-          sortKey: 700
+          sortKey: 800
         url: '{{ _.base_url }}/api/v1/explore/membership/:name'
         method: GET
         pathParameters:
@@ -639,7 +671,7 @@ collection:
       - name: Releases recorded at this studio
         meta:
           id: req_b0a9d044bf7e18f240d423ca462f0188
-          sortKey: 800
+          sortKey: 900
         url: '{{ _.base_url }}/api/v1/explore/studio/:name'
         method: GET
         pathParameters:
@@ -648,13 +680,13 @@ collection:
       - name: Studios with known coordinates, for the recording-location map
         meta:
           id: req_78dd5afab6817528e8bda7154ef2646a
-          sortKey: 900
+          sortKey: 1000
         url: '{{ _.base_url }}/api/v1/explore/recording-locations'
         method: GET
       - name: Releases on this label
         meta:
           id: req_2a90c46248fd11d9ba25bcccd928b767
-          sortKey: 1000
+          sortKey: 1100
         url: '{{ _.base_url }}/api/v1/explore/label/:name'
         method: GET
         parameters:
@@ -667,7 +699,7 @@ collection:
       - name: Releases in this genre
         meta:
           id: req_a7dbd4bd9edbf82e9fae43fb6e6744ce
-          sortKey: 1100
+          sortKey: 1200
         url: '{{ _.base_url }}/api/v1/explore/genre/:name'
         method: GET
         pathParameters:
@@ -676,7 +708,7 @@ collection:
       - name: Releases in this style
         meta:
           id: req_8d65cc5ae2ae4ec5dad3d75b888ebe93
-          sortKey: 1200
+          sortKey: 1300
         url: '{{ _.base_url }}/api/v1/explore/style/:name'
         method: GET
         pathParameters:
@@ -685,7 +717,7 @@ collection:
       - name: Releases from this country
         meta:
           id: req_5b12ee7287324e0a922493aa2a388c26
-          sortKey: 1300
+          sortKey: 1400
         url: '{{ _.base_url }}/api/v1/explore/country/:name'
         method: GET
         pathParameters:
@@ -694,7 +726,7 @@ collection:
       - name: Releases from this decade — accepts 1970s format
         meta:
           id: req_183fb1c1e68ba589c49007b17eacad69
-          sortKey: 1400
+          sortKey: 1500
         url: '{{ _.base_url }}/api/v1/explore/decade/:decade'
         method: GET
         pathParameters:
@@ -703,7 +735,7 @@ collection:
       - name: Releases from this exact year
         meta:
           id: req_aa30336c726783f229b1f5217cb4cb87
-          sortKey: 1500
+          sortKey: 1600
         url: '{{ _.base_url }}/api/v1/explore/year/:year'
         method: GET
         pathParameters:
@@ -712,7 +744,7 @@ collection:
       - name: Graph traversal from a release — nodes reachable within depth hops (max 3), each tagged with its edge-specificity weight (1/degree), most-specific first
         meta:
           id: req_29e7edcf6984d82dd0c777ab5095cd25
-          sortKey: 1600
+          sortKey: 1700
         url: '{{ _.base_url }}/api/v1/explore/connections/:discogsId'
         method: GET
         parameters:
@@ -725,7 +757,7 @@ collection:
       - name: Releases most related to this one, ranked by edge specificity (Σ 1/degree over shared session players, producers, engineers, and studios)
         meta:
           id: req_812e65947a114361dd38cac48eb021f2
-          sortKey: 1700
+          sortKey: 1800
         url: '{{ _.base_url }}/api/v1/explore/related/:discogsId'
         method: GET
         parameters:
@@ -738,7 +770,7 @@ collection:
       - name: Shortest human/credit path between two records or people — the 'six degrees' finder
         meta:
           id: req_ca29925eeb6345150576ae4c387f485e
-          sortKey: 1800
+          sortKey: 1900
         url: '{{ _.base_url }}/api/v1/explore/path'
         method: GET
         parameters:
@@ -752,13 +784,13 @@ collection:
       - name: Release pairs that share one or more session musicians
         meta:
           id: req_80287ce4b9c1d41e34e0e03d6f38dae7
-          sortKey: 1900
+          sortKey: 2000
         url: '{{ _.base_url }}/api/v1/explore/shared-musicians'
         method: GET
       - name: Tracks with the most distinct countries of origin among their credited musicians. Requires nationality enrichment to have been run.
         meta:
           id: req_780d18450bf98dc564e75aaa926a3850
-          sortKey: 2000
+          sortKey: 2100
         url: '{{ _.base_url }}/api/v1/explore/tracks/most-international'
         method: GET
         parameters:
@@ -768,7 +800,7 @@ collection:
       - name: Albums in this collection with the widest global pressing reach. Requires master data enrichment to have been run.
         meta:
           id: req_ecd44bf255eb79f5ef72d9cc205be97b
-          sortKey: 2100
+          sortKey: 2200
         url: '{{ _.base_url }}/api/v1/explore/releases/most-pressed'
         method: GET
         parameters:
@@ -778,7 +810,7 @@ collection:
       - name: Find tracks by audio features
         meta:
           id: req_08162dc68e9b3133701494d2eef98130
-          sortKey: 2200
+          sortKey: 2300
         url: '{{ _.base_url }}/api/v1/explore/tracks/by-audio-features'
         method: GET
         parameters:

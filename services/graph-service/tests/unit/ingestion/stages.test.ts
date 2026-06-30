@@ -153,6 +153,7 @@ describe('RELOAD_STAGES order', () => {
       'mb-artist-id',
       'track-recording-artists',
       'track-recording-places',
+      'track-recording-lineage',
       'nationality',
       'artist-wikidata',
       'artist-influences',
@@ -257,6 +258,7 @@ describe('RELOAD_STAGES resource lanes', () => {
       'track-works',
       'track-recording-artists',
       'track-recording-places',
+      'track-recording-lineage',
       'mb-release-events',
       'mb-artist-id',
       'nationality',
@@ -271,6 +273,7 @@ describe('RELOAD_STAGES resource lanes', () => {
       'track-works',
       'track-recording-artists',
       'track-recording-places',
+      'track-recording-lineage',
       'track-acousticbrainz',
       'track-deezer',
     ] as const) {
@@ -557,6 +560,10 @@ describe('stages skip (return null) when a required client is missing', () => {
 
   it('track-recording-places skips with no musicbrainz client', async () => {
     expect(await stage('track-recording-places').run(makeCtx({ musicbrainz: null }))).toBeNull();
+  });
+
+  it('track-recording-lineage skips with no musicbrainz client', async () => {
+    expect(await stage('track-recording-lineage').run(makeCtx({ musicbrainz: null }))).toBeNull();
   });
 
   it('nationality skips with no musicbrainz client', async () => {

@@ -983,7 +983,7 @@ describe('MusicBrainzClient', () => {
       ]);
     });
 
-    it('keeps mastering / remixer release-scoped — they are NOT pushed down to a track (#339)', async () => {
+    it('keeps mastering release-scoped — it is NOT pushed down to a track (#339)', async () => {
       fetchSpy.mockResolvedValueOnce(
         makeOkResponse({
           id: 'rec-1',
@@ -999,12 +999,6 @@ describe('MusicBrainzClient', () => {
               'target-type': 'artist',
               attributes: [],
               artist: { id: 'm-1', name: 'Masterer' },
-            },
-            {
-              type: 'remixer',
-              'target-type': 'artist',
-              attributes: [],
-              artist: { id: 'r-1', name: 'Remixer' },
             },
           ],
         }),
@@ -1081,6 +1075,28 @@ describe('MusicBrainzClient', () => {
       for (const a of artists) {
         expect(parseRoleCategory(a.role)).toBe('composer');
       }
+    });
+
+    it('maps the remixer role down to track scope, dropping qualifier attributes (#434)', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            {
+              type: 'remixer',
+              'target-type': 'artist',
+              attributes: ['additional'],
+              artist: { id: 'rm-1', name: 'Remixer' },
+            },
+          ],
+        }),
+      );
+
+      const artists = await client.getArtistsByRecordingMbid('rec-1');
+
+      expect(artists).toEqual([{ mbid: 'rm-1', name: 'Remixer', role: 'remixer', attributes: [] }]);
+      // The remixer credit is its own kind — it buckets `other`, not producer/engineer/composer.
+      expect(parseRoleCategory(artists[0]!.role)).toBe('other');
     });
 
     it('ignores performance relations without an artist id or with a non-artist target', async () => {
@@ -1218,6 +1234,109 @@ describe('MusicBrainzClient', () => {
     it('returns an empty array on a 404 (recording no longer resolves)', async () => {
       fetchSpy.mockResolvedValueOnce(makeErrorResponse(404, 'Not Found'));
       expect(await client.getPlacesByRecordingMbid('gone')).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getRecordingRelationsByMbid (#434)
+  // -------------------------------------------------------------------------
+  describe('getRecordingRelationsByMbid', () => {
+    it('maps curated derivative types, keeping target mbid/title and raw type + direction', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            {
+              type: 'remix',
+              direction: 'forward',
+              'target-type': 'recording',
+              recording: { id: 'orig-1', title: 'Original Mix' },
+            },
+            {
+              type: 'instrumental',
+              direction: 'backward',
+              'target-type': 'recording',
+              recording: { id: 'inst-1', title: '  Instrumental  ' },
+            },
+          ],
+        }),
+      );
+
+      const derivations = await client.getRecordingRelationsByMbid('rec-1');
+
+      expect(derivations).toEqual([
+        { recordingMbid: 'orig-1', title: 'Original Mix', type: 'remix', direction: 'forward' },
+        {
+          recordingMbid: 'inst-1',
+          title: 'Instrumental',
+          type: 'instrumental',
+          direction: 'backward',
+        },
+      ]);
+      const url = fetchSpy.mock.calls[0]?.[0] as string;
+      expect(url).toContain('/recording/rec-1');
+      expect(url).toContain('inc=recording-rels');
+    });
+
+    it('stores a null direction when MusicBrainz omits it', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            {
+              type: 'edit',
+              'target-type': 'recording',
+              recording: { id: 'edit-1', title: 'Edit' },
+            },
+          ],
+        }),
+      );
+
+      expect(await client.getRecordingRelationsByMbid('rec-1')).toEqual([
+        { recordingMbid: 'edit-1', title: 'Edit', type: 'edit', direction: null },
+      ]);
+    });
+
+    it('drops non-recording targets, excluded types, and targets without an id', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeOkResponse({
+          id: 'rec-1',
+          relations: [
+            // non-recording target
+            { type: 'remix', 'target-type': 'artist', artist: { id: 'a-1', name: 'X' } },
+            // recording target but an excluded type (samples → #337, deprecated remaster, music video)
+            {
+              type: 'samples material',
+              'target-type': 'recording',
+              recording: { id: 'rec-9', title: 'Sampled' },
+            },
+            {
+              type: 'remaster',
+              'target-type': 'recording',
+              recording: { id: 'rec-8', title: 'RM' },
+            },
+            {
+              type: 'music video',
+              'target-type': 'recording',
+              recording: { id: 'rec-7', title: 'MV' },
+            },
+            // curated type but the target carries no id
+            { type: 'remix', 'target-type': 'recording', recording: { title: 'No Id' } },
+          ],
+        }),
+      );
+
+      expect(await client.getRecordingRelationsByMbid('rec-1')).toEqual([]);
+    });
+
+    it('returns an empty array when the recording has no relations', async () => {
+      fetchSpy.mockResolvedValueOnce(makeOkResponse({ id: 'rec-1' }));
+      expect(await client.getRecordingRelationsByMbid('rec-1')).toEqual([]);
+    });
+
+    it('returns an empty array on a 404 (recording no longer resolves)', async () => {
+      fetchSpy.mockResolvedValueOnce(makeErrorResponse(404, 'Not Found'));
+      expect(await client.getRecordingRelationsByMbid('gone')).toEqual([]);
     });
   });
 
