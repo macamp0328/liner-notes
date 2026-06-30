@@ -94,9 +94,9 @@ variable "scheduler_timezone" {
 }
 
 variable "scheduler_stop_cron" {
-  description = "EventBridge Scheduler cron for the nightly stop, evaluated in scheduler_timezone. Default 23:00."
+  description = "EventBridge Scheduler cron for the nightly stop, evaluated in scheduler_timezone. Default 20:00."
   type        = string
-  default     = "cron(0 23 * * ? *)"
+  default     = "cron(0 20 * * ? *)"
 }
 
 variable "scheduler_start_cron" {

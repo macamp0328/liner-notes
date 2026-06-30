@@ -1165,8 +1165,8 @@ Run from the repo root (uses your default AWS profile; honors `AWS_PROFILE`):
 | Command             | What it does                                                                                                | When                              |
 | ------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------- |
 | `pnpm power:off`    | Pauses the nightly schedule, suppresses the two alarms, stops the node. Stays down until you say otherwise. | Away for days/weeks.              |
-| `pnpm power:on`     | Pauses the nightly schedule, starts the node, re-enables the alarms. Stays up — the 23:00 stop won't fire.  | Working now, including overnight. |
-| `pnpm power:auto`   | Re-arms the nightly stop (23:00 ET) / start (08:00 ET) cost-saver and starts the node now.                  | Back to hands-off cost saving.    |
+| `pnpm power:on`     | Pauses the nightly schedule, starts the node, re-enables the alarms. Stays up — the 20:00 stop won't fire.  | Working now, including overnight. |
+| `pnpm power:auto`   | Re-arms the nightly stop (20:00 ET) / start (08:00 ET) cost-saver and starts the node now.                  | Back to hands-off cost saving.    |
 | `pnpm power:status` | Read-only: prints the instance state and each schedule's ENABLED/DISABLED state.                            | Checking where things stand.      |
 
 Each command prints the resulting state, e.g.:
