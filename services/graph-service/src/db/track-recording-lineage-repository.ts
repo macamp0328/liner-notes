@@ -75,7 +75,8 @@ export async function mergeRecordingLineage(
       `UNWIND $derivations AS d
        MERGE (rec:Recording { mbid: d.recordingMbid })
          ON CREATE SET rec.title = d.title
-         ON MATCH SET rec.title = coalesce(rec.title, d.title)
+         ON MATCH SET rec.title =
+           CASE WHEN coalesce(rec.title, '') = '' THEN d.title ELSE rec.title END
        WITH rec, d
        UNWIND $trackElementIds AS eid
        MATCH (t:Track) WHERE elementId(t) = eid

@@ -91,10 +91,13 @@ describe('mergeRecordingLineage', () => {
 
     expect(runSpy).toHaveBeenCalledOnce();
     const [query, params] = runSpy.mock.calls[0] as [string, Record<string, unknown>];
-    // The fallback Recording node is MBID-keyed on the OTHER recording; title only fills a gap.
+    // The fallback Recording node is MBID-keyed on the OTHER recording; title only fills a gap —
+    // including an empty-string gap (the client emits '' for a missing MB title, not null).
     expect(query).toContain('MERGE (rec:Recording { mbid: d.recordingMbid })');
     expect(query).toContain('ON CREATE SET rec.title = d.title');
-    expect(query).toContain('coalesce(rec.title, d.title)');
+    expect(query).toContain(
+      "CASE WHEN coalesce(rec.title, '') = '' THEN d.title ELSE rec.title END",
+    );
     // The edge merge key includes `type` so two derivative types to one target don't collapse.
     expect(query).toContain('MERGE (t)-[rel:RELATED_RECORDING { type: d.type }]->(rec)');
     expect(query).toContain('ON CREATE SET');
