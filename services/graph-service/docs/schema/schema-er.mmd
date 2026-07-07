@@ -53,6 +53,10 @@ erDiagram
         DateTime nationalityFetchedAt "indexed"
         Boolean notAGroup
     }
+    Recording {
+        String mbid PK
+        String title
+    }
     Region {
         String name PK
     }
@@ -125,6 +129,7 @@ erDiagram
         String musicalScale "indexed"
         String position
         DateTime recordingArtistsFetchedAt "indexed"
+        DateTime recordingLineageFetchedAt "indexed"
         String recordingMbid "indexed"
         DateTime recordingPlacesFetchedAt "indexed"
         Long releaseDiscogsId
@@ -161,6 +166,7 @@ erDiagram
     Release }o--o{ Studio : "RECORDED_AT"
     Track }o--o{ Studio : "RECORDED_AT"
     Track }o--o{ Work : "RECORDING_OF"
+    Track }o--o{ Recording : "RELATED_RECORDING"
     Release }o--o{ Artist : "RELEASED_BY"
     Master }o--o{ Country : "RELEASED_IN"
     Master }o--o{ Region : "RELEASED_IN_REGION"
