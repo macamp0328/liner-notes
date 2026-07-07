@@ -6,6 +6,7 @@ flowchart LR
     Label["Label"]
     Master["Master"]
     Musician["Musician"]
+    Recording["Recording"]
     Region["Region"]
     Release["Release"]
     ReloadJob["ReloadJob"]
@@ -34,6 +35,7 @@ flowchart LR
     Release -->|"RECORDED_AT"| Studio
     Track -->|"RECORDED_AT"| Studio
     Track -->|"RECORDING_OF"| Work
+    Track -->|"RELATED_RECORDING"| Recording
     Release -->|"RELEASED_BY"| Artist
     Master -->|"RELEASED_IN"| Country
     Master -->|"RELEASED_IN_REGION"| Region

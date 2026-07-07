@@ -7,7 +7,7 @@
 > `pnpm schema:diagram` to refresh. Node/relationship names and properties below
 > are the authoritative model; the tables in the service handbook point here.
 
-**Drift:** ✅ In sync with the last snapshot and schema.ts.
+**Drift:** ⚠️ model changed vs last snapshot (1 label(s), 1 property(ies), 1 relationship(s)).
 
 ## Entity-relationship diagram
 
@@ -71,6 +71,10 @@ erDiagram
         String name "indexed"
         DateTime nationalityFetchedAt "indexed"
         Boolean notAGroup
+    }
+    Recording {
+        String mbid PK
+        String title
     }
     Region {
         String name PK
@@ -144,6 +148,7 @@ erDiagram
         String musicalScale "indexed"
         String position
         DateTime recordingArtistsFetchedAt "indexed"
+        DateTime recordingLineageFetchedAt "indexed"
         String recordingMbid "indexed"
         DateTime recordingPlacesFetchedAt "indexed"
         Long releaseDiscogsId
@@ -180,6 +185,7 @@ erDiagram
     Release }o--o{ Studio : "RECORDED_AT"
     Track }o--o{ Studio : "RECORDED_AT"
     Track }o--o{ Work : "RECORDING_OF"
+    Track }o--o{ Recording : "RELATED_RECORDING"
     Release }o--o{ Artist : "RELEASED_BY"
     Master }o--o{ Country : "RELEASED_IN"
     Master }o--o{ Region : "RELEASED_IN_REGION"
@@ -205,6 +211,7 @@ flowchart LR
     Label["Label"]
     Master["Master"]
     Musician["Musician"]
+    Recording["Recording"]
     Region["Region"]
     Release["Release"]
     ReloadJob["ReloadJob"]
@@ -233,6 +240,7 @@ flowchart LR
     Release -->|"RECORDED_AT"| Studio
     Track -->|"RECORDED_AT"| Studio
     Track -->|"RECORDING_OF"| Work
+    Track -->|"RELATED_RECORDING"| Recording
     Release -->|"RELEASED_BY"| Artist
     Master -->|"RELEASED_IN"| Country
     Master -->|"RELEASED_IN_REGION"| Region
