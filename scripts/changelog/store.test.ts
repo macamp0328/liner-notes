@@ -8,7 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isReleaseNotFound, retryTransient } from './store.js';
+import { isRefAlreadyExists, isReleaseNotFound, retryTransient } from './store.js';
 
 test('isReleaseNotFound: true ONLY for a genuine "release not found" / 404', () => {
   // gh prints exactly this (exit 1) when the release/draft does not exist:
@@ -25,6 +25,21 @@ test('isReleaseNotFound: false for transient/other failures (must NOT read as ab
   assert.equal(isReleaseNotFound('HTTP 503: Service Unavailable'), false);
   assert.equal(isReleaseNotFound('gh auth: authentication required'), false);
   assert.equal(isReleaseNotFound(''), false); // no stderr → don't assume absence
+});
+
+test('isRefAlreadyExists: true ONLY for a genuine tag-ref collision', () => {
+  // The Git Data API's 422 when the tag ref already exists, as gh renders it:
+  assert.equal(isRefAlreadyExists('HTTP 422: Reference already exists'), true);
+  assert.equal(isRefAlreadyExists('gh: Reference already exists (HTTP 422)'), true);
+});
+
+test('isRefAlreadyExists: false for transient/other failures (must NOT read as a collision)', () => {
+  // A misclassification here would turn a network blip into a bogus `.N` suffix
+  // recompute (and a second doomed create) instead of a loud, retryable failure.
+  assert.equal(isRefAlreadyExists('read tcp: read: connection reset by peer'), false);
+  assert.equal(isRefAlreadyExists('HTTP 403: Resource not accessible by integration'), false);
+  assert.equal(isRefAlreadyExists('HTTP 503: Service Unavailable'), false);
+  assert.equal(isRefAlreadyExists(''), false);
 });
 
 // ── retryTransient ────────────────────────────────────────────────────────────

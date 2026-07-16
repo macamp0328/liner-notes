@@ -388,12 +388,60 @@ function versionReleaseExists(tag: string): boolean {
 }
 
 /**
- * Create (or re-render) one PUBLISHED per-version release. On first write,
- * `gh release create <tag> --target <sha>` publishes a real, discoverable release
- * and creates the tag ref at the deployed commit. On a re-render (reconcile),
- * edit body+title only — NEVER pass `--target`, which can move an already-published
- * tag. Throws (via `gh`) if the tag already exists on create — release.ts catches
- * that to recompute the same-day `.N` suffix.
+ * gh's "reference already exists" (HTTP 422) off a failed tag-ref create — the
+ * same-day tag collision signal. Pure + exported so the classification that decides
+ * between "recompute the `.N` suffix" and "propagate a transient failure" is
+ * unit-tested without invoking gh.
+ */
+export function isRefAlreadyExists(stderr: string): boolean {
+  return /already exists/i.test(stderr);
+}
+
+/**
+ * Ensure the tag ref exists at `sha`, via the Git Data API — NOT via
+ * `gh release create --target`. The releases endpoint enforces the `workflows` scope
+ * when creating a release whose tag it would have to create and whose diff to the
+ * default-branch HEAD touches `.github/workflows/**` — and `workflows: write` is not
+ * grantable to GITHUB_TOKEN, so the auto-cut (which tags the DEPLOYED commit) 403'd
+ * whenever a later merge changed any workflow file (run 29525387135; cli/cli#9514).
+ * Creating a tag ref that points at an existing main commit adds no workflow content,
+ * so it needs only contents:write; with the tag pre-existing, the releases endpoint
+ * ignores target_commitish and the enforcement never fires.
+ *
+ * Failure semantics: if the tag already exists AT `sha`, this is a no-op — the
+ * crash-rerun case (tag created, release create died) recovers cleanly instead of
+ * minting a pointless `.N`. If it exists at a DIFFERENT sha, the original
+ * "already exists" error propagates so release.ts recomputes the same-day `.N`
+ * suffix, exactly like the old create-time collision. Any other create failure
+ * (transient network, auth) propagates untouched. The sha lookup itself goes
+ * through `ghRead` (retried read): if it STILL fails, ITS error propagates and the
+ * cut fails loud — a degraded API state must not quietly mint a `.N` for what may
+ * have been a same-sha re-run.
+ */
+function ensureTagRef(tag: string, sha: string): void {
+  try {
+    gh(['api', 'repos/{owner}/{repo}/git/refs', '-f', `ref=refs/tags/${tag}`, '-f', `sha=${sha}`]);
+  } catch (err) {
+    if (!isRefAlreadyExists(ghStderr(err))) throw err;
+    const existing = ghRead([
+      'api',
+      `repos/{owner}/{repo}/git/ref/tags/${tag}`,
+      '--jq',
+      '.object.sha',
+    ]);
+    if (existing.trim() === sha) return; // idempotent re-run — tag already where we want it
+    throw err;
+  }
+}
+
+/**
+ * Create (or re-render) one PUBLISHED per-version release. On first write, create
+ * the tag ref at the deployed commit via `ensureTagRef` (see its note for why NOT
+ * `gh release create --target`), then publish the release at that existing tag. On
+ * a re-render (reconcile), edit body+title only — never touch the tag, which could
+ * move an already-published ref. Throws (via `ensureTagRef`) if the tag already
+ * exists at a different commit — release.ts catches that to recompute the same-day
+ * `.N` suffix.
  */
 export function writeVersionRelease(
   tag: string,
@@ -408,17 +456,8 @@ export function writeVersionRelease(
     if (versionReleaseExists(tag)) {
       gh(['release', 'edit', tag, '--title', title, '--notes-file', bodyPath]);
     } else {
-      gh([
-        'release',
-        'create',
-        tag,
-        '--target',
-        targetSha,
-        '--title',
-        title,
-        '--notes-file',
-        bodyPath,
-      ]);
+      ensureTagRef(tag, targetSha);
+      gh(['release', 'create', tag, '--title', title, '--notes-file', bodyPath]);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
