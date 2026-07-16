@@ -10,6 +10,7 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       exclude: [
         'src/index.ts',
+        'src/backup/run.ts', // thin CronJob entrypoint — same rationale as src/index.ts
         'src/ingestion/types.ts', // type declarations only — no executable code
       ],
       thresholds: {
