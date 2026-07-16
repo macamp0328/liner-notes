@@ -44,8 +44,10 @@ export async function hasReleases(driver: Driver): Promise<boolean> {
 
 /**
  * Delete every node and relationship in the graph. Returns the number of nodes
- * removed. Destructive and irreversible — intended for a deliberate "wipe and
- * reload from scratch" (the graph is fully reconstructable from Discogs). The
+ * removed. Destructive — intended for a deliberate "wipe and reload from
+ * scratch". Recovery is either the weekly S3 backup (exact graph, minutes —
+ * infra/RUNBOOK.md "Graph backup and restore") or a full reload (hours, and
+ * the local-harvest-only Genius lyrics are NOT refetchable, #456). The
  * collection is small (~200 releases / a few thousand nodes), so a single
  * DETACH DELETE is well within Aura's transaction limits.
  */
