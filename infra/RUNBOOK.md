@@ -1146,7 +1146,7 @@ aws s3 ls "s3://$BUCKET/graph-backups/"             # the new object appears whe
 
 Restores are **operator-run and local by design** — there is no restore HTTP endpoint; prod creds and AWS access stay in operator hands. The everyday use is restoring into a local docker-compose Neo4j (inspecting a backup, restore drills); restoring over prod Aura is the rare, deliberate case.
 
-> **Operator read access (2026-07-16 drill finding).** The scoped operator user (`liner-notes-cli`) cannot yet `aws s3 ls`/`cp` the backup bucket — its curated managed policy predates it. Until `s3:ListBucket` + `s3:GetObject` on the backup bucket are added to the operator policy (an admin console action — [#508](https://github.com/macamp0328/liner-notes/issues/508)), prefix the two download commands below with `AWS_PROFILE=root`. The backup **CronJob is unaffected** — it writes via the EC2 instance role, which terraform already granted.
+> **Operator read access.** The download commands below run under the scoped operator profile: [`operator-deploy-policy.json`](iam/operator-deploy-policy.json) grants read-only `s3:ListBucket` + `s3:GetObject` on the backup bucket ([#508](https://github.com/macamp0328/liner-notes/issues/508) — a 2026-07-16 drill finding). If your `liner-notes-deploy` managed policy predates that, push a new version per [`infra/iam/README.md`](iam/README.md#updating-a-managed-policy) (or prefix the two commands with `AWS_PROFILE=root` in the meantime). The backup **CronJob is unaffected** either way — it writes via the EC2 instance role.
 
 ```bash
 # 1. Pick and fetch a backup
