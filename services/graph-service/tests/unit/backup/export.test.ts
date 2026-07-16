@@ -173,6 +173,30 @@ describe('exportGraph', () => {
     expect(manifest.nodeCount).toBe(3);
   });
 
+  it('escapes U+2028/U+2029 so every physical line survives any line splitter', async () => {
+    // Real prod data: a Discogs artist profile containing a raw U+2028 (LINE SEPARATOR),
+    // which JSON.stringify legally leaves unescaped but readline treats as a terminator.
+    const profile = 'drums, percussion\u2028guitar\u2029bass';
+    const separatorNode = makeNode('n9', ['Artist'], { profile });
+    const { session } = makeSession([separatorNode], []);
+    const { driver } = makeDriver(session);
+    const raw: string[] = [];
+    const capture = new Writable({
+      write(chunk: Buffer, _enc, cb) {
+        raw.push(chunk.toString());
+        cb();
+      },
+    });
+    await exportGraph(driver, capture);
+    const text = raw.join('');
+    expect(text).not.toContain('\u2028');
+    expect(text).not.toContain('\u2029');
+    // splitting on \n alone yields whole, parseable records that decode the chars back
+    const nodeLine = text.split('\n').find((l) => l.includes('"n9"'));
+    const parsed = JSON.parse(nodeLine!) as { props: { profile: string } };
+    expect(parsed.props.profile).toBe(profile);
+  });
+
   it('handles an empty graph — manifest reports zeros', async () => {
     const { session } = makeSession([], []);
     const { driver } = makeDriver(session);

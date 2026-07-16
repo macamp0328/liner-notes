@@ -110,6 +110,33 @@ export function parseBackupLine(line: string, lineNo: number): BackupLine {
 }
 
 /**
+ * Splits a byte/text stream into lines on `\n` ONLY — never on `\r` alone or the Unicode
+ * LINE/PARAGRAPH SEPARATORS (U+2028/U+2029), which Node's readline treats as terminators.
+ * That readline behaviour shattered a real prod backup record (a Discogs profile containing a
+ * raw U+2028, which JSON.stringify legally leaves unescaped) into unparseable fragments — this
+ * splitter's semantics match how the export writes: one record per `\n`. Buffer chunks are
+ * decoded with a streaming TextDecoder so a multi-byte UTF-8 character split across chunk
+ * boundaries never corrupts. A trailing `\r` (CRLF file) is left for collectBackup's trim.
+ */
+export async function* splitJsonlLines(
+  source: AsyncIterable<string | Buffer> | Iterable<string | Buffer>,
+): AsyncGenerator<string> {
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for await (const chunk of source) {
+    buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+    let newlineAt = buffer.indexOf('\n');
+    while (newlineAt !== -1) {
+      yield buffer.slice(0, newlineAt);
+      buffer = buffer.slice(newlineAt + 1);
+      newlineAt = buffer.indexOf('\n');
+    }
+  }
+  buffer += decoder.decode(); // flush any dangling multi-byte sequence
+  if (buffer !== '') yield buffer;
+}
+
+/**
  * Collects a full backup from an (async) line iterable, enforcing the strict file shape:
  * metadata first, a trailing manifest (its absence means the export was truncated mid-write),
  * and nothing after the manifest. Blank lines are ignored.

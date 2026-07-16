@@ -7,6 +7,7 @@ import {
   groupNodesByLabelSet,
   groupRelsByType,
   restoreGraph,
+  splitJsonlLines,
   verifyRestore,
   countGraph,
   RESTORE_TEMP_INDEX,
@@ -94,6 +95,35 @@ describe('collectBackup', () => {
       /content after the manifest/,
     );
     await expect(collectBackup([META, META, MANIFEST])).rejects.toThrow(/duplicate metadata/);
+  });
+});
+
+describe('splitJsonlLines', () => {
+  async function collect(chunks: (string | Buffer)[]): Promise<string[]> {
+    const out: string[] = [];
+    for await (const line of splitJsonlLines(chunks)) out.push(line);
+    return out;
+  }
+
+  it('splits on \\n only — U+2028/U+2029 and bare \\r never break a record', async () => {
+    // The exact failure a real prod backup hit: readline treats U+2028 as a terminator.
+    const record = '{"profile":"drums\u2028guitar\u2029bass\rmore"}';
+    expect(await collect([record + '\n', 'tail'])).toEqual([record, 'tail']);
+  });
+
+  it('reassembles lines split across chunk boundaries, including multi-byte UTF-8', async () => {
+    const line = '{"name":"Björk — 🎵"}';
+    const bytes = Buffer.from(line + '\n{"x":1}\n', 'utf8');
+    // cut mid-emoji (the 🎵 is 4 bytes) so a naive chunk.toString() would corrupt
+    const cut = bytes.indexOf(Buffer.from('🎵', 'utf8')) + 2;
+    const lines = await collect([bytes.subarray(0, cut), bytes.subarray(cut)]);
+    expect(lines).toEqual([line, '{"x":1}']);
+  });
+
+  it('yields a final unterminated line and nothing for empty input', async () => {
+    expect(await collect(['no trailing newline'])).toEqual(['no trailing newline']);
+    expect(await collect([])).toEqual([]);
+    expect(await collect(['a\nb\n'])).toEqual(['a', 'b']);
   });
 });
 

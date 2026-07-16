@@ -35,11 +35,30 @@ Browse it as an interactive, pan-and-zoom diagram:
 **[→ Live schema diagram](https://macamp0328.github.io/liner-notes/)**
 
 A scheduled job re-introspects prod and opens a PR with any model changes (plus a drift report against
-`src/db/schema.ts`), so the picture stays current with zero hand-maintenance. The same
+`src/db/schema.ts`), so the picture stays current with zero hand-maintenance. See [ADR 0004](docs/adr/0004-data-model-diagrams-from-live-introspection.md)
+for the design and [`scripts/schema-diagram/README.md`](scripts/schema-diagram/README.md) for the tool. The same
 entity-relationship and graph-of-labels views also render in
 [`services/graph-service/docs/schema/SCHEMA.md`](services/graph-service/docs/schema/SCHEMA.md), backed by
-a machine-readable snapshot. See [ADR 0004](docs/adr/0004-data-model-diagrams-from-live-introspection.md)
-for the design and [`scripts/schema-diagram/README.md`](scripts/schema-diagram/README.md) for the tool.
+a machine-readable snapshot.
+
+## Backups (yes, the record-collection app has disaster recovery)
+
+The production graph is **backed up weekly to S3 — and the restore path is drill-tested against
+real production data**, not assumed to work. Every Sunday an in-cluster job streams the entire
+graph out of Neo4j Aura over Bolt (Aura Free forbids APOC file export, so it's plain Cypher all
+the way down) as gzipped JSONL through a lossless type-tagged codec: integers past 2^53,
+nanosecond-precision zoned datetimes, multi-label nodes, the lot. The whole production graph —
+**8,000+ nodes and 28,000 relationships — is a 1.9 MB object** that restores anywhere in under a
+minute, and every backup carries its own manifest: the restore tool exits non-zero unless the
+result **provably matches the export**, byte-for-byte on encoded properties.
+
+Why bother, for a hobby graph? Because it's no longer fully rebuildable — some enrichment (the
+Genius-sourced lyrics) can only be harvested from a residential IP and was permanently lost once
+before — and a rebuild from upstream APIs takes hours against sources that drift. The backup is
+also deliberately **uptime-aligned** with the scale-to-zero design: it only runs while the node is
+up, so "everything off" still costs ~$0, and the S3 objects are what survive Aura Free's
+90-day paused-instance deletion. Procedure and drill log:
+[`infra/RUNBOOK.md` → Graph backup and restore](infra/RUNBOOK.md#graph-backup-and-restore).
 
 ## Quick Start
 
