@@ -640,8 +640,18 @@ jobs:
     #
     # Pin the binary + SHA256 like hadolint/kubeconform: download over HTTPS, verify
     # BEFORE running. TFLINT_CONFIG_FILE is absolute so --chdir still finds the root
-    # config; GITHUB_TOKEN on --init avoids GitHub rate limits when fetching the AWS
-    # plugin. Bump TFLINT_VERSION + TFLINT_SHA256 (release checksums.txt) to update.
+    # config. Bump TFLINT_VERSION + TFLINT_SHA256 (release checksums.txt) to update.
+    #
+    # The AWS ruleset is PRE-INSTALLED by checksum instead of letting `tflint --init`
+    # download it (#506): init fetches the plugin's artifact attestations from the
+    # GitHub API and verifies them via tflint's vendored sigstore-go, which started
+    # nil-pointer-crashing on 2026-07-16 when GitHub changed what that endpoint
+    # serves — same pinned binary + plugin, repo-wide, persistent across reruns.
+    # Our own SHA256 pin preserves the supply-chain check (same trust model as the
+    # tflint binary above), and init becomes an offline no-op that just verifies the
+    # installed plugin, so the job also loses its GitHub-API dependency. Once a
+    # tflint release ships a fixed sigstore-go (>1.2.1), this step can revert to
+    # plain --init — or stay, since it's strictly less flaky.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -660,20 +670,30 @@ jobs:
           unzip -o /tmp/tflint.zip -d /tmp
           sudo install -m 0755 /tmp/tflint /usr/local/bin/tflint
           tflint --version
-      - name: Init plugins (downloads the pinned AWS ruleset, with retry)
+      - name: Pre-install pinned AWS ruleset (bypasses the crashing attestation fetch — #506)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # .tflint.hcl owns the version pin — the guard below fails loudly on drift.
+          # Bump BOTH (plus TFLINT_AWS_SHA256, from the ruleset release's
+          # checksums.txt entry for tflint-ruleset-aws_linux_amd64.zip) together.
+          TFLINT_AWS_VERSION: 0.47.0
+          TFLINT_AWS_SHA256: 6ba3e665642be9ae61b08ca04f0396fdba33ee9be3b5fdb36d5603208887e17d
         run: |
-          n=0
-          until tflint --init; do
-            n=$((n + 1))
-            if [ "$n" -ge 3 ]; then
-              echo "tflint --init failed after $n attempts" >&2
-              exit 1
-            fi
-            echo "tflint --init failed (attempt $n) — retrying in $((n * 10))s..." >&2
-            sleep $((n * 10))
-          done
+          hcl_version="$(awk -F'"' '/^plugin "aws"/{f=1} f && /version/{print $2; exit}' .tflint.hcl)"
+          if [ "$hcl_version" != "$TFLINT_AWS_VERSION" ]; then
+            echo ".tflint.hcl pins aws ruleset ${hcl_version} but this step pre-installs ${TFLINT_AWS_VERSION}." >&2
+            echo "Update TFLINT_AWS_VERSION + TFLINT_AWS_SHA256 in ci.yml to match." >&2
+            exit 1
+          fi
+          curl -fsSL -o /tmp/tflint-ruleset-aws.zip \
+            "https://github.com/terraform-linters/tflint-ruleset-aws/releases/download/v${TFLINT_AWS_VERSION}/tflint-ruleset-aws_linux_amd64.zip"
+          echo "${TFLINT_AWS_SHA256}  /tmp/tflint-ruleset-aws.zip" | sha256sum -c -
+          # The layout tflint expects: <plugin_dir>/<source>/<version>/tflint-ruleset-<name>
+          plugin_dir="$HOME/.tflint.d/plugins/github.com/terraform-linters/tflint-ruleset-aws/${TFLINT_AWS_VERSION}"
+          mkdir -p "$plugin_dir"
+          unzip -o /tmp/tflint-ruleset-aws.zip tflint-ruleset-aws -d "$plugin_dir"
+          chmod +x "${plugin_dir}/tflint-ruleset-aws"
+      - name: Init plugins (offline no-op — verifies the pre-installed ruleset)
+        run: tflint --init
       - name: Lint root module
         run: tflint --chdir=infra/terraform
       - name: Lint bootstrap module
