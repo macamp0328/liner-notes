@@ -664,7 +664,7 @@ jobs:
           # From the release's checksums.txt (tflint_linux_amd64.zip).
           TFLINT_SHA256: 8441a7d97df20431f19c9b9d27ff4c63e308c964e86660bc7cc0cf7bbe0725e8
         run: |
-          curl -fsSL -o /tmp/tflint.zip \
+          curl -fsSL --retry 3 -o /tmp/tflint.zip \
             "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_amd64.zip"
           echo "${TFLINT_SHA256}  /tmp/tflint.zip" | sha256sum -c -
           unzip -o /tmp/tflint.zip -d /tmp
@@ -678,13 +678,23 @@ jobs:
           TFLINT_AWS_VERSION: 0.47.0
           TFLINT_AWS_SHA256: 6ba3e665642be9ae61b08ca04f0396fdba33ee9be3b5fdb36d5603208887e17d
         run: |
-          hcl_version="$(awk -F'"' '/^plugin "aws"/{f=1} f && /version/{print $2; exit}' .tflint.hcl)"
+          # Match only the `version = "…"` key inside the plugin "aws" block.
+          hcl_version="$(awk -F'"' '
+            /^plugin "aws"/ { f = 1; next }
+            f && /^}/ { exit }
+            f && $1 ~ /^[[:space:]]*version[[:space:]]*=[[:space:]]*$/ { print $2; exit }
+          ' "$TFLINT_CONFIG_FILE")"
+          if [ -z "$hcl_version" ]; then
+            echo "Could not extract the aws ruleset version from ${TFLINT_CONFIG_FILE} —" >&2
+            echo "its layout changed; update this guard to match." >&2
+            exit 1
+          fi
           if [ "$hcl_version" != "$TFLINT_AWS_VERSION" ]; then
             echo ".tflint.hcl pins aws ruleset ${hcl_version} but this step pre-installs ${TFLINT_AWS_VERSION}." >&2
             echo "Update TFLINT_AWS_VERSION + TFLINT_AWS_SHA256 in ci.yml to match." >&2
             exit 1
           fi
-          curl -fsSL -o /tmp/tflint-ruleset-aws.zip \
+          curl -fsSL --retry 3 -o /tmp/tflint-ruleset-aws.zip \
             "https://github.com/terraform-linters/tflint-ruleset-aws/releases/download/v${TFLINT_AWS_VERSION}/tflint-ruleset-aws_linux_amd64.zip"
           echo "${TFLINT_AWS_SHA256}  /tmp/tflint-ruleset-aws.zip" | sha256sum -c -
           # The layout tflint expects: <plugin_dir>/<source>/<version>/tflint-ruleset-<name>
