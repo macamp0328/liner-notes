@@ -32,10 +32,12 @@ function log(level: 'info' | 'warn' | 'error', msg: string, extra: object = {}):
   );
 }
 
+// `=== undefined`, not `!value` — an explicitly-empty NEO4J_PASSWORD is valid for a
+// NEO4J_AUTH=none database (same rationale as server.ts's onReady validation).
 function requireEnv(name: string): string {
   // eslint-disable-next-line security/detect-object-injection -- `name` is a hardcoded env-var literal from main(), never input data
   const value = process.env[name];
-  if (!value) throw new Error(`Missing required env var ${name}`);
+  if (value === undefined) throw new Error(`Missing required env var ${name}`);
   return value;
 }
 
@@ -52,6 +54,7 @@ async function main(): Promise<void> {
   const user = requireEnv('NEO4J_USER');
   const password = requireEnv('NEO4J_PASSWORD');
   const bucket = requireEnv('BACKUP_S3_BUCKET');
+  if (bucket === '') throw new Error('BACKUP_S3_BUCKET is set but empty');
   const region = process.env['AWS_REGION'];
   const sourceHost = hostOf(uri);
 
@@ -70,16 +73,34 @@ async function main(): Promise<void> {
 
     // exportGraph writes JSONL into the pipeline head; gzip compresses; Upload consumes the
     // tail via streaming multipart. The upload must be started before the export fills the
-    // pipe (backpressure would deadlock otherwise), so both run concurrently.
+    // pipe (backpressure would deadlock otherwise), so both run concurrently. An upload
+    // failure destroys the pipeline head — otherwise a mid-export S3 error would leave
+    // exportGraph blocked forever on backpressure that will never drain.
     const raw = new PassThrough();
     const gzip = createGzip();
-    const gzipDone = pipeline(raw, gzip);
-    const uploadDone = uploadBackup({ bucket, key, body: gzip, ...(region ? { region } : {}) });
+    const gzipDone = pipeline(raw, gzip).catch(() => undefined); // surfaced via uploadError/export throw
+    let uploadError: Error | null = null;
+    const uploadDone = uploadBackup({
+      bucket,
+      key,
+      body: gzip,
+      ...(region ? { region } : {}),
+    }).catch((err: unknown) => {
+      uploadError = err instanceof Error ? err : new Error(String(err));
+      raw.destroy(uploadError);
+    });
 
-    const manifest = await exportGraph(driver, raw, { sourceHost });
-    raw.end();
+    let manifest;
+    try {
+      manifest = await exportGraph(driver, raw, { sourceHost });
+      raw.end();
+    } catch (err) {
+      await uploadDone;
+      throw uploadError ?? err; // the upload failure is the root cause when both threw
+    }
     await gzipDone;
     await uploadDone;
+    if (uploadError !== null) throw uploadError;
 
     log('info', 'backup complete', {
       s3Uri: `s3://${bucket}/${key}`,
