@@ -58,6 +58,9 @@ describe('parseBackupLine', () => {
       /missing string "id"/,
     );
     expect(() =>
+      parseBackupLine('{"type":"node","id":"n","labels":["A",7],"props":{}}', 8),
+    ).toThrow(/Line 8: .*"labels" array of strings/);
+    expect(() =>
       parseBackupLine('{"type":"rel","id":"r","relType":"T","start":"a","props":{}}', 5),
     ).toThrow(/missing string "end"/);
     expect(() => parseBackupLine('{"type":"manifest","nodeCount":"x","relCount":0}', 6)).toThrow(

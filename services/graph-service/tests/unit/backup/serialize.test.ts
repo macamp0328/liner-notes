@@ -137,6 +137,16 @@ describe('encodeValue / decodeValue', () => {
     expect(() => decodeValue({ $t: 'wat', v: 1 })).toThrow(/unknown type tag "wat"/);
     expect(() => decodeValue({ $t: 'int', v: 42 } as never)).toThrow(/must be a string/);
   });
+
+  it('rejects a JSON object without a string $t tag instead of passing it through', () => {
+    // A corrupt file's map-like value must never silently reach the driver
+    expect(() => decodeValue({ notATag: true } as never)).toThrow(
+      /without a string "\$t" type tag/,
+    );
+    expect(() => decodeValue({ $t: 7, v: 'x' } as never)).toThrow(
+      /without a string "\$t" type tag/,
+    );
+  });
 });
 
 describe('encodeProps / decodeProps', () => {

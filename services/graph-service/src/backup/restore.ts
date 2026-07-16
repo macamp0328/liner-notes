@@ -81,7 +81,12 @@ export function parseBackupLine(line: string, lineNo: number): BackupLine {
     }
     case 'node': {
       if (typeof parsed['id'] !== 'string') fail('missing string "id"');
-      if (!Array.isArray(parsed['labels'])) fail('missing "labels" array');
+      const labels = parsed['labels'];
+      // Element types are checked here so a corrupt file fails fast with the line number,
+      // not later inside grouping/escaping with the context lost.
+      if (!Array.isArray(labels) || labels.some((l) => typeof l !== 'string')) {
+        fail('missing "labels" array of strings');
+      }
       if (!isRecord(parsed['props'])) fail('missing "props" object');
       return parsed as unknown as NodeLine;
     }

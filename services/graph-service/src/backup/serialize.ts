@@ -166,8 +166,20 @@ function describe(value: unknown): string {
   return ctor ?? typeof value;
 }
 
-function isTagged(value: EncodedValue): value is TaggedValue {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+/**
+ * Every JSON object in a well-formed backup is a `{ $t, v }` type tag (Neo4j props are never
+ * maps, so no collision is possible). An object WITHOUT a string `$t` is therefore corrupt
+ * input — throw a pointed error rather than falling through to a confusing
+ * `unknown type tag "undefined"` or, worse, passing the raw object to the driver.
+ */
+function asTagged(value: object): TaggedValue {
+  const tag = (value as Record<string, unknown>)['$t'];
+  if (typeof tag !== 'string') {
+    throw new Error(
+      'Malformed encoded value: JSON object without a string "$t" type tag — corrupt backup file?',
+    );
+  }
+  return value as TaggedValue;
 }
 
 function vNum(fields: unknown, name: string): number {
@@ -191,8 +203,7 @@ export function decodeValue(value: EncodedValue): unknown {
     return value;
   }
   if (Array.isArray(value)) return value.map(decodeValue);
-  if (!isTagged(value)) return value;
-  const { $t, v } = value;
+  const { $t, v } = asTagged(value);
   switch ($t) {
     case 'int': {
       if (typeof v !== 'string') throw new Error('Malformed int tag: value must be a string');
