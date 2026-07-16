@@ -11,6 +11,7 @@ name: CI
 #   script-tests (changelog unit tests), terraform (fmt + validate) │  parallel
 #   hadolint (Dockerfile lint), kubeconform (k8s manifest validate)  │
 #   markdownlint (Markdown), yamllint (YAML), tflint (Terraform lint) │
+#   trivy (Terraform security posture)                                │
 #   audit, secrets-scan, codeql, actionlint (+ standalone shellcheck) ┘
 #
 #   lint, typecheck ──→ docker-build   (the ONLY gate: the multi-stage build
@@ -49,7 +50,7 @@ permissions:
   contents: read
 
 # Rapid agent push cadence means a PR head is often superseded within seconds —
-# cancel the obsolete run instead of letting the full 16-job fan-out finish for
+# cancel the obsolete run instead of letting the full 17-job fan-out finish for
 # nothing. Pushes to main never cancel (each merged commit keeps its CI record).
 concurrency:
   group: ci-${{ github.ref }}
@@ -708,3 +709,52 @@ jobs:
         run: tflint --chdir=infra/terraform
       - name: Lint bootstrap module
         run: tflint --chdir=infra/terraform/bootstrap
+
+  trivy:
+    name: Trivy
+    # Terraform SECURITY-POSTURE scanning (issue #395) — the deferred second half of
+    # the #348 lint story. tflint above catches anti-patterns and AWS deprecations;
+    # trivy (the maintained tfsec successor) catches security misconfigurations:
+    # open security groups, unencrypted resources, public exposure, missing
+    # hardening. Known-intentional findings (cost-driven choices for a single-node
+    # hobby deploy) are suppressed INLINE in the .tf files — a reason comment plus
+    # `#trivy:ignore:AVD-AWS-XXXX` directly above the resource — so the scan must
+    # come back completely clean and any new finding fails the job at every
+    # severity. Every suppression documents its rationale where the resource lives;
+    # never suppress here in CI flags. Like its sibling quality gates the job
+    # hard-fails (red on the PR); whether it BLOCKS merge is curated in the
+    # branch-protection ruleset, not by the job existing.
+    #
+    # Pin the binary + SHA256 like hadolint/kubeconform: download over HTTPS, verify
+    # BEFORE running. Bump TRIVY_VERSION + TRIVY_SHA256 (from the release's
+    # trivy_<ver>_checksums.txt entry for Linux-64bit.tar.gz) together to update.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install pinned trivy
+        env:
+          TRIVY_VERSION: 0.72.0
+          # From the release's checksums.txt (trivy_0.72.0_Linux-64bit.tar.gz).
+          TRIVY_SHA256: bbb64b9695866ce4a7a8f5c9592002c5961cab378577fa3f8a040df362b9b2ea
+        run: |
+          curl -fsSL --retry 3 -o /tmp/trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  /tmp/trivy.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          sudo install -m 0755 /tmp/trivy /usr/local/bin/trivy
+          trivy --version
+      - name: Scan Terraform security posture
+        # --skip-check-update: use the checks embedded in the pinned binary —
+        #   deterministic and offline, no runtime ghcr.io bundle pull (same
+        #   no-runtime-fetch rationale as the #506 tflint plugin pre-install).
+        # --misconfig-scanners terraform: this job is the Terraform security gate
+        #   only; Dockerfile/k8s surfaces are owned by hadolint/kubeconform.
+        # --disable-telemetry / --skip-version-check: no anonymous usage pings to
+        #   Aqua, no update-check call — CI stays network-silent after the install.
+        # One invocation covers BOTH roots: trivy discovers bootstrap/ as a nested
+        # root module (unlike tflint, which needs an explicit --chdir per root),
+        # and lambda/ holds only Python the terraform scanner ignores.
+        run: |
+          trivy config --exit-code 1 --skip-check-update --misconfig-scanners terraform \
+            --disable-telemetry --skip-version-check infra/terraform

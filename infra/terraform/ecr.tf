@@ -1,5 +1,11 @@
 # Container registry for graph-service images.
 
+# MUTABLE tags: deploys tag images by short commit SHA, and re-running a deploy
+# for the same commit re-pushes the same tag — IMMUTABLE would break that
+# recovery path. AES256 rather than a customer-managed key: same cost rationale
+# as the S3 buckets.
+#trivy:ignore:AVD-AWS-0031
+#trivy:ignore:AVD-AWS-0033
 resource "aws_ecr_repository" "graph_service" {
   name                 = "${local.name_prefix}/graph-service"
   image_tag_mutability = "MUTABLE"

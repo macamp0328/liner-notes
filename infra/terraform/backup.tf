@@ -16,6 +16,10 @@ locals {
   backup_bucket_name = "${local.name_prefix}-graph-backups-${data.aws_caller_identity.current.account_id}"
 }
 
+# No access logging (there is no log-target bucket, and the contents are
+# disposable derived data) and no versioning — see the comment below.
+#trivy:ignore:AVD-AWS-0089
+#trivy:ignore:AVD-AWS-0090
 resource "aws_s3_bucket" "graph_backups" {
   bucket = local.backup_bucket_name
 
@@ -31,6 +35,7 @@ resource "aws_s3_bucket" "graph_backups" {
 
 # SSE-S3 (AES256) at no cost; the graph contains no secrets, but default-encrypting
 # every bucket keeps the posture uniform with the tfstate bucket.
+#trivy:ignore:AVD-AWS-0132
 resource "aws_s3_bucket_server_side_encryption_configuration" "graph_backups" {
   bucket = aws_s3_bucket.graph_backups.id
 

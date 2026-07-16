@@ -16,6 +16,9 @@
 # Log Group — fluent-bit destination.
 # ---------------------------------------------------------------------------
 
+# Default SSE for the log group: a CMK adds KMS cost for pod stdout that
+# contains no secrets.
+#trivy:ignore:AVD-AWS-0017
 resource "aws_cloudwatch_log_group" "graph_service" {
   name              = "/${local.name_prefix}/graph-service"
   retention_in_days = 30
@@ -25,6 +28,10 @@ resource "aws_cloudwatch_log_group" "graph_service" {
 # SNS — single topic, single subscriber. All alarms publish here.
 # ---------------------------------------------------------------------------
 
+# Unencrypted on purpose: alarm notifications carry no sensitive data, the free
+# aws/sns managed key can't be used (CloudWatch alarms can't publish through
+# it), and a customer-managed key costs ~$1/month.
+#trivy:ignore:AVD-AWS-0095
 resource "aws_sns_topic" "alerts" {
   name = "${local.name_prefix}-alerts"
 }
