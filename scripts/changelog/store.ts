@@ -412,21 +412,24 @@ export function isRefAlreadyExists(stderr: string): boolean {
  * crash-rerun case (tag created, release create died) recovers cleanly instead of
  * minting a pointless `.N`. If it exists at a DIFFERENT sha, the original
  * "already exists" error propagates so release.ts recomputes the same-day `.N`
- * suffix, exactly like the old create-time collision. Anything else (transient
- * network, auth) propagates untouched.
+ * suffix, exactly like the old create-time collision. Any other create failure
+ * (transient network, auth) propagates untouched. The sha lookup itself goes
+ * through `ghRead` (retried read): if it STILL fails, ITS error propagates and the
+ * cut fails loud — a degraded API state must not quietly mint a `.N` for what may
+ * have been a same-sha re-run.
  */
 function ensureTagRef(tag: string, sha: string): void {
   try {
     gh(['api', 'repos/{owner}/{repo}/git/refs', '-f', `ref=refs/tags/${tag}`, '-f', `sha=${sha}`]);
   } catch (err) {
     if (!isRefAlreadyExists(ghStderr(err))) throw err;
-    const existing = tryGh([
+    const existing = ghRead([
       'api',
       `repos/{owner}/{repo}/git/ref/tags/${tag}`,
       '--jq',
       '.object.sha',
     ]);
-    if (existing?.trim() === sha) return; // idempotent re-run — tag already where we want it
+    if (existing.trim() === sha) return; // idempotent re-run — tag already where we want it
     throw err;
   }
 }
