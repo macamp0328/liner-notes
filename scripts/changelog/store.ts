@@ -51,6 +51,76 @@ function tryGh(args: string[]): string | null {
   }
 }
 
+/** stderr text off a thrown execFileSync error (utf8 string or Buffer). */
+function ghStderr(err: unknown): string {
+  const e = err as { stderr?: string | Buffer };
+  return e.stderr ? e.stderr.toString() : '';
+}
+
+// ── Transient-failure retry (reads only) ─────────────────────────────────────
+//
+// GitHub's release-asset CDN periodically resets connections mid-download
+// ("connection reset by peer"), and one blip used to red the whole changelog job
+// because the store deliberately throws loud rather than degrade a read to empty.
+// Retrying keeps that invariant — a read still NEVER silently reads as empty — it
+// just gives a transient blip a couple of chances to clear first. Only idempotent
+// READS retry; writes stay single-shot (`release create` is not idempotent, and
+// release.ts relies on catching its "already exists" failure to recompute the
+// same-day `.N` tag suffix).
+
+const GH_RETRY_ATTEMPTS = 3;
+const GH_RETRY_BASE_DELAY_MS = 2000;
+
+/** Sync sleep — this module is execFileSync-based throughout, so no event loop to yield to. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Run `run`, retrying with exponential backoff on failure. `isExpectedFailure`
+ * (matched against the error's stderr) short-circuits the retries for failures that
+ * are semantically meaningful to the caller — e.g. "release not found", which is a
+ * legitimate answer, not a blip. The ORIGINAL error object is always what propagates
+ * (never wrapped), so callers can still classify it by stderr. Pure decision logic
+ * with injectable sleep/warn so the retry behaviour is unit-testable without gh.
+ */
+export function retryTransient<T>(
+  run: () => T,
+  opts: {
+    label: string;
+    attempts?: number;
+    isExpectedFailure?: (stderr: string) => boolean;
+    sleep?: (ms: number) => void;
+    warn?: (message: string) => void;
+  },
+): T {
+  const attempts = opts.attempts ?? GH_RETRY_ATTEMPTS;
+  const sleep = opts.sleep ?? sleepSync;
+  const warn = opts.warn ?? console.warn;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return run();
+    } catch (err) {
+      if (opts.isExpectedFailure?.(ghStderr(err))) throw err;
+      if (attempt >= attempts) throw err;
+      const delayMs = GH_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
+      warn(
+        `${opts.label} failed (attempt ${attempt}/${attempts}) — transient? retrying in ${delayMs / 1000}s…`,
+      );
+      sleep(delayMs);
+    }
+  }
+}
+
+/** Read-only gh call with transient-failure retry. Use `gh()` directly for writes. */
+function ghRead(args: string[], isExpectedFailure?: (stderr: string) => boolean): string {
+  return retryTransient(() => gh(args), {
+    label: `gh ${args.slice(0, 3).join(' ')}`,
+    // exactOptionalPropertyTypes: only pass the key when a predicate was given.
+    ...(isExpectedFailure ? { isExpectedFailure } : {}),
+  });
+}
+
 // ── PR fetching ──────────────────────────────────────────────────────────────
 
 interface GhPrView {
@@ -87,7 +157,7 @@ export interface PrInputRaw {
 
 /** Fetch the fields we summarise from for one PR. */
 export function getPrInput(number: number): PrInputRaw {
-  const json = gh([
+  const json = ghRead([
     'pr',
     'view',
     String(number),
@@ -114,7 +184,7 @@ interface GhPrListItem {
 
 /** Merged PR numbers (+ merge time) since an ISO date — the reconciler's candidate set. */
 export function listMergedPrNumbers(sinceIso: string): Array<{ number: number; mergedAt: string }> {
-  const json = gh([
+  const json = ghRead([
     'pr',
     'list',
     '--state',
@@ -132,7 +202,7 @@ export function listMergedPrNumbers(sinceIso: string): Array<{ number: number; m
 
 /** Every merged PR number (for backfill). Capped at GH_LIST_LIMIT; logs if hit. */
 export function listAllMergedPrNumbers(): number[] {
-  const json = gh([
+  const json = ghRead([
     'pr',
     'list',
     '--state',
@@ -162,12 +232,6 @@ interface GhReleaseAssets {
   assets?: Array<{ name?: string }>;
 }
 
-/** stderr text off a thrown execFileSync error (utf8 string or Buffer). */
-function ghStderr(err: unknown): string {
-  const e = err as { stderr?: string | Buffer };
-  return e.stderr ? e.stderr.toString() : '';
-}
-
 /**
  * Classify a failed `gh release view`: a genuine "release not found" (the draft is
  * absent — a legitimate empty) vs ANY other failure (network / 5xx / rate-limit /
@@ -181,21 +245,23 @@ export function isReleaseNotFound(stderr: string): boolean {
 
 /**
  * `gh release view <RELEASE_TAG> --json <fields>` → the JSON string, or `null` ONLY
- * when gh reports the release genuinely doesn't exist. Any OTHER gh failure THROWS —
- * the load-bearing distinction that stops a transient blip being read as "absent" and
- * wiping the canonical assets on the next write-back. (The previous code used the
- * error-swallowing `tryGh` here, so a transient view failure looked identical to
- * absence — the hole this closes.)
+ * when gh reports the release genuinely doesn't exist. Any OTHER gh failure is
+ * retried (transient) and, if it persists, THROWS — the load-bearing distinction that
+ * stops a transient blip being read as "absent" and wiping the canonical assets on
+ * the next write-back. (The previous code used the error-swallowing `tryGh` here, so
+ * a transient view failure looked identical to absence — the hole this closes.)
  */
 function viewReleaseJson(fields: string): string | null {
   try {
-    return gh(['release', 'view', RELEASE_TAG, '--json', fields]);
+    return ghRead(['release', 'view', RELEASE_TAG, '--json', fields], isReleaseNotFound);
   } catch (err) {
     if (isReleaseNotFound(ghStderr(err))) return null;
     throw new Error(
-      `gh release view ${RELEASE_TAG} failed and it is NOT "release not found" — treating as a ` +
-        'transient error, not absence (refusing to risk a write-back over an empty read). Retry. ' +
-        `Details: ${ghStderr(err) || (err as Error).message}`,
+      `gh release view ${RELEASE_TAG} failed and it is NOT "release not found" — refusing to ` +
+        'read it as absence (a write-back over an empty read would wipe the store). The call was ' +
+        `already retried ${GH_RETRY_ATTEMPTS}× internally, so the failure is persisting — ` +
+        `investigate before re-running. Details: ${ghStderr(err) || (err as Error).message}`,
+      { cause: err },
     );
   }
 }
@@ -214,14 +280,15 @@ function releaseAssetNames(): string[] | null {
 }
 
 /**
- * Download one LISTED asset into a fresh temp dir and return its contents. Throws
- * (via gh) on a download failure: the caller has already confirmed the asset exists,
- * so a failure here is transient — it must be loud, never an empty read.
+ * Download one LISTED asset into a fresh temp dir and return its contents. The
+ * caller has already confirmed the asset exists, so a failure here is transient
+ * (the release-asset CDN is the flakiest gh path we hit) — retried, and if it
+ * persists it throws: loud, never an empty read.
  */
 function downloadAsset(assetName: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'changelog-'));
   try {
-    gh(['release', 'download', RELEASE_TAG, '--pattern', assetName, '--dir', dir, '--clobber']);
+    ghRead(['release', 'download', RELEASE_TAG, '--pattern', assetName, '--dir', dir, '--clobber']);
     return readFileSync(join(dir, assetName), 'utf8');
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -360,12 +427,12 @@ export function writeVersionRelease(
 
 /** Every release tag name (published + draft). Feeds the CalVer `.N` suffix + prev-version lookup. */
 export function listReleaseTags(): string[] {
-  const json = gh(['release', 'list', '--json', 'tagName', '--limit', String(GH_LIST_LIMIT)]);
+  const json = ghRead(['release', 'list', '--json', 'tagName', '--limit', String(GH_LIST_LIMIT)]);
   const items = JSON.parse(json) as Array<{ tagName?: string }>;
   return items.map((i) => i.tagName ?? '').filter((t) => t !== '');
 }
 
 /** The default-branch HEAD SHA — the baseline release's `--target` when no deploy SHA is given. */
 export function defaultBranchSha(): string {
-  return gh(['api', 'repos/{owner}/{repo}/commits/main', '--jq', '.sha']).trim();
+  return ghRead(['api', 'repos/{owner}/{repo}/commits/main', '--jq', '.sha']).trim();
 }

@@ -2,11 +2,13 @@
 // integration-only, but the FAILURE CLASSIFICATION — "release genuinely absent" vs
 // "transient error" — is the load-bearing distinction (a misclassification silently
 // wipes the store on the next write), so it's extracted as a pure function and tested
-// here. Run with `pnpm changelog:test`.
+// here. Likewise the transient-retry decision logic (`retryTransient`), which takes
+// injectable sleep/warn so it's testable without invoking gh. Run with
+// `pnpm changelog:test`.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isReleaseNotFound } from './store.js';
+import { isReleaseNotFound, retryTransient } from './store.js';
 
 test('isReleaseNotFound: true ONLY for a genuine "release not found" / 404', () => {
   // gh prints exactly this (exit 1) when the release/draft does not exist:
@@ -23,4 +25,101 @@ test('isReleaseNotFound: false for transient/other failures (must NOT read as ab
   assert.equal(isReleaseNotFound('HTTP 503: Service Unavailable'), false);
   assert.equal(isReleaseNotFound('gh auth: authentication required'), false);
   assert.equal(isReleaseNotFound(''), false); // no stderr → don't assume absence
+});
+
+// ── retryTransient ────────────────────────────────────────────────────────────
+
+/** Error shaped like a thrown execFileSync failure (stderr carries gh's message). */
+function ghError(stderr: string): Error {
+  return Object.assign(new Error(`gh failed: ${stderr}`), { stderr });
+}
+
+const silent = { sleep: () => {}, warn: () => {} };
+
+test('retryTransient: first success returns immediately — no sleeps, no warnings', () => {
+  const delays: number[] = [];
+  const result = retryTransient(() => 'ok', {
+    label: 'gh release download',
+    sleep: (ms) => delays.push(ms),
+    warn: () => {},
+  });
+  assert.equal(result, 'ok');
+  assert.deepEqual(delays, []);
+});
+
+test('retryTransient: transient blip clears on a later attempt (the #503 failure mode)', () => {
+  // The exact failure that red the changelog job: the release-asset CDN resetting
+  // the connection mid-download. One blip must not fail the job.
+  const delays: number[] = [];
+  let calls = 0;
+  const result = retryTransient(
+    () => {
+      calls++;
+      if (calls < 3) throw ghError('read tcp: read: connection reset by peer');
+      return 'store contents';
+    },
+    { label: 'gh release download', sleep: (ms) => delays.push(ms), warn: () => {} },
+  );
+  assert.equal(result, 'store contents');
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [2000, 4000]); // exponential backoff
+});
+
+test('retryTransient: persistent failure exhausts attempts and rethrows the ORIGINAL error', () => {
+  // The original error object (not a wrapper) must propagate so callers can still
+  // classify it by stderr (viewReleaseJson's absent-vs-transient distinction).
+  const boom = ghError('HTTP 503: Service Unavailable');
+  let calls = 0;
+  assert.throws(
+    () =>
+      retryTransient(
+        () => {
+          calls++;
+          throw boom;
+        },
+        { label: 'gh release view', ...silent },
+      ),
+    (err: unknown) => err === boom,
+  );
+  assert.equal(calls, 3); // default attempts
+});
+
+test('retryTransient: expected failures short-circuit — no retries, no sleeps', () => {
+  // "release not found" is a legitimate ANSWER (first-run empty store), not a blip —
+  // retrying it 3× would just add ~6s of delay to every legit empty read.
+  const notFound = ghError('release not found');
+  const delays: number[] = [];
+  let calls = 0;
+  assert.throws(
+    () =>
+      retryTransient(
+        () => {
+          calls++;
+          throw notFound;
+        },
+        {
+          label: 'gh release view',
+          isExpectedFailure: isReleaseNotFound,
+          sleep: (ms) => delays.push(ms),
+          warn: () => {},
+        },
+      ),
+    (err: unknown) => err === notFound,
+  );
+  assert.equal(calls, 1);
+  assert.deepEqual(delays, []);
+});
+
+test('retryTransient: honours a custom attempts count', () => {
+  let calls = 0;
+  assert.throws(() =>
+    retryTransient(
+      () => {
+        calls++;
+        throw ghError('dial tcp: connection refused');
+      },
+      { label: 'gh api', attempts: 5, ...silent },
+    ),
+  );
+  assert.equal(calls, 5);
 });
