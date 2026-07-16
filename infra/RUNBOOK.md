@@ -1106,13 +1106,17 @@ After the reload reaches `complete`, run the residential **["Harvest Genius lyri
 
 A weekly in-cluster CronJob (`graph-backup`, [infra/k8s/graph-service/backup-cronjob.yaml](k8s/graph-service/backup-cronjob.yaml), issue [#104](https://github.com/macamp0328/liner-notes/issues/104)) exports the **full graph** — every node, relationship, and property — as gzipped JSONL to S3. This is the fast restore path the [full reload](#full-reload-from-scratch) is not: a restore takes minutes and reproduces the exact captured graph (enrichment state, Genius lyrics and all), where a reload takes hours and re-fetches from living upstream sources that drift.
 
+> **Drill-tested live 2026-07-16.** The whole loop was exercised against production: manual trigger → 8,019 nodes + 27,988 rels streamed out of Aura and uploaded in ~20s (a 1.9 MB object) → downloaded → restored into a local Neo4j in ~45s → manifest verification passed → restored counts matched live `/stats` exactly, including all 73 irreplaceable Genius lyrics. The drill also caught and fixed a real bug (a raw U+2028 in a Discogs profile broke the restore parser) — run a restore drill after any change to `src/backup/`.
+
 **How it runs.** Sunday 10:00 America/New_York, from the graph-service image with an alternate command (`node dist/backup/run.js`). It streams the graph via plain Cypher (Aura blocks APOC file export), gzips, and multipart-uploads to `s3://<bucket>/graph-backups/graph-<timestamp>.jsonl.gz`. S3 credentials come from the EC2 instance role over IMDS (write-only, scoped to the prefix — [infra/terraform/backup.tf](terraform/backup.tf)); a lifecycle rule expires objects after 60 days (~8 weekly restore points). Deliberately **uptime-aligned**: the CronJob only fires while the node is up — exactly when writes can happen — so a long `pnpm power:off` still means everything (including Aura's idle clock) sleeps, and the S3 objects are what protect against Aura Free's 90-day paused-instance deletion. A node that was off at fire time catches up its weekly run within 24h of powering on (`startingDeadlineSeconds`); a longer hibernation skips to the next Sunday.
 
 **Consistency.** Neo4j is read-committed, so the job **skips itself (exit 0, logged) while an orchestrated reload is running** (checked via the DB-backed reload job, so it works cross-pod). Standalone `/ingest`/enrich jobs are in-memory state the backup pod cannot see — avoid manually triggering a backup mid-enrichment; the restore side detects and reports the resulting dangling rels if one ever slips through.
 
 ### One-time setup
 
-1. `terraform apply` (primary checkout, operator profile) creates the bucket and IAM grant. Note the `backup_bucket_name` output.
+> Completed for this deployment on 2026-07-16 — kept for forks and rebuilds.
+
+1. `terraform apply` (primary checkout) creates the bucket and IAM grant. **The first apply needs the admin profile** (`AWS_PROFILE=root terraform apply` — the scoped operator user lacks `s3:CreateBucket`, the same first-apply pattern as Step 1 of the first-time deploy). Note the `backup_bucket_name` output. If the Cloudflare provider blocks the plan (`CLOUDFLARE_API_TOKEN` unset), a `-target`ed apply of just the six `backup.tf` resources sidesteps it.
 2. Add the bucket name to the prod secret — **merge, don't overwrite** (the get → `jq '. + {...}'` → put pattern preserves the existing keys):
 
    ```bash
@@ -1141,6 +1145,8 @@ aws s3 ls "s3://$BUCKET/graph-backups/"             # the new object appears whe
 ### Restore
 
 Restores are **operator-run and local by design** — there is no restore HTTP endpoint; prod creds and AWS access stay in operator hands. The everyday use is restoring into a local docker-compose Neo4j (inspecting a backup, restore drills); restoring over prod Aura is the rare, deliberate case.
+
+> **Operator read access (2026-07-16 drill finding).** The scoped operator user (`liner-notes-cli`) cannot yet `aws s3 ls`/`cp` the backup bucket — its curated managed policy predates it. Until `s3:ListBucket` + `s3:GetObject` on the backup bucket are added to the operator policy (an admin console action — [#508](https://github.com/macamp0328/liner-notes/issues/508)), prefix the two download commands below with `AWS_PROFILE=root`. The backup **CronJob is unaffected** — it writes via the EC2 instance role, which terraform already granted.
 
 ```bash
 # 1. Pick and fetch a backup
