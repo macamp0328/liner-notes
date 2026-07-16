@@ -1,0 +1,85 @@
+# Weekly full-graph backup to S3 (issue #104).
+#
+# Reuses the graph-service image with an alternate command — dist/backup/run.js
+# streams every node/rel out of Aura as gzipped JSONL and uploads it to the
+# graph-backups bucket (infra/terraform/backup.tf), authenticating to S3 via the
+# EC2 instance role over IMDS (the same path ESO and the refresher use). Being
+# in-cluster is deliberate: the backup only runs while the node is up — exactly
+# when writes can happen — so a long `pnpm power:off` still means "everything
+# sleeps" and the S3 objects themselves are what protect against Aura Free's
+# 90-day paused-instance deletion. See infra/RUNBOOK.md "Graph backup and restore".
+#
+# Env comes from graph-service-secrets (ESO-synced): NEO4J_* plus the
+# BACKUP_S3_BUCKET key the operator adds to the Secrets Manager secret after
+# `terraform apply` (the bucket name embeds the account id, so it is never
+# committed). The entrypoint skips (exit 0) while an orchestrated reload is
+# running — a read-committed export taken mid-reload would not be consistent.
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: graph-backup
+  namespace: liner-notes
+spec:
+  # Sunday 10:00 America/New_York — mid morning inside the (opt-in) nightly
+  # power window (start 08:00, stop 20:00 ET), and pinned to the same IANA zone
+  # as scheduler.tf so it stays mid-window across DST changes.
+  schedule: '0 10 * * 0'
+  timeZone: America/New_York
+  concurrencyPolicy: Forbid
+  # If the node was off at fire time the tick is missed; on power-on within 24h
+  # the controller runs the missed weekly job (catch-up), while a longer
+  # hibernation cleanly skips to the next Sunday.
+  startingDeadlineSeconds: 86400
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      # A healthy export is minutes; anything at 30min is wedged (e.g. Aura
+      # paused mid-connect) — kill it and let the next tick retry.
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: OnFailure
+          # The job never touches the k8s API — no ServiceAccount/RBAC, and no
+          # token mounted for something to steal.
+          automountServiceAccountToken: false
+          # Private ECR image (unlike the refresher's public one) — without the
+          # pull secret this pod ImagePullBackOffs forever.
+          imagePullSecrets:
+            - name: ecr-pull-secret
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+          containers:
+            - name: backup
+              # Logical name retargeted by the `images:` block in
+              # kustomization.yaml — kustomize's image transformer covers
+              # CronJob pod templates, so the CD pipeline's
+              # `kustomize edit set image` retags this alongside the Deployment.
+              image: graph-service-image
+              command: ['node', 'dist/backup/run.js']
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
+              envFrom:
+                - secretRef:
+                    name: graph-service-secrets
+              env:
+                - name: AWS_REGION
+                  value: us-east-1 # must match var.aws_region
+                - name: NODE_ENV
+                  value: production
+              # Streaming export + bounded multipart upload keep the working set
+              # small; cap it so a weekly job can't squeeze graph-service on the
+              # shared small node.
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 250m
+                  memory: 256Mi
