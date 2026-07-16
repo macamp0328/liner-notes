@@ -9,6 +9,7 @@ import {
   collectBackup,
   restoreGraph,
   countGraph,
+  splitJsonlLines,
   verifyRestore,
 } from '../../../src/backup/restore.js';
 import { encodeProps } from '../../../src/backup/serialize.js';
@@ -27,6 +28,9 @@ import { encodeProps } from '../../../src/backup/serialize.js';
 // arrays (string + int), and a null-free shape (Neo4j never stores nulls).
 const RELEASE_PROPS = {
   title: 'Horses',
+  // the U+2028/U+2029 regression: real Discogs profile text contains raw Unicode line
+  // separators, which must survive export → any line splitter → restore intact
+  linerNotes: 'side one\u2028side two\u2029end',
   discogsId: neo4j.int(999001),
   bigCount: neo4j.int('9007199254740995'),
   confidence: 0.85,
@@ -126,7 +130,8 @@ describe('backup export → wipe → restore round-trip (real Neo4j)', () => {
     expect(await countGraph(driver)).toEqual({ nodes: 0, rels: 0 });
 
     // -- restore ------------------------------------------------------------
-    const backup = await collectBackup(text().split('\n'));
+    // Same splitter the operator script uses — the U+2028 fixture proves the whole path.
+    const backup = await collectBackup(splitJsonlLines([text()]));
     expect(backup.manifest).toEqual(manifest);
     const result = await restoreGraph(driver, backup);
     const after = await countGraph(driver);

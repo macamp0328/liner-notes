@@ -30,12 +30,17 @@
  * against the file's manifest, exiting 1 on any mismatch or dangling rel.
  */
 import { createReadStream, existsSync } from 'node:fs';
-import { createInterface } from 'node:readline';
 import { createGunzip } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import neo4j from 'neo4j-driver';
 import type { Driver } from 'neo4j-driver';
-import { collectBackup, countGraph, restoreGraph, verifyRestore } from '../src/backup/restore.js';
+import {
+  collectBackup,
+  countGraph,
+  restoreGraph,
+  splitJsonlLines,
+  verifyRestore,
+} from '../src/backup/restore.js';
 import type { ParsedBackup } from '../src/backup/restore.js';
 import { applySchema } from '../src/db/schema.js';
 import { wipeGraph } from '../src/db/ingestion-repository.js';
@@ -89,8 +94,9 @@ async function readBackupFile(path: string): Promise<ParsedBackup> {
   if (!existsSync(path)) throw new Error(`--file not found: ${path}`);
   const raw = createReadStream(path);
   const stream = path.endsWith('.gz') ? raw.pipe(createGunzip()) : raw;
-  const lines = createInterface({ input: stream, crlfDelay: Infinity });
-  return collectBackup(lines);
+  // splitJsonlLines, not readline: readline splits on U+2028/U+2029 too, which a real prod
+  // backup contained inside a property value (see splitJsonlLines in src/backup/restore.ts).
+  return collectBackup(splitJsonlLines(stream));
 }
 
 async function main(): Promise<void> {

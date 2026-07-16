@@ -36,7 +36,12 @@ export interface ExportOptions {
 }
 
 async function writeLine(sink: Writable, line: BackupLine): Promise<void> {
-  if (!sink.write(`${JSON.stringify(line)}\n`)) {
+  // JSON.stringify legally leaves U+2028/U+2029 (Unicode LINE/PARAGRAPH SEPARATOR) raw inside
+  // strings, but line-oriented consumers — Node's readline included — treat them as terminators,
+  // which shattered a real prod record (a Discogs profile containing U+2028) into unparseable
+  // fragments. Escape them so every physical line is one JSON document under ANY line splitter.
+  const json = JSON.stringify(line).replaceAll('\u2028', '\\u2028').replaceAll('\u2029', '\\u2029');
+  if (!sink.write(`${json}\n`)) {
     await once(sink, 'drain');
   }
 }
