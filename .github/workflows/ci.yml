@@ -247,6 +247,20 @@ jobs:
     # pnpm audit blocks on high AND critical CVEs (--audit-level=high is stricter than critical).
     # New CVEs in existing dependencies will surface here even with no code changes.
     # If this fails: check `pnpm audit` output, update the affected package, and re-push.
+    #
+    # This job runs pnpm 11 — the ONLY place in the repo that does (#502). npm retired the
+    # legacy audit endpoint with a 410 in July 2026, and pnpm 9/10 both call it; pnpm 11
+    # queries the replacement bulk advisory endpoint. The `11` range resolves latest 11.x at
+    # run time so future endpoint adaptations arrive automatically (the root cause here was
+    # exactly a frozen EOL major hitting endpoint churn). The install/lockfile toolchain
+    # stays pnpm 9.15.9 repo-wide — pnpm 11 must NEVER run `install` or write the lockfile
+    # (it ignores `pnpm.overrides` in package.json, among other breaking changes).
+    #
+    # There is deliberately NO install step: `pnpm audit` reads only pnpm-lock.yaml, so
+    # installing was dead weight (~60s) and removing it means pnpm 11 never touches
+    # node_modules. The "pnpm.overrides ... ignored" warning in the log is expected and
+    # harmless — the lockfile was already resolved with those overrides by pnpm 9, and
+    # audit only checks the resolved package@version set.
     runs-on: ubuntu-latest
     # Backstop against wedged installs/pulls — GitHub default is 360 min.
     timeout-minutes: 15
@@ -254,13 +268,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
-          version: 9
+          version: 11
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-          cache: 'pnpm'
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
       - name: Audit dependencies
         run: pnpm audit --audit-level=high
 
