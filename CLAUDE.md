@@ -182,6 +182,7 @@ liner-notes/
 │       │   ├── db/              ← Neo4j driver + repository layer
 │       │   ├── ingestion/       ← Discogs ingestion pipeline
 │       │   ├── enrichment/      ← post-ingest enrichment (lyrics, master-data, nationality, track audio, artist genres/profiles/Wikidata bio)
+│       │   ├── backup/          ← weekly S3 graph backup (#104): codec + streaming export + restore engine; run.ts = CronJob entrypoint
 │       │   ├── observability/   ← stats snapshots + Aura keep-warm timer
 │       │   ├── server.ts        ← Fastify instance builder
 │       │   └── index.ts         ← Fastify entry point

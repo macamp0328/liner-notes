@@ -84,3 +84,8 @@ output "github_schema_diagram_role_arn" {
   description = "ARN of the read-only role the schema-diagram refresh workflow (ADR 0004) assumes via GitHub OIDC. Record as the AWS_SCHEMA_DIAGRAM_ROLE_ARN GitHub Actions variable — see the 'Schema diagram refresh' section of infra/RUNBOOK.md."
   value       = aws_iam_role.github_schema_diagram.arn
 }
+
+output "backup_bucket_name" {
+  description = "S3 bucket the weekly graph-backup CronJob writes to (#104). Add it as the BACKUP_S3_BUCKET key in the graph-service Secrets Manager secret — see the 'Graph backup and restore' section of infra/RUNBOOK.md."
+  value       = aws_s3_bucket.graph_backups.bucket
+}

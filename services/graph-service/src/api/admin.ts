@@ -494,8 +494,10 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         summary: 'Wipe the entire graph (destructive)',
         description:
           '**Deletes ALL nodes and relationships** via `MATCH (n) DETACH DELETE n`. ' +
-          'Intended for a deliberate "wipe and reload from scratch" — the graph is fully ' +
-          'reconstructable from Discogs, so there is no separate backup to restore.\n\n' +
+          'Intended for a deliberate "wipe and reload from scratch". Recovery paths: the weekly ' +
+          'S3 backup restores the exact captured graph in minutes (see "Graph backup and restore" ' +
+          'in infra/RUNBOOK.md — consider a manual backup before wiping), while a reload rebuilds ' +
+          'from Discogs over hours and cannot refetch the local-harvest-only Genius lyrics (#456).\n\n' +
           'Double-gated: requires the `ADMIN_TOKEN` bearer **and** an explicit `?confirm=wipe-all` ' +
           'query parameter. Without the exact confirm value it returns 400 and changes nothing.\n\n' +
           'After wiping, restart the pod (or call `POST /api/v1/admin/ingest`) to re-ingest: an empty ' +

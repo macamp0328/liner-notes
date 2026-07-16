@@ -45,10 +45,13 @@ flowchart LR
           k8s_secret[("Secret · graph-service-secrets")]
           k8s_pull[("Secret · ecr-pull-secret<br/>(dockerconfigjson)")]
           cron["CronJob · ecr-pull-secret-refresher<br/>every 6h"]
+          cron_backup["CronJob · graph-backup<br/>weekly (Sun 10:00 ET)"]
           svc --> pod
           k8s_secret -.envFrom.-> pod
           k8s_pull -.imagePullSecret.-> pod
           cron -- "writes refreshed token" --> k8s_pull
+          k8s_secret -.envFrom.-> cron_backup
+          k8s_pull -.imagePullSecret.-> cron_backup
         end
 
         subgraph eso["k8s namespace: external-secrets"]
@@ -63,7 +66,8 @@ flowchart LR
       direction TB
       ecr["ECR · liner-notes/graph-service<br/>(last 10 tagged images)"]
       sm["Secrets Manager<br/>liner-notes/graph-service/prod"]
-      iam["EC2 IAM role · ec2_k3s<br/>ECR read · SM read · SSM"]
+      s3[("S3 · graph backups<br/>(gzipped JSONL · 60-day lifecycle)")]
+      iam["EC2 IAM role · ec2_k3s<br/>ECR read · SM read · SSM · S3 backup write"]
     end
     iam -.attached.-> ec2
   end
@@ -81,6 +85,8 @@ flowchart LR
   cron == "ecr get-login-password<br/>(IMDS → instance role)" ==> ecr
   eso_op == "GetSecretValue<br/>(IMDS → instance role)" ==> sm
   pod == "image pull<br/>(via dockerconfigjson)" ==> ecr
+  cron_backup == "full-graph Cypher read" ==> aura
+  cron_backup == "PutObject<br/>(IMDS → instance role)" ==> s3
 
   subgraph legend["Edge legend &nbsp;·&nbsp; color = flow category"]
     direction LR
@@ -91,29 +97,33 @@ flowchart LR
   end
 
   %% Edge indices follow declaration order across the entire file.
-  %% Main edges (0–12):
+  %% Main edges (0–16):
   %%   0  svc --> pod                          (request)
   %%   1  k8s_secret -.envFrom.-> pod          (mount, gray default)
   %%   2  k8s_pull -.imagePullSecret.-> pod    (mount, gray default)
   %%   3  cron -- "writes refreshed token" --> k8s_pull   (secret sync)
-  %%   4  eso_op -- "syncs every 1h" --> k8s_secret       (secret sync)
-  %%   5  iam -.attached.-> ec2                (attachment, gray default)
-  %%   6  user --> cloudflare                  (request)
-  %%   7  cloudflare --> svc                   (request)
-  %%   8  pod ==> aura                         (data path)
-  %%   9  pod -.ingest.-> discogs              (external egress)
-  %%  10  cron ==> ecr                         (secret sync — image-pull token)
-  %%  11  eso_op ==> sm                        (secret sync)
-  %%  12  pod ==> ecr                          (data path — image pull)
-  %% Legend edges (13–16):
-  %%  13  lr1 --> lr2                          (request)
-  %%  14  ld1 ==> ld2                          (data path)
-  %%  15  lc1 -.-> lc2                         (secret sync)
-  %%  16  le1 -.-> le2                         (external egress)
-  linkStyle 0,6,7,13 stroke:#0f172a,stroke-width:2px
-  linkStyle 8,12,14 stroke:#1d4ed8,stroke-width:2.5px
-  linkStyle 3,4,10,11,15 stroke:#7c3aed,stroke-width:1.8px
-  linkStyle 9,16 stroke:#15803d,stroke-width:1.8px
+  %%   4  k8s_secret -.envFrom.-> cron_backup  (mount, gray default)
+  %%   5  k8s_pull -.imagePullSecret.-> cron_backup       (mount, gray default)
+  %%   6  eso_op -- "syncs every 1h" --> k8s_secret       (secret sync)
+  %%   7  iam -.attached.-> ec2                (attachment, gray default)
+  %%   8  user --> cloudflare                  (request)
+  %%   9  cloudflare --> svc                   (request)
+  %%  10  pod ==> aura                         (data path)
+  %%  11  pod -.ingest.-> discogs              (external egress)
+  %%  12  cron ==> ecr                         (secret sync — image-pull token)
+  %%  13  eso_op ==> sm                        (secret sync)
+  %%  14  pod ==> ecr                          (data path — image pull)
+  %%  15  cron_backup ==> aura                 (data path — full-graph export read)
+  %%  16  cron_backup ==> s3                   (data path — backup upload)
+  %% Legend edges (17–20):
+  %%  17  lr1 --> lr2                          (request)
+  %%  18  ld1 ==> ld2                          (data path)
+  %%  19  lc1 -.-> lc2                         (secret sync)
+  %%  20  le1 -.-> le2                         (external egress)
+  linkStyle 0,8,9,17 stroke:#0f172a,stroke-width:2px
+  linkStyle 10,14,15,16,18 stroke:#1d4ed8,stroke-width:2.5px
+  linkStyle 3,6,12,13,19 stroke:#7c3aed,stroke-width:1.8px
+  linkStyle 11,20 stroke:#15803d,stroke-width:1.8px
 
   classDef ext fill:#f4f4f4,stroke:#999,stroke-dasharray:5 3
   classDef legendNode fill:#ffffff,stroke:#cbd5e1,color:#475569
@@ -1013,7 +1023,7 @@ names only — no secrets). The first deploy may need a manual `workflow_dispatc
 
 Use this to discard the entire graph and rebuild it from Discogs — e.g. after a schema change, to clear stale nodes that `MERGE` can't remove (releases deleted from the collection), or to validate the ingestion + enrichment pipeline end-to-end on an empty graph.
 
-> **The graph is fully reconstructable from Discogs.** There is no separate backup to restore; a wipe is safe by design.
+> **A wipe is recoverable two ways, and they are not equivalent.** The graph is _mostly_ reconstructable from Discogs + the enrichment sources, but a rebuild takes hours, drifts with the living upstream databases, and **cannot** refetch the Genius lyrics (local-harvest-only, #240/#258 — the 2026-06-17 wipe permanently lost 16 of them, #456). The weekly **S3 backup** ([Graph backup and restore](#graph-backup-and-restore)) restores the exact pre-wipe graph in minutes, enrichment state included. Before a deliberate wipe, consider triggering a manual backup first.
 
 Since [#175](https://github.com/macamp0328/liner-notes/issues/175) this is **two steps**: an explicit wipe, then **one** orchestrated reload that owns the whole sequence — ingest **and every enrichment**, including the track-level/nationality stages (`mb-release-events`, `track-musicbrainz`, `track-acousticbrainz`, `track-deezer`, `nationality`) that `POST /ingest` does _not_ run. The reload checkpoints per-stage state to Neo4j, so **if the pod is killed mid-reload — a deploy roll, an OOM, a node reboot — the replacement pod resumes from the last completed stage on startup**: it does not restart, re-wipe, or skip because the graph is non-empty. There is no longer a separate `pnpm enrich:bootstrap` step.
 
@@ -1089,6 +1099,81 @@ curl -s "$GRAPH_SERVICE_URL/api/v1/stats" | jq .data.enrichment
 - **The heavy concurrent reload leaves a batch of transient LRCLIB misses.** Running `lyrics` alongside the other stages inflates the per-request failure rate from cross-stage DB/API contention (the 2026-06-13 reload logged `failed: 231` with the breaker never opening — individual 429/timeout, not an outage). These don't stamp `lyricsFetchedAt`, so they're recoverable, but the reload won't retry them within the run.
 
 After the reload reaches `complete`, run the residential **["Harvest Genius lyrics locally"](#harvest-genius-lyrics-locally)** pass (`pnpm lyrics:enrich:local`). It forces `ENRICHMENT_STALENESS_DAYS=0`, re-fires LRCLIB for the misses, and restores Genius from a non-blocked IP — the standalone re-run recovers the transient failures with zero contention (the 2026-06-13 top-up took lyrics 59.2% → 72.8% with `failed: 0`). If a reload shows an elevated lyrics `failed` count, set `RELOAD_LYRICS_CONCURRENCY` below `LYRICS_CONCURRENCY` (default 6) before the next one to throttle lyrics under the contention without slowing standalone runs.
+
+---
+
+## Graph backup and restore
+
+A weekly in-cluster CronJob (`graph-backup`, [infra/k8s/graph-service/backup-cronjob.yaml](k8s/graph-service/backup-cronjob.yaml), issue [#104](https://github.com/macamp0328/liner-notes/issues/104)) exports the **full graph** — every node, relationship, and property — as gzipped JSONL to S3. This is the fast restore path the [full reload](#full-reload-from-scratch) is not: a restore takes minutes and reproduces the exact captured graph (enrichment state, Genius lyrics and all), where a reload takes hours and re-fetches from living upstream sources that drift.
+
+**How it runs.** Sunday 10:00 America/New_York, from the graph-service image with an alternate command (`node dist/backup/run.js`). It streams the graph via plain Cypher (Aura blocks APOC file export), gzips, and multipart-uploads to `s3://<bucket>/graph-backups/graph-<timestamp>.jsonl.gz`. S3 credentials come from the EC2 instance role over IMDS (write-only, scoped to the prefix — [infra/terraform/backup.tf](terraform/backup.tf)); a lifecycle rule expires objects after 60 days (~8 weekly restore points). Deliberately **uptime-aligned**: the CronJob only fires while the node is up — exactly when writes can happen — so a long `pnpm power:off` still means everything (including Aura's idle clock) sleeps, and the S3 objects are what protect against Aura Free's 90-day paused-instance deletion. A node that was off at fire time catches up its weekly run within 24h of powering on (`startingDeadlineSeconds`); a longer hibernation skips to the next Sunday.
+
+**Consistency.** Neo4j is read-committed, so the job **skips itself (exit 0, logged) while an orchestrated reload is running** (checked via the DB-backed reload job, so it works cross-pod). Standalone `/ingest`/enrich jobs are in-memory state the backup pod cannot see — avoid manually triggering a backup mid-enrichment; the restore side detects and reports the resulting dangling rels if one ever slips through.
+
+### One-time setup
+
+1. `terraform apply` (primary checkout, operator profile) creates the bucket and IAM grant. Note the `backup_bucket_name` output.
+2. Add the bucket name to the prod secret — **merge, don't overwrite** (the get → `jq '. + {...}'` → put pattern preserves the existing keys):
+
+   ```bash
+   BUCKET="$(terraform -chdir=infra/terraform output -raw backup_bucket_name)"
+   MERGED="$(aws secretsmanager get-secret-value --secret-id liner-notes/graph-service/prod \
+     --query SecretString --output text \
+     | jq -c --arg b "$BUCKET" '. + { BACKUP_S3_BUCKET: $b }')"
+   aws secretsmanager put-secret-value \
+     --secret-id liner-notes/graph-service/prod --secret-string "$MERGED"
+   ```
+
+3. Force an ESO sync so `graph-service-secrets` picks the key up now instead of within the hour:
+
+   ```bash
+   kubectl -n liner-notes annotate externalsecret graph-service-secrets force-sync=$(date +%s) --overwrite
+   ```
+
+### Manual backup (e.g. right before a deliberate wipe)
+
+```bash
+kubectl -n liner-notes create job --from=cronjob/graph-backup graph-backup-manual-$(date +%s)
+kubectl -n liner-notes logs -l job-name --tail=20   # or: kubectl logs job/<name>
+aws s3 ls "s3://$BUCKET/graph-backups/"             # the new object appears when the job logs "backup complete"
+```
+
+### Restore
+
+Restores are **operator-run and local by design** — there is no restore HTTP endpoint; prod creds and AWS access stay in operator hands. The everyday use is restoring into a local docker-compose Neo4j (inspecting a backup, restore drills); restoring over prod Aura is the rare, deliberate case.
+
+```bash
+# 1. Pick and fetch a backup
+aws s3 ls "s3://$BUCKET/graph-backups/"
+aws s3 cp "s3://$BUCKET/graph-backups/graph-<timestamp>.jsonl.gz" /tmp/
+
+# 2. Restore into the target the env file points at (default: services/graph-service/.env.local)
+pnpm backup:restore -- --file /tmp/graph-<timestamp>.jsonl.gz --yes
+```
+
+The script prints a preflight report (backup source host + timestamp + manifest counts, target host + current contents) and then enforces three guards:
+
+- **`--yes`** — without it the preflight prints and nothing is written (a safe dry-run).
+- **`--wipe`** — required when the target is non-empty: replay is CREATE-based, so restoring on top of existing data would duplicate every node. `--wipe` runs `MATCH (n) DETACH DELETE n` first.
+- **`--allow-remote`** — required for any non-localhost target (i.e. prod Aura, via `--env` pointing at an env file with the prod creds).
+
+After the replay it applies the real schema from `src/db/schema.ts` (a uniqueness-constraint failure doubles as a data-integrity alarm), re-counts the graph, and diffs against the backup's manifest — **exit 0 means the restored graph provably matches the export**; any mismatch or dangling rel exits 1 with each problem named.
+
+**Restoring prod after data loss:**
+
+```bash
+pnpm backup:restore -- --file /tmp/graph-<timestamp>.jsonl.gz \
+  --env /absolute/path/to/.env.prod.local --wipe --allow-remote --yes
+```
+
+Post-restore checks: the backup includes the `ReloadJob`/`ReloadStage` checkpoint nodes, so hit `GET /admin/reload/status` — if the backup happened to capture a stale `running` job (the backup skips live reloads, but a crashed job's checkpoint can linger), the next pod start would try to resume it; `POST /api/v1/admin/reload/abort` clears it. Then spot-check `/api/v1/stats` against the coverage you expect from the backup's date.
+
+### When it breaks
+
+- **Job failed, log says connection error** — Aura was likely paused (≥72h idle after a long power-off). Resume it ([Resuming a paused Aura instance](#resuming-a-paused-aura-instance)); the next weekly tick (or a manual trigger) picks up.
+- **Pod stuck `ImagePullBackOff` right after a long power-off** — the ECR pull token had expired; kubelet retries and the 6h refresher CronJob re-mints it, so this self-heals within the hour.
+- **`Missing required env var BACKUP_S3_BUCKET`** — the one-time secret-merge step above hasn't run (or ESO hasn't synced yet).
+- **Skipped: reload in progress** — by design; re-trigger after the reload completes.
 
 ---
 

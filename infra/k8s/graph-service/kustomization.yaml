@@ -6,6 +6,7 @@ namespace: liner-notes
 resources:
   - external-secret.yaml
   - ecr-pull-secret-refresher.yaml
+  - backup-cronjob.yaml
   - deployment.yaml
   - service.yaml
 

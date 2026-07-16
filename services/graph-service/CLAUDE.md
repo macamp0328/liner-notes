@@ -10,6 +10,7 @@
    effectively LRCLIB-only**. See the Lyrics notes below before touching this.
 3. **Serves** a Fastify REST API for relationship-driven collection exploration
 4. **Auto-generates** OpenAPI documentation via `@fastify/swagger` (mounted in **dev only** — see OpenAPI / Swagger)
+5. **Backs up** the full graph weekly to S3 (issue #104): `src/backup/` holds the tagged-JSONL codec, streaming export, and restore engine; `dist/backup/run.js` is the in-cluster CronJob's alternate entrypoint (it never imports `server.ts`), and `pnpm backup:restore` (`scripts/backup-restore.ts`) is the operator restore shell — see infra/RUNBOOK.md "Graph backup and restore"
 
 This is the **only service that talks to Neo4j**. All other services (future `collection-mcp`, etc.) query graph-service via REST.
 
