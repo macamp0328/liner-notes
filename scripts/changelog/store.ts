@@ -257,9 +257,11 @@ function viewReleaseJson(fields: string): string | null {
   } catch (err) {
     if (isReleaseNotFound(ghStderr(err))) return null;
     throw new Error(
-      `gh release view ${RELEASE_TAG} failed and it is NOT "release not found" — treating as a ` +
-        'transient error, not absence (refusing to risk a write-back over an empty read). Retry. ' +
-        `Details: ${ghStderr(err) || (err as Error).message}`,
+      `gh release view ${RELEASE_TAG} failed and it is NOT "release not found" — refusing to ` +
+        'read it as absence (a write-back over an empty read would wipe the store). The call was ' +
+        `already retried ${GH_RETRY_ATTEMPTS}× internally, so the failure is persisting — ` +
+        `investigate before re-running. Details: ${ghStderr(err) || (err as Error).message}`,
+      { cause: err },
     );
   }
 }
