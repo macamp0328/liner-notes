@@ -162,11 +162,18 @@ def _start(context):
         # fire for a node that stayed down — page explicitly. Actions are
         # still re-enabled so alarm behaviour is normal after a manual fix.
         _set_alarm_actions(True)
+        # Re-raising lets Lambda's async retry (2 more attempts) re-run the
+        # start — a transient EC2 error can self-heal. The cost is up to two
+        # duplicate pages for a persistent failure; the message sets that
+        # expectation so a retry that succeeds reads as "no further email".
         _page(
             "liner-notes: k3s node failed to start",
             f"start_instances failed for {INSTANCE_ID}; the node is likely "
             f"still stopped and its transient alarms are sitting in ALARM "
-            f"(which cannot re-notify on its own).\n\nError: {err}",
+            f"(which cannot re-notify on their own).\n\n"
+            f"This invocation will be retried automatically up to twice — "
+            f"if no further email arrives, a retry succeeded and the node "
+            f"recovered quietly.\n\nError: {err}",
         )
         raise
     try:
@@ -175,10 +182,21 @@ def _start(context):
             InvocationType="Event",
             Payload=json.dumps({"action": "rearm"}).encode(),
         )
-    except Exception:
+    except Exception as err:
         # Degraded fallback: without a rearm pass, restore the old arm-at-start
-        # behaviour rather than leave monitoring disabled indefinitely.
+        # behaviour rather than leave monitoring disabled indefinitely — and
+        # page, because in this mode a started-but-never-healthy node would
+        # sit silently in ALARM again. Re-raising lets the async retry take
+        # another shot at the hand-off (the duplicate start is a no-op).
         _set_alarm_actions(True)
+        _page(
+            "liner-notes: alarm rearm hand-off failed",
+            f"The node was started, but the async rearm self-invocation "
+            f"failed; alarm actions were re-enabled immediately instead "
+            f"(degraded mode). If the node does not come up healthy, the "
+            f"alarms will sit in ALARM without notifying — verify manually."
+            f"\n\nError: {err}",
+        )
         raise
 
 

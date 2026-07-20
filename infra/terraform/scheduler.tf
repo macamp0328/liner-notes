@@ -128,7 +128,9 @@ data "aws_iam_policy_document" "instance_scheduler" {
 
   # The rearm pass reads alarm state before re-enabling actions. Alarm-ARN
   # scoping is supported here for metric alarms — the documented "must be *"
-  # caveat on DescribeAlarms applies only to composite alarms.
+  # caveat on DescribeAlarms applies only to composite alarms (CloudWatch
+  # permissions reference), and the IAM policy simulator confirms a request
+  # against a specific alarm ARN is allowed by this statement.
   statement {
     sid     = "ReadTransientAlarmState"
     actions = ["cloudwatch:DescribeAlarms"]
@@ -149,10 +151,15 @@ data "aws_iam_policy_document" "instance_scheduler" {
   # _start() hands re-arming to an async self-invocation ({"action":"rearm"}).
   # ARN constructed from the function name (same rationale as
   # schedule_arn_prefix above) rather than referencing the function resource.
+  # The ":*" variant also covers qualified invocations (version/alias) in
+  # case context.invoked_function_arn ever carries a qualifier.
   statement {
-    sid       = "SelfInvokeRearm"
-    actions   = ["lambda:InvokeFunction"]
-    resources = ["arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${local.scheduler_function_name}"]
+    sid     = "SelfInvokeRearm"
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${local.scheduler_function_name}",
+      "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${local.scheduler_function_name}:*",
+    ]
   }
 
   statement {
