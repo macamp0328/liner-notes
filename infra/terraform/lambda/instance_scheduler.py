@@ -16,9 +16,12 @@ alarms' actions before stopping and re-enables them after starting, so the
 alerts.
 
 Re-enabling at start (rather than after the node is healthy) is safe only
-because neither alarm has ok_actions (observability.tf): the instance takes
-minutes to boot, so the ALARM→OK recovery lands *after* actions are back on,
-and with ok_actions wired that transition emailed the operator every morning.
+because the two suppressed alarms named in ALARM_NAMES — the EC2 status-check
+and Route 53 health-check alarms — have no ok_actions (see their definitions
+in infra/terraform/observability.tf; the other alarms there keep ok_actions):
+the instance takes minutes to boot, so the ALARM→OK recovery lands *after*
+actions are back on, and with ok_actions wired that transition emailed the
+operator every morning.
 
 Environment:
   INSTANCE_ID     - the EC2 instance to control.
