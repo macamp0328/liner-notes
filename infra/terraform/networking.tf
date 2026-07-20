@@ -4,6 +4,9 @@
 # and routes egress directly through the internet gateway. This matches the
 # single-node, personal-project scale and keeps cost at $0 for networking.
 
+# No VPC flow logs: CloudWatch ingest/storage cost for no operational value on
+# a single-node hobby VPC whose only listeners are the SG-gated NodePort + SSH.
+#trivy:ignore:AVD-AWS-0178
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_support   = true
@@ -26,6 +29,10 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+# Public subnet by design (see header) — a private subnet would need a NAT
+# gateway (~$32/month) for egress. The instance enforces IMDSv2 and the
+# security group admits only the NodePort (or Cloudflare-only) and SSH.
+#trivy:ignore:AVD-AWS-0164
 resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.1.0/24"
@@ -104,6 +111,9 @@ resource "aws_vpc_security_group_ingress_rule" "ssh" {
   ip_protocol       = "tcp"
 }
 
+# Open egress is required: the single-node k3s host pulls images (ECR, ghcr)
+# and reaches upstream APIs (Aura, Discogs, MusicBrainz, ...) directly.
+#trivy:ignore:AVD-AWS-0104
 resource "aws_vpc_security_group_egress_rule" "all" {
   security_group_id = aws_security_group.k3s_node.id
   description       = "All egress"

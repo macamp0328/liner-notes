@@ -41,6 +41,9 @@ locals {
   }
 }
 
+# No access logging: there is no log-target bucket; the bucket is private,
+# TLS-only (policy below), and versioned.
+#trivy:ignore:AVD-AWS-0089
 resource "aws_s3_bucket" "state" {
   bucket = local.state_bucket_name
 
@@ -63,6 +66,7 @@ resource "aws_s3_bucket_versioning" "state" {
 
 # SSE-S3 (AES256) encrypts state at rest at no cost. A customer-managed KMS key
 # would add ~$1/month plus per-request charges for no meaningful benefit here.
+#trivy:ignore:AVD-AWS-0132
 resource "aws_s3_bucket_server_side_encryption_configuration" "state" {
   bucket = aws_s3_bucket.state.id
 

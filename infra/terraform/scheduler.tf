@@ -34,11 +34,16 @@ data "archive_file" "instance_scheduler" {
   output_path = "${path.module}/lambda/instance_scheduler.zip"
 }
 
+# Default SSE — same rationale as the graph-service log group (no secrets).
+#trivy:ignore:AVD-AWS-0017
 resource "aws_cloudwatch_log_group" "instance_scheduler" {
   name              = "/aws/lambda/${local.scheduler_function_name}"
   retention_in_days = 30
 }
 
+# No X-Ray tracing: a 30-second cron start/stop function — CloudWatch logs are
+# ample for debugging it.
+#trivy:ignore:AVD-AWS-0066
 resource "aws_lambda_function" "instance_scheduler" {
   function_name = local.scheduler_function_name
   description   = "Start/stop the k3s node and toggle the nightly cost-saving schedule."
