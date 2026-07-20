@@ -15,6 +15,11 @@ alarms' actions before stopping and re-enables them after starting, so the
 "asleep" state stays quiet while a genuine outage of a *running* node still
 alerts.
 
+Re-enabling at start (rather than after the node is healthy) is safe only
+because neither alarm has ok_actions (observability.tf): the instance takes
+minutes to boot, so the ALARM→OK recovery lands *after* actions are back on,
+and with ok_actions wired that transition emailed the operator every morning.
+
 Environment:
   INSTANCE_ID     - the EC2 instance to control.
   ALARM_NAMES     - comma-separated `name@region` pairs of CloudWatch alarms to
