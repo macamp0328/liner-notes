@@ -148,12 +148,12 @@ resource "aws_cloudwatch_metric_alarm" "health_check" {
   # SNS topic lives in the default-region account scope; cross-region alarm →
   # SNS is supported by CloudWatch.
   #
-  # No ok_actions: the nightly scale-to-zero cycle drives this alarm into
-  # ALARM every night and back to OK every morning. The scheduler Lambda
-  # suppresses the overnight ALARM (actions disabled before stop), but it
-  # re-enables actions immediately at start — minutes before the health check
-  # actually recovers — so the morning ALARM→OK transition emailed the
-  # operator daily. Recovery after a genuine outage shows on the dashboard.
+  # No ok_actions: recovery notifications are noise for a single-operator
+  # deployment — a genuine outage still pages via alarm_actions, and recovery
+  # shows on the dashboard. (The nightly scale-to-zero cycle used to email
+  # "OK" every morning through this hook; the scheduler Lambda's deferred
+  # rearm now keeps the planned cycle silent in both directions regardless —
+  # see lambda/instance_scheduler.py.)
   alarm_actions = [aws_sns_topic.alerts.arn]
 }
 
@@ -180,9 +180,8 @@ resource "aws_cloudwatch_metric_alarm" "ec2_status_check" {
     InstanceId = aws_instance.k3s.id
   }
 
-  # No ok_actions — same daily-noise rationale as the health-check alarm
-  # above: the nightly power schedule cycles this alarm ALARM→OK each morning
-  # after the scheduler Lambda has already re-enabled actions.
+  # No ok_actions — same recovery-emails-are-noise rationale as the
+  # health-check alarm above.
   alarm_actions = [aws_sns_topic.alerts.arn]
 }
 

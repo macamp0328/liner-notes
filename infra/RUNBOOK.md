@@ -1245,7 +1245,7 @@ curl -s "$GRAPH_SERVICE_URL/api/v1/stats" \
 
 ## Instance power switch — scale-to-zero
 
-The k3s node doesn't need to run 24/7. A small Lambda (`liner-notes-instance-scheduler`, see [`infra/terraform/scheduler.tf`](terraform/scheduler.tf)) starts/stops it on demand and on a nightly schedule, suppressing the two transient alarms (`liner-notes-ec2-status-check`, `liner-notes-health-check`) while the node is intentionally down so a planned stop doesn't page you. A stopped EC2 node plus an auto-paused Aura instance (see "Resuming a paused Aura instance" below) is a coherent "asleep" state at ~$0/month.
+The k3s node doesn't need to run 24/7. A small Lambda (`liner-notes-instance-scheduler`, see [`infra/terraform/scheduler.tf`](terraform/scheduler.tf)) starts/stops it on demand and on a nightly schedule, suppressing the two transient alarms (`liner-notes-ec2-status-check`, `liner-notes-health-check`) while the node is intentionally down so a planned stop doesn't page you. The flip side is covered too: because a suppressed alarm sits in ALARM overnight and CloudWatch only notifies on state _transitions_, a node that fails to come back up would otherwise stay silent — so after every start the Lambda re-arms the alarms only once they've actually recovered, and **emails you directly (via the same alerts topic) if the start call fails or the node isn't healthy within ~14 minutes**. A stopped EC2 node plus an auto-paused Aura instance (see "Resuming a paused Aura instance" below) is a coherent "asleep" state at ~$0/month.
 
 > **One-time prerequisite.** `operator-deploy-policy.json` grants `lambda:InvokeFunction` on `function:liner-notes-*`. If you set this account up before [#118](https://github.com/macamp0328/liner-notes/issues/118), re-attach the operator policies per [`infra/iam/README.md`](iam/README.md) before the switch will work.
 
@@ -1253,12 +1253,12 @@ The k3s node doesn't need to run 24/7. A small Lambda (`liner-notes-instance-sch
 
 Run from the repo root (uses your default AWS profile; honors `AWS_PROFILE`):
 
-| Command             | What it does                                                                                                | When                              |
-| ------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| `pnpm power:off`    | Pauses the nightly schedule, suppresses the two alarms, stops the node. Stays down until you say otherwise. | Away for days/weeks.              |
-| `pnpm power:on`     | Pauses the nightly schedule, starts the node, re-enables the alarms. Stays up — the 20:00 stop won't fire.  | Working now, including overnight. |
-| `pnpm power:auto`   | Re-arms the nightly stop (20:00 ET) / start (08:00 ET) cost-saver and starts the node now.                  | Back to hands-off cost saving.    |
-| `pnpm power:status` | Read-only: prints the instance state and each schedule's ENABLED/DISABLED state.                            | Checking where things stand.      |
+| Command             | What it does                                                                                                              | When                              |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `pnpm power:off`    | Pauses the nightly schedule, suppresses the two alarms, stops the node. Stays down until you say otherwise.               | Away for days/weeks.              |
+| `pnpm power:on`     | Pauses the nightly schedule, starts the node, re-arms the alarms once they recover. Stays up — the 20:00 stop won't fire. | Working now, including overnight. |
+| `pnpm power:auto`   | Re-arms the nightly stop (20:00 ET) / start (08:00 ET) cost-saver and starts the node now.                                | Back to hands-off cost saving.    |
+| `pnpm power:status` | Read-only: prints the instance state and each schedule's ENABLED/DISABLED state.                                          | Checking where things stand.      |
 
 Each command prints the resulting state, e.g.:
 
@@ -1279,7 +1279,7 @@ Each command prints the resulting state, e.g.:
 - Give the node ~1–2 minutes; k3s restarts the graph-service pod automatically.
 - The ECR pull-secret CronJob refreshes every 6h; after a long stop the in-cluster `ecr-pull-secret` may be stale until the next fire. If the pod is stuck `ImagePullBackOff` with `unauthorized`, force a refresh: `kubectl -n liner-notes create job --from=cronjob/ecr-pull-secret-refresher refresh-now`, then `kubectl -n liner-notes rollout restart deployment/graph-service`.
 - The first request is slow while the pod settles. If the node was stopped ≥72h, Aura will have auto-paused and does **not** resume on its own — resume it manually first (see "Resuming a paused Aura instance" below).
-- The two transient alarms are re-enabled automatically — no manual alarm steps.
+- The two transient alarms are re-armed automatically once they've recovered (the Lambda's async "rearm" pass) — no manual alarm steps. If the node doesn't come back healthy within ~14 minutes, you get a direct email from the alerts topic instead; that is the _only_ page for a failed start, since a suppressed alarm stuck in ALARM can't re-notify.
 
 ---
 

@@ -3,8 +3,11 @@
 # A small Lambda is the single control point: it starts/stops the EC2 instance,
 # suppresses the two transient alarms while the node is intentionally stopped
 # (see observability.tf — both use treat_missing_data = "breaching", so a bare
-# stop would page every night), and enables/disables the nightly cost-saving
-# schedule. It is invoked two ways:
+# stop would page every night), re-arms them only after they've genuinely
+# recovered (paging directly via SNS when a start fails or the node never
+# comes back healthy — a suppressed alarm stuck in ALARM can't re-notify),
+# and enables/disables the nightly cost-saving schedule. It is invoked two
+# ways:
 #
 #   - the EventBridge schedules below (the "auto" nightly stop/start), and
 #   - `pnpm power:on|off|auto|status` (scripts/admin/power.sh), which invokes
@@ -42,7 +45,13 @@ resource "aws_lambda_function" "instance_scheduler" {
   role          = aws_iam_role.instance_scheduler.arn
   handler       = "instance_scheduler.handler"
   runtime       = "python3.12"
-  timeout       = 30
+  # 14 minutes, not 30s: after a start, the async "rearm" self-invocation
+  # polls the suppressed alarms until they actually recover before
+  # re-enabling their actions, and this timeout is what bounds that boot
+  # grace window (EC2 boot + k3s + pod + Route 53 health check + 2 alarm
+  # evaluation periods ≈ 6–8 min on a normal morning). Every other action
+  # still returns within seconds.
+  timeout = 840
 
   filename         = data.archive_file.instance_scheduler.output_path
   source_code_hash = data.archive_file.instance_scheduler.output_base64sha256
@@ -60,6 +69,12 @@ resource "aws_lambda_function" "instance_scheduler" {
         "${aws_cloudwatch_metric_alarm.health_check.alarm_name}@us-east-1",
       ])
       SCHEDULE_NAMES = join(",", [local.stop_schedule_name, local.start_schedule_name])
+      # Paged directly (sns:Publish) when a start fails or the node never
+      # becomes healthy — the suppressed alarms sit in ALARM overnight, and
+      # CloudWatch fires alarm actions only on state transitions, so a node
+      # that stays down produces no transition and could never page on its
+      # own. See the module docstring in lambda/instance_scheduler.py.
+      ALERTS_TOPIC_ARN = aws_sns_topic.alerts.arn
     }
   }
 
@@ -108,6 +123,42 @@ data "aws_iam_policy_document" "instance_scheduler" {
     resources = [
       aws_cloudwatch_metric_alarm.ec2_status_check.arn,
       aws_cloudwatch_metric_alarm.health_check.arn,
+    ]
+  }
+
+  # The rearm pass reads alarm state before re-enabling actions. Alarm-ARN
+  # scoping is supported here for metric alarms — the documented "must be *"
+  # caveat on DescribeAlarms applies only to composite alarms (CloudWatch
+  # permissions reference), and the IAM policy simulator confirms a request
+  # against a specific alarm ARN is allowed by this statement.
+  statement {
+    sid     = "ReadTransientAlarmState"
+    actions = ["cloudwatch:DescribeAlarms"]
+    resources = [
+      aws_cloudwatch_metric_alarm.ec2_status_check.arn,
+      aws_cloudwatch_metric_alarm.health_check.arn,
+    ]
+  }
+
+  # Direct operator page when a start fails or the node never becomes
+  # healthy — the suppressed alarms can't re-notify from a standing ALARM.
+  statement {
+    sid       = "PageOperatorDirectly"
+    actions   = ["sns:Publish"]
+    resources = [aws_sns_topic.alerts.arn]
+  }
+
+  # _start() hands re-arming to an async self-invocation ({"action":"rearm"}).
+  # ARN constructed from the function name (same rationale as
+  # schedule_arn_prefix above) rather than referencing the function resource.
+  # The ":*" variant also covers qualified invocations (version/alias) in
+  # case context.invoked_function_arn ever carries a qualifier.
+  statement {
+    sid     = "SelfInvokeRearm"
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${local.scheduler_function_name}",
+      "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${local.scheduler_function_name}:*",
     ]
   }
 

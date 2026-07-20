@@ -31,6 +31,7 @@ flowchart LR
   subgraph ext_observability_tf["observability.tf"]
     aws_cloudwatch_metric_alarm_ec2_status_check(["🚨 ec2_status_check<br/><small>metric alarm</small>"]):::observability
     aws_cloudwatch_metric_alarm_health_check(["🚨 health_check<br/><small>metric alarm</small>"]):::observability
+    aws_sns_topic_alerts(["📣 alerts<br/><small>SNS topic</small>"]):::observability
   end
   aws_iam_role_policy_attachment_instance_scheduler_logs --> aws_iam_role_instance_scheduler
   aws_iam_role_policy_instance_scheduler --> aws_iam_role_instance_scheduler
@@ -44,6 +45,7 @@ flowchart LR
   aws_lambda_function_instance_scheduler -.-> aws_cloudwatch_metric_alarm_health_check
   aws_lambda_function_instance_scheduler --> aws_iam_role_instance_scheduler
   aws_lambda_function_instance_scheduler -.-> aws_instance_k3s
+  aws_lambda_function_instance_scheduler -.-> aws_sns_topic_alerts
   aws_lambda_function_instance_scheduler --> data_archive_file_instance_scheduler
   aws_scheduler_schedule_start --> aws_iam_role_scheduler_invoke
   aws_scheduler_schedule_start --> aws_lambda_function_instance_scheduler
@@ -53,5 +55,6 @@ flowchart LR
   data_aws_iam_policy_document_instance_scheduler -.-> aws_cloudwatch_metric_alarm_health_check
   data_aws_iam_policy_document_instance_scheduler --> aws_iam_role_scheduler_invoke
   data_aws_iam_policy_document_instance_scheduler -.-> aws_instance_k3s
+  data_aws_iam_policy_document_instance_scheduler -.-> aws_sns_topic_alerts
   data_aws_iam_policy_document_instance_scheduler -.-> data_aws_caller_identity_current
   data_aws_iam_policy_document_scheduler_invoke --> aws_lambda_function_instance_scheduler
