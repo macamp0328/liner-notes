@@ -61,7 +61,7 @@ jobs:
         # ubuntu-latest; the pull is cached automatically by the daemon.
         run: docker pull nshine/dot:2.40.1@sha256:17ba91db2197ae4154cdc4b397a263017ce15c7f2c0cb8bf29404d78bcb4bd6d
 
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         with:
           version: 9
 
